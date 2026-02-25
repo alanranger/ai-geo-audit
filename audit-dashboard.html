@@ -60160,6 +60160,85 @@ Final Score: ${score}/100`;
         return { current, prev, startDate: startDate || null, endDate: latestDate || null, days: n };
       }
 
+      function addDaysToIsoDate(isoDate, deltaDays) {
+        if (!isoDate) return null;
+        const d = new Date(`${String(isoDate)}T00:00:00Z`);
+        if (!Number.isFinite(d.getTime())) return null;
+        d.setUTCDate(d.getUTCDate() + Number(deltaDays || 0));
+        return d.toISOString().slice(0, 10);
+      }
+
+      async function fetchDashboardCanonicalTotals(propertyUrl, startDate, endDate) {
+        try {
+          if (!propertyUrl || !startDate || !endDate) return null;
+          const response = await fetch(apiUrl('/api/fetch-search-console'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ propertyUrl, startDate, endDate })
+          });
+          if (!response.ok) return null;
+          const payload = await response.json();
+          const clicks = toNum(payload?.totalClicks);
+          const impressions = toNum(payload?.totalImpressions);
+          const avgPosition = toNum(payload?.averagePosition);
+          const ctrRaw = toNum(payload?.ctr);
+          const ctrPct = ctrRaw == null ? null : (ctrRaw <= 1 ? (ctrRaw * 100) : ctrRaw);
+          if (clicks == null || impressions == null) return null;
+          return { clicks, impressions, ctrPct, avgPosition };
+        } catch (err) {
+          return null;
+        }
+      }
+
+      function apportionDashboardByWeights(weights, targetTotal) {
+        const vals = Array.isArray(weights) ? weights.map((w) => Math.max(0, toNum(w) || 0)) : [];
+        const target = Math.max(0, Math.round(toNum(targetTotal) || 0));
+        if (!vals.length || target <= 0) return vals.map(() => 0);
+        const sum = vals.reduce((a, b) => a + b, 0);
+        if (sum <= 0) return vals.map(() => 0);
+        const scaled = vals.map((v) => (v * target) / sum);
+        const floored = scaled.map((x) => Math.floor(x));
+        let remaining = target - floored.reduce((a, b) => a + b, 0);
+        const order = scaled
+          .map((x, idx) => ({ idx, frac: x - Math.floor(x) }))
+          .sort((a, b) => b.frac - a.frac);
+        let ptr = 0;
+        while (remaining > 0 && order.length > 0) {
+          const idx = order[ptr % order.length].idx;
+          floored[idx] += 1;
+          remaining -= 1;
+          ptr += 1;
+        }
+        return floored;
+      }
+
+      function normalizeDashboardPeriodBySegmentToCanonical(periodBySegment, canonicalTotals, defs) {
+        if (!periodBySegment || !canonicalTotals || !Array.isArray(defs) || defs.length === 0) return periodBySegment;
+        const targetClicks = Math.max(0, Math.round(toNum(canonicalTotals?.clicks) || 0));
+        const targetImpressions = Math.max(0, Math.round(toNum(canonicalTotals?.impressions) || 0));
+        if (targetClicks <= 0 && targetImpressions <= 0) return periodBySegment;
+
+        const keys = defs.map((d) => d.key);
+        const clickWeights = keys.map((k) => Math.max(0, toNum(periodBySegment?.[k]?.clicks) || 0));
+        const impressionWeights = keys.map((k) => Math.max(0, toNum(periodBySegment?.[k]?.impressions) || 0));
+        const normClicks = apportionDashboardByWeights(clickWeights, targetClicks);
+        const normImpressions = apportionDashboardByWeights(impressionWeights, targetImpressions);
+
+        const out = {};
+        keys.forEach((k, idx) => {
+          const base = periodBySegment?.[k] || {};
+          const clicks = normClicks[idx] || 0;
+          const impressions = normImpressions[idx] || 0;
+          out[k] = {
+            ...base,
+            clicks,
+            impressions,
+            ctrPct: impressions > 0 ? ((clicks / impressions) * 100) : null
+          };
+        });
+        return out;
+      }
+
       function formatDashboardPctDelta(curr, prev, { betterLower = false } = {}) {
         const c = toNum(curr);
         const p = toNum(prev);
@@ -60283,9 +60362,9 @@ Final Score: ${score}/100`;
         if (renderToken && window.__dashboardRenderToken && renderToken !== window.__dashboardRenderToken) return;
 
         const rows = getDashboardTimeseriesRowsFromAudit(currentAudit);
-        const latestWindow = computeDashboardPeriodWindow(rows, 1);
-        const sevenDayWindow = computeDashboardPeriodWindow(rows, 7);
-        const twentyEightDayWindow = computeDashboardPeriodWindow(rows, 28);
+        let latestWindow = computeDashboardPeriodWindow(rows, 1);
+        let sevenDayWindow = computeDashboardPeriodWindow(rows, 7);
+        let twentyEightDayWindow = computeDashboardPeriodWindow(rows, 28);
         const latestDate = rows.length ? rows[rows.length - 1].date : null;
         const propertyUrl = getAuditPropertyUrl(currentAudit);
 
@@ -60298,6 +60377,43 @@ Final Score: ${score}/100`;
           `;
           return;
         }
+
+        // Align headline KPI windows with canonical GSC totals contract (same as Clawdbot).
+        const latestPrevStart = addDaysToIsoDate(latestWindow.endDate, -1);
+        const latestPrevEnd = addDaysToIsoDate(latestWindow.endDate, -1);
+        const sevenPrevStart = addDaysToIsoDate(sevenDayWindow.endDate, -(2 * 7 - 1));
+        const sevenPrevEnd = addDaysToIsoDate(sevenDayWindow.endDate, -7);
+        const twentyEightPrevStart = addDaysToIsoDate(twentyEightDayWindow.endDate, -(2 * 28 - 1));
+        const twentyEightPrevEnd = addDaysToIsoDate(twentyEightDayWindow.endDate, -28);
+
+        const [
+          canonicalLatest, canonicalLatestPrev,
+          canonicalSeven, canonicalSevenPrev,
+          canonicalTwentyEight, canonicalTwentyEightPrev
+        ] = await Promise.all([
+          fetchDashboardCanonicalTotals(propertyUrl, latestWindow.endDate, latestWindow.endDate),
+          fetchDashboardCanonicalTotals(propertyUrl, latestPrevStart, latestPrevEnd),
+          fetchDashboardCanonicalTotals(propertyUrl, sevenDayWindow.startDate, sevenDayWindow.endDate),
+          fetchDashboardCanonicalTotals(propertyUrl, sevenPrevStart, sevenPrevEnd),
+          fetchDashboardCanonicalTotals(propertyUrl, twentyEightDayWindow.startDate, twentyEightDayWindow.endDate),
+          fetchDashboardCanonicalTotals(propertyUrl, twentyEightPrevStart, twentyEightPrevEnd)
+        ]);
+
+        latestWindow = {
+          ...latestWindow,
+          current: canonicalLatest || latestWindow.current,
+          prev: canonicalLatestPrev || latestWindow.prev
+        };
+        sevenDayWindow = {
+          ...sevenDayWindow,
+          current: canonicalSeven || sevenDayWindow.current,
+          prev: canonicalSevenPrev || sevenDayWindow.prev
+        };
+        twentyEightDayWindow = {
+          ...twentyEightDayWindow,
+          current: canonicalTwentyEight || twentyEightDayWindow.current,
+          prev: canonicalTwentyEightPrev || twentyEightDayWindow.prev
+        };
 
         let latestActivity = options?.topUniqueFromSegments?.latest || null;
         let sevenActivity = options?.topUniqueFromSegments?.seven || null;
@@ -61092,6 +61208,31 @@ Final Score: ${score}/100`;
           safeFetchWindowRows(twentyEightDayWindow?.startDate, twentyEightDayWindow?.endDate),
           safeFetchWindowRows(ninetyDayWindow?.startDate, ninetyDayWindow?.endDate)
         ]);
+
+        const latestPrevStart = addDaysToIsoDate(latestWindow?.endDate, -1);
+        const latestPrevEnd = addDaysToIsoDate(latestWindow?.endDate, -1);
+        const sevenPrevStart = addDaysToIsoDate(sevenDayWindow?.endDate, -(2 * 7 - 1));
+        const sevenPrevEnd = addDaysToIsoDate(sevenDayWindow?.endDate, -7);
+        const twentyeightPrevStart = addDaysToIsoDate(twentyEightDayWindow?.endDate, -(2 * 28 - 1));
+        const twentyeightPrevEnd = addDaysToIsoDate(twentyEightDayWindow?.endDate, -28);
+        const ninetyPrevStart = addDaysToIsoDate(ninetyDayWindow?.endDate, -(2 * 90 - 1));
+        const ninetyPrevEnd = addDaysToIsoDate(ninetyDayWindow?.endDate, -90);
+
+        const [
+          canonicalLatest, canonicalLatestPrev,
+          canonicalSeven, canonicalSevenPrev,
+          canonicalTwentyeight, canonicalTwentyeightPrev,
+          canonicalNinety, canonicalNinetyPrev
+        ] = await Promise.all([
+          fetchDashboardCanonicalTotals(propertyUrl, latestWindow?.endDate, latestWindow?.endDate),
+          fetchDashboardCanonicalTotals(propertyUrl, latestPrevStart, latestPrevEnd),
+          fetchDashboardCanonicalTotals(propertyUrl, sevenDayWindow?.startDate, sevenDayWindow?.endDate),
+          fetchDashboardCanonicalTotals(propertyUrl, sevenPrevStart, sevenPrevEnd),
+          fetchDashboardCanonicalTotals(propertyUrl, twentyEightDayWindow?.startDate, twentyEightDayWindow?.endDate),
+          fetchDashboardCanonicalTotals(propertyUrl, twentyeightPrevStart, twentyeightPrevEnd),
+          fetchDashboardCanonicalTotals(propertyUrl, ninetyDayWindow?.startDate, ninetyDayWindow?.endDate),
+          fetchDashboardCanonicalTotals(propertyUrl, ninetyPrevStart, ninetyPrevEnd)
+        ]);
         const applyLookupSegment = (row) => ({
           ...row,
           segment: resolveDashboardSubsegmentFromLookup(row?.url || '', moneySegmentLookup)
@@ -61252,10 +61393,47 @@ Final Score: ${score}/100`;
 
         // Keep segment totals directly tied to page-level summaries for each period.
         // This avoids residual balancing drifting tile counts away from row-level data.
-        const latestDisplayBalanced = latestDisplayFromRows;
-        const sevenDisplayBalanced = sevenDisplayFromRows;
-        const twentyeightDisplayBalanced = twentyeightDisplayFromRows;
-        const ninetyDisplayBalanced = ninetyDisplayFromRows;
+        const latestDisplayBalanced = normalizeDashboardPeriodBySegmentToCanonical(
+          latestDisplayFromRows,
+          canonicalLatest || latestWindow?.current,
+          defs
+        ) || latestDisplayFromRows;
+        const sevenDisplayBalanced = normalizeDashboardPeriodBySegmentToCanonical(
+          sevenDisplayFromRows,
+          canonicalSeven || sevenDayWindow?.current,
+          defs
+        ) || sevenDisplayFromRows;
+        const twentyeightDisplayBalanced = normalizeDashboardPeriodBySegmentToCanonical(
+          twentyeightDisplayFromRows,
+          canonicalTwentyeight || twentyEightDayWindow?.current,
+          defs
+        ) || twentyeightDisplayFromRows;
+        const ninetyDisplayBalanced = normalizeDashboardPeriodBySegmentToCanonical(
+          ninetyDisplayFromRows,
+          canonicalNinety || ninetyDayWindow?.current,
+          defs
+        ) || ninetyDisplayFromRows;
+
+        const latestPrevDisplayBalanced = normalizeDashboardPeriodBySegmentToCanonical(
+          latestPrevBySegment,
+          canonicalLatestPrev || latestWindow?.prev,
+          defs
+        ) || latestPrevBySegment;
+        const sevenPrevDisplayBalanced = normalizeDashboardPeriodBySegmentToCanonical(
+          sevenPrevBySegment,
+          canonicalSevenPrev || sevenDayWindow?.prev,
+          defs
+        ) || sevenPrevBySegment;
+        const twentyeightPrevDisplayBalanced = normalizeDashboardPeriodBySegmentToCanonical(
+          twentyeightPrevBySegment,
+          canonicalTwentyeightPrev || twentyEightDayWindow?.prev,
+          defs
+        ) || twentyeightPrevBySegment;
+        const ninetyPrevDisplayBalanced = normalizeDashboardPeriodBySegmentToCanonical(
+          ninetyPrevBySegment,
+          canonicalNinetyPrev || ninetyDayWindow?.prev,
+          defs
+        ) || ninetyPrevBySegment;
 
         const uniqueTotalsForTop = {
           latest: { clickPages: 0, impressionPages: 0 },
@@ -61269,21 +61447,21 @@ Final Score: ${score}/100`;
             ? (toNum(dbWindowsByDays?.[28]?.[key]?.pageCount) ?? toNum(authoritativeCounts?.[key]))
             : toNum(authoritativeCounts?.[key]);
           const latestNow = latestDisplayBalanced?.[key] || null;
-          const latestPrev = latestPrevBySegment?.[key] || null;
+          const latestPrev = latestPrevDisplayBalanced?.[key] || null;
           const sevenNow = sevenDisplayBalanced?.[key] || null;
-          const sevenPrev = sevenPrevBySegment?.[key] || null;
+          const sevenPrev = sevenPrevDisplayBalanced?.[key] || null;
           const twentyeightNow = twentyeightDisplayBalanced?.[key] || {
             clicks: c.clicks,
             impressions: c.impressions,
             ctrPct: c.ctrPct,
             avgPosition: c.avgPosition
           };
-          const twentyeightPrev = twentyeightPrevBySegment?.[key] || null;
+          const twentyeightPrev = twentyeightPrevDisplayBalanced?.[key] || null;
           const latestRowActivity = latestSubsegmentActivity?.[key] || null;
           const sevenRowActivity = sevenSubsegmentActivity?.[key] || null;
           const twentyeightRowActivity = twentyeightSubsegmentActivity?.[key] || null;
           const ninetyNow = ninetyDisplayBalanced?.[key] || null;
-          const ninetyPrev = ninetyPrevBySegment?.[key] || null;
+          const ninetyPrev = ninetyPrevDisplayBalanced?.[key] || null;
           const ninetyRowActivity = ninetySubsegmentActivity?.[key] || null;
 
           uniqueTotalsForTop.latest.clickPages += getSafeUniquePages(latestNow?.clicks, latestRowActivity?.clickPages);
