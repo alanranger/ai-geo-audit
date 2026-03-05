@@ -7215,6 +7215,17 @@
             <option value="local">Local</option>
             <option value="other">Other</option>
           </select>
+          <select id="optimisation-filter-objective-kpi" style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
+            <option value="">All KPI Objectives</option>
+            <option value="ctr_28d">CTR</option>
+            <option value="impressions_28d">Impressions</option>
+            <option value="clicks_28d">Clicks</option>
+            <option value="current_rank">Rank</option>
+            <option value="ai_citations">AI Citations</option>
+            <option value="ai_overview">AI Overview</option>
+            <option value="opportunity_score">Opportunity Score</option>
+            <option value="not_set">Not Set</option>
+          </select>
           <input type="text" id="optimisation-filter-keyword" placeholder="Filter by keyword..." style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; flex: 1; min-width: 200px;">
           <input type="text" id="optimisation-filter-url" placeholder="Filter by URL..." style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; flex: 1; min-width: 200px;">
           <button id="optimisation-filter-needs-update" class="btn btn-secondary" style="padding: 0.5rem 1rem;" title="Show tasks that need measurement update (no measurement or older than 30 days).">Needs Update</button>
@@ -13309,6 +13320,7 @@
       const urlFilter = document.getElementById('optimisation-filter-url')?.value?.toLowerCase().trim() || '';
       const typeFilter = document.getElementById('optimisation-filter-type')?.value || '';
       const statusFilter = document.getElementById('optimisation-filter-status')?.value || '';
+      const objectiveKpiFilter = document.getElementById('optimisation-filter-objective-kpi')?.value || '';
       
       // Apply filters
       if (keywordFilter) {
@@ -13322,6 +13334,14 @@
       }
       if (statusFilter) {
         tasks = tasks.filter(t => t.status === statusFilter);
+      }
+      if (objectiveKpiFilter) {
+        tasks = tasks.filter(t => {
+          let objectiveKpiKey = t.objectiveKpiKey || (t.objective && t.objective.kpi) || t.objective_metric || t.objective_kpi || t.primary_kpi || '';
+          if (objectiveKpiKey === 'Rank' || objectiveKpiKey === 'rank') objectiveKpiKey = 'current_rank';
+          if (objectiveKpiFilter === 'not_set') return !objectiveKpiKey;
+          return objectiveKpiKey === objectiveKpiFilter;
+        });
       }
       
       // Get scope
@@ -13385,6 +13405,17 @@
       const statusFilter = document.getElementById('optimisation-filter-status')?.value || '';
       if (statusFilter) {
         tasks = tasks.filter(t => t.status === statusFilter);
+      }
+      
+      // Apply objective KPI filter
+      const objectiveKpiFilter = document.getElementById('optimisation-filter-objective-kpi')?.value || '';
+      if (objectiveKpiFilter) {
+        tasks = tasks.filter(t => {
+          let objectiveKpiKey = t.objectiveKpiKey || (t.objective && t.objective.kpi) || t.objective_metric || t.objective_kpi || t.primary_kpi || '';
+          if (objectiveKpiKey === 'Rank' || objectiveKpiKey === 'rank') objectiveKpiKey = 'current_rank';
+          if (objectiveKpiFilter === 'not_set') return !objectiveKpiKey;
+          return objectiveKpiKey === objectiveKpiFilter;
+        });
       }
       
       // Apply trafficKpiOnly filter (CTR/Impressions/Clicks objectives only)
@@ -15578,6 +15609,7 @@
       // Filter handlers
       const filterStatus = document.getElementById('optimisation-filter-status');
       const filterType = document.getElementById('optimisation-filter-type');
+      const filterObjectiveKpi = document.getElementById('optimisation-filter-objective-kpi');
       const filterKeyword = document.getElementById('optimisation-filter-keyword');
       const filterUrl = document.getElementById('optimisation-filter-url');
       const clearFilters = document.getElementById('optimisation-clear-filters');
@@ -15595,6 +15627,14 @@
         }
         if (filterType && filterType.value) {
           filtered = filtered.filter(t => t.task_type === filterType.value);
+        }
+        if (filterObjectiveKpi && filterObjectiveKpi.value) {
+          filtered = filtered.filter(t => {
+            let objectiveKpiKey = t.objectiveKpiKey || (t.objective && t.objective.kpi) || t.objective_metric || t.objective_kpi || t.primary_kpi || '';
+            if (objectiveKpiKey === 'Rank' || objectiveKpiKey === 'rank') objectiveKpiKey = 'current_rank';
+            if (filterObjectiveKpi.value === 'not_set') return !objectiveKpiKey;
+            return objectiveKpiKey === filterObjectiveKpi.value;
+          });
         }
         if (filterKeyword && filterKeyword.value) {
           const keyword = filterKeyword.value.toLowerCase();
@@ -15661,6 +15701,7 @@
 
       if (filterStatus) filterStatus.addEventListener('change', applyFilters);
       if (filterType) filterType.addEventListener('change', applyFilters);
+      if (filterObjectiveKpi) filterObjectiveKpi.addEventListener('change', applyFilters);
       if (filterKeyword) filterKeyword.addEventListener('input', applyFilters);
       if (filterUrl) filterUrl.addEventListener('input', applyFilters);
       
@@ -15855,6 +15896,7 @@
         clearFilters.addEventListener('click', () => {
           if (filterStatus) filterStatus.value = '';
           if (filterType) filterType.value = '';
+          if (filterObjectiveKpi) filterObjectiveKpi.value = '';
           if (filterKeyword) filterKeyword.value = '';
           if (filterUrl) filterUrl.value = '';
           // Clear metric traffic filter
