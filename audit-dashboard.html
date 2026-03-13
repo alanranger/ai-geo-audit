@@ -21776,6 +21776,104 @@
       `).join("");
     }
 
+    const implTechFoundationTableState = {
+      rows: [],
+      sortKey: 'url',
+      sortDir: 'asc',
+      statusFilter: 'all',
+      reasonFilter: 'all',
+      search: ''
+    };
+
+    function getTechReasonCategory(row) {
+      if (row?.pass) return 'indexable';
+      const reason = String(row?.reason || '').toLowerCase();
+      if (reason.includes('http ')) return 'http';
+      if (reason.includes('noindex')) return 'noindex';
+      if (reason.includes('fetch failed')) return 'fetch';
+      return 'other';
+    }
+
+    function sortTechRows(rows, sortKey, sortDir) {
+      const dir = sortDir === 'desc' ? -1 : 1;
+      return [...rows].sort((a, b) => {
+        let left = a?.[sortKey];
+        let right = b?.[sortKey];
+        if (sortKey === 'indexable' || sortKey === 'pass') {
+          left = a?.pass ? 1 : 0;
+          right = b?.pass ? 1 : 0;
+        }
+        if (sortKey === 'statusCode') {
+          left = Number(left || 0);
+          right = Number(right || 0);
+        }
+        left = String(left ?? '').toLowerCase();
+        right = String(right ?? '').toLowerCase();
+        if (left === right) return 0;
+        return left > right ? dir : -dir;
+      });
+    }
+
+    function filterTechRows(rows, state) {
+      return rows.filter((row) => {
+        const statusOk = state.statusFilter === 'all'
+          ? true
+          : (state.statusFilter === 'pass' ? !!row.pass : !row.pass);
+        if (!statusOk) return false;
+
+        const reasonType = getTechReasonCategory(row);
+        if (state.reasonFilter !== 'all' && reasonType !== state.reasonFilter) return false;
+
+        if (!state.search) return true;
+        const haystack = `${row.url || ''} ${row.reason || ''}`.toLowerCase();
+        return haystack.includes(state.search);
+      });
+    }
+
+    function renderTechFoundationTableRows() {
+      const tableBody = document.getElementById('impl-tech-table-body');
+      if (!tableBody) return;
+      const filteredRows = filterTechRows(implTechFoundationTableState.rows, implTechFoundationTableState);
+      const sortedRows = sortTechRows(filteredRows, implTechFoundationTableState.sortKey, implTechFoundationTableState.sortDir);
+      if (!sortedRows.length) {
+        tableBody.innerHTML = '<tr><td colspan="5" class="ranking-table-empty">No rows match your filter.</td></tr>';
+        return;
+      }
+      tableBody.innerHTML = sortedRows.map((row) => {
+        const statusLabel = row.pass ? 'Pass' : 'Fail';
+        const category = getTechReasonCategory(row);
+        return `
+          <tr>
+            <td style="word-break: break-word;">${row.url || '-'}</td>
+            <td>${row.statusCode ?? '-'}</td>
+            <td>${statusLabel}</td>
+            <td>${category}</td>
+            <td>${row.reason || '-'}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    window.onImplTechSort = function(sortKey) {
+      if (implTechFoundationTableState.sortKey === sortKey) {
+        implTechFoundationTableState.sortDir = implTechFoundationTableState.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        implTechFoundationTableState.sortKey = sortKey;
+        implTechFoundationTableState.sortDir = 'asc';
+      }
+      renderTechFoundationTableRows();
+    };
+
+    window.onImplTechFilterChange = function() {
+      const statusEl = document.getElementById('impl-tech-filter-status');
+      const reasonEl = document.getElementById('impl-tech-filter-reason');
+      const searchEl = document.getElementById('impl-tech-filter-search');
+      implTechFoundationTableState.statusFilter = statusEl?.value || 'all';
+      implTechFoundationTableState.reasonFilter = reasonEl?.value || 'all';
+      implTechFoundationTableState.search = String(searchEl?.value || '').trim().toLowerCase();
+      renderTechFoundationTableRows();
+    };
+
     async function fetchAndRenderTechnicalFoundationStatus() {
       const target = document.getElementById("impl-tech-foundation-status");
       if (!target) return;
@@ -21807,6 +21905,7 @@
           : '<p style="margin-top: 0.75rem;">No technical blockers detected in this run.</p>';
 
         const indexability = data.indexability || {};
+        implTechFoundationTableState.rows = Array.isArray(indexability.results) ? indexability.results : [];
         target.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
             <div>
@@ -21821,7 +21920,49 @@
             <div class="card" style="margin: 0;"><strong>Indexable Key Pages</strong><div style="margin-top: 0.3rem;">${indexability.passCount || 0}/${indexability.pagesChecked || 0}</div></div>
           </div>
           ${blockerList}
+          <div style="margin-top: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <label style="display: flex; flex-direction: column; gap: 0.25rem;">
+              <span>Status</span>
+              <select id="impl-tech-filter-status" class="filter-control" onchange="window.onImplTechFilterChange()">
+                <option value="all">All</option>
+                <option value="fail">Fail only</option>
+                <option value="pass">Pass only</option>
+              </select>
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 0.25rem;">
+              <span>Reason Type</span>
+              <select id="impl-tech-filter-reason" class="filter-control" onchange="window.onImplTechFilterChange()">
+                <option value="all">All</option>
+                <option value="http">HTTP</option>
+                <option value="noindex">Noindex</option>
+                <option value="fetch">Fetch</option>
+                <option value="indexable">Indexable</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 0.25rem; min-width: 240px; flex: 1;">
+              <span>Search</span>
+              <input id="impl-tech-filter-search" class="filter-control" type="text" placeholder="Filter by URL or reason..." oninput="window.onImplTechFilterChange()" />
+            </label>
+          </div>
+          <div style="margin-top: 0.85rem; overflow-x: auto;">
+            <table class="ranking-table" id="impl-tech-table">
+              <thead>
+                <tr>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplTechSort('url')">URL</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplTechSort('statusCode')">HTTP</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplTechSort('pass')">Status</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplTechSort('reason')">Reason Type</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplTechSort('reason')">Reason Detail</button></th>
+                </tr>
+              </thead>
+              <tbody id="impl-tech-table-body">
+                <tr><td colspan="5" class="ranking-table-empty">Loading rows...</td></tr>
+              </tbody>
+            </table>
+          </div>
         `;
+        renderTechFoundationTableRows();
       } catch (error) {
         const blockersEl = document.getElementById('impl-technical-blockers-open');
         if (blockersEl) blockersEl.textContent = 'Unknown';
