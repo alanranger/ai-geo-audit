@@ -30,7 +30,7 @@ function normalizeBaseUrl(value) {
 }
 
 function buildDefaultUrls(baseUrl) {
-  return ['/', '/about', '/blog', '/lessons', '/workshops'].map((path) => `${baseUrl}${path}`);
+  return ['/', '/about', '/contact', '/services', '/workshops'].map((path) => `${baseUrl}${path}`);
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
@@ -40,6 +40,28 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
     return await fetch(url, { ...options, signal: controller.signal });
   } finally {
     clearTimeout(timer);
+  }
+}
+
+function extractLocEntries(xmlText) {
+  const out = [];
+  const re = /<loc>(.*?)<\/loc>/gi;
+  let match = re.exec(String(xmlText || ''));
+  while (match) {
+    const value = String(match[1] || '').trim();
+    if (value) out.push(value);
+    match = re.exec(String(xmlText || ''));
+  }
+  return out;
+}
+
+function normalizeAbsoluteHttpUrl(value) {
+  try {
+    const u = new URL(String(value || '').trim());
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return `${u.protocol}//${u.hostname}${u.pathname}${u.search}`;
+  } catch {
+    return null;
   }
 }
 
@@ -121,6 +143,56 @@ async function checkRobots(robotsUrl) {
   }
 }
 
+async function readChildSitemapUrls(childSitemapUrl) {
+  try {
+    const response = await fetchWithTimeout(childSitemapUrl, { headers: { 'User-Agent': 'AI-GEO-Audit/1.0' } }, 10000);
+    if (!response.ok) return [];
+    const text = await response.text();
+    const hasUrlSet = /<urlset[\s>]/i.test(text);
+    if (!hasUrlSet) return [];
+    const urls = extractLocEntries(text).map(normalizeAbsoluteHttpUrl).filter(Boolean);
+    return urls;
+  } catch {
+    return [];
+  }
+}
+
+function pickIndexabilityUrls(baseUrl, sitemapPageUrls) {
+  const unique = [];
+  const seen = new Set();
+  for (const raw of sitemapPageUrls || []) {
+    const normalized = normalizeAbsoluteHttpUrl(raw);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    unique.push(normalized);
+  }
+  if (!unique.length) return { urls: buildDefaultUrls(baseUrl), source: 'fallback-defaults' };
+
+  const baseHost = new URL(baseUrl).hostname.toLowerCase();
+  const home = `${new URL(baseUrl).protocol}//${baseHost}/`;
+  const preferred = [];
+  const hasHome = unique.some((u) => {
+    try { return new URL(u).hostname.toLowerCase() === baseHost && new URL(u).pathname === '/'; } catch { return false; }
+  });
+  if (hasHome) preferred.push(home);
+
+  const containsAny = (value, words) => words.some((w) => value.includes(w));
+  const buckets = [
+    ['about'],
+    ['workshop', 'course', 'lesson', 'services', 'service'],
+    ['blog', 'article', 'academy']
+  ];
+  for (const bucket of buckets) {
+    const hit = unique.find((u) => containsAny(u.toLowerCase(), bucket) && !preferred.includes(u));
+    if (hit) preferred.push(hit);
+  }
+  for (const url of unique) {
+    if (preferred.length >= 5) break;
+    if (!preferred.includes(url)) preferred.push(url);
+  }
+  return { urls: preferred.slice(0, 5), source: 'sitemap-derived' };
+}
+
 async function checkSitemap(sitemapUrl) {
   const sitemap = {
     url: sitemapUrl,
@@ -128,6 +200,7 @@ async function checkSitemap(sitemapUrl) {
     pass: false,
     statusCode: null,
     discoveredSitemaps: [],
+    pageUrls: [],
     notes: []
   };
   try {
@@ -141,8 +214,20 @@ async function checkSitemap(sitemapUrl) {
     const text = await response.text();
     const hasUrlSet = /<urlset[\s>]/i.test(text);
     const hasSitemapIndex = /<sitemapindex[\s>]/i.test(text);
-    const locMatches = [...text.matchAll(/<loc>(.*?)<\/loc>/gi)];
-    sitemap.discoveredSitemaps = locMatches.map((m) => m[1]).slice(0, 10);
+    const locEntries = extractLocEntries(text);
+    sitemap.discoveredSitemaps = locEntries.slice(0, 10);
+    if (hasUrlSet) {
+      sitemap.pageUrls = locEntries.map(normalizeAbsoluteHttpUrl).filter(Boolean).slice(0, 200);
+    } else if (hasSitemapIndex) {
+      const childSitemaps = locEntries.slice(0, 8);
+      const pageUrlSet = new Set();
+      for (const child of childSitemaps) {
+        const childUrls = await readChildSitemapUrls(child);
+        for (const u of childUrls) pageUrlSet.add(u);
+        if (pageUrlSet.size >= 200) break;
+      }
+      sitemap.pageUrls = Array.from(pageUrlSet).slice(0, 200);
+    }
     sitemap.pass = hasUrlSet || hasSitemapIndex;
     if (!sitemap.pass) sitemap.notes.push('sitemap.xml did not contain <urlset> or <sitemapindex>.');
     return sitemap;
@@ -182,7 +267,7 @@ async function checkSinglePageIndexability(pageUrl) {
   }
 }
 
-async function checkIndexability(pagesToCheck) {
+async function checkIndexability(pagesToCheck, source = 'unknown') {
   const results = [];
   for (const pageUrl of pagesToCheck) {
     const row = await checkSinglePageIndexability(pageUrl);
@@ -191,6 +276,7 @@ async function checkIndexability(pagesToCheck) {
   const passCount = results.filter((r) => r.pass).length;
   const failCount = results.length - passCount;
   return {
+    source,
     pagesChecked: results.length,
     passCount,
     failCount,
@@ -241,13 +327,12 @@ export default async function handler(req, res) {
 
     const robotsUrl = `${baseUrl}/robots.txt`;
     const sitemapUrl = `${baseUrl}/sitemap.xml`;
-    const pagesToCheck = buildDefaultUrls(baseUrl);
-
-    const [robots, sitemap, indexability] = await Promise.all([
+    const [robots, sitemap] = await Promise.all([
       checkRobots(robotsUrl),
-      checkSitemap(sitemapUrl),
-      checkIndexability(pagesToCheck)
+      checkSitemap(sitemapUrl)
     ]);
+    const selection = pickIndexabilityUrls(baseUrl, sitemap.pageUrls);
+    const indexability = await checkIndexability(selection.urls, selection.source);
     const overall = buildOverallResult(robots, sitemap, indexability);
 
     return res.status(200).json({
