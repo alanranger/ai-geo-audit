@@ -208,7 +208,7 @@ function pickIndexabilityUrls(baseUrl, sitemapPageUrls, mode = 'sample', limit =
   return { urls: preferred.slice(0, 5), source: 'sitemap-derived', mode: 'sample' };
 }
 
-async function checkSitemap(sitemapUrl) {
+async function checkSitemap(sitemapUrl, pageUrlLimit = 5000) {
   const sitemap = {
     url: sitemapUrl,
     exists: false,
@@ -232,16 +232,16 @@ async function checkSitemap(sitemapUrl) {
     const locEntries = extractLocEntries(text);
     sitemap.discoveredSitemaps = locEntries.slice(0, 10);
     if (hasUrlSet) {
-      sitemap.pageUrls = locEntries.map(normalizeAbsoluteHttpUrl).filter(Boolean).slice(0, 200);
+      sitemap.pageUrls = locEntries.map(normalizeAbsoluteHttpUrl).filter(Boolean).slice(0, pageUrlLimit);
     } else if (hasSitemapIndex) {
-      const childSitemaps = locEntries.slice(0, 8);
+      const childSitemaps = locEntries.slice(0, 100);
       const pageUrlSet = new Set();
       for (const child of childSitemaps) {
         const childUrls = await readChildSitemapUrls(child);
         for (const u of childUrls) pageUrlSet.add(u);
-        if (pageUrlSet.size >= 200) break;
+        if (pageUrlSet.size >= pageUrlLimit) break;
       }
-      sitemap.pageUrls = Array.from(pageUrlSet).slice(0, 200);
+      sitemap.pageUrls = Array.from(pageUrlSet).slice(0, pageUrlLimit);
     }
     sitemap.pass = hasUrlSet || hasSitemapIndex;
     if (!sitemap.pass) sitemap.notes.push('sitemap.xml did not contain <urlset> or <sitemapindex>.');
@@ -346,9 +346,11 @@ export default async function handler(req, res) {
 
     const robotsUrl = `${baseUrl}/robots.txt`;
     const sitemapUrl = `${baseUrl}/sitemap.xml`;
+    const pageUrlLimit = limit || (mode === 'full' ? 5000 : 500);
+
     const [robots, sitemap] = await Promise.all([
       checkRobots(robotsUrl),
-      checkSitemap(sitemapUrl)
+      checkSitemap(sitemapUrl, pageUrlLimit)
     ]);
     const selection = pickIndexabilityUrls(baseUrl, sitemap.pageUrls, mode, limit);
     const indexability = await checkIndexability(selection.urls, selection.source, selection.mode);
