@@ -6893,6 +6893,16 @@
 
           <div class="card" style="margin-bottom: 1.5rem;">
             <div class="card-header">
+              <h3 style="margin: 0;">Technical Foundation Audit (Live)</h3>
+              <p class="card-subtitle">Checks robots, sitemap, and indexability blockers for your configured property URL.</p>
+            </div>
+            <div class="card-body" id="impl-tech-foundation-status">
+              <p class="card-subtitle">Loading technical foundation status...</p>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 1.5rem;">
+            <div class="card-header">
               <h3 style="margin: 0;">Outstanding Tickets and Benefits</h3>
             </div>
             <div class="card-body" style="overflow-x: auto;">
@@ -6923,7 +6933,7 @@
               <div class="card" style="margin: 0;"><strong>Schema QA Pass Rate</strong><div style="font-size: 1.35rem; margin-top: 0.35rem;">Pending</div></div>
               <div class="card" style="margin: 0;"><strong>Extractability Pass Rate</strong><div style="font-size: 1.35rem; margin-top: 0.35rem;">Pending</div></div>
               <div class="card" style="margin: 0;"><strong>Citation Consistency Score</strong><div style="font-size: 1.35rem; margin-top: 0.35rem;">Pending</div></div>
-              <div class="card" style="margin: 0;"><strong>Technical Blockers Open</strong><div style="font-size: 1.35rem; margin-top: 0.35rem;">Pending</div></div>
+              <div class="card" style="margin: 0;"><strong>Technical Blockers Open</strong><div id="impl-technical-blockers-open" style="font-size: 1.35rem; margin-top: 0.35rem;">Pending</div></div>
             </div>
           </div>
         </div>
@@ -21693,7 +21703,7 @@
       {
         priority: "P0",
         title: "Build technical foundation audit (robots/sitemap/indexability)",
-        status: "planned",
+        status: "done",
         lane: "now",
         impact: "High",
         owner: "AI GEO Engineer",
@@ -21766,7 +21776,60 @@
       `).join("");
     }
 
-    window.renderImplementationProgressTab = function() {
+    async function fetchAndRenderTechnicalFoundationStatus() {
+      const target = document.getElementById("impl-tech-foundation-status");
+      if (!target) return;
+
+      const property =
+        (document.getElementById('propertyUrl')?.value || '').trim() ||
+        (localStorage.getItem('gsc_property_url') || '').trim() ||
+        (localStorage.getItem('last_property_url') || '').trim() ||
+        'https://www.alanranger.com';
+
+      target.innerHTML = '<p class="card-subtitle">Running technical foundation checks...</p>';
+      try {
+        const response = await fetch(apiUrl(`/api/aigeo/technical-foundation?property=${encodeURIComponent(property)}`));
+        const payload = await response.json();
+        if (!response.ok || payload?.status !== 'ok' || !payload?.data) {
+          throw new Error(payload?.message || `HTTP ${response.status}`);
+        }
+
+        const data = payload.data;
+        const blockerCount = Array.isArray(data.overall?.blockers) ? data.overall.blockers.length : 0;
+        const blockersEl = document.getElementById('impl-technical-blockers-open');
+        if (blockersEl) blockersEl.textContent = String(blockerCount);
+
+        const badgeColor = data.overall?.pass ? '#10b981' : '#ef4444';
+        const badgeLabel = data.overall?.pass ? 'PASS' : 'FAIL';
+
+        const blockerList = blockerCount
+          ? `<ul style="margin-top: 0.75rem; line-height: 1.6;">${data.overall.blockers.map((b) => `<li>${b}</li>`).join('')}</ul>`
+          : '<p style="margin-top: 0.75rem;">No technical blockers detected in this run.</p>';
+
+        const indexability = data.indexability || {};
+        target.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+            <div>
+              <strong style="font-size: 1.05rem;">Overall Foundation Status</strong>
+              <div style="margin-top: 0.35rem; opacity: 0.9;">Property: ${property}</div>
+            </div>
+            <span style="display: inline-block; padding: 0.35rem 0.7rem; border-radius: 999px; font-weight: 700; background: ${badgeColor}; color: #fff;">${badgeLabel}</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; margin-top: 1rem;">
+            <div class="card" style="margin: 0;"><strong>Robots</strong><div style="margin-top: 0.3rem;">${data.robots?.pass ? 'Pass' : 'Fail'}</div></div>
+            <div class="card" style="margin: 0;"><strong>Sitemap</strong><div style="margin-top: 0.3rem;">${data.sitemap?.pass ? 'Pass' : 'Fail'}</div></div>
+            <div class="card" style="margin: 0;"><strong>Indexable Key Pages</strong><div style="margin-top: 0.3rem;">${indexability.passCount || 0}/${indexability.pagesChecked || 0}</div></div>
+          </div>
+          ${blockerList}
+        `;
+      } catch (error) {
+        const blockersEl = document.getElementById('impl-technical-blockers-open');
+        if (blockersEl) blockersEl.textContent = 'Unknown';
+        target.innerHTML = `<p class="card-subtitle">Could not load technical foundation status: ${error.message}</p>`;
+      }
+    }
+
+    window.renderImplementationProgressTab = async function() {
       const summary = IMPLEMENTATION_PROGRESS_TICKETS.reduce((acc, t) => {
         acc.total += 1;
         acc[t.status] = (acc[t.status] || 0) + 1;
@@ -21810,6 +21873,8 @@
           <td>${t.owner}</td>
         </tr>
       `).join("");
+
+      await fetchAndRenderTechnicalFoundationStatus();
     };
 
     // Portfolio Tab Functions
