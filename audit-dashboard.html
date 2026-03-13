@@ -6896,8 +6896,24 @@
               <h3 style="margin: 0;">Technical Foundation Audit (Live)</h3>
               <p class="card-subtitle">Checks robots, sitemap, and indexability blockers for your configured property URL.</p>
             </div>
-            <div class="card-body" id="impl-tech-foundation-status">
-              <p class="card-subtitle">Loading technical foundation status...</p>
+            <div class="card-body">
+              <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.75rem;">
+                <button id="impl-tech-run-sample-btn" class="btn btn-small" type="button" onclick="window.runImplTechAudit('sample')">Run Sample Audit</button>
+                <button id="impl-tech-run-full-btn" class="btn btn-small" type="button" onclick="window.runImplTechAudit('full')">Audit Whole Site URLs</button>
+                <label style="display: flex; flex-direction: column; gap: 0.2rem; min-width: 140px;">
+                  <span style="font-size: 0.85rem; opacity: 0.9;">Whole-site limit</span>
+                  <select id="impl-tech-limit-select" class="filter-control">
+                    <option value="all">All URLs</option>
+                    <option value="100">100 URLs</option>
+                    <option value="250">250 URLs</option>
+                    <option value="500">500 URLs</option>
+                    <option value="1000">1000 URLs</option>
+                  </select>
+                </label>
+              </div>
+              <div id="impl-tech-foundation-status">
+                <p class="card-subtitle">Loading technical foundation status...</p>
+              </div>
             </div>
           </div>
 
@@ -21784,6 +21800,10 @@
       reasonFilter: 'all',
       search: ''
     };
+    const implTechFoundationRunState = {
+      mode: 'sample',
+      isLoading: false
+    };
 
     function getTechReasonCategory(row) {
       if (row?.pass) return 'indexable';
@@ -21874,9 +21894,22 @@
       renderTechFoundationTableRows();
     };
 
-    async function fetchAndRenderTechnicalFoundationStatus() {
+    function setImplTechAuditButtonState(isLoading) {
+      const sampleBtn = document.getElementById('impl-tech-run-sample-btn');
+      const fullBtn = document.getElementById('impl-tech-run-full-btn');
+      if (sampleBtn) sampleBtn.disabled = isLoading;
+      if (fullBtn) fullBtn.disabled = isLoading;
+      if (sampleBtn) sampleBtn.textContent = isLoading && implTechFoundationRunState.mode === 'sample' ? 'Running Sample...' : 'Run Sample Audit';
+      if (fullBtn) fullBtn.textContent = isLoading && implTechFoundationRunState.mode === 'full' ? 'Running Whole-Site...' : 'Audit Whole Site URLs';
+    }
+
+    async function fetchAndRenderTechnicalFoundationStatus(modeOverride = null) {
       const target = document.getElementById("impl-tech-foundation-status");
       if (!target) return;
+      const requestedMode = modeOverride || implTechFoundationRunState.mode || 'sample';
+      implTechFoundationRunState.mode = requestedMode;
+      implTechFoundationRunState.isLoading = true;
+      setImplTechAuditButtonState(true);
 
       const property =
         (document.getElementById('propertyUrl')?.value || '').trim() ||
@@ -21884,9 +21917,17 @@
         (localStorage.getItem('last_property_url') || '').trim() ||
         'https://www.alanranger.com';
 
-      target.innerHTML = '<p class="card-subtitle">Running technical foundation checks...</p>';
+      target.innerHTML = `<p class="card-subtitle">Running ${requestedMode === 'full' ? 'whole-site' : 'sample'} technical foundation checks...</p>`;
       try {
-        const response = await fetch(apiUrl(`/api/aigeo/technical-foundation?property=${encodeURIComponent(property)}`));
+        const limitValue = document.getElementById('impl-tech-limit-select')?.value || 'all';
+        const params = new URLSearchParams({
+          property,
+          mode: requestedMode
+        });
+        if (requestedMode === 'full' && limitValue !== 'all') {
+          params.set('limit', limitValue);
+        }
+        const response = await fetch(apiUrl(`/api/aigeo/technical-foundation?${params.toString()}`));
         const payload = await response.json();
         if (!response.ok || payload?.status !== 'ok' || !payload?.data) {
           throw new Error(payload?.message || `HTTP ${response.status}`);
@@ -21920,7 +21961,7 @@
             <div class="card" style="margin: 0;">
               <strong>Indexable Key Pages</strong>
               <div style="margin-top: 0.3rem;">${indexability.passCount || 0}/${indexability.pagesChecked || 0}</div>
-              <div style="font-size: 0.8rem; opacity: 0.85; margin-top: 0.25rem;">Source: ${indexability.source || 'unknown'}</div>
+              <div style="font-size: 0.8rem; opacity: 0.85; margin-top: 0.25rem;">Source: ${indexability.source || 'unknown'} | Mode: ${indexability.mode || requestedMode}</div>
             </div>
           </div>
           ${blockerList}
@@ -21971,8 +22012,16 @@
         const blockersEl = document.getElementById('impl-technical-blockers-open');
         if (blockersEl) blockersEl.textContent = 'Unknown';
         target.innerHTML = `<p class="card-subtitle">Could not load technical foundation status: ${error.message}</p>`;
+      } finally {
+        implTechFoundationRunState.isLoading = false;
+        setImplTechAuditButtonState(false);
       }
     }
+
+    window.runImplTechAudit = async function(mode) {
+      const nextMode = mode === 'full' ? 'full' : 'sample';
+      await fetchAndRenderTechnicalFoundationStatus(nextMode);
+    };
 
     window.renderImplementationProgressTab = async function() {
       const summary = IMPLEMENTATION_PROGRESS_TICKETS.reduce((acc, t) => {

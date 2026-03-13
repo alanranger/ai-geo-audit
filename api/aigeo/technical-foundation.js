@@ -65,6 +65,12 @@ function normalizeAbsoluteHttpUrl(value) {
   }
 }
 
+function parsePositiveInt(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n);
+}
+
 function extractDirectivesForAgent(robotsText, agentName) {
   const lines = String(robotsText || '')
     .split(/\r?\n/)
@@ -157,7 +163,7 @@ async function readChildSitemapUrls(childSitemapUrl) {
   }
 }
 
-function pickIndexabilityUrls(baseUrl, sitemapPageUrls) {
+function pickIndexabilityUrls(baseUrl, sitemapPageUrls, mode = 'sample', limit = null) {
   const unique = [];
   const seen = new Set();
   for (const raw of sitemapPageUrls || []) {
@@ -166,7 +172,16 @@ function pickIndexabilityUrls(baseUrl, sitemapPageUrls) {
     seen.add(normalized);
     unique.push(normalized);
   }
-  if (!unique.length) return { urls: buildDefaultUrls(baseUrl), source: 'fallback-defaults' };
+  if (!unique.length) return { urls: buildDefaultUrls(baseUrl), source: 'fallback-defaults', mode: 'sample' };
+
+  const effectiveLimit = limit || unique.length;
+  if (mode === 'full') {
+    return {
+      urls: unique.slice(0, effectiveLimit),
+      source: 'sitemap-derived',
+      mode: 'full'
+    };
+  }
 
   const baseHost = new URL(baseUrl).hostname.toLowerCase();
   const home = `${new URL(baseUrl).protocol}//${baseHost}/`;
@@ -190,7 +205,7 @@ function pickIndexabilityUrls(baseUrl, sitemapPageUrls) {
     if (preferred.length >= 5) break;
     if (!preferred.includes(url)) preferred.push(url);
   }
-  return { urls: preferred.slice(0, 5), source: 'sitemap-derived' };
+  return { urls: preferred.slice(0, 5), source: 'sitemap-derived', mode: 'sample' };
 }
 
 async function checkSitemap(sitemapUrl) {
@@ -267,7 +282,7 @@ async function checkSinglePageIndexability(pageUrl) {
   }
 }
 
-async function checkIndexability(pagesToCheck, source = 'unknown') {
+async function checkIndexability(pagesToCheck, source = 'unknown', mode = 'sample') {
   const results = [];
   for (const pageUrl of pagesToCheck) {
     const row = await checkSinglePageIndexability(pageUrl);
@@ -277,6 +292,7 @@ async function checkIndexability(pagesToCheck, source = 'unknown') {
   const failCount = results.length - passCount;
   return {
     source,
+    mode,
     pagesChecked: results.length,
     passCount,
     failCount,
@@ -316,6 +332,9 @@ export default async function handler(req, res) {
 
   try {
     const baseUrl = normalizeBaseUrl(req.query.property);
+    const modeRaw = String(req.query.mode || 'sample').trim().toLowerCase();
+    const mode = modeRaw === 'full' ? 'full' : 'sample';
+    const limit = parsePositiveInt(req.query.limit);
     if (!baseUrl) {
       return res.status(400).json({
         status: 'error',
@@ -331,14 +350,14 @@ export default async function handler(req, res) {
       checkRobots(robotsUrl),
       checkSitemap(sitemapUrl)
     ]);
-    const selection = pickIndexabilityUrls(baseUrl, sitemap.pageUrls);
-    const indexability = await checkIndexability(selection.urls, selection.source);
+    const selection = pickIndexabilityUrls(baseUrl, sitemap.pageUrls, mode, limit);
+    const indexability = await checkIndexability(selection.urls, selection.source, selection.mode);
     const overall = buildOverallResult(robots, sitemap, indexability);
 
     return res.status(200).json({
       status: 'ok',
       source: 'technical-foundation',
-      params: { property: baseUrl },
+      params: { property: baseUrl, mode, limit },
       data: {
         overall,
         robots,
