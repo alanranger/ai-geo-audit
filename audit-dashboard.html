@@ -6858,6 +6858,74 @@
         </div>
       </section>
 
+      <style>
+        .impl-status-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+          border-radius: 999px;
+          padding: 0.2rem 0.55rem;
+          font-size: 0.78rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.02em;
+          border: 1px solid transparent;
+        }
+        .impl-status-red {
+          background: rgba(239, 68, 68, 0.15);
+          color: #ef4444;
+          border-color: rgba(239, 68, 68, 0.4);
+        }
+        .impl-status-amber {
+          background: rgba(245, 158, 11, 0.18);
+          color: #f59e0b;
+          border-color: rgba(245, 158, 11, 0.45);
+        }
+        .impl-status-green {
+          background: rgba(16, 185, 129, 0.15);
+          color: #10b981;
+          border-color: rgba(16, 185, 129, 0.45);
+        }
+        .impl-progress-track {
+          width: 100%;
+          height: 10px;
+          background: rgba(148, 163, 184, 0.25);
+          border-radius: 999px;
+          overflow: hidden;
+        }
+        .impl-progress-fill {
+          height: 100%;
+          width: 0%;
+          border-radius: 999px;
+          transition: width 220ms ease;
+        }
+        .impl-summary-card {
+          border: 1px solid rgba(148, 163, 184, 0.22);
+        }
+        .impl-summary-card .impl-summary-value {
+          font-size: 1.7rem;
+          font-weight: 700;
+        }
+        .impl-status-card-red {
+          border-color: rgba(239, 68, 68, 0.45);
+          background: rgba(239, 68, 68, 0.07);
+        }
+        .impl-status-card-amber {
+          border-color: rgba(245, 158, 11, 0.45);
+          background: rgba(245, 158, 11, 0.08);
+        }
+        .impl-status-card-green {
+          border-color: rgba(16, 185, 129, 0.45);
+          background: rgba(16, 185, 129, 0.07);
+        }
+        .impl-ticket-card {
+          border: 1px solid var(--dark-border, #334155);
+          border-radius: 10px;
+          padding: 0.75rem;
+          margin-bottom: 0.75rem;
+        }
+      </style>
+
       <!-- Implementation Progress Panel -->
       <section class="aigeo-panel" data-panel="implementation-progress" hidden>
         <div class="container" style="max-width: 1400px; margin: 0 auto; padding: 2rem;">
@@ -6866,14 +6934,23 @@
             <p>
               Business-readable tracking for what is live, what is being built, what is outstanding, and the expected AI visibility impact.
             </p>
+            <div style="margin-top: 1rem;">
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; margin-bottom: 0.4rem;">
+                <strong>Overall Delivery Progress</strong>
+                <span id="impl-overall-progress-text" class="impl-status-chip impl-status-amber">0%</span>
+              </div>
+              <div class="impl-progress-track">
+                <div id="impl-overall-progress-bar" class="impl-progress-fill" style="background: #f59e0b; width: 0%;"></div>
+              </div>
+            </div>
           </div>
 
           <div id="implementation-progress-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin: 1rem 0 1.5rem;">
-            <div class="card"><div style="font-size: 1.7rem; font-weight: 700;" id="impl-summary-planned">-</div><div>Planned</div></div>
-            <div class="card"><div style="font-size: 1.7rem; font-weight: 700;" id="impl-summary-in-progress">-</div><div>In Progress</div></div>
-            <div class="card"><div style="font-size: 1.7rem; font-weight: 700;" id="impl-summary-done">-</div><div>Done</div></div>
-            <div class="card"><div style="font-size: 1.7rem; font-weight: 700;" id="impl-summary-blocked">-</div><div>Blocked</div></div>
-            <div class="card"><div style="font-size: 1.7rem; font-weight: 700;" id="impl-summary-high-impact-open">-</div><div>High-Impact Open</div></div>
+            <div class="card impl-summary-card impl-status-card-amber"><div class="impl-summary-value" id="impl-summary-planned">-</div><div>Planned</div></div>
+            <div class="card impl-summary-card impl-status-card-amber"><div class="impl-summary-value" id="impl-summary-in-progress">-</div><div>In Progress</div></div>
+            <div class="card impl-summary-card impl-status-card-green"><div class="impl-summary-value" id="impl-summary-done">-</div><div>Done</div></div>
+            <div class="card impl-summary-card impl-status-card-red"><div class="impl-summary-value" id="impl-summary-blocked">-</div><div>Blocked</div></div>
+            <div class="card impl-summary-card impl-status-card-amber"><div class="impl-summary-value" id="impl-summary-high-impact-open">-</div><div>High-Impact Open</div></div>
           </div>
 
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
@@ -21772,6 +21849,32 @@
       }
     ];
 
+    function getImplStatusMeta(status) {
+      switch (status) {
+        case 'done':
+          return { label: 'Done', chipClass: 'impl-status-green', cardClass: 'impl-status-card-green', progress: 100, color: '#10b981' };
+        case 'in_progress':
+          return { label: 'In Progress', chipClass: 'impl-status-amber', cardClass: 'impl-status-card-amber', progress: 60, color: '#f59e0b' };
+        case 'blocked':
+          return { label: 'Blocked', chipClass: 'impl-status-red', cardClass: 'impl-status-card-red', progress: 100, color: '#ef4444' };
+        case 'planned':
+        default:
+          return { label: 'Planned', chipClass: 'impl-status-amber', cardClass: 'impl-status-card-amber', progress: 20, color: '#f59e0b' };
+      }
+    }
+
+    function getPassFailMeta(pass) {
+      return pass
+        ? { label: 'Pass', chipClass: 'impl-status-green', color: '#10b981' }
+        : { label: 'Fail', chipClass: 'impl-status-red', color: '#ef4444' };
+    }
+
+    function getProgressVisuals(percent) {
+      if (percent >= 70) return { chipClass: 'impl-status-green', color: '#10b981' };
+      if (percent >= 30) return { chipClass: 'impl-status-amber', color: '#f59e0b' };
+      return { chipClass: 'impl-status-red', color: '#ef4444' };
+    }
+
     function renderImplementationLane(laneId, laneName) {
       const container = document.getElementById(laneId);
       if (!container) return;
@@ -21780,16 +21883,24 @@
         container.innerHTML = '<p class="card-subtitle">No tickets in this lane.</p>';
         return;
       }
-      container.innerHTML = tickets.map(ticket => `
-        <div style="border: 1px solid var(--dark-border, #334155); border-radius: 10px; padding: 0.75rem; margin-bottom: 0.75rem;">
+      container.innerHTML = tickets.map(ticket => {
+        const meta = getImplStatusMeta(ticket.status);
+        return `
+        <div class="impl-ticket-card ${meta.cardClass}">
           <div style="display: flex; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.4rem;">
             <strong>${ticket.priority}</strong>
-            <span style="font-size: 0.8rem; opacity: 0.85;">${ticket.status.replace('_', ' ')}</span>
+            <span class="impl-status-chip ${meta.chipClass}">${meta.label}</span>
           </div>
           <div style="font-weight: 600; margin-bottom: 0.3rem;">${ticket.title}</div>
           <div style="font-size: 0.82rem; opacity: 0.9;">Impact: ${ticket.impact} | Owner: ${ticket.owner}</div>
+          <div style="margin-top: 0.55rem;">
+            <div class="impl-progress-track">
+              <div class="impl-progress-fill" style="width: ${meta.progress}%; background: ${meta.color};"></div>
+            </div>
+          </div>
         </div>
-      `).join("");
+      `;
+      }).join("");
     }
 
     const implTechFoundationTableState = {
@@ -21836,9 +21947,12 @@
 
     function filterTechRows(rows, state) {
       return rows.filter((row) => {
-        const statusOk = state.statusFilter === 'all'
-          ? true
-          : (state.statusFilter === 'pass' ? !!row.pass : !row.pass);
+        let statusOk = true;
+        if (state.statusFilter === 'pass') {
+          statusOk = !!row.pass;
+        } else if (state.statusFilter === 'fail') {
+          statusOk = !row.pass;
+        }
         if (!statusOk) return false;
 
         const reasonType = getTechReasonCategory(row);
@@ -21860,13 +21974,13 @@
         return;
       }
       tableBody.innerHTML = sortedRows.map((row) => {
-        const statusLabel = row.pass ? 'Pass' : 'Fail';
+        const statusMeta = getPassFailMeta(row.pass);
         const category = getTechReasonCategory(row);
         return `
           <tr>
             <td style="word-break: break-word;">${row.url || '-'}</td>
             <td>${row.statusCode ?? '-'}</td>
-            <td>${statusLabel}</td>
+            <td><span class="impl-status-chip ${statusMeta.chipClass}">${statusMeta.label}</span></td>
             <td>${category}</td>
             <td>${row.reason || '-'}</td>
           </tr>
@@ -21938,14 +22052,19 @@
         const blockersEl = document.getElementById('impl-technical-blockers-open');
         if (blockersEl) blockersEl.textContent = String(blockerCount);
 
-        const badgeColor = data.overall?.pass ? '#10b981' : '#ef4444';
-        const badgeLabel = data.overall?.pass ? 'PASS' : 'FAIL';
+        const overallMeta = getPassFailMeta(data.overall?.pass);
+        const robotsMeta = getPassFailMeta(data.robots?.pass);
+        const sitemapMeta = getPassFailMeta(data.sitemap?.pass);
 
         const blockerList = blockerCount
           ? `<ul style="margin-top: 0.75rem; line-height: 1.6;">${data.overall.blockers.map((b) => `<li>${b}</li>`).join('')}</ul>`
           : '<p style="margin-top: 0.75rem;">No technical blockers detected in this run.</p>';
 
         const indexability = data.indexability || {};
+        const pagesChecked = Number(indexability.pagesChecked || 0);
+        const passCount = Number(indexability.passCount || 0);
+        const indexabilityPercent = pagesChecked > 0 ? Math.round((passCount / pagesChecked) * 100) : 0;
+        const indexabilityMeta = getPassFailMeta(indexabilityPercent >= 80);
         implTechFoundationTableState.rows = Array.isArray(indexability.results) ? indexability.results : [];
         target.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
@@ -21953,14 +22072,30 @@
               <strong style="font-size: 1.05rem;">Overall Foundation Status</strong>
               <div style="margin-top: 0.35rem; opacity: 0.9;">Property: ${property}</div>
             </div>
-            <span style="display: inline-block; padding: 0.35rem 0.7rem; border-radius: 999px; font-weight: 700; background: ${badgeColor}; color: #fff;">${badgeLabel}</span>
+            <span class="impl-status-chip ${overallMeta.chipClass}">${overallMeta.label}</span>
+          </div>
+          <div style="margin-top: 0.85rem;">
+            <div style="display: flex; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.3rem;">
+              <span>Foundation pass ratio</span>
+              <span>${indexabilityPercent}%</span>
+            </div>
+            <div class="impl-progress-track">
+              <div class="impl-progress-fill" style="width: ${indexabilityPercent}%; background: ${indexabilityMeta.color};"></div>
+            </div>
           </div>
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; margin-top: 1rem;">
-            <div class="card" style="margin: 0;"><strong>Robots</strong><div style="margin-top: 0.3rem;">${data.robots?.pass ? 'Pass' : 'Fail'}</div></div>
-            <div class="card" style="margin: 0;"><strong>Sitemap</strong><div style="margin-top: 0.3rem;">${data.sitemap?.pass ? 'Pass' : 'Fail'}</div></div>
-            <div class="card" style="margin: 0;">
+            <div class="card ${data.robots?.pass ? 'impl-status-card-green' : 'impl-status-card-red'}" style="margin: 0;">
+              <strong>Robots</strong>
+              <div style="margin-top: 0.3rem;"><span class="impl-status-chip ${robotsMeta.chipClass}">${robotsMeta.label}</span></div>
+            </div>
+            <div class="card ${data.sitemap?.pass ? 'impl-status-card-green' : 'impl-status-card-red'}" style="margin: 0;">
+              <strong>Sitemap</strong>
+              <div style="margin-top: 0.3rem;"><span class="impl-status-chip ${sitemapMeta.chipClass}">${sitemapMeta.label}</span></div>
+            </div>
+            <div class="card ${indexabilityMeta.chipClass === 'impl-status-green' ? 'impl-status-card-green' : 'impl-status-card-amber'}" style="margin: 0;">
               <strong>Indexable Key Pages</strong>
-              <div style="margin-top: 0.3rem;">${indexability.passCount || 0}/${indexability.pagesChecked || 0}</div>
+              <div style="margin-top: 0.3rem;">${passCount}/${pagesChecked}</div>
+              <div style="margin-top: 0.35rem;"><span class="impl-status-chip ${indexabilityMeta.chipClass}">${indexabilityPercent}%</span></div>
               <div style="font-size: 0.8rem; opacity: 0.85; margin-top: 0.25rem;">Source: ${indexability.source || 'unknown'} | Mode: ${indexability.mode || requestedMode}</div>
             </div>
           </div>
@@ -22046,6 +22181,21 @@
       const highImpactEl = document.getElementById("impl-summary-high-impact-open");
       if (highImpactEl) highImpactEl.textContent = summary.highImpactOpen;
 
+      const completionPercent = summary.total > 0
+        ? Math.round(((summary.done || 0) / summary.total) * 100)
+        : 0;
+      const progressBar = document.getElementById('impl-overall-progress-bar');
+      const progressText = document.getElementById('impl-overall-progress-text');
+      const progressVisuals = getProgressVisuals(completionPercent);
+      if (progressBar) {
+        progressBar.style.width = `${completionPercent}%`;
+        progressBar.style.background = progressVisuals.color;
+      }
+      if (progressText) {
+        progressText.className = `impl-status-chip ${progressVisuals.chipClass}`;
+        progressText.textContent = `${completionPercent}%`;
+      }
+
       renderImplementationLane("impl-list-now", "now");
       renderImplementationLane("impl-list-next", "next");
       renderImplementationLane("impl-list-later", "later");
@@ -22057,16 +22207,19 @@
         body.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No outstanding implementation tickets.</td></tr>';
         return;
       }
-      body.innerHTML = rows.map(t => `
+      body.innerHTML = rows.map(t => {
+        const statusMeta = getImplStatusMeta(t.status);
+        return `
         <tr>
           <td>${t.priority}</td>
           <td>${t.title}</td>
-          <td>${t.status.replace('_', ' ')}</td>
+          <td><span class="impl-status-chip ${statusMeta.chipClass}">${statusMeta.label}</span></td>
           <td>${t.expectedBenefit}</td>
           <td>${t.impact}</td>
           <td>${t.owner}</td>
         </tr>
-      `).join("");
+      `;
+      }).join("");
 
       await fetchAndRenderTechnicalFoundationStatus();
     };
