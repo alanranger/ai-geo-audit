@@ -88,6 +88,7 @@ function parseNonNegativeInt(value) {
 }
 
 function clampInt(value, fallback, min, max) {
+  if (value === null || value === undefined || value === '') return fallback;
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(n)));
@@ -403,14 +404,29 @@ async function checkIndexability(pagesToCheck, source = 'unknown', mode = 'sampl
   const retryBaseDelayMs = clampInt(options.retryBaseDelayMs, DEFAULT_INDEXABILITY_RETRY_BASE_DELAY_MS, 250, MAX_INDEXABILITY_DELAY_MS);
 
   const results = [];
+  let adaptiveRequestDelayMs = requestDelayMs;
+  let consecutiveRateLimited = 0;
   for (let i = 0; i < pagesToCheck.length; i += 1) {
     const pageUrl = pagesToCheck[i];
     const row = await checkSinglePageIndexability(pageUrl, { retries, timeoutMs, retryBaseDelayMs });
     results.push(row);
 
     const isLast = i === pagesToCheck.length - 1;
-    if (!isLast && requestDelayMs > 0) {
-      await sleep(requestDelayMs);
+    if (row.rateLimited) {
+      consecutiveRateLimited += 1;
+      adaptiveRequestDelayMs = Math.min(MAX_INDEXABILITY_DELAY_MS, Math.max(2000, adaptiveRequestDelayMs * 2 || 2000));
+      if (consecutiveRateLimited >= 3 && !isLast) {
+        await sleep(10000);
+      }
+    } else {
+      consecutiveRateLimited = 0;
+      if (adaptiveRequestDelayMs > requestDelayMs) {
+        adaptiveRequestDelayMs = Math.max(requestDelayMs, adaptiveRequestDelayMs - 100);
+      }
+    }
+
+    if (!isLast && adaptiveRequestDelayMs > 0) {
+      await sleep(adaptiveRequestDelayMs);
     }
     const checked = i + 1;
     if (!isLast && checked % batchSize === 0 && batchDelayMs > 0) {
@@ -432,6 +448,7 @@ async function checkIndexability(pagesToCheck, source = 'unknown', mode = 'sampl
     pacing: {
       batchSize,
       requestDelayMs,
+      adaptiveRequestDelayMs,
       batchDelayMs,
       retries,
       timeoutMs,

@@ -6924,6 +6924,60 @@
           padding: 0.75rem;
           margin-bottom: 0.75rem;
         }
+        .impl-progress-modal-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 9999;
+          background: rgba(2, 6, 23, 0.62);
+          display: none;
+          align-items: center;
+          justify-content: center;
+          padding: 1rem;
+        }
+        .impl-progress-modal-backdrop.is-open {
+          display: flex;
+        }
+        .impl-progress-modal {
+          width: min(560px, 96vw);
+          border-radius: 14px;
+          border: 1px solid rgba(148, 163, 184, 0.35);
+          background: #0f172a;
+          color: #e2e8f0;
+          box-shadow: 0 18px 60px rgba(15, 23, 42, 0.55);
+          padding: 1rem 1rem 1.1rem;
+        }
+        .impl-progress-modal-title {
+          margin: 0 0 0.35rem;
+          font-size: 1rem;
+          font-weight: 700;
+        }
+        .impl-progress-modal-subtitle {
+          margin: 0 0 0.8rem;
+          color: #cbd5e1;
+          font-size: 0.9rem;
+        }
+        .impl-progress-modal-track {
+          width: 100%;
+          height: 12px;
+          border-radius: 999px;
+          overflow: hidden;
+          background: rgba(100, 116, 139, 0.35);
+        }
+        .impl-progress-modal-fill {
+          width: 8%;
+          height: 100%;
+          border-radius: 999px;
+          background: linear-gradient(90deg, #f59e0b 0%, #10b981 100%);
+          transition: width 260ms ease;
+        }
+        .impl-progress-modal-meta {
+          margin-top: 0.6rem;
+          font-size: 0.85rem;
+          color: #cbd5e1;
+          display: flex;
+          justify-content: space-between;
+          gap: 0.5rem;
+        }
       </style>
 
       <!-- Implementation Progress Panel -->
@@ -7031,6 +7085,19 @@
           </div>
         </div>
       </section>
+      <div id="impl-tech-progress-modal" class="impl-progress-modal-backdrop" aria-hidden="true">
+        <div class="impl-progress-modal" role="status" aria-live="polite">
+          <h4 id="impl-tech-progress-title" class="impl-progress-modal-title">Running audit...</h4>
+          <p id="impl-tech-progress-subtitle" class="impl-progress-modal-subtitle">Please wait while we check pages.</p>
+          <div class="impl-progress-modal-track">
+            <div id="impl-tech-progress-fill" class="impl-progress-modal-fill"></div>
+          </div>
+          <div class="impl-progress-modal-meta">
+            <span id="impl-tech-progress-percent">5%</span>
+            <span id="impl-tech-progress-elapsed">Elapsed: 0s</span>
+          </div>
+        </div>
+      </div>
 
       <!-- Local & Reviews Panel -->
       <section class="aigeo-panel" data-panel="local">
@@ -21913,8 +21980,69 @@
     };
     const implTechFoundationRunState = {
       mode: 'sample',
-      isLoading: false
+      isLoading: false,
+      progressTimer: null,
+      progressPercent: 0,
+      startedAt: null
     };
+
+    function showImplTechProgressModal(mode) {
+      const modal = document.getElementById('impl-tech-progress-modal');
+      const title = document.getElementById('impl-tech-progress-title');
+      const subtitle = document.getElementById('impl-tech-progress-subtitle');
+      const fill = document.getElementById('impl-tech-progress-fill');
+      const pct = document.getElementById('impl-tech-progress-percent');
+      const elapsed = document.getElementById('impl-tech-progress-elapsed');
+      if (!modal || !title || !subtitle || !fill || !pct || !elapsed) return;
+
+      implTechFoundationRunState.progressPercent = 6;
+      implTechFoundationRunState.startedAt = Date.now();
+      title.textContent = mode === 'full'
+        ? 'Running whole-site technical foundation audit'
+        : 'Running sample technical foundation audit';
+      subtitle.textContent = mode === 'full'
+        ? 'Checking robots, sitemap, and indexability in paced batches to avoid rate limits.'
+        : 'Checking key pages for robots, sitemap, and indexability.';
+      fill.style.width = `${implTechFoundationRunState.progressPercent}%`;
+      pct.textContent = `${implTechFoundationRunState.progressPercent}%`;
+      elapsed.textContent = 'Elapsed: 0s';
+      modal.classList.add('is-open');
+      modal.setAttribute('aria-hidden', 'false');
+
+      if (implTechFoundationRunState.progressTimer) {
+        clearInterval(implTechFoundationRunState.progressTimer);
+      }
+      implTechFoundationRunState.progressTimer = setInterval(() => {
+        const elapsedSec = Math.max(0, Math.floor((Date.now() - (implTechFoundationRunState.startedAt || Date.now())) / 1000));
+        const step = mode === 'full' ? 2 : 5;
+        if (implTechFoundationRunState.progressPercent < 92) {
+          implTechFoundationRunState.progressPercent = Math.min(92, implTechFoundationRunState.progressPercent + step);
+        }
+        fill.style.width = `${implTechFoundationRunState.progressPercent}%`;
+        pct.textContent = `${implTechFoundationRunState.progressPercent}%`;
+        elapsed.textContent = `Elapsed: ${elapsedSec}s`;
+      }, 1000);
+    }
+
+    function hideImplTechProgressModal(success = true) {
+      const modal = document.getElementById('impl-tech-progress-modal');
+      const fill = document.getElementById('impl-tech-progress-fill');
+      const pct = document.getElementById('impl-tech-progress-percent');
+      if (implTechFoundationRunState.progressTimer) {
+        clearInterval(implTechFoundationRunState.progressTimer);
+        implTechFoundationRunState.progressTimer = null;
+      }
+      if (fill && pct) {
+        implTechFoundationRunState.progressPercent = success ? 100 : Math.max(implTechFoundationRunState.progressPercent, 95);
+        fill.style.width = `${implTechFoundationRunState.progressPercent}%`;
+        pct.textContent = `${implTechFoundationRunState.progressPercent}%`;
+      }
+      setTimeout(() => {
+        if (!modal) return;
+        modal.classList.remove('is-open');
+        modal.setAttribute('aria-hidden', 'true');
+      }, 250);
+    }
 
     function getTechReasonCategory(row) {
       if (row?.pass) return 'indexable';
@@ -22026,9 +22154,11 @@
       const target = document.getElementById("impl-tech-foundation-status");
       if (!target) return;
       const requestedMode = modeOverride || implTechFoundationRunState.mode || 'sample';
+      let auditSucceeded = true;
       implTechFoundationRunState.mode = requestedMode;
       implTechFoundationRunState.isLoading = true;
       setImplTechAuditButtonState(true);
+      showImplTechProgressModal(requestedMode);
 
       const property =
         (document.getElementById('propertyUrl')?.value || '').trim() ||
@@ -22150,12 +22280,14 @@
         `;
         renderTechFoundationTableRows();
       } catch (error) {
+        auditSucceeded = false;
         const blockersEl = document.getElementById('impl-technical-blockers-open');
         if (blockersEl) blockersEl.textContent = 'Unknown';
         target.innerHTML = `<p class="card-subtitle">Could not load technical foundation status: ${error.message}</p>`;
       } finally {
         implTechFoundationRunState.isLoading = false;
         setImplTechAuditButtonState(false);
+        hideImplTechProgressModal(auditSucceeded);
       }
     }
 
