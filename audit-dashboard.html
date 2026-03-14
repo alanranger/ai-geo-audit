@@ -7007,6 +7007,19 @@
             <div class="card impl-summary-card impl-status-card-amber"><div class="impl-summary-value" id="impl-summary-high-impact-open">-</div><div>High-Impact Open</div></div>
           </div>
 
+          <div class="card" style="margin-bottom: 1.5rem;">
+            <div class="card-header">
+              <h3 style="margin: 0;">Phase Audit Quick Actions</h3>
+              <p class="card-subtitle">Run each phase from here without scrolling.</p>
+            </div>
+            <div class="card-body" style="display: flex; flex-wrap: wrap; gap: 0.75rem;">
+              <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplTechAudit('sample')">Phase 1: Technical (Sample)</button>
+              <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplTechAudit('full')">Phase 1: Technical (Whole Site)</button>
+              <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplLocalSchemaAudit('sample')">Phase 2: LocalBusiness (Sample)</button>
+              <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplLocalSchemaAudit('full')">Phase 2: LocalBusiness (Whole Site)</button>
+            </div>
+          </div>
+
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
             <div class="card">
               <div class="card-header"><h3 style="margin: 0;">Now</h3></div>
@@ -22020,7 +22033,9 @@
       sortKey: 'url',
       sortDir: 'asc',
       statusFilter: 'all',
-      search: ''
+      search: '',
+      page: 1,
+      pageSize: 25
     };
     const implLocalSchemaRunState = {
       mode: 'sample',
@@ -22125,11 +22140,24 @@
       if (!tableBody) return;
       const filteredRows = filterLocalSchemaRows(implLocalSchemaTableState.rows, implLocalSchemaTableState);
       const sortedRows = sortLocalSchemaRows(filteredRows, implLocalSchemaTableState.sortKey, implLocalSchemaTableState.sortDir);
+      const pageSize = Math.max(1, Number(implLocalSchemaTableState.pageSize || 25));
+      const totalRows = sortedRows.length;
+      const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+      implLocalSchemaTableState.page = Math.min(Math.max(1, implLocalSchemaTableState.page), totalPages);
+      const start = (implLocalSchemaTableState.page - 1) * pageSize;
+      const pageRows = sortedRows.slice(start, start + pageSize);
+      const infoEl = document.getElementById('impl-local-pagination-info');
+      const prevBtn = document.getElementById('impl-local-page-prev');
+      const nextBtn = document.getElementById('impl-local-page-next');
+
       if (!sortedRows.length) {
         tableBody.innerHTML = '<tr><td colspan="5" class="ranking-table-empty">No rows match your filter.</td></tr>';
+        if (infoEl) infoEl.textContent = '0 results';
+        if (prevBtn) prevBtn.disabled = true;
+        if (nextBtn) nextBtn.disabled = true;
         return;
       }
-      tableBody.innerHTML = sortedRows.map((row) => {
+      tableBody.innerHTML = pageRows.map((row) => {
         const schemaMeta = row.hasLocalBusiness
           ? { label: 'Present', chipClass: 'impl-status-green' }
           : (row.rateLimited ? { label: 'Transient (429)', chipClass: 'impl-status-amber' } : { label: 'Missing', chipClass: 'impl-status-red' });
@@ -22148,6 +22176,11 @@
           </tr>
         `;
       }).join('');
+      if (infoEl) {
+        infoEl.textContent = `Page ${implLocalSchemaTableState.page}/${totalPages} · Showing ${pageRows.length} of ${totalRows}`;
+      }
+      if (prevBtn) prevBtn.disabled = implLocalSchemaTableState.page <= 1;
+      if (nextBtn) nextBtn.disabled = implLocalSchemaTableState.page >= totalPages;
     }
 
     window.onImplLocalSort = function(sortKey) {
@@ -22157,6 +22190,7 @@
         implLocalSchemaTableState.sortKey = sortKey;
         implLocalSchemaTableState.sortDir = 'asc';
       }
+      implLocalSchemaTableState.page = 1;
       renderLocalSchemaTableRows();
     };
 
@@ -22165,6 +22199,20 @@
       const searchEl = document.getElementById('impl-local-filter-search');
       implLocalSchemaTableState.statusFilter = statusEl?.value || 'all';
       implLocalSchemaTableState.search = String(searchEl?.value || '').trim().toLowerCase();
+      implLocalSchemaTableState.page = 1;
+      renderLocalSchemaTableRows();
+    };
+
+    window.onImplLocalPageChange = function(delta) {
+      implLocalSchemaTableState.page = Math.max(1, implLocalSchemaTableState.page + Number(delta || 0));
+      renderLocalSchemaTableRows();
+    };
+
+    window.onImplLocalPageSizeChange = function() {
+      const pageSizeEl = document.getElementById('impl-local-page-size');
+      const nextSize = Number(pageSizeEl?.value || 25);
+      implLocalSchemaTableState.pageSize = Number.isFinite(nextSize) && nextSize > 0 ? nextSize : 25;
+      implLocalSchemaTableState.page = 1;
       renderLocalSchemaTableRows();
     };
 
@@ -22217,6 +22265,7 @@
         const passRatio = pagesChecked > 0 ? Math.round((matchedPages / pagesChecked) * 100) : 0;
         const passVisual = getProgressVisuals(passRatio);
         implLocalSchemaTableState.rows = Array.isArray(scan.results) ? scan.results : [];
+        implLocalSchemaTableState.page = 1;
 
         target.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
@@ -22280,6 +22329,21 @@
               </tbody>
             </table>
           </div>
+          <div style="margin-top: 0.65rem; display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+            <div id="impl-local-pagination-info" style="font-size: 0.85rem; opacity: 0.9;">Page 1/1</div>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <label style="display: inline-flex; align-items: center; gap: 0.35rem;">
+                <span style="font-size: 0.85rem;">Rows</span>
+                <select id="impl-local-page-size" class="filter-control" style="min-width: 80px;" onchange="window.onImplLocalPageSizeChange()">
+                  <option value="25" selected>25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                </select>
+              </label>
+              <button id="impl-local-page-prev" type="button" class="btn btn-small" onclick="window.onImplLocalPageChange(-1)">Previous</button>
+              <button id="impl-local-page-next" type="button" class="btn btn-small" onclick="window.onImplLocalPageChange(1)">Next</button>
+            </div>
+          </div>
         `;
         renderLocalSchemaTableRows();
       } catch (error) {
@@ -22303,7 +22367,9 @@
       sortDir: 'asc',
       statusFilter: 'all',
       reasonFilter: 'all',
-      search: ''
+      search: '',
+      page: 1,
+      pageSize: 25
     };
     const implTechFoundationRunState = {
       mode: 'sample',
@@ -22430,11 +22496,23 @@
       if (!tableBody) return;
       const filteredRows = filterTechRows(implTechFoundationTableState.rows, implTechFoundationTableState);
       const sortedRows = sortTechRows(filteredRows, implTechFoundationTableState.sortKey, implTechFoundationTableState.sortDir);
+      const pageSize = Math.max(1, Number(implTechFoundationTableState.pageSize || 25));
+      const totalRows = sortedRows.length;
+      const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+      implTechFoundationTableState.page = Math.min(Math.max(1, implTechFoundationTableState.page), totalPages);
+      const start = (implTechFoundationTableState.page - 1) * pageSize;
+      const pageRows = sortedRows.slice(start, start + pageSize);
+      const infoEl = document.getElementById('impl-tech-pagination-info');
+      const prevBtn = document.getElementById('impl-tech-page-prev');
+      const nextBtn = document.getElementById('impl-tech-page-next');
       if (!sortedRows.length) {
         tableBody.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No rows match your filter.</td></tr>';
+        if (infoEl) infoEl.textContent = '0 results';
+        if (prevBtn) prevBtn.disabled = true;
+        if (nextBtn) nextBtn.disabled = true;
         return;
       }
-      tableBody.innerHTML = sortedRows.map((row) => {
+      tableBody.innerHTML = pageRows.map((row) => {
         const statusMeta = row.rateLimited
           ? { label: 'Transient (429)', chipClass: 'impl-status-amber' }
           : getPassFailMeta(row.pass);
@@ -22455,6 +22533,11 @@
           </tr>
         `;
       }).join('');
+      if (infoEl) {
+        infoEl.textContent = `Page ${implTechFoundationTableState.page}/${totalPages} · Showing ${pageRows.length} of ${totalRows}`;
+      }
+      if (prevBtn) prevBtn.disabled = implTechFoundationTableState.page <= 1;
+      if (nextBtn) nextBtn.disabled = implTechFoundationTableState.page >= totalPages;
     }
 
     window.onImplTechSort = function(sortKey) {
@@ -22464,6 +22547,7 @@
         implTechFoundationTableState.sortKey = sortKey;
         implTechFoundationTableState.sortDir = 'asc';
       }
+      implTechFoundationTableState.page = 1;
       renderTechFoundationTableRows();
     };
 
@@ -22474,6 +22558,20 @@
       implTechFoundationTableState.statusFilter = statusEl?.value || 'all';
       implTechFoundationTableState.reasonFilter = reasonEl?.value || 'all';
       implTechFoundationTableState.search = String(searchEl?.value || '').trim().toLowerCase();
+      implTechFoundationTableState.page = 1;
+      renderTechFoundationTableRows();
+    };
+
+    window.onImplTechPageChange = function(delta) {
+      implTechFoundationTableState.page = Math.max(1, implTechFoundationTableState.page + Number(delta || 0));
+      renderTechFoundationTableRows();
+    };
+
+    window.onImplTechPageSizeChange = function() {
+      const pageSizeEl = document.getElementById('impl-tech-page-size');
+      const nextSize = Number(pageSizeEl?.value || 25);
+      implTechFoundationTableState.pageSize = Number.isFinite(nextSize) && nextSize > 0 ? nextSize : 25;
+      implTechFoundationTableState.page = 1;
       renderTechFoundationTableRows();
     };
 
@@ -22542,6 +22640,7 @@
         const googleUnknownCount = Number(googleIndex.googleUnknownCount || 0);
         const googleIndexedPercent = pagesChecked > 0 ? Math.round((googleIndexedCount / pagesChecked) * 100) : 0;
         implTechFoundationTableState.rows = Array.isArray(indexability.results) ? indexability.results : [];
+        implTechFoundationTableState.page = 1;
         target.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
             <div>
@@ -22624,6 +22723,21 @@
                 <tr><td colspan="6" class="ranking-table-empty">Loading rows...</td></tr>
               </tbody>
             </table>
+          </div>
+          <div style="margin-top: 0.65rem; display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+            <div id="impl-tech-pagination-info" style="font-size: 0.85rem; opacity: 0.9;">Page 1/1</div>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <label style="display: inline-flex; align-items: center; gap: 0.35rem;">
+                <span style="font-size: 0.85rem;">Rows</span>
+                <select id="impl-tech-page-size" class="filter-control" style="min-width: 80px;" onchange="window.onImplTechPageSizeChange()">
+                  <option value="25" selected>25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                </select>
+              </label>
+              <button id="impl-tech-page-prev" type="button" class="btn btn-small" onclick="window.onImplTechPageChange(-1)">Previous</button>
+              <button id="impl-tech-page-next" type="button" class="btn btn-small" onclick="window.onImplTechPageChange(1)">Next</button>
+            </div>
           </div>
         `;
         renderTechFoundationTableRows();
