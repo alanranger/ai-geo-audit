@@ -7029,6 +7029,8 @@
               <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplTechAudit('full')">Check Technical Basics (Whole Site)</button>
               <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplLocalSchemaAudit('sample')">Check LocalBusiness Schema (Sample)</button>
               <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplLocalSchemaAudit('full')">Check LocalBusiness Schema (Whole Site)</button>
+              <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplServiceSchemaAudit('sample')">Check Service Schema (Sample)</button>
+              <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplServiceSchemaAudit('full')">Check Service Schema (Whole Site)</button>
             </div>
           </div>
 
@@ -7122,6 +7124,32 @@
             </div>
           </div>
 
+          <div class="card" style="margin-bottom: 1.5rem;">
+            <div class="card-header">
+              <h3 style="margin: 0;">Service Schema Audit (Live)</h3>
+              <p class="card-subtitle">Checks service-intent pages for Service schema and highlights confirmed missing pages.</p>
+            </div>
+            <div class="card-body">
+              <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.75rem;">
+                <button id="impl-service-run-sample-btn" class="btn btn-small" type="button" onclick="window.runImplServiceSchemaAudit('sample')">Check Service Schema (Sample)</button>
+                <button id="impl-service-run-full-btn" class="btn btn-small" type="button" onclick="window.runImplServiceSchemaAudit('full')">Check Service Schema (Whole Site)</button>
+                <label style="display: flex; flex-direction: column; gap: 0.2rem; min-width: 140px;">
+                  <span style="font-size: 0.85rem; opacity: 0.9;">Whole-site limit</span>
+                  <select id="impl-service-limit-select" class="filter-control">
+                    <option value="all">All URLs</option>
+                    <option value="50">50 URLs</option>
+                    <option value="100">100 URLs</option>
+                    <option value="250">250 URLs</option>
+                    <option value="500">500 URLs</option>
+                  </select>
+                </label>
+              </div>
+              <div id="impl-service-schema-status">
+                <p class="card-subtitle">Loading service schema status...</p>
+              </div>
+            </div>
+          </div>
+
           <div class="card">
             <div class="card-header">
               <h3 style="margin: 0;">Outcome Metrics (Coming Soon)</h3>
@@ -7159,6 +7187,19 @@
           <div class="impl-progress-modal-meta">
             <span id="impl-local-progress-percent">5%</span>
             <span id="impl-local-progress-elapsed">Elapsed: 0s</span>
+          </div>
+        </div>
+      </div>
+      <div id="impl-service-progress-modal" class="impl-progress-modal-backdrop" aria-hidden="true">
+        <div class="impl-progress-modal" role="status" aria-live="polite">
+          <h4 id="impl-service-progress-title" class="impl-progress-modal-title">Running service schema audit...</h4>
+          <p id="impl-service-progress-subtitle" class="impl-progress-modal-subtitle">Please wait while we scan service-intent pages for Service schema.</p>
+          <div class="impl-progress-modal-track">
+            <div id="impl-service-progress-fill" class="impl-progress-modal-fill"></div>
+          </div>
+          <div class="impl-progress-modal-meta">
+            <span id="impl-service-progress-percent">5%</span>
+            <span id="impl-service-progress-elapsed">Elapsed: 0s</span>
           </div>
         </div>
       </div>
@@ -22012,6 +22053,49 @@
       return { chipClass: 'impl-status-red', color: '#ef4444' };
     }
 
+    function isServiceIntentUrlForUi(url) {
+      try {
+        const pathname = new URL(String(url || '')).pathname.toLowerCase();
+        if (!pathname || pathname === '/') return false;
+        const serviceHints = [
+          '/photography-services',
+          '/service',
+          '/services',
+          '/professional-commercial-photographer',
+          '/commercial-photographer',
+          '/photo-print-preparation-service',
+          '/camera-sensor-clean'
+        ];
+        return serviceHints.some((hint) => pathname.includes(hint));
+      } catch {
+        return false;
+      }
+    }
+
+    function deriveServiceSchemaCoverage(schemaData) {
+      if (schemaData?.serviceSchemaCoverage && typeof schemaData.serviceSchemaCoverage === 'object') {
+        return schemaData.serviceSchemaCoverage;
+      }
+      const pages = Array.isArray(schemaData?.pages) ? schemaData.pages : [];
+      if (!pages.length) return null;
+      const servicePages = pages.filter((page) => isServiceIntentUrlForUi(page?.url));
+      const totalServicePages = servicePages.length;
+      const pagesWithServiceSchema = servicePages.filter((page) => {
+        const types = Array.isArray(page?.schemaTypes) ? page.schemaTypes : [];
+        return types.some((type) => String(type || '').toLowerCase() === 'service');
+      }).length;
+      const serviceCoverage = totalServicePages > 0
+        ? Math.round((pagesWithServiceSchema / totalServicePages) * 10000) / 100
+        : 0;
+      return { totalServicePages, pagesWithServiceSchema, serviceCoverage };
+    }
+
+    function formatServiceSchemaCoverage(schemaData) {
+      const coverage = deriveServiceSchemaCoverage(schemaData);
+      if (!coverage || !Number.isFinite(coverage.totalServicePages)) return 'N/A';
+      return `${coverage.pagesWithServiceSchema || 0}/${coverage.totalServicePages || 0} (${(coverage.serviceCoverage || 0).toFixed(1)}%)`;
+    }
+
     function renderImplementationLane(laneId, laneName) {
       const container = document.getElementById(laneId);
       if (!container) return;
@@ -22378,6 +22462,366 @@
     window.runImplLocalSchemaAudit = async function(mode) {
       const nextMode = mode === 'full' ? 'full' : 'sample';
       await fetchAndRenderLocalBusinessSchemaStatus(nextMode);
+    };
+
+    const implServiceSchemaTableState = {
+      rows: [],
+      sortKey: 'url',
+      sortDir: 'asc',
+      statusFilter: 'all',
+      search: '',
+      page: 1,
+      pageSize: 25
+    };
+    const implServiceSchemaRunState = {
+      mode: 'sample',
+      isLoading: false,
+      progressTimer: null,
+      progressPercent: 0,
+      startedAt: null
+    };
+
+    function parseStatusCodeFromError(errorText) {
+      const match = String(errorText || '').match(/\bHTTP\s+(\d{3})\b/i);
+      if (!match) return null;
+      const value = Number(match[1]);
+      return Number.isFinite(value) ? value : null;
+    }
+
+    function showImplServiceProgressModal(mode) {
+      const modal = document.getElementById('impl-service-progress-modal');
+      const title = document.getElementById('impl-service-progress-title');
+      const subtitle = document.getElementById('impl-service-progress-subtitle');
+      const fill = document.getElementById('impl-service-progress-fill');
+      const pct = document.getElementById('impl-service-progress-percent');
+      const elapsed = document.getElementById('impl-service-progress-elapsed');
+      if (!modal || !title || !subtitle || !fill || !pct || !elapsed) return;
+
+      implServiceSchemaRunState.progressPercent = 7;
+      implServiceSchemaRunState.startedAt = Date.now();
+      title.textContent = mode === 'full'
+        ? 'Running whole-site Service schema audit'
+        : 'Running sample Service schema audit';
+      subtitle.textContent = mode === 'full'
+        ? 'Checking service-intent pages for Service schema in paced requests.'
+        : 'Checking sample service-intent pages for Service schema.';
+      fill.style.width = `${implServiceSchemaRunState.progressPercent}%`;
+      pct.textContent = `${implServiceSchemaRunState.progressPercent}%`;
+      elapsed.textContent = 'Elapsed: 0s';
+      modal.classList.add('is-open');
+      modal.setAttribute('aria-hidden', 'false');
+
+      if (implServiceSchemaRunState.progressTimer) {
+        clearInterval(implServiceSchemaRunState.progressTimer);
+      }
+      implServiceSchemaRunState.progressTimer = setInterval(() => {
+        const elapsedSec = Math.max(0, Math.floor((Date.now() - (implServiceSchemaRunState.startedAt || Date.now())) / 1000));
+        const step = mode === 'full' ? 2 : 5;
+        if (implServiceSchemaRunState.progressPercent < 92) {
+          implServiceSchemaRunState.progressPercent = Math.min(92, implServiceSchemaRunState.progressPercent + step);
+        }
+        fill.style.width = `${implServiceSchemaRunState.progressPercent}%`;
+        pct.textContent = `${implServiceSchemaRunState.progressPercent}%`;
+        elapsed.textContent = `Elapsed: ${elapsedSec}s`;
+      }, 1000);
+    }
+
+    function hideImplServiceProgressModal(success = true) {
+      const modal = document.getElementById('impl-service-progress-modal');
+      const fill = document.getElementById('impl-service-progress-fill');
+      const pct = document.getElementById('impl-service-progress-percent');
+      if (implServiceSchemaRunState.progressTimer) {
+        clearInterval(implServiceSchemaRunState.progressTimer);
+        implServiceSchemaRunState.progressTimer = null;
+      }
+      if (fill && pct) {
+        implServiceSchemaRunState.progressPercent = success ? 100 : Math.max(implServiceSchemaRunState.progressPercent, 95);
+        fill.style.width = `${implServiceSchemaRunState.progressPercent}%`;
+        pct.textContent = `${implServiceSchemaRunState.progressPercent}%`;
+      }
+      setTimeout(() => {
+        if (!modal) return;
+        modal.classList.remove('is-open');
+        modal.setAttribute('aria-hidden', 'true');
+      }, 250);
+    }
+
+    function sortServiceSchemaRows(rows, sortKey, sortDir) {
+      const dir = sortDir === 'desc' ? -1 : 1;
+      return [...rows].sort((a, b) => {
+        let left = a?.[sortKey];
+        let right = b?.[sortKey];
+        if (sortKey === 'hasService' || sortKey === 'pass') {
+          left = a?.pass === null ? -1 : (a?.hasService ? 1 : 0);
+          right = b?.pass === null ? -1 : (b?.hasService ? 1 : 0);
+        } else if (sortKey === 'statusCode') {
+          left = Number(left || 0);
+          right = Number(right || 0);
+        } else {
+          left = String(left ?? '').toLowerCase();
+          right = String(right ?? '').toLowerCase();
+        }
+        if (left === right) return 0;
+        return left > right ? dir : -dir;
+      });
+    }
+
+    function filterServiceSchemaRows(rows, state) {
+      return rows.filter((row) => {
+        if (state.statusFilter === 'has_schema' && !row.hasService) return false;
+        if (state.statusFilter === 'missing_schema' && (row.hasService || row.rateLimited)) return false;
+        if (state.statusFilter === 'unknown_retry' && !row.rateLimited) return false;
+        if (state.search) {
+          const haystack = `${row.url || ''} ${row.reason || ''}`.toLowerCase();
+          return haystack.includes(state.search);
+        }
+        return true;
+      });
+    }
+
+    function renderServiceSchemaTableRows() {
+      const tableBody = document.getElementById('impl-service-table-body');
+      if (!tableBody) return;
+      const filteredRows = filterServiceSchemaRows(implServiceSchemaTableState.rows, implServiceSchemaTableState);
+      const sortedRows = sortServiceSchemaRows(filteredRows, implServiceSchemaTableState.sortKey, implServiceSchemaTableState.sortDir);
+      const pageSize = Math.max(1, Number(implServiceSchemaTableState.pageSize || 25));
+      const totalRows = sortedRows.length;
+      const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+      implServiceSchemaTableState.page = Math.min(Math.max(1, implServiceSchemaTableState.page), totalPages);
+      const start = (implServiceSchemaTableState.page - 1) * pageSize;
+      const pageRows = sortedRows.slice(start, start + pageSize);
+      const infoEl = document.getElementById('impl-service-pagination-info');
+      const prevBtn = document.getElementById('impl-service-page-prev');
+      const nextBtn = document.getElementById('impl-service-page-next');
+
+      if (!sortedRows.length) {
+        tableBody.innerHTML = '<tr><td colspan="5" class="ranking-table-empty">No rows match your filter.</td></tr>';
+        if (infoEl) infoEl.textContent = '0 results';
+        if (prevBtn) prevBtn.disabled = true;
+        if (nextBtn) nextBtn.disabled = true;
+        return;
+      }
+      tableBody.innerHTML = pageRows.map((row) => {
+        const schemaMeta = row.hasService
+          ? { label: 'Present', chipClass: 'impl-status-green' }
+          : (row.rateLimited ? { label: 'Transient (429)', chipClass: 'impl-status-amber' } : { label: 'Missing', chipClass: 'impl-status-red' });
+        const passMeta = row.rateLimited
+          ? { label: 'Unknown (Retry needed)', chipClass: 'impl-status-amber' }
+          : getPassFailMeta(!!row.pass);
+        const safeUrl = row.url || '';
+        const urlCell = safeUrl
+          ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color: #60a5fa; text-decoration: underline;">${safeUrl}</a>`
+          : '-';
+        return `
+          <tr>
+            <td style="word-break: break-word; text-align: left;">${urlCell}</td>
+            <td>${row.statusCode ?? '-'}</td>
+            <td><span class="impl-status-chip ${schemaMeta.chipClass}">${schemaMeta.label}</span></td>
+            <td><span class="impl-status-chip ${passMeta.chipClass}">${passMeta.label}</span></td>
+            <td>${row.reason || '-'}</td>
+          </tr>
+        `;
+      }).join('');
+      if (infoEl) {
+        infoEl.textContent = `Page ${implServiceSchemaTableState.page}/${totalPages} · Showing ${pageRows.length} of ${totalRows}`;
+      }
+      if (prevBtn) prevBtn.disabled = implServiceSchemaTableState.page <= 1;
+      if (nextBtn) nextBtn.disabled = implServiceSchemaTableState.page >= totalPages;
+    }
+
+    window.onImplServiceSort = function(sortKey) {
+      if (implServiceSchemaTableState.sortKey === sortKey) {
+        implServiceSchemaTableState.sortDir = implServiceSchemaTableState.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        implServiceSchemaTableState.sortKey = sortKey;
+        implServiceSchemaTableState.sortDir = 'asc';
+      }
+      implServiceSchemaTableState.page = 1;
+      renderServiceSchemaTableRows();
+    };
+
+    window.onImplServiceFilterChange = function() {
+      const statusEl = document.getElementById('impl-service-filter-status');
+      const searchEl = document.getElementById('impl-service-filter-search');
+      implServiceSchemaTableState.statusFilter = statusEl?.value || 'all';
+      implServiceSchemaTableState.search = String(searchEl?.value || '').trim().toLowerCase();
+      implServiceSchemaTableState.page = 1;
+      renderServiceSchemaTableRows();
+    };
+
+    window.onImplServicePageChange = function(delta) {
+      implServiceSchemaTableState.page = Math.max(1, implServiceSchemaTableState.page + Number(delta || 0));
+      renderServiceSchemaTableRows();
+    };
+
+    window.onImplServicePageSizeChange = function() {
+      const pageSizeEl = document.getElementById('impl-service-page-size');
+      const nextSize = Number(pageSizeEl?.value || 25);
+      implServiceSchemaTableState.pageSize = Number.isFinite(nextSize) && nextSize > 0 ? nextSize : 25;
+      implServiceSchemaTableState.page = 1;
+      renderServiceSchemaTableRows();
+    };
+
+    function setImplServiceAuditButtonState(isLoading) {
+      const sampleBtn = document.getElementById('impl-service-run-sample-btn');
+      const fullBtn = document.getElementById('impl-service-run-full-btn');
+      if (sampleBtn) sampleBtn.disabled = isLoading;
+      if (fullBtn) fullBtn.disabled = isLoading;
+      if (sampleBtn) sampleBtn.textContent = isLoading && implServiceSchemaRunState.mode === 'sample' ? 'Running Sample...' : 'Check Service Schema (Sample)';
+      if (fullBtn) fullBtn.textContent = isLoading && implServiceSchemaRunState.mode === 'full' ? 'Running Whole-Site...' : 'Check Service Schema (Whole Site)';
+    }
+
+    async function fetchAndRenderServiceSchemaStatus(modeOverride = null) {
+      const target = document.getElementById('impl-service-schema-status');
+      if (!target) return;
+      const requestedMode = modeOverride || implServiceSchemaRunState.mode || 'sample';
+      let auditSucceeded = true;
+      implServiceSchemaRunState.mode = requestedMode;
+      implServiceSchemaRunState.isLoading = true;
+      setImplServiceAuditButtonState(true);
+      showImplServiceProgressModal(requestedMode);
+
+      const property =
+        (document.getElementById('propertyUrl')?.value || '').trim() ||
+        (localStorage.getItem('gsc_property_url') || '').trim() ||
+        (localStorage.getItem('last_property_url') || '').trim() ||
+        'https://www.alanranger.com';
+
+      target.innerHTML = `<p class="card-subtitle">Running ${requestedMode === 'full' ? 'whole-site' : 'sample'} service schema checks...</p>`;
+      try {
+        const limitValue = document.getElementById('impl-service-limit-select')?.value || 'all';
+        const params = new URLSearchParams({
+          mode: requestedMode,
+          serviceOnly: '1'
+        });
+        if (requestedMode === 'full' && limitValue !== 'all') {
+          params.set('limit', limitValue);
+        }
+        const response = await fetch(apiUrl(`/api/schema-audit?${params.toString()}`));
+        const payload = await response.json();
+        if (!response.ok || payload?.status !== 'ok' || !payload?.data) {
+          throw new Error(payload?.message || `HTTP ${response.status}`);
+        }
+
+        const pages = Array.isArray(payload.data.pages) ? payload.data.pages : [];
+        const selection = payload.meta?.selection || {};
+        const rows = pages.map((page) => {
+          const schemaTypes = Array.isArray(page?.schemaTypes) ? page.schemaTypes : [];
+          const hasService = schemaTypes.some((type) => String(type || '').toLowerCase() === 'service');
+          const statusCode = Number.isFinite(page?.statusCode) ? Number(page.statusCode) : parseStatusCodeFromError(page?.error);
+          const rateLimited = Number(statusCode) === 429 || String(page?.errorType || '').toLowerCase().includes('rate limited');
+          return {
+            url: page?.url || '',
+            statusCode,
+            hasService,
+            pass: hasService ? true : (rateLimited ? null : false),
+            rateLimited,
+            reason: page?.error || (hasService ? 'Service schema detected' : 'Service schema missing')
+          };
+        });
+        const pagesChecked = rows.length;
+        const matchedPages = rows.filter((row) => row.hasService).length;
+        const unknownPages = rows.filter((row) => row.pass === null).length;
+        const missingPages = rows.filter((row) => row.pass === false).length;
+        const knownPages = Math.max(0, pagesChecked - unknownPages);
+        const passRatio = knownPages > 0 ? Math.round((matchedPages / knownPages) * 100) : 0;
+        const passVisual = getProgressVisuals(passRatio);
+        implServiceSchemaTableState.rows = rows;
+        implServiceSchemaTableState.page = 1;
+
+        target.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+            <div>
+              <strong style="font-size: 1.05rem;">Service Schema Coverage</strong>
+              <div style="margin-top: 0.35rem; opacity: 0.9;">Property: ${property}</div>
+            </div>
+            <span class="impl-status-chip ${passRatio >= 70 ? 'impl-status-green' : (passRatio >= 30 ? 'impl-status-amber' : 'impl-status-red')}">${passRatio}%</span>
+          </div>
+          <div style="margin-top: 0.85rem;">
+            <div style="display: flex; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.3rem;">
+              <span>Service schema coverage ratio (known pages)</span>
+              <span>${passRatio}%</span>
+            </div>
+            <div class="impl-progress-track">
+              <div class="impl-progress-fill" style="width: ${passRatio}%; background: ${passVisual.color};"></div>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; margin-top: 1rem;">
+            <div class="card ${matchedPages > 0 ? 'impl-status-card-green' : 'impl-status-card-red'}" style="margin: 0;">
+              <strong>Pages With Service Schema</strong>
+              <div style="margin-top: 0.3rem;">${matchedPages}/${knownPages || pagesChecked}</div>
+            </div>
+            <div class="card ${missingPages > 0 ? 'impl-status-card-amber' : 'impl-status-card-green'}" style="margin: 0;">
+              <strong>Confirmed Missing Service Schema</strong>
+              <div style="margin-top: 0.3rem;">${missingPages}</div>
+            </div>
+            <div class="card ${unknownPages > 0 ? 'impl-status-card-amber' : 'impl-status-card-green'}" style="margin: 0;">
+              <strong>Unknown / Retry Needed (429)</strong>
+              <div style="margin-top: 0.3rem;">${unknownPages}</div>
+              <div style="font-size: 0.8rem; opacity: 0.85; margin-top: 0.25rem;">Mode: ${selection.mode || requestedMode} | Source: service-intent pages</div>
+            </div>
+          </div>
+          <div style="margin-top: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <label style="display: flex; flex-direction: column; gap: 0.25rem;">
+              <span>Schema Status</span>
+              <select id="impl-service-filter-status" class="filter-control" onchange="window.onImplServiceFilterChange()">
+                <option value="all">All</option>
+                <option value="missing_schema">Missing schema</option>
+                <option value="has_schema">Has Service schema</option>
+                <option value="unknown_retry">Unknown (429 retry needed)</option>
+              </select>
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 0.25rem; min-width: 240px; flex: 1;">
+              <span>Search</span>
+              <input id="impl-service-filter-search" class="filter-control" type="text" placeholder="Filter by URL or reason..." oninput="window.onImplServiceFilterChange()" />
+            </label>
+          </div>
+          <div style="margin-top: 0.85rem; overflow-x: auto;">
+            <table class="ranking-table" id="impl-service-table">
+              <thead>
+                <tr>
+                  <th style="text-align: left;"><button type="button" class="btn btn-small" onclick="window.onImplServiceSort('url')">URL</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplServiceSort('statusCode')">HTTP</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplServiceSort('hasService')">Service</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplServiceSort('pass')">Status</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplServiceSort('reason')">Reason</button></th>
+                </tr>
+              </thead>
+              <tbody id="impl-service-table-body">
+                <tr><td colspan="5" class="ranking-table-empty">Loading rows...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top: 0.65rem; display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+            <div id="impl-service-pagination-info" style="font-size: 0.85rem; opacity: 0.9;">Page 1/1</div>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <label style="display: inline-flex; align-items: center; gap: 0.35rem;">
+                <span style="font-size: 0.85rem;">Rows</span>
+                <select id="impl-service-page-size" class="filter-control" style="min-width: 80px;" onchange="window.onImplServicePageSizeChange()">
+                  <option value="25" selected>25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                </select>
+              </label>
+              <button id="impl-service-page-prev" type="button" class="btn btn-small" onclick="window.onImplServicePageChange(-1)">Previous</button>
+              <button id="impl-service-page-next" type="button" class="btn btn-small" onclick="window.onImplServicePageChange(1)">Next</button>
+            </div>
+          </div>
+        `;
+        renderServiceSchemaTableRows();
+      } catch (error) {
+        auditSucceeded = false;
+        target.innerHTML = `<p class="card-subtitle">Could not load Service schema audit: ${error.message}</p>`;
+      } finally {
+        implServiceSchemaRunState.isLoading = false;
+        setImplServiceAuditButtonState(false);
+        hideImplServiceProgressModal(auditSucceeded);
+      }
+    }
+
+    window.runImplServiceSchemaAudit = async function(mode) {
+      const nextMode = mode === 'full' ? 'full' : 'sample';
+      await fetchAndRenderServiceSchemaStatus(nextMode);
     };
 
     const implTechFoundationTableState = {
@@ -22850,6 +23294,7 @@
 
       await fetchAndRenderTechnicalFoundationStatus();
       await fetchAndRenderLocalBusinessSchemaStatus();
+      await fetchAndRenderServiceSchemaStatus();
     };
 
     // Portfolio Tab Functions
@@ -34484,7 +34929,7 @@ Final Score: ${score}/100`;
                   <div>Foundation schemas: ${foundationPresent}/4 (${foundationTypes.filter(t => (schemaData.foundation && schemaData.foundation[t] === true) || allTypes.has(t)).join(', ') || 'none'})</div>
                   <div>Rich result types: ${richEligibleCount}/${richResultTypes.length} eligible</div>
                   <div>Coverage: ${coverageScore != null ? coverageScore.toFixed(1) : 'N/A'}% (${Array.isArray(schemaData.pagesWithSchema) ? schemaData.pagesWithSchema.length : (typeof schemaData.pagesWithSchema === 'number' ? schemaData.pagesWithSchema : 0)}/${Array.isArray(schemaData.pages) ? schemaData.pages.length : (typeof schemaData.totalPages === 'number' ? schemaData.totalPages : (Array.isArray(schemaData.pages) ? schemaData.pages.length : 0))} pages)</div>
-                  <div>Service schema coverage: ${schemaData.serviceSchemaCoverage && typeof schemaData.serviceSchemaCoverage === 'object' ? `${schemaData.serviceSchemaCoverage.pagesWithServiceSchema || 0}/${schemaData.serviceSchemaCoverage.totalServicePages || 0} (${(schemaData.serviceSchemaCoverage.serviceCoverage || 0).toFixed(1)}%)` : 'N/A'}</div>
+                  <div>Service schema coverage: ${formatServiceSchemaCoverage(schemaData)}</div>
                   <div>Type diversity: ${uniqueTypesCount} unique types</div>
                   <div style="margin-top: 0.5rem;"><strong>Schema types found:</strong> ${schemaTypesDisplay}${schemaTypesList.length >= 20 ? '...' : ''}</div>
                 </div>

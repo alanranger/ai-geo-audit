@@ -873,6 +873,28 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function parsePositiveInt(value) {
+  const parsed = Number.parseInt(String(value ?? '').trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes';
+}
+
+function selectUrlsForMode(urls, mode, limit, sampleSize) {
+  if (!Array.isArray(urls) || urls.length === 0) return [];
+  const safeSampleSize = parsePositiveInt(sampleSize) || 25;
+  if (mode === 'sample') {
+    const sampleLimit = parsePositiveInt(limit) || safeSampleSize;
+    return urls.slice(0, Math.min(sampleLimit, urls.length));
+  }
+  const fullLimit = parsePositiveInt(limit);
+  return fullLimit ? urls.slice(0, Math.min(fullLimit, urls.length)) : urls;
+}
+
 /**
  * Crawl a single URL with concurrency control and rate limiting handling
  */
@@ -936,6 +958,7 @@ async function crawlUrl(url, semaphore, delayAfterMs = 0, retryCount = 0) {
         success: false,
         error: `HTTP ${response.status}: ${response.statusText}`,
         errorType: errorType,
+        statusCode: response.status,
         schemas: [],
         retryCount: retryCount
       };
@@ -1008,6 +1031,7 @@ async function crawlUrl(url, semaphore, delayAfterMs = 0, retryCount = 0) {
     return {
       url,
       success: true,
+      statusCode: response.status,
       schemas,
       title,
       metaDescription
@@ -1042,6 +1066,7 @@ async function crawlUrl(url, semaphore, delayAfterMs = 0, retryCount = 0) {
       success: false,
       error: errorMessage,
       errorType: errorType,
+      statusCode: null,
       schemas: []
     };
   } finally {
@@ -1102,13 +1127,24 @@ export default async function handler(req, res) {
   }
 
   try {
+    const query = req.query || {};
+    const modeInput = String(query.mode ?? '').trim().toLowerCase();
+    const mode = modeInput === 'sample' ? 'sample' : 'full';
+    const queryLimit = parsePositiveInt(query.limit);
+    const querySampleSize = parsePositiveInt(query.sampleSize);
+    const queryServiceOnly = parseBoolean(query.serviceOnly);
+
     // Check if manual URL list is provided in request body
     let urls = [];
     let urlSource = 'github';
+    let body = {};
+    let bodyMode = null;
+    let bodyLimit = null;
+    let bodySampleSize = null;
+    let bodyServiceOnly = false;
     
     if (req.method === 'POST') {
       // Parse request body
-      let body = {};
       try {
         if (typeof req.body === 'string') {
           body = JSON.parse(req.body);
@@ -1119,6 +1155,10 @@ export default async function handler(req, res) {
         // Body might already be parsed
         body = req.body || {};
       }
+      bodyMode = String(body.mode ?? '').trim().toLowerCase();
+      bodyLimit = parsePositiveInt(body.limit);
+      bodySampleSize = parsePositiveInt(body.sampleSize);
+      bodyServiceOnly = parseBoolean(body.serviceOnly);
       
       if (body.urls && Array.isArray(body.urls)) {
         // Use manual URL list from request
@@ -1135,12 +1175,32 @@ export default async function handler(req, res) {
       urls = await parseCsvUrls();
       urlSource = 'csv';
     }
+
+    let runMode = 'full';
+    if (modeInput) {
+      runMode = mode;
+    } else if (bodyMode === 'sample') {
+      runMode = 'sample';
+    }
+    const runLimit = queryLimit || bodyLimit || null;
+    const runSampleSize = querySampleSize || bodySampleSize || 25;
+    const runServiceOnly = queryServiceOnly || bodyServiceOnly;
+
+    const inputUrlCount = urls.length;
+    if (runServiceOnly) {
+      urls = urls.filter((url) => isServiceIntentUrl(url));
+    }
+
+    const candidateUrlCount = urls.length;
+    urls = selectUrlsForMode(urls, runMode, runLimit, runSampleSize);
     
     if (urls.length === 0) {
       return res.status(400).json({
         status: 'error',
         source: 'schema-audit',
-        message: 'No URLs found in CSV file',
+        message: runServiceOnly
+          ? 'No service-intent URLs matched the current source list.'
+          : 'No URLs found in CSV file',
         meta: { generatedAt: new Date().toISOString() }
       });
     }
@@ -1562,6 +1622,7 @@ export default async function handler(req, res) {
       url: result.url,
       title: result.title || null,
       metaDescription: result.metaDescription || null,
+      statusCode: Number.isFinite(result.statusCode) ? result.statusCode : null,
       hasSchema: result.success && result.schemas && result.schemas.length > 0,
       hasInheritedSchema: result.success && !result.schemas?.length && inheritanceMap.get(result.url) === true,
       schemaTypes: pageSchemaTypesMap.get(result.url) || [],
@@ -1593,6 +1654,14 @@ export default async function handler(req, res) {
         urlsScanned: totalPages,
         urlsWithSchema: pagesWithSchema,
         urlsWithInheritedSchema: pagesWithInheritedSchema,
+        selection: {
+          mode: runMode,
+          limit: runLimit,
+          sampleSize: runSampleSize,
+          serviceOnly: runServiceOnly,
+          inputUrlCount,
+          candidateUrlCount
+        },
         diagnostic: diagnosticInfo
       }
     });
