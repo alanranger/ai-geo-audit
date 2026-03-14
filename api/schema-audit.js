@@ -640,6 +640,180 @@ function buildServiceSchemaCoverage(pages = []) {
   };
 }
 
+const QA_DATE_FIELDS = ['datePublished', 'dateModified', 'startDate', 'endDate', 'validFrom', 'validThrough'];
+const QA_REQUIRED_FIELDS_BY_TYPE = {
+  Organization: ['name', 'url'],
+  LocalBusiness: ['name', 'address', 'telephone'],
+  Product: ['name', 'offers'],
+  Event: ['name', 'startDate', 'location'],
+  FAQPage: ['mainEntity'],
+  Service: ['name', 'provider']
+};
+const QA_SUPPORTED_TYPES = new Set(Object.keys(QA_REQUIRED_FIELDS_BY_TYPE));
+const ISO_DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_DATE_TIME_PREFIX_PATTERN = /^\d{4}-\d{2}-\d{2}T/;
+
+function hasValue(value) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
+}
+
+function getPathValue(obj, path) {
+  return String(path || '')
+    .split('.')
+    .filter(Boolean)
+    .reduce((acc, key) => {
+      if (!acc || typeof acc !== 'object') return undefined;
+      return acc[key];
+    }, obj);
+}
+
+function isValidIsoDateString(value) {
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim();
+  if (!ISO_DATE_ONLY_PATTERN.test(normalized) && !ISO_DATE_TIME_PREFIX_PATTERN.test(normalized)) {
+    return false;
+  }
+  return !Number.isNaN(Date.parse(normalized));
+}
+
+function collectTypedNodes(node, bucket = [], depth = 0) {
+  if (!node || typeof node !== 'object' || depth > 12) return bucket;
+  if (Array.isArray(node)) {
+    node.forEach((item) => collectTypedNodes(item, bucket, depth + 1));
+    return bucket;
+  }
+
+  const atType = node['@type'];
+  if (atType) {
+    const typeValues = Array.isArray(atType) ? atType : [atType];
+    typeValues
+      .filter((typeName) => typeof typeName === 'string' && typeName.trim())
+      .forEach((typeName) => {
+        bucket.push({ type: typeName.trim(), node });
+      });
+  }
+
+  Object.keys(node).forEach((key) => {
+    if (key === '@type') return;
+    collectTypedNodes(node[key], bucket, depth + 1);
+  });
+  return bucket;
+}
+
+function evaluateTypedSchemaNode(typeName, schemaNode) {
+  const issues = [];
+  const requiredFields = QA_REQUIRED_FIELDS_BY_TYPE[typeName] || [];
+
+  requiredFields.forEach((fieldPath) => {
+    const fieldValue = getPathValue(schemaNode, fieldPath);
+    if (!hasValue(fieldValue)) {
+      issues.push({
+        severity: 'block_deploy',
+        code: 'missing_required_field',
+        detail: `${typeName}: missing required field "${fieldPath}"`
+      });
+    }
+  });
+
+  const atId = schemaNode?.['@id'];
+  if (!hasValue(atId)) {
+    issues.push({
+      severity: 'warning',
+      code: 'missing_id',
+      detail: `${typeName}: missing @id`
+    });
+  } else if (typeof atId === 'string' && !/^https?:\/\//i.test(atId.trim())) {
+    issues.push({
+      severity: 'warning',
+      code: 'non_absolute_id',
+      detail: `${typeName}: @id is not absolute URL`
+    });
+  }
+
+  QA_DATE_FIELDS.forEach((dateField) => {
+    const rawDate = getPathValue(schemaNode, dateField);
+    if (!hasValue(rawDate) || typeof rawDate !== 'string') return;
+    if (!isValidIsoDateString(rawDate)) {
+      issues.push({
+        severity: 'block_deploy',
+        code: 'invalid_iso_date',
+        detail: `${typeName}: "${dateField}" is not valid ISO date`
+      });
+    }
+  });
+
+  return issues;
+}
+
+function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full') {
+  const rows = results.map((result) => {
+    const pageIssues = [];
+    if (!result?.success) {
+      pageIssues.push({
+        severity: 'warning',
+        code: 'crawl_failed',
+        detail: `Crawl failed: ${result?.error || 'Unknown error'}`
+      });
+    } else if (!Array.isArray(result.schemas) || result.schemas.length === 0) {
+      pageIssues.push({
+        severity: 'block_deploy',
+        code: 'missing_jsonld',
+        detail: 'No JSON-LD schema detected on page'
+      });
+    } else {
+      result.schemas.forEach((schemaBlock) => {
+        const typedNodes = collectTypedNodes(schemaBlock);
+        typedNodes.forEach(({ type, node }) => {
+          if (!QA_SUPPORTED_TYPES.has(type)) return;
+          pageIssues.push(...evaluateTypedSchemaNode(type, node));
+        });
+      });
+    }
+
+    const blockIssues = pageIssues.filter((issue) => issue.severity === 'block_deploy');
+    const warningIssues = pageIssues.filter((issue) => issue.severity === 'warning');
+    let status = 'pass';
+    if (blockIssues.length > 0) {
+      status = 'block_deploy';
+    } else if (warningIssues.length > 0) {
+      status = 'warning';
+    }
+    const summary = pageIssues.length > 0
+      ? pageIssues.slice(0, 3).map((issue) => issue.detail).join(' | ')
+      : 'Schema QA checks passed';
+
+    return {
+      url: result?.url || '',
+      statusCode: Number.isFinite(result?.statusCode) ? result.statusCode : null,
+      status,
+      blockIssueCount: blockIssues.length,
+      warningIssueCount: warningIssues.length,
+      summary,
+      issueCodes: pageIssues.map((issue) => issue.code)
+    };
+  });
+
+  const pagesChecked = rows.length;
+  const blockPages = rows.filter((row) => row.status === 'block_deploy').length;
+  const warningPages = rows.filter((row) => row.status === 'warning').length;
+  const passPages = rows.filter((row) => row.status === 'pass').length;
+  const passRate = pagesChecked > 0 ? Math.round((passPages / pagesChecked) * 100) : 0;
+
+  return {
+    source,
+    mode,
+    pagesChecked,
+    passPages,
+    warningPages,
+    blockPages,
+    passRate,
+    rows
+  };
+}
+
 /**
  * Get parent collection page URL for a given URL
  * Returns null if no parent collection page exists
@@ -1622,6 +1796,7 @@ export default async function handler(req, res) {
       errorType: result.success ? null : (result.errorType || null)
     }));
     const serviceSchemaCoverage = buildServiceSchemaCoverage(pages);
+    const qaGate = buildSchemaQaGate(results, urlSource, runMode);
     
     return res.status(200).json({
       status: 'ok',
@@ -1637,6 +1812,7 @@ export default async function handler(req, res) {
         missingSchemaCount: missingSchemaPages.length,
         missingSchemaPages: missingSchemaPages.length > 0 ? missingSchemaPages : undefined,
         serviceSchemaCoverage,
+        qaGate,
         richEligible,
         errors: errors.length > 0 ? errors : undefined,
         pages // Array of all pages with metadata (title, metaDescription)

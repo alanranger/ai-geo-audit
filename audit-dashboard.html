@@ -7031,6 +7031,8 @@
               <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplLocalSchemaAudit('full')">Check LocalBusiness Schema (Whole Site)</button>
               <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplServiceSchemaAudit('sample')">Check Service Schema (Sample)</button>
               <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplServiceSchemaAudit('full')">Check Service Schema (Whole Site)</button>
+              <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplSchemaQaGateAudit('sample')">Check Schema QA Gate (Sample)</button>
+              <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplSchemaQaGateAudit('full')">Check Schema QA Gate (Whole Site)</button>
             </div>
           </div>
 
@@ -7150,6 +7152,32 @@
             </div>
           </div>
 
+          <div class="card" style="margin-bottom: 1.5rem;">
+            <div class="card-header">
+              <h3 style="margin: 0;">Schema QA Gate (Live)</h3>
+              <p class="card-subtitle">Checks required fields, ISO dates, and @id quality with clear block-deploy vs warning statuses.</p>
+            </div>
+            <div class="card-body">
+              <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.75rem;">
+                <button id="impl-qa-run-sample-btn" class="btn btn-small" type="button" onclick="window.runImplSchemaQaGateAudit('sample')">Check Schema QA Gate (Sample)</button>
+                <button id="impl-qa-run-full-btn" class="btn btn-small" type="button" onclick="window.runImplSchemaQaGateAudit('full')">Check Schema QA Gate (Whole Site)</button>
+                <label style="display: flex; flex-direction: column; gap: 0.2rem; min-width: 140px;">
+                  <span style="font-size: 0.85rem; opacity: 0.9;">Whole-site limit</span>
+                  <select id="impl-qa-limit-select" class="filter-control">
+                    <option value="all">All URLs</option>
+                    <option value="100">100 URLs</option>
+                    <option value="250">250 URLs</option>
+                    <option value="500">500 URLs</option>
+                    <option value="1000">1000 URLs</option>
+                  </select>
+                </label>
+              </div>
+              <div id="impl-qa-gate-status">
+                <p class="card-subtitle">Loading schema QA gate status...</p>
+              </div>
+            </div>
+          </div>
+
           <div class="card">
             <div class="card-header">
               <h3 style="margin: 0;">Outcome Metrics (Coming Soon)</h3>
@@ -7200,6 +7228,19 @@
           <div class="impl-progress-modal-meta">
             <span id="impl-service-progress-percent">5%</span>
             <span id="impl-service-progress-elapsed">Elapsed: 0s</span>
+          </div>
+        </div>
+      </div>
+      <div id="impl-qa-progress-modal" class="impl-progress-modal-backdrop" aria-hidden="true">
+        <div class="impl-progress-modal" role="status" aria-live="polite">
+          <h4 id="impl-qa-progress-title" class="impl-progress-modal-title">Running schema QA gate...</h4>
+          <p id="impl-qa-progress-subtitle" class="impl-progress-modal-subtitle">Please wait while we validate schema quality checks.</p>
+          <div class="impl-progress-modal-track">
+            <div id="impl-qa-progress-fill" class="impl-progress-modal-fill"></div>
+          </div>
+          <div class="impl-progress-modal-meta">
+            <span id="impl-qa-progress-percent">5%</span>
+            <span id="impl-qa-progress-elapsed">Elapsed: 0s</span>
           </div>
         </div>
       </div>
@@ -21986,8 +22027,8 @@
       {
         priority: "P1",
         title: "Add pre-deploy schema QA gate (@id, ISO dates, required fields)",
-        status: "planned",
-        lane: "next",
+        status: "in_progress",
+        lane: "now",
         impact: "High",
         owner: "Schema Engineer",
         expectedBenefit: "Stops quality drift before deploy and reduces parser failures."
@@ -22821,6 +22862,340 @@
       await fetchAndRenderServiceSchemaStatus(nextMode);
     };
 
+    const implQaGateTableState = {
+      rows: [],
+      sortKey: 'url',
+      sortDir: 'asc',
+      statusFilter: 'all',
+      search: '',
+      page: 1,
+      pageSize: 25
+    };
+    const implQaGateRunState = {
+      mode: 'sample',
+      isLoading: false,
+      progressTimer: null,
+      progressPercent: 0,
+      startedAt: null
+    };
+
+    function showImplQaProgressModal(mode) {
+      const modal = document.getElementById('impl-qa-progress-modal');
+      const title = document.getElementById('impl-qa-progress-title');
+      const subtitle = document.getElementById('impl-qa-progress-subtitle');
+      const fill = document.getElementById('impl-qa-progress-fill');
+      const pct = document.getElementById('impl-qa-progress-percent');
+      const elapsed = document.getElementById('impl-qa-progress-elapsed');
+      if (!modal || !title || !subtitle || !fill || !pct || !elapsed) return;
+
+      implQaGateRunState.progressPercent = 7;
+      implQaGateRunState.startedAt = Date.now();
+      title.textContent = mode === 'full'
+        ? 'Running whole-site schema QA gate'
+        : 'Running sample schema QA gate';
+      subtitle.textContent = mode === 'full'
+        ? 'Validating required fields, ISO dates, and @id quality in paced requests.'
+        : 'Validating schema quality checks on sample pages.';
+      fill.style.width = `${implQaGateRunState.progressPercent}%`;
+      pct.textContent = `${implQaGateRunState.progressPercent}%`;
+      elapsed.textContent = 'Elapsed: 0s';
+      modal.classList.add('is-open');
+      modal.setAttribute('aria-hidden', 'false');
+
+      if (implQaGateRunState.progressTimer) {
+        clearInterval(implQaGateRunState.progressTimer);
+      }
+      implQaGateRunState.progressTimer = setInterval(() => {
+        const elapsedSec = Math.max(0, Math.floor((Date.now() - (implQaGateRunState.startedAt || Date.now())) / 1000));
+        const step = mode === 'full' ? 2 : 5;
+        if (implQaGateRunState.progressPercent < 92) {
+          implQaGateRunState.progressPercent = Math.min(92, implQaGateRunState.progressPercent + step);
+        }
+        fill.style.width = `${implQaGateRunState.progressPercent}%`;
+        pct.textContent = `${implQaGateRunState.progressPercent}%`;
+        elapsed.textContent = `Elapsed: ${elapsedSec}s`;
+      }, 1000);
+    }
+
+    function hideImplQaProgressModal(success = true) {
+      const modal = document.getElementById('impl-qa-progress-modal');
+      const fill = document.getElementById('impl-qa-progress-fill');
+      const pct = document.getElementById('impl-qa-progress-percent');
+      if (implQaGateRunState.progressTimer) {
+        clearInterval(implQaGateRunState.progressTimer);
+        implQaGateRunState.progressTimer = null;
+      }
+      if (fill && pct) {
+        implQaGateRunState.progressPercent = success ? 100 : Math.max(implQaGateRunState.progressPercent, 95);
+        fill.style.width = `${implQaGateRunState.progressPercent}%`;
+        pct.textContent = `${implQaGateRunState.progressPercent}%`;
+      }
+      setTimeout(() => {
+        if (!modal) return;
+        modal.classList.remove('is-open');
+        modal.setAttribute('aria-hidden', 'true');
+      }, 250);
+    }
+
+    function getQaStatusMeta(status) {
+      if (status === 'block_deploy') return { label: 'Block Deploy', chipClass: 'impl-status-red' };
+      if (status === 'warning') return { label: 'Warning', chipClass: 'impl-status-amber' };
+      return { label: 'Pass', chipClass: 'impl-status-green' };
+    }
+
+    function sortQaRows(rows, sortKey, sortDir) {
+      const dir = sortDir === 'desc' ? -1 : 1;
+      const statusWeight = (status) => {
+        if (status === 'block_deploy') return 3;
+        if (status === 'warning') return 2;
+        return 1;
+      };
+      return [...rows].sort((a, b) => {
+        let left = a?.[sortKey];
+        let right = b?.[sortKey];
+        if (sortKey === 'status') {
+          left = statusWeight(a?.status);
+          right = statusWeight(b?.status);
+        } else if (sortKey === 'statusCode' || sortKey === 'blockIssueCount' || sortKey === 'warningIssueCount') {
+          left = Number(left || 0);
+          right = Number(right || 0);
+        } else {
+          left = String(left ?? '').toLowerCase();
+          right = String(right ?? '').toLowerCase();
+        }
+        if (left === right) return 0;
+        return left > right ? dir : -dir;
+      });
+    }
+
+    function filterQaRows(rows, state) {
+      return rows.filter((row) => {
+        if (state.statusFilter !== 'all' && row.status !== state.statusFilter) return false;
+        if (!state.search) return true;
+        const haystack = `${row.url || ''} ${row.summary || ''}`.toLowerCase();
+        return haystack.includes(state.search);
+      });
+    }
+
+    function renderQaGateTableRows() {
+      const tableBody = document.getElementById('impl-qa-table-body');
+      if (!tableBody) return;
+      const filteredRows = filterQaRows(implQaGateTableState.rows, implQaGateTableState);
+      const sortedRows = sortQaRows(filteredRows, implQaGateTableState.sortKey, implQaGateTableState.sortDir);
+      const pageSize = Math.max(1, Number(implQaGateTableState.pageSize || 25));
+      const totalRows = sortedRows.length;
+      const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+      implQaGateTableState.page = Math.min(Math.max(1, implQaGateTableState.page), totalPages);
+      const start = (implQaGateTableState.page - 1) * pageSize;
+      const pageRows = sortedRows.slice(start, start + pageSize);
+      const infoEl = document.getElementById('impl-qa-pagination-info');
+      const prevBtn = document.getElementById('impl-qa-page-prev');
+      const nextBtn = document.getElementById('impl-qa-page-next');
+
+      if (!sortedRows.length) {
+        tableBody.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No rows match your filter.</td></tr>';
+        if (infoEl) infoEl.textContent = '0 results';
+        if (prevBtn) prevBtn.disabled = true;
+        if (nextBtn) nextBtn.disabled = true;
+        return;
+      }
+
+      tableBody.innerHTML = pageRows.map((row) => {
+        const statusMeta = getQaStatusMeta(row.status);
+        const safeUrl = row.url || '';
+        const urlCell = safeUrl
+          ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color: #60a5fa; text-decoration: underline;">${safeUrl}</a>`
+          : '-';
+        return `
+          <tr>
+            <td style="word-break: break-word; text-align: left;">${urlCell}</td>
+            <td>${row.statusCode ?? '-'}</td>
+            <td><span class="impl-status-chip ${statusMeta.chipClass}">${statusMeta.label}</span></td>
+            <td>${Number(row.blockIssueCount || 0)}</td>
+            <td>${Number(row.warningIssueCount || 0)}</td>
+            <td>${row.summary || '-'}</td>
+          </tr>
+        `;
+      }).join('');
+
+      if (infoEl) {
+        infoEl.textContent = `Page ${implQaGateTableState.page}/${totalPages} · Showing ${pageRows.length} of ${totalRows}`;
+      }
+      if (prevBtn) prevBtn.disabled = implQaGateTableState.page <= 1;
+      if (nextBtn) nextBtn.disabled = implQaGateTableState.page >= totalPages;
+    }
+
+    window.onImplQaSort = function(sortKey) {
+      if (implQaGateTableState.sortKey === sortKey) {
+        implQaGateTableState.sortDir = implQaGateTableState.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        implQaGateTableState.sortKey = sortKey;
+        implQaGateTableState.sortDir = 'asc';
+      }
+      implQaGateTableState.page = 1;
+      renderQaGateTableRows();
+    };
+
+    window.onImplQaFilterChange = function() {
+      const statusEl = document.getElementById('impl-qa-filter-status');
+      const searchEl = document.getElementById('impl-qa-filter-search');
+      implQaGateTableState.statusFilter = statusEl?.value || 'all';
+      implQaGateTableState.search = String(searchEl?.value || '').trim().toLowerCase();
+      implQaGateTableState.page = 1;
+      renderQaGateTableRows();
+    };
+
+    window.onImplQaPageChange = function(delta) {
+      implQaGateTableState.page = Math.max(1, implQaGateTableState.page + Number(delta || 0));
+      renderQaGateTableRows();
+    };
+
+    window.onImplQaPageSizeChange = function() {
+      const pageSizeEl = document.getElementById('impl-qa-page-size');
+      const nextSize = Number(pageSizeEl?.value || 25);
+      implQaGateTableState.pageSize = Number.isFinite(nextSize) && nextSize > 0 ? nextSize : 25;
+      implQaGateTableState.page = 1;
+      renderQaGateTableRows();
+    };
+
+    function setImplQaGateButtonState(isLoading) {
+      const sampleBtn = document.getElementById('impl-qa-run-sample-btn');
+      const fullBtn = document.getElementById('impl-qa-run-full-btn');
+      if (sampleBtn) sampleBtn.disabled = isLoading;
+      if (fullBtn) fullBtn.disabled = isLoading;
+      if (sampleBtn) sampleBtn.textContent = isLoading && implQaGateRunState.mode === 'sample' ? 'Running Sample...' : 'Check Schema QA Gate (Sample)';
+      if (fullBtn) fullBtn.textContent = isLoading && implQaGateRunState.mode === 'full' ? 'Running Whole-Site...' : 'Check Schema QA Gate (Whole Site)';
+    }
+
+    async function fetchAndRenderSchemaQaGateStatus(modeOverride = null) {
+      const target = document.getElementById('impl-qa-gate-status');
+      if (!target) return;
+      const requestedMode = modeOverride || implQaGateRunState.mode || 'sample';
+      let auditSucceeded = true;
+      implQaGateRunState.mode = requestedMode;
+      implQaGateRunState.isLoading = true;
+      setImplQaGateButtonState(true);
+      showImplQaProgressModal(requestedMode);
+
+      target.innerHTML = `<p class="card-subtitle">Running ${requestedMode === 'full' ? 'whole-site' : 'sample'} schema QA gate checks...</p>`;
+      try {
+        const limitValue = document.getElementById('impl-qa-limit-select')?.value || 'all';
+        const params = new URLSearchParams({ mode: requestedMode });
+        if (requestedMode === 'full' && limitValue !== 'all') {
+          params.set('limit', limitValue);
+        }
+        const response = await fetch(apiUrl(`/api/schema-audit?${params.toString()}`));
+        const payload = await response.json();
+        if (!response.ok || payload?.status !== 'ok' || !payload?.data) {
+          throw new Error(payload?.message || `HTTP ${response.status}`);
+        }
+
+        const qaGate = payload.data?.qaGate || {};
+        const rows = Array.isArray(qaGate.rows) ? qaGate.rows : [];
+        const pagesChecked = Number(qaGate.pagesChecked || rows.length || 0);
+        const passPages = Number(qaGate.passPages || 0);
+        const warningPages = Number(qaGate.warningPages || 0);
+        const blockPages = Number(qaGate.blockPages || 0);
+        const passRate = pagesChecked > 0 ? Math.round((passPages / pagesChecked) * 100) : 0;
+        const passVisual = getProgressVisuals(passRate);
+        implQaGateTableState.rows = rows;
+        implQaGateTableState.page = 1;
+
+        target.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+            <div>
+              <strong style="font-size: 1.05rem;">Schema QA Gate Status</strong>
+              <div style="margin-top: 0.35rem; opacity: 0.9;">Mode: ${qaGate.mode || requestedMode} | Source: ${qaGate.source || 'unknown'}</div>
+            </div>
+            <span class="impl-status-chip ${passRate >= 70 ? 'impl-status-green' : (passRate >= 30 ? 'impl-status-amber' : 'impl-status-red')}">${passRate}%</span>
+          </div>
+          <div style="margin-top: 0.85rem;">
+            <div style="display: flex; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.3rem;">
+              <span>Ready-to-deploy ratio</span>
+              <span>${passRate}%</span>
+            </div>
+            <div class="impl-progress-track">
+              <div class="impl-progress-fill" style="width: ${passRate}%; background: ${passVisual.color};"></div>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; margin-top: 1rem;">
+            <div class="card ${passPages > 0 ? 'impl-status-card-green' : 'impl-status-card-amber'}" style="margin: 0;">
+              <strong>Ready to Deploy (Pass)</strong>
+              <div style="margin-top: 0.3rem;">${passPages}/${pagesChecked}</div>
+            </div>
+            <div class="card ${warningPages > 0 ? 'impl-status-card-amber' : 'impl-status-card-green'}" style="margin: 0;">
+              <strong>Warning (Review)</strong>
+              <div style="margin-top: 0.3rem;">${warningPages}</div>
+            </div>
+            <div class="card ${blockPages > 0 ? 'impl-status-card-red' : 'impl-status-card-green'}" style="margin: 0;">
+              <strong>Block Deploy</strong>
+              <div style="margin-top: 0.3rem;">${blockPages}</div>
+            </div>
+          </div>
+          <div style="margin-top: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <label style="display: flex; flex-direction: column; gap: 0.25rem;">
+              <span>Status</span>
+              <select id="impl-qa-filter-status" class="filter-control" onchange="window.onImplQaFilterChange()">
+                <option value="all">All</option>
+                <option value="block_deploy">Block Deploy</option>
+                <option value="warning">Warning</option>
+                <option value="pass">Pass</option>
+              </select>
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 0.25rem; min-width: 240px; flex: 1;">
+              <span>Search</span>
+              <input id="impl-qa-filter-search" class="filter-control" type="text" placeholder="Filter by URL or issue..." oninput="window.onImplQaFilterChange()" />
+            </label>
+          </div>
+          <div style="margin-top: 0.85rem; overflow-x: auto;">
+            <table class="ranking-table" id="impl-qa-table">
+              <thead>
+                <tr>
+                  <th style="text-align: left;"><button type="button" class="btn btn-small" onclick="window.onImplQaSort('url')">URL</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplQaSort('statusCode')">HTTP</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplQaSort('status')">QA Status</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplQaSort('blockIssueCount')">Block Issues</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplQaSort('warningIssueCount')">Warnings</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplQaSort('summary')">Summary</button></th>
+                </tr>
+              </thead>
+              <tbody id="impl-qa-table-body">
+                <tr><td colspan="6" class="ranking-table-empty">Loading rows...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top: 0.65rem; display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+            <div id="impl-qa-pagination-info" style="font-size: 0.85rem; opacity: 0.9;">Page 1/1</div>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <label style="display: inline-flex; align-items: center; gap: 0.35rem;">
+                <span style="font-size: 0.85rem;">Rows</span>
+                <select id="impl-qa-page-size" class="filter-control" style="min-width: 80px;" onchange="window.onImplQaPageSizeChange()">
+                  <option value="25" selected>25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                </select>
+              </label>
+              <button id="impl-qa-page-prev" type="button" class="btn btn-small" onclick="window.onImplQaPageChange(-1)">Previous</button>
+              <button id="impl-qa-page-next" type="button" class="btn btn-small" onclick="window.onImplQaPageChange(1)">Next</button>
+            </div>
+          </div>
+        `;
+        renderQaGateTableRows();
+      } catch (error) {
+        auditSucceeded = false;
+        target.innerHTML = `<p class="card-subtitle">Could not load schema QA gate: ${error.message}</p>`;
+      } finally {
+        implQaGateRunState.isLoading = false;
+        setImplQaGateButtonState(false);
+        hideImplQaProgressModal(auditSucceeded);
+      }
+    }
+
+    window.runImplSchemaQaGateAudit = async function(mode) {
+      const nextMode = mode === 'full' ? 'full' : 'sample';
+      await fetchAndRenderSchemaQaGateStatus(nextMode);
+    };
+
     const implTechFoundationTableState = {
       rows: [],
       sortKey: 'url',
@@ -23292,6 +23667,7 @@
       await fetchAndRenderTechnicalFoundationStatus();
       await fetchAndRenderLocalBusinessSchemaStatus();
       await fetchAndRenderServiceSchemaStatus();
+      await fetchAndRenderSchemaQaGateStatus();
     };
 
     // Portfolio Tab Functions
