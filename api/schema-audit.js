@@ -1080,6 +1080,50 @@ function parseBoolean(value) {
   return normalized === '1' || normalized === 'true' || normalized === 'yes';
 }
 
+function normalizeUrlForComparison(url) {
+  if (!url || typeof url !== 'string') return '';
+  try {
+    const parsed = new URL(url);
+    const normalizedPath = parsed.pathname.replace(/\/+$/, '');
+    return `${parsed.origin}${normalizedPath}`.toLowerCase();
+  } catch {
+    return url.trim().replace(/\/+$/, '').toLowerCase();
+  }
+}
+
+function inferPrimaryOrigin(urls) {
+  const counts = new Map();
+  urls.forEach((url) => {
+    try {
+      const parsed = new URL(url);
+      const key = parsed.origin.toLowerCase();
+      counts.set(key, (counts.get(key) || 0) + 1);
+    } catch {
+      // Ignore invalid URLs
+    }
+  });
+  if (!counts.size) return null;
+  let bestOrigin = null;
+  let bestCount = -1;
+  counts.forEach((count, origin) => {
+    if (count > bestCount) {
+      bestOrigin = origin;
+      bestCount = count;
+    }
+  });
+  return bestOrigin;
+}
+
+function ensureRootUrlIncluded(urls) {
+  if (!Array.isArray(urls) || !urls.length) return urls;
+  const primaryOrigin = inferPrimaryOrigin(urls);
+  if (!primaryOrigin) return urls;
+  const rootUrl = `${primaryOrigin}/`;
+  const normalizedSet = new Set(urls.map((url) => normalizeUrlForComparison(url)));
+  if (normalizedSet.has(normalizeUrlForComparison(rootUrl))) return urls;
+  return [rootUrl, ...urls];
+}
+
 function selectUrlsForMode(urls, mode, limit, sampleSize) {
   if (!Array.isArray(urls) || urls.length === 0) return [];
   const safeSampleSize = parsePositiveInt(sampleSize) || 25;
@@ -1382,6 +1426,7 @@ export default async function handler(req, res) {
     const runSampleSize = querySampleSize || bodySampleSize || 25;
     const runServiceOnly = queryServiceOnly || bodyServiceOnly;
 
+    urls = ensureRootUrlIncluded(urls);
     const inputUrlCount = urls.length;
     if (runServiceOnly) {
       urls = urls.filter((url) => isServiceIntentUrl(url));
