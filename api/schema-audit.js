@@ -605,16 +605,8 @@ function isServiceIntentUrl(url) {
   try {
     const pathname = new URL(url).pathname.toLowerCase();
     if (!pathname || pathname === '/') return false;
-    const serviceHints = [
-      '/photography-services',
-      '/service',
-      '/services',
-      '/professional-commercial-photographer',
-      '/commercial-photographer',
-      '/photo-print-preparation-service',
-      '/camera-sensor-clean'
-    ];
-    return serviceHints.some((hint) => pathname.includes(hint));
+    // Tier B Product pages (aligned with Ranking & AI classifier)
+    return pathname.includes('/photo-workshops-uk') || pathname.includes('/photography-services-near-me');
   } catch {
     return false;
   }

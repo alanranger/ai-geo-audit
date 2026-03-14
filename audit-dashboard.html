@@ -7127,7 +7127,7 @@
           <div class="card" style="margin-bottom: 1.5rem;">
             <div class="card-header">
               <h3 style="margin: 0;">Service Schema Audit (Live)</h3>
-              <p class="card-subtitle">Checks service-intent pages for Service schema and highlights confirmed missing pages.</p>
+              <p class="card-subtitle">Checks Tier B Product pages for Service schema and highlights confirmed missing pages.</p>
             </div>
             <div class="card-body">
               <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.75rem;">
@@ -7193,7 +7193,7 @@
       <div id="impl-service-progress-modal" class="impl-progress-modal-backdrop" aria-hidden="true">
         <div class="impl-progress-modal" role="status" aria-live="polite">
           <h4 id="impl-service-progress-title" class="impl-progress-modal-title">Running service schema audit...</h4>
-          <p id="impl-service-progress-subtitle" class="impl-progress-modal-subtitle">Please wait while we scan service-intent pages for Service schema.</p>
+          <p id="impl-service-progress-subtitle" class="impl-progress-modal-subtitle">Please wait while we scan Tier B Product pages for Service schema.</p>
           <div class="impl-progress-modal-track">
             <div id="impl-service-progress-fill" class="impl-progress-modal-fill"></div>
           </div>
@@ -22053,20 +22053,16 @@
       return { chipClass: 'impl-status-red', color: '#ef4444' };
     }
 
-    function isServiceIntentUrlForUi(url) {
+    function isTierBProductUrlForUi(url) {
       try {
-        const pathname = new URL(String(url || '')).pathname.toLowerCase();
-        if (!pathname || pathname === '/') return false;
-        const serviceHints = [
-          '/photography-services',
-          '/service',
-          '/services',
-          '/professional-commercial-photographer',
-          '/commercial-photographer',
-          '/photo-print-preparation-service',
-          '/camera-sensor-clean'
-        ];
-        return serviceHints.some((hint) => pathname.includes(hint));
+        const rawUrl = String(url || '');
+        if (!rawUrl) return false;
+        if (typeof window.classifyUrlForRankingAi === 'function') {
+          const classification = window.classifyUrlForRankingAi(rawUrl);
+          return String(classification?.pageType || '').toLowerCase() === 'product';
+        }
+        const pathname = new URL(rawUrl).pathname.toLowerCase();
+        return pathname.includes('/photo-workshops-uk') || pathname.includes('/photography-services-near-me');
       } catch {
         return false;
       }
@@ -22078,7 +22074,7 @@
       }
       const pages = Array.isArray(schemaData?.pages) ? schemaData.pages : [];
       if (!pages.length) return null;
-      const servicePages = pages.filter((page) => isServiceIntentUrlForUi(page?.url));
+      const servicePages = pages.filter((page) => isTierBProductUrlForUi(page?.url));
       const totalServicePages = servicePages.length;
       const pagesWithServiceSchema = servicePages.filter((page) => {
         const types = Array.isArray(page?.schemaTypes) ? page.schemaTypes : [];
@@ -22503,8 +22499,8 @@
         ? 'Running whole-site Service schema audit'
         : 'Running sample Service schema audit';
       subtitle.textContent = mode === 'full'
-        ? 'Checking service-intent pages for Service schema in paced requests.'
-        : 'Checking sample service-intent pages for Service schema.';
+        ? 'Checking Tier B Product pages for Service schema in paced requests.'
+        : 'Checking sample Tier B Product pages for Service schema.';
       fill.style.width = `${implServiceSchemaRunState.progressPercent}%`;
       pct.textContent = `${implServiceSchemaRunState.progressPercent}%`;
       elapsed.textContent = 'Elapsed: 0s';
@@ -22705,7 +22701,8 @@
 
         const pages = Array.isArray(payload.data.pages) ? payload.data.pages : [];
         const selection = payload.meta?.selection || {};
-        const rows = pages.map((page) => {
+        const targetPages = pages.filter((page) => isTierBProductUrlForUi(page?.url));
+        const rows = targetPages.map((page) => {
           const schemaTypes = Array.isArray(page?.schemaTypes) ? page.schemaTypes : [];
           const hasService = schemaTypes.some((type) => String(type || '').toLowerCase() === 'service');
           const statusCode = Number.isFinite(page?.statusCode) ? Number(page.statusCode) : parseStatusCodeFromError(page?.error);
@@ -22758,7 +22755,7 @@
             <div class="card ${unknownPages > 0 ? 'impl-status-card-amber' : 'impl-status-card-green'}" style="margin: 0;">
               <strong>Unknown / Retry Needed (429)</strong>
               <div style="margin-top: 0.3rem;">${unknownPages}</div>
-              <div style="font-size: 0.8rem; opacity: 0.85; margin-top: 0.25rem;">Mode: ${selection.mode || requestedMode} | Source: service-intent pages</div>
+              <div style="font-size: 0.8rem; opacity: 0.85; margin-top: 0.25rem;">Mode: ${selection.mode || requestedMode} | Source: Tier B Product pages</div>
             </div>
           </div>
           <div style="margin-top: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
@@ -45953,7 +45950,7 @@ Final Score: ${score}/100`;
                     }
                   }
                 } else {
-                  contentSchemaDesc += ' <strong>Data Checked:</strong> Foundation schemas (Organization, Person, WebSite, BreadcrumbList), Rich result eligibility (Article, Event, Course, FAQ, HowTo, VideoObject, Product, LocalBusiness, Review, ImageObject, ItemList), service schema coverage on service-intent pages, schema coverage percentage, schema type diversity.';
+                  contentSchemaDesc += ' <strong>Data Checked:</strong> Foundation schemas (Organization, Person, WebSite, BreadcrumbList), Rich result eligibility (Article, Event, Course, FAQ, HowTo, VideoObject, Product, LocalBusiness, Review, ImageObject, ItemList), service schema coverage on Tier B Product pages, schema coverage percentage, schema type diversity.';
                 }
                 
                 // Build Local Entity and Service Area descriptions based on whether we have real Business Profile data
