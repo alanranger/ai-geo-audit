@@ -21936,6 +21936,12 @@
         : { label: 'Fail', chipClass: 'impl-status-red', color: '#ef4444' };
     }
 
+    function getGoogleIndexMeta(value) {
+      if (value === true) return { label: 'Indexed', chipClass: 'impl-status-green' };
+      if (value === false) return { label: 'Not indexed', chipClass: 'impl-status-red' };
+      return { label: 'Unknown', chipClass: 'impl-status-amber' };
+    }
+
     function getProgressVisuals(percent) {
       if (percent >= 70) return { chipClass: 'impl-status-green', color: '#10b981' };
       if (percent >= 30) return { chipClass: 'impl-status-amber', color: '#f59e0b' };
@@ -22063,6 +22069,11 @@
           left = a?.pass ? 1 : 0;
           right = b?.pass ? 1 : 0;
         }
+        if (sortKey === 'googleIndexed') {
+          const mapValue = (v) => (v === true ? 2 : v === false ? 1 : 0);
+          left = mapValue(a?.googleIndexed);
+          right = mapValue(b?.googleIndexed);
+        }
         if (sortKey === 'statusCode') {
           left = Number(left || 0);
           right = Number(right || 0);
@@ -22099,12 +22110,15 @@
       const filteredRows = filterTechRows(implTechFoundationTableState.rows, implTechFoundationTableState);
       const sortedRows = sortTechRows(filteredRows, implTechFoundationTableState.sortKey, implTechFoundationTableState.sortDir);
       if (!sortedRows.length) {
-        tableBody.innerHTML = '<tr><td colspan="5" class="ranking-table-empty">No rows match your filter.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No rows match your filter.</td></tr>';
         return;
       }
       tableBody.innerHTML = sortedRows.map((row) => {
-        const statusMeta = getPassFailMeta(row.pass);
+        const statusMeta = row.rateLimited
+          ? { label: 'Transient (429)', chipClass: 'impl-status-amber' }
+          : getPassFailMeta(row.pass);
         const category = getTechReasonCategory(row);
+        const googleMeta = getGoogleIndexMeta(row.googleIndexed);
         const safeUrl = row.url || '';
         const urlCell = safeUrl
           ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color: #60a5fa; text-decoration: underline;">${safeUrl}</a>`
@@ -22116,6 +22130,7 @@
             <td><span class="impl-status-chip ${statusMeta.chipClass}">${statusMeta.label}</span></td>
             <td>${category}</td>
             <td>${row.reason || '-'}</td>
+            <td><span class="impl-status-chip ${googleMeta.chipClass}">${googleMeta.label}</span></td>
           </tr>
         `;
       }).join('');
@@ -22200,6 +22215,11 @@
         const passCount = Number(indexability.passCount || 0);
         const indexabilityPercent = pagesChecked > 0 ? Math.round((passCount / pagesChecked) * 100) : 0;
         const indexabilityMeta = getPassFailMeta(indexabilityPercent >= 80);
+        const googleIndex = indexability.googleIndex || {};
+        const googleIndexedCount = Number(googleIndex.googleIndexedCount || 0);
+        const requestIndexingCount = Number(googleIndex.requestIndexingCandidates || 0);
+        const googleUnknownCount = Number(googleIndex.googleUnknownCount || 0);
+        const googleIndexedPercent = pagesChecked > 0 ? Math.round((googleIndexedCount / pagesChecked) * 100) : 0;
         implTechFoundationTableState.rows = Array.isArray(indexability.results) ? indexability.results : [];
         target.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
@@ -22232,6 +22252,12 @@
               <div style="margin-top: 0.3rem;">${passCount}/${pagesChecked}</div>
               <div style="margin-top: 0.35rem;"><span class="impl-status-chip ${indexabilityMeta.chipClass}">${indexabilityPercent}%</span></div>
               <div style="font-size: 0.8rem; opacity: 0.85; margin-top: 0.25rem;">Source: ${indexability.source || 'unknown'} | Mode: ${indexability.mode || requestedMode}</div>
+            </div>
+            <div class="card ${googleUnknownCount ? 'impl-status-card-amber' : (googleIndexedPercent >= 70 ? 'impl-status-card-green' : 'impl-status-card-amber')}" style="margin: 0;">
+              <strong>Google Indexed (GSC 90d)</strong>
+              <div style="margin-top: 0.3rem;">${googleIndexedCount}/${pagesChecked}</div>
+              <div style="margin-top: 0.35rem;"><span class="impl-status-chip ${googleUnknownCount ? 'impl-status-amber' : (googleIndexedPercent >= 70 ? 'impl-status-green' : 'impl-status-amber')}">${googleIndexedPercent}%</span></div>
+              <div style="font-size: 0.8rem; opacity: 0.85; margin-top: 0.25rem;">Request indexing candidates: ${requestIndexingCount}${googleUnknownCount ? ` | Unknown: ${googleUnknownCount}` : ''}</div>
             </div>
           </div>
           ${blockerList}
@@ -22270,10 +22296,11 @@
                   <th><button type="button" class="btn btn-small" onclick="window.onImplTechSort('pass')">Status</button></th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplTechSort('reason')">Reason Type</button></th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplTechSort('reason')">Reason Detail</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplTechSort('googleIndexed')">Google Indexed</button></th>
                 </tr>
               </thead>
               <tbody id="impl-tech-table-body">
-                <tr><td colspan="5" class="ranking-table-empty">Loading rows...</td></tr>
+                <tr><td colspan="6" class="ranking-table-empty">Loading rows...</td></tr>
               </tbody>
             </table>
           </div>

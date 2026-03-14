@@ -1,3 +1,5 @@
+import { getGSCAccessToken, getGscDateRange, normalizePropertyUrl } from './utils.js';
+
 /**
  * Technical Foundation Audit API
  *
@@ -23,6 +25,8 @@ const DEFAULT_INDEXABILITY_BATCH_DELAY_MS = 1000;
 const DEFAULT_INDEXABILITY_RETRIES = 2;
 const DEFAULT_INDEXABILITY_RETRY_BASE_DELAY_MS = 1500;
 const DEFAULT_INDEXABILITY_TIMEOUT_MS = 10000;
+const DEFAULT_RATE_LIMIT_RETRY_COOLDOWN_MS = 15000;
+const DEFAULT_RATE_LIMIT_RETRY_REQUEST_DELAY_MS = 1500;
 const MAX_INDEXABILITY_BATCH_SIZE = 500;
 const MAX_INDEXABILITY_RETRIES = 5;
 const MAX_INDEXABILITY_DELAY_MS = 15000;
@@ -119,6 +123,16 @@ function parseRetryAfterMs(retryAfterHeader) {
   return null;
 }
 
+function normalizeComparableUrl(value) {
+  try {
+    const parsed = new URL(String(value || '').trim());
+    const pathname = parsed.pathname.replace(/\/+$/, '') || '/';
+    return `${parsed.protocol}//${parsed.hostname}${pathname}`;
+  } catch {
+    return null;
+  }
+}
+
 function computeBackoffDelayMs(attempt, retryBaseDelayMs, retryAfterMs = null) {
   if (Number.isFinite(retryAfterMs) && retryAfterMs >= 0) {
     return Math.min(MAX_INDEXABILITY_DELAY_MS, Math.floor(retryAfterMs));
@@ -183,6 +197,145 @@ async function attemptSingleIndexabilityFetch(pageUrl, options) {
     }
     return { kind: 'result', row: buildFetchFailedIndexabilityRow(pageUrl, error) };
   }
+}
+
+async function fetchGoogleIndexSignals(baseUrl, pagesToCheck) {
+  const fallback = {
+    available: false,
+    source: 'gsc-searchanalytics',
+    startDate: null,
+    endDate: null,
+    indexedSet: new Set(),
+    error: null
+  };
+
+  try {
+    const accessToken = await getGSCAccessToken();
+    const siteUrl = normalizePropertyUrl(baseUrl);
+    const { startDate, endDate } = getGscDateRange({ daysBack: 90, endOffsetDays: 2 });
+    const endpoint = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        startDate,
+        endDate,
+        dimensions: ['page'],
+        rowLimit: Math.max(25000, pagesToCheck.length + 500)
+      })
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return {
+        ...fallback,
+        startDate,
+        endDate,
+        error: `gsc_api_error:${response.status}:${text.slice(0, 180)}`
+      };
+    }
+
+    const payload = await response.json();
+    const indexedSet = new Set();
+    for (const row of payload?.rows || []) {
+      const rawPage = row?.keys?.[0];
+      const comparable = normalizeComparableUrl(rawPage);
+      if (!comparable) continue;
+      const impressions = Number(row?.impressions || 0);
+      const clicks = Number(row?.clicks || 0);
+      if (impressions > 0 || clicks > 0) indexedSet.add(comparable);
+    }
+
+    return {
+      available: true,
+      source: 'gsc-searchanalytics-90d',
+      startDate,
+      endDate,
+      indexedSet,
+      error: null
+    };
+  } catch (error) {
+    return {
+      ...fallback,
+      error: error.message || 'unknown_gsc_error'
+    };
+  }
+}
+
+async function rerunRateLimitedRows(results, options = {}) {
+  const cooldownMs = clampInt(options.cooldownMs, DEFAULT_RATE_LIMIT_RETRY_COOLDOWN_MS, 0, MAX_INDEXABILITY_DELAY_MS);
+  const retryRequestDelayMs = clampInt(options.retryRequestDelayMs, DEFAULT_RATE_LIMIT_RETRY_REQUEST_DELAY_MS, 0, MAX_INDEXABILITY_DELAY_MS);
+  const retries = clampInt(options.retries, DEFAULT_INDEXABILITY_RETRIES + 1, 0, MAX_INDEXABILITY_RETRIES);
+  const timeoutMs = clampInt(options.timeoutMs, DEFAULT_INDEXABILITY_TIMEOUT_MS, 3000, 30000);
+  const retryBaseDelayMs = clampInt(options.retryBaseDelayMs, Math.max(DEFAULT_INDEXABILITY_RETRY_BASE_DELAY_MS, 3000), 250, MAX_INDEXABILITY_DELAY_MS);
+  const targetIndexes = [];
+
+  results.forEach((row, idx) => {
+    if (row?.rateLimited) targetIndexes.push(idx);
+  });
+  if (!targetIndexes.length) {
+    return { retried: 0, resolved: 0, stillRateLimited: 0 };
+  }
+
+  if (cooldownMs > 0) await sleep(cooldownMs);
+  let resolved = 0;
+  for (let i = 0; i < targetIndexes.length; i += 1) {
+    const idx = targetIndexes[i];
+    const prev = results[idx];
+    const updated = await checkSinglePageIndexability(prev.url, { retries, timeoutMs, retryBaseDelayMs });
+    results[idx] = updated;
+    if (!updated.rateLimited) resolved += 1;
+    const isLast = i === targetIndexes.length - 1;
+    if (!isLast && retryRequestDelayMs > 0) await sleep(retryRequestDelayMs);
+  }
+
+  return {
+    retried: targetIndexes.length,
+    resolved,
+    stillRateLimited: targetIndexes.length - resolved
+  };
+}
+
+function applyGoogleIndexSignals(results, googleSignals) {
+  const indexedSet = googleSignals?.indexedSet || new Set();
+  let googleIndexedCount = 0;
+  let googleNotIndexedCount = 0;
+  let googleUnknownCount = 0;
+  let requestIndexingCandidates = 0;
+
+  const rows = results.map((row) => {
+    if (!googleSignals?.available) {
+      googleUnknownCount += 1;
+      return {
+        ...row,
+        googleIndexed: null,
+        googleIndexReason: 'GSC index data unavailable'
+      };
+    }
+    const comparable = normalizeComparableUrl(row.url);
+    const isIndexed = !!(comparable && indexedSet.has(comparable));
+    if (isIndexed) googleIndexedCount += 1;
+    else googleNotIndexedCount += 1;
+    if (!isIndexed && row.pass && !row.rateLimited) requestIndexingCandidates += 1;
+    return {
+      ...row,
+      googleIndexed: isIndexed,
+      googleIndexReason: isIndexed ? 'Seen in GSC (last 90d)' : 'Not seen in GSC (last 90d)'
+    };
+  });
+
+  return {
+    rows,
+    counts: {
+      googleIndexedCount,
+      googleNotIndexedCount,
+      googleUnknownCount,
+      requestIndexingCandidates
+    }
+  };
 }
 
 function extractDirectivesForAgent(robotsText, agentName) {
@@ -434,17 +587,56 @@ async function checkIndexability(pagesToCheck, source = 'unknown', mode = 'sampl
     }
   }
 
-  const passCount = results.filter((r) => r.pass).length;
-  const failCount = results.length - passCount;
-  const rateLimitedCount = results.filter((r) => r.rateLimited).length;
+  let rateLimitedCount = results.filter((r) => r.rateLimited).length;
+  let rateLimitRetry = { retried: 0, resolved: 0, stillRateLimited: rateLimitedCount };
+
+  if (mode === 'full' && rateLimitedCount > 0) {
+    rateLimitRetry = await rerunRateLimitedRows(results, {
+      retries,
+      timeoutMs,
+      retryBaseDelayMs,
+      cooldownMs: DEFAULT_RATE_LIMIT_RETRY_COOLDOWN_MS,
+      retryRequestDelayMs: DEFAULT_RATE_LIMIT_RETRY_REQUEST_DELAY_MS
+    });
+    rateLimitedCount = results.filter((r) => r.rateLimited).length;
+  }
+
+  let googleIndex = {
+    available: false,
+    source: 'gsc-searchanalytics',
+    startDate: null,
+    endDate: null,
+    error: 'google_index_check_disabled',
+    googleIndexedCount: 0,
+    googleNotIndexedCount: 0,
+    googleUnknownCount: results.length,
+    requestIndexingCandidates: 0
+  };
+
+  if (options.includeGoogleIndex) {
+    const googleSignals = await fetchGoogleIndexSignals(options.baseUrl, pagesToCheck);
+    const enriched = applyGoogleIndexSignals(results, googleSignals);
+    results.splice(0, results.length, ...enriched.rows);
+    googleIndex = {
+      available: googleSignals.available,
+      source: googleSignals.source,
+      startDate: googleSignals.startDate,
+      endDate: googleSignals.endDate,
+      error: googleSignals.error || null,
+      ...enriched.counts
+    };
+  }
+
+  const finalPassCount = results.filter((r) => r.pass).length;
+  const finalFailCount = results.length - finalPassCount;
   return {
     source,
     mode,
     pagesChecked: results.length,
-    passCount,
-    failCount,
+    passCount: finalPassCount,
+    failCount: finalFailCount,
     rateLimitedCount,
-    pass: failCount === 0,
+    pass: finalFailCount === 0,
     pacing: {
       batchSize,
       requestDelayMs,
@@ -454,6 +646,8 @@ async function checkIndexability(pagesToCheck, source = 'unknown', mode = 'sampl
       timeoutMs,
       retryBaseDelayMs
     },
+    rateLimitRetry,
+    googleIndex,
     results
   };
 }
@@ -492,6 +686,7 @@ export default async function handler(req, res) {
     const modeRaw = String(req.query.mode || 'sample').trim().toLowerCase();
     const mode = modeRaw === 'full' ? 'full' : 'sample';
     const limit = parsePositiveInt(req.query.limit);
+    const includeGoogleIndex = String(req.query.includeGoogleIndex ?? '1').trim() !== '0';
     if (!baseUrl) {
       return res.status(400).json({
         status: 'error',
@@ -520,6 +715,8 @@ export default async function handler(req, res) {
     ]);
     const selection = pickIndexabilityUrls(baseUrl, sitemap.pageUrls, mode, limit);
     const indexability = await checkIndexability(selection.urls, selection.source, selection.mode, {
+      baseUrl,
+      includeGoogleIndex,
       batchSize,
       requestDelayMs,
       batchDelayMs,
@@ -541,7 +738,8 @@ export default async function handler(req, res) {
         batchDelayMs,
         retries,
         timeoutMs,
-        retryBaseDelayMs
+        retryBaseDelayMs,
+        includeGoogleIndex
       },
       data: {
         overall,
