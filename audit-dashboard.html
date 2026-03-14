@@ -7071,6 +7071,32 @@
             </div>
           </div>
 
+          <div class="card" style="margin-bottom: 1.5rem;">
+            <div class="card-header">
+              <h3 style="margin: 0;">LocalBusiness Schema Audit (Live)</h3>
+              <p class="card-subtitle">Scans sitemap pages for LocalBusiness JSON-LD and shows where local entity schema is missing.</p>
+            </div>
+            <div class="card-body">
+              <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.75rem;">
+                <button id="impl-local-run-sample-btn" class="btn btn-small" type="button" onclick="window.runImplLocalSchemaAudit('sample')">Run Sample Audit</button>
+                <button id="impl-local-run-full-btn" class="btn btn-small" type="button" onclick="window.runImplLocalSchemaAudit('full')">Audit Whole Site URLs</button>
+                <label style="display: flex; flex-direction: column; gap: 0.2rem; min-width: 140px;">
+                  <span style="font-size: 0.85rem; opacity: 0.9;">Whole-site limit</span>
+                  <select id="impl-local-limit-select" class="filter-control">
+                    <option value="all">All URLs</option>
+                    <option value="100">100 URLs</option>
+                    <option value="250">250 URLs</option>
+                    <option value="500">500 URLs</option>
+                    <option value="1000">1000 URLs</option>
+                  </select>
+                </label>
+              </div>
+              <div id="impl-local-schema-status">
+                <p class="card-subtitle">Loading local schema status...</p>
+              </div>
+            </div>
+          </div>
+
           <div class="card">
             <div class="card-header">
               <h3 style="margin: 0;">Outcome Metrics (Phase 1)</h3>
@@ -7095,6 +7121,19 @@
           <div class="impl-progress-modal-meta">
             <span id="impl-tech-progress-percent">5%</span>
             <span id="impl-tech-progress-elapsed">Elapsed: 0s</span>
+          </div>
+        </div>
+      </div>
+      <div id="impl-local-progress-modal" class="impl-progress-modal-backdrop" aria-hidden="true">
+        <div class="impl-progress-modal" role="status" aria-live="polite">
+          <h4 id="impl-local-progress-title" class="impl-progress-modal-title">Running local schema audit...</h4>
+          <p id="impl-local-progress-subtitle" class="impl-progress-modal-subtitle">Please wait while we scan pages for LocalBusiness schema.</p>
+          <div class="impl-progress-modal-track">
+            <div id="impl-local-progress-fill" class="impl-progress-modal-fill"></div>
+          </div>
+          <div class="impl-progress-modal-meta">
+            <span id="impl-local-progress-percent">5%</span>
+            <span id="impl-local-progress-elapsed">Elapsed: 0s</span>
           </div>
         </div>
       </div>
@@ -21854,7 +21893,7 @@
       {
         priority: "P0",
         title: "Implement localBusinessSchemaPages scanner in local-signals",
-        status: "planned",
+        status: "done",
         lane: "now",
         impact: "High",
         owner: "AI GEO Engineer",
@@ -21975,6 +22014,288 @@
       `;
       }).join("");
     }
+
+    const implLocalSchemaTableState = {
+      rows: [],
+      sortKey: 'url',
+      sortDir: 'asc',
+      statusFilter: 'all',
+      search: ''
+    };
+    const implLocalSchemaRunState = {
+      mode: 'sample',
+      isLoading: false,
+      progressTimer: null,
+      progressPercent: 0,
+      startedAt: null
+    };
+
+    function showImplLocalProgressModal(mode) {
+      const modal = document.getElementById('impl-local-progress-modal');
+      const title = document.getElementById('impl-local-progress-title');
+      const subtitle = document.getElementById('impl-local-progress-subtitle');
+      const fill = document.getElementById('impl-local-progress-fill');
+      const pct = document.getElementById('impl-local-progress-percent');
+      const elapsed = document.getElementById('impl-local-progress-elapsed');
+      if (!modal || !title || !subtitle || !fill || !pct || !elapsed) return;
+
+      implLocalSchemaRunState.progressPercent = 7;
+      implLocalSchemaRunState.startedAt = Date.now();
+      title.textContent = mode === 'full'
+        ? 'Running whole-site LocalBusiness schema audit'
+        : 'Running sample LocalBusiness schema audit';
+      subtitle.textContent = mode === 'full'
+        ? 'Scanning sitemap pages for LocalBusiness JSON-LD in paced batches.'
+        : 'Scanning sample pages for LocalBusiness JSON-LD.';
+      fill.style.width = `${implLocalSchemaRunState.progressPercent}%`;
+      pct.textContent = `${implLocalSchemaRunState.progressPercent}%`;
+      elapsed.textContent = 'Elapsed: 0s';
+      modal.classList.add('is-open');
+      modal.setAttribute('aria-hidden', 'false');
+
+      if (implLocalSchemaRunState.progressTimer) {
+        clearInterval(implLocalSchemaRunState.progressTimer);
+      }
+      implLocalSchemaRunState.progressTimer = setInterval(() => {
+        const elapsedSec = Math.max(0, Math.floor((Date.now() - (implLocalSchemaRunState.startedAt || Date.now())) / 1000));
+        const step = mode === 'full' ? 2 : 5;
+        if (implLocalSchemaRunState.progressPercent < 92) {
+          implLocalSchemaRunState.progressPercent = Math.min(92, implLocalSchemaRunState.progressPercent + step);
+        }
+        fill.style.width = `${implLocalSchemaRunState.progressPercent}%`;
+        pct.textContent = `${implLocalSchemaRunState.progressPercent}%`;
+        elapsed.textContent = `Elapsed: ${elapsedSec}s`;
+      }, 1000);
+    }
+
+    function hideImplLocalProgressModal(success = true) {
+      const modal = document.getElementById('impl-local-progress-modal');
+      const fill = document.getElementById('impl-local-progress-fill');
+      const pct = document.getElementById('impl-local-progress-percent');
+      if (implLocalSchemaRunState.progressTimer) {
+        clearInterval(implLocalSchemaRunState.progressTimer);
+        implLocalSchemaRunState.progressTimer = null;
+      }
+      if (fill && pct) {
+        implLocalSchemaRunState.progressPercent = success ? 100 : Math.max(implLocalSchemaRunState.progressPercent, 95);
+        fill.style.width = `${implLocalSchemaRunState.progressPercent}%`;
+        pct.textContent = `${implLocalSchemaRunState.progressPercent}%`;
+      }
+      setTimeout(() => {
+        if (!modal) return;
+        modal.classList.remove('is-open');
+        modal.setAttribute('aria-hidden', 'true');
+      }, 250);
+    }
+
+    function sortLocalSchemaRows(rows, sortKey, sortDir) {
+      const dir = sortDir === 'desc' ? -1 : 1;
+      return [...rows].sort((a, b) => {
+        let left = a?.[sortKey];
+        let right = b?.[sortKey];
+        if (sortKey === 'hasLocalBusiness' || sortKey === 'pass') {
+          left = a?.hasLocalBusiness ? 1 : 0;
+          right = b?.hasLocalBusiness ? 1 : 0;
+        } else if (sortKey === 'statusCode') {
+          left = Number(left || 0);
+          right = Number(right || 0);
+        } else {
+          left = String(left ?? '').toLowerCase();
+          right = String(right ?? '').toLowerCase();
+        }
+        if (left === right) return 0;
+        return left > right ? dir : -dir;
+      });
+    }
+
+    function filterLocalSchemaRows(rows, state) {
+      return rows.filter((row) => {
+        if (state.statusFilter === 'has_schema' && !row.hasLocalBusiness) return false;
+        if (state.statusFilter === 'missing_schema' && row.hasLocalBusiness) return false;
+        if (state.search) {
+          const haystack = `${row.url || ''} ${row.reason || ''}`.toLowerCase();
+          return haystack.includes(state.search);
+        }
+        return true;
+      });
+    }
+
+    function renderLocalSchemaTableRows() {
+      const tableBody = document.getElementById('impl-local-table-body');
+      if (!tableBody) return;
+      const filteredRows = filterLocalSchemaRows(implLocalSchemaTableState.rows, implLocalSchemaTableState);
+      const sortedRows = sortLocalSchemaRows(filteredRows, implLocalSchemaTableState.sortKey, implLocalSchemaTableState.sortDir);
+      if (!sortedRows.length) {
+        tableBody.innerHTML = '<tr><td colspan="5" class="ranking-table-empty">No rows match your filter.</td></tr>';
+        return;
+      }
+      tableBody.innerHTML = sortedRows.map((row) => {
+        const schemaMeta = row.hasLocalBusiness
+          ? { label: 'Present', chipClass: 'impl-status-green' }
+          : (row.rateLimited ? { label: 'Transient (429)', chipClass: 'impl-status-amber' } : { label: 'Missing', chipClass: 'impl-status-red' });
+        const passMeta = getPassFailMeta(row.pass);
+        const safeUrl = row.url || '';
+        const urlCell = safeUrl
+          ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color: #60a5fa; text-decoration: underline;">${safeUrl}</a>`
+          : '-';
+        return `
+          <tr>
+            <td style="word-break: break-word; text-align: left;">${urlCell}</td>
+            <td>${row.statusCode ?? '-'}</td>
+            <td><span class="impl-status-chip ${schemaMeta.chipClass}">${schemaMeta.label}</span></td>
+            <td><span class="impl-status-chip ${passMeta.chipClass}">${passMeta.label}</span></td>
+            <td>${row.reason || '-'}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    window.onImplLocalSort = function(sortKey) {
+      if (implLocalSchemaTableState.sortKey === sortKey) {
+        implLocalSchemaTableState.sortDir = implLocalSchemaTableState.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        implLocalSchemaTableState.sortKey = sortKey;
+        implLocalSchemaTableState.sortDir = 'asc';
+      }
+      renderLocalSchemaTableRows();
+    };
+
+    window.onImplLocalFilterChange = function() {
+      const statusEl = document.getElementById('impl-local-filter-status');
+      const searchEl = document.getElementById('impl-local-filter-search');
+      implLocalSchemaTableState.statusFilter = statusEl?.value || 'all';
+      implLocalSchemaTableState.search = String(searchEl?.value || '').trim().toLowerCase();
+      renderLocalSchemaTableRows();
+    };
+
+    function setImplLocalAuditButtonState(isLoading) {
+      const sampleBtn = document.getElementById('impl-local-run-sample-btn');
+      const fullBtn = document.getElementById('impl-local-run-full-btn');
+      if (sampleBtn) sampleBtn.disabled = isLoading;
+      if (fullBtn) fullBtn.disabled = isLoading;
+      if (sampleBtn) sampleBtn.textContent = isLoading && implLocalSchemaRunState.mode === 'sample' ? 'Running Sample...' : 'Run Sample Audit';
+      if (fullBtn) fullBtn.textContent = isLoading && implLocalSchemaRunState.mode === 'full' ? 'Running Whole-Site...' : 'Audit Whole Site URLs';
+    }
+
+    async function fetchAndRenderLocalBusinessSchemaStatus(modeOverride = null) {
+      const target = document.getElementById('impl-local-schema-status');
+      if (!target) return;
+      const requestedMode = modeOverride || implLocalSchemaRunState.mode || 'sample';
+      let auditSucceeded = true;
+      implLocalSchemaRunState.mode = requestedMode;
+      implLocalSchemaRunState.isLoading = true;
+      setImplLocalAuditButtonState(true);
+      showImplLocalProgressModal(requestedMode);
+
+      const property =
+        (document.getElementById('propertyUrl')?.value || '').trim() ||
+        (localStorage.getItem('gsc_property_url') || '').trim() ||
+        (localStorage.getItem('last_property_url') || '').trim() ||
+        'https://www.alanranger.com';
+
+      target.innerHTML = `<p class="card-subtitle">Running ${requestedMode === 'full' ? 'whole-site' : 'sample'} LocalBusiness schema checks...</p>`;
+      try {
+        const limitValue = document.getElementById('impl-local-limit-select')?.value || 'all';
+        const params = new URLSearchParams({
+          property,
+          includeSchemaScan: '1',
+          schemaMode: requestedMode
+        });
+        if (requestedMode === 'full' && limitValue !== 'all') {
+          params.set('schemaLimit', limitValue);
+        }
+        const response = await fetch(apiUrl(`/api/aigeo/local-signals?${params.toString()}`));
+        const payload = await response.json();
+        if (!response.ok || payload?.status !== 'ok' || !payload?.data) {
+          throw new Error(payload?.message || `HTTP ${response.status}`);
+        }
+        const scan = payload.data.localBusinessSchemaScan || {};
+        const pagesChecked = Number(scan.pagesChecked || 0);
+        const matchedPages = Number(scan.matchedPages || 0);
+        const missingPages = Number(scan.missingPages || 0);
+        const rateLimitedCount = Number(scan.rateLimitedCount || 0);
+        const passRatio = pagesChecked > 0 ? Math.round((matchedPages / pagesChecked) * 100) : 0;
+        const passVisual = getProgressVisuals(passRatio);
+        implLocalSchemaTableState.rows = Array.isArray(scan.results) ? scan.results : [];
+
+        target.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+            <div>
+              <strong style="font-size: 1.05rem;">LocalBusiness Schema Coverage</strong>
+              <div style="margin-top: 0.35rem; opacity: 0.9;">Property: ${property}</div>
+            </div>
+            <span class="impl-status-chip ${passRatio >= 70 ? 'impl-status-green' : (passRatio >= 30 ? 'impl-status-amber' : 'impl-status-red')}">${passRatio}%</span>
+          </div>
+          <div style="margin-top: 0.85rem;">
+            <div style="display: flex; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.3rem;">
+              <span>Schema coverage ratio</span>
+              <span>${passRatio}%</span>
+            </div>
+            <div class="impl-progress-track">
+              <div class="impl-progress-fill" style="width: ${passRatio}%; background: ${passVisual.color};"></div>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; margin-top: 1rem;">
+            <div class="card ${matchedPages > 0 ? 'impl-status-card-green' : 'impl-status-card-red'}" style="margin: 0;">
+              <strong>Pages With LocalBusiness</strong>
+              <div style="margin-top: 0.3rem;">${matchedPages}/${pagesChecked}</div>
+            </div>
+            <div class="card ${missingPages > 0 ? 'impl-status-card-amber' : 'impl-status-card-green'}" style="margin: 0;">
+              <strong>Pages Missing LocalBusiness</strong>
+              <div style="margin-top: 0.3rem;">${missingPages}</div>
+            </div>
+            <div class="card ${rateLimitedCount > 0 ? 'impl-status-card-amber' : 'impl-status-card-green'}" style="margin: 0;">
+              <strong>Rate-Limited (429)</strong>
+              <div style="margin-top: 0.3rem;">${rateLimitedCount}</div>
+              <div style="font-size: 0.8rem; opacity: 0.85; margin-top: 0.25rem;">Source: ${scan.source || 'unknown'} | Mode: ${scan.mode || requestedMode}</div>
+            </div>
+          </div>
+          <div style="margin-top: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <label style="display: flex; flex-direction: column; gap: 0.25rem;">
+              <span>Schema Status</span>
+              <select id="impl-local-filter-status" class="filter-control" onchange="window.onImplLocalFilterChange()">
+                <option value="all">All</option>
+                <option value="missing_schema">Missing schema</option>
+                <option value="has_schema">Has LocalBusiness schema</option>
+              </select>
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 0.25rem; min-width: 240px; flex: 1;">
+              <span>Search</span>
+              <input id="impl-local-filter-search" class="filter-control" type="text" placeholder="Filter by URL or reason..." oninput="window.onImplLocalFilterChange()" />
+            </label>
+          </div>
+          <div style="margin-top: 0.85rem; overflow-x: auto;">
+            <table class="ranking-table" id="impl-local-table">
+              <thead>
+                <tr>
+                  <th style="text-align: left;"><button type="button" class="btn btn-small" onclick="window.onImplLocalSort('url')">URL</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplLocalSort('statusCode')">HTTP</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplLocalSort('hasLocalBusiness')">LocalBusiness</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplLocalSort('pass')">Status</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplLocalSort('reason')">Reason</button></th>
+                </tr>
+              </thead>
+              <tbody id="impl-local-table-body">
+                <tr><td colspan="5" class="ranking-table-empty">Loading rows...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        `;
+        renderLocalSchemaTableRows();
+      } catch (error) {
+        auditSucceeded = false;
+        target.innerHTML = `<p class="card-subtitle">Could not load LocalBusiness schema audit: ${error.message}</p>`;
+      } finally {
+        implLocalSchemaRunState.isLoading = false;
+        setImplLocalAuditButtonState(false);
+        hideImplLocalProgressModal(auditSucceeded);
+      }
+    }
+
+    window.runImplLocalSchemaAudit = async function(mode) {
+      const nextMode = mode === 'full' ? 'full' : 'sample';
+      await fetchAndRenderLocalBusinessSchemaStatus(nextMode);
+    };
 
     const implTechFoundationTableState = {
       rows: [],
@@ -22387,6 +22708,7 @@
       }).join("");
 
       await fetchAndRenderTechnicalFoundationStatus();
+      await fetchAndRenderLocalBusinessSchemaStatus();
     };
 
     // Portfolio Tab Functions

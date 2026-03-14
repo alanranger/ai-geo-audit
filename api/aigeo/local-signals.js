@@ -15,6 +15,12 @@ import { getBusinessProfileAccessToken } from './utils.js';
 import fs from 'fs/promises';
 import path from 'path';
 
+const LOCAL_SCHEMA_DEFAULT_TIMEOUT_MS = 10000;
+const LOCAL_SCHEMA_DEFAULT_BATCH_SIZE = 25;
+const LOCAL_SCHEMA_DEFAULT_REQUEST_DELAY_MS = 80;
+const LOCAL_SCHEMA_DEFAULT_BATCH_DELAY_MS = 900;
+const LOCAL_SCHEMA_MAX_SCAN_LIMIT = 1000;
+
 function normalizePropertyUrl(value) {
   if (!value || typeof value !== 'string') return null;
   let raw = value.trim();
@@ -47,6 +53,280 @@ function hasLocationMatchForProperty(locations = [], propertyUrl) {
       return String(loc.websiteUri || '').toLowerCase().includes(propertyHost);
     }
   });
+}
+
+function parsePositiveInt(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n);
+}
+
+function clampInt(value, fallback, min, max) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function sleep(ms) {
+  const waitMs = Math.max(0, Number(ms) || 0);
+  if (!waitMs) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, waitMs));
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = LOCAL_SCHEMA_DEFAULT_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function normalizeAbsoluteHttpUrl(value) {
+  try {
+    const u = new URL(String(value || '').trim());
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return `${u.protocol}//${u.hostname}${u.pathname}${u.search}`;
+  } catch {
+    return null;
+  }
+}
+
+function extractLocEntries(xmlText) {
+  const out = [];
+  const re = /<loc>(.*?)<\/loc>/gi;
+  let match = re.exec(String(xmlText || ''));
+  while (match) {
+    const value = String(match[1] || '').trim();
+    if (value) out.push(value);
+    match = re.exec(String(xmlText || ''));
+  }
+  return out;
+}
+
+function extractJsonLdCandidates(html) {
+  const raw = String(html || '');
+  const scripts = [];
+  const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let match = re.exec(raw);
+  while (match) {
+    const text = String(match[1] || '').trim();
+    if (text) scripts.push(text);
+    match = re.exec(raw);
+  }
+  return scripts;
+}
+
+function nodeHasLocalBusinessType(node) {
+  if (!node || typeof node !== 'object') return false;
+  const rawType = node['@type'];
+  if (!rawType) return false;
+  const types = Array.isArray(rawType) ? rawType : [rawType];
+  return types.some((t) => String(t || '').toLowerCase().includes('localbusiness'));
+}
+
+function findLocalBusinessInJsonLd(node) {
+  if (!node || typeof node !== 'object') return false;
+  if (Array.isArray(node)) {
+    return node.some((child) => findLocalBusinessInJsonLd(child));
+  }
+  if (nodeHasLocalBusinessType(node)) return true;
+  if (Array.isArray(node['@graph']) && findLocalBusinessInJsonLd(node['@graph'])) return true;
+  return false;
+}
+
+function findLocalBusinessFromHtml(html) {
+  const candidates = extractJsonLdCandidates(html);
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (findLocalBusinessInJsonLd(parsed)) return true;
+    } catch {
+      // Ignore malformed JSON-LD blocks
+    }
+  }
+  return false;
+}
+
+async function readChildSitemapUrls(childSitemapUrl) {
+  try {
+    const response = await fetchWithTimeout(childSitemapUrl, { headers: { 'User-Agent': 'AI-GEO-Audit/1.0' } }, LOCAL_SCHEMA_DEFAULT_TIMEOUT_MS);
+    if (!response.ok) return [];
+    const text = await response.text();
+    if (!/<urlset[\s>]/i.test(text)) return [];
+    return extractLocEntries(text).map(normalizeAbsoluteHttpUrl).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function mapSitemapLocEntries(locEntries, urlLimit) {
+  return locEntries.map(normalizeAbsoluteHttpUrl).filter(Boolean).slice(0, urlLimit);
+}
+
+async function collectPagesFromChildSitemaps(childSitemaps, urlLimit) {
+  const pages = [];
+  const seen = new Set();
+  for (const child of childSitemaps) {
+    const childUrls = await readChildSitemapUrls(child);
+    for (const u of childUrls) {
+      if (seen.has(u)) continue;
+      seen.add(u);
+      pages.push(u);
+      if (pages.length >= urlLimit) return pages;
+    }
+  }
+  return pages;
+}
+
+async function fetchSitemapPageUrls(baseUrl, urlLimit = 300) {
+  const sitemapUrl = `${baseUrl}/sitemap.xml`;
+  try {
+    const response = await fetchWithTimeout(sitemapUrl, { headers: { 'User-Agent': 'AI-GEO-Audit/1.0' } }, LOCAL_SCHEMA_DEFAULT_TIMEOUT_MS);
+    if (!response.ok) return [];
+    const text = await response.text();
+    const locEntries = extractLocEntries(text);
+    if (/<urlset[\s>]/i.test(text)) return mapSitemapLocEntries(locEntries, urlLimit);
+    if (!/<sitemapindex[\s>]/i.test(text)) return [];
+    const childSitemaps = locEntries.slice(0, 100);
+    return collectPagesFromChildSitemaps(childSitemaps, urlLimit);
+  } catch {
+    return [];
+  }
+}
+
+function selectLocalSchemaScanUrls(baseUrl, sitemapUrls, mode = 'sample', limit = null) {
+  const unique = [];
+  const seen = new Set();
+  for (const raw of sitemapUrls || []) {
+    const normalized = normalizeAbsoluteHttpUrl(raw);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    unique.push(normalized);
+  }
+
+  if (!unique.length) {
+    return {
+      urls: [`${baseUrl}/`, `${baseUrl}/about`, `${baseUrl}/contact`],
+      source: 'fallback-defaults',
+      mode: 'sample'
+    };
+  }
+
+  if (mode === 'full') {
+    const max = clampInt(limit, unique.length, 1, LOCAL_SCHEMA_MAX_SCAN_LIMIT);
+    return { urls: unique.slice(0, max), source: 'sitemap-derived', mode: 'full' };
+  }
+
+  const preferred = [];
+  const keywords = ['contact', 'about', 'location', 'coventry', 'service', 'workshop'];
+  for (const keyword of keywords) {
+    const hit = unique.find((u) => u.toLowerCase().includes(keyword) && !preferred.includes(u));
+    if (hit) preferred.push(hit);
+    if (preferred.length >= 10) break;
+  }
+  for (const url of unique) {
+    if (preferred.length >= 10) break;
+    if (!preferred.includes(url)) preferred.push(url);
+  }
+
+  const max = clampInt(limit, 10, 1, 50);
+  return { urls: preferred.slice(0, max), source: 'sitemap-derived', mode: 'sample' };
+}
+
+async function scanLocalBusinessSchemaPages(urlsToCheck, options = {}) {
+  const batchSize = clampInt(options.batchSize, LOCAL_SCHEMA_DEFAULT_BATCH_SIZE, 1, 100);
+  const requestDelayMs = clampInt(options.requestDelayMs, LOCAL_SCHEMA_DEFAULT_REQUEST_DELAY_MS, 0, 5000);
+  const batchDelayMs = clampInt(options.batchDelayMs, LOCAL_SCHEMA_DEFAULT_BATCH_DELAY_MS, 0, 10000);
+  const timeoutMs = clampInt(options.timeoutMs, LOCAL_SCHEMA_DEFAULT_TIMEOUT_MS, 3000, 30000);
+
+  const results = [];
+  for (let i = 0; i < urlsToCheck.length; i += 1) {
+    const url = urlsToCheck[i];
+    results.push(await scanSingleLocalSchemaPage(url, timeoutMs));
+
+    const isLast = i === urlsToCheck.length - 1;
+    if (!isLast && requestDelayMs > 0) await sleep(requestDelayMs);
+    if (!isLast && (i + 1) % batchSize === 0 && batchDelayMs > 0) await sleep(batchDelayMs);
+  }
+
+  const pagesChecked = results.length;
+  const matchedPages = results.filter((r) => r.hasLocalBusiness).length;
+  const missingPages = pagesChecked - matchedPages;
+  const rateLimitedCount = results.filter((r) => r.rateLimited).length;
+  return {
+    pagesChecked,
+    matchedPages,
+    missingPages,
+    rateLimitedCount,
+    pass: missingPages === 0,
+    results
+  };
+}
+
+async function scanSingleLocalSchemaPage(url, timeoutMs) {
+  let statusCode = null;
+  let hasLocalBusiness = false;
+  let reason = 'No LocalBusiness JSON-LD detected';
+  try {
+    const response = await fetchWithTimeout(url, { headers: { 'User-Agent': 'AI-GEO-Audit/1.0' } }, timeoutMs);
+    statusCode = response.status;
+    if (response.ok) {
+      const html = await response.text();
+      hasLocalBusiness = findLocalBusinessFromHtml(html);
+      reason = hasLocalBusiness ? 'LocalBusiness JSON-LD detected' : 'No LocalBusiness JSON-LD detected';
+    } else {
+      reason = statusCode === 429 ? 'HTTP 429 (rate limited)' : `HTTP ${statusCode}`;
+    }
+  } catch (error) {
+    reason = `Fetch failed: ${error.message}`;
+  }
+  return {
+    url,
+    statusCode,
+    hasLocalBusiness,
+    pass: hasLocalBusiness,
+    rateLimited: statusCode === 429,
+    reason
+  };
+}
+
+function emptyLocalSchemaScan(mode = 'sample', source = 'not-run') {
+  return {
+    source,
+    mode,
+    pagesChecked: 0,
+    matchedPages: 0,
+    missingPages: 0,
+    rateLimitedCount: 0,
+    pass: false,
+    results: []
+  };
+}
+
+async function runLocalSchemaScan(propertyBaseUrl, mode, limit) {
+  const sitemapPageLimit = mode === 'full'
+    ? clampInt(limit, 400, 1, LOCAL_SCHEMA_MAX_SCAN_LIMIT)
+    : clampInt(limit, 25, 1, 80);
+  const sitemapUrls = await fetchSitemapPageUrls(propertyBaseUrl, sitemapPageLimit);
+  const selected = selectLocalSchemaScanUrls(propertyBaseUrl, sitemapUrls, mode, limit);
+  const localSchemaScan = await scanLocalBusinessSchemaPages(selected.urls, {
+    batchSize: mode === 'full' ? 25 : 10,
+    requestDelayMs: mode === 'full' ? 120 : 60,
+    batchDelayMs: mode === 'full' ? 1000 : 0
+  });
+  return {
+    source: selected.source,
+    mode: selected.mode,
+    pagesChecked: localSchemaScan.pagesChecked,
+    matchedPages: localSchemaScan.matchedPages,
+    missingPages: localSchemaScan.missingPages,
+    rateLimitedCount: localSchemaScan.rateLimitedCount,
+    pass: localSchemaScan.pass,
+    results: localSchemaScan.results
+  };
 }
 
 async function updateSupabaseGbp(propertyUrl, gbpRating, gbpReviewCount) {
@@ -255,15 +535,27 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { property, debug } = req.query;
+    const { property, debug, schemaMode, schemaLimit, includeSchemaScan } = req.query;
     const debugMode = String(debug || '').toLowerCase() === '1' || String(debug || '').toLowerCase() === 'true';
     const debugInfo = debugMode ? { locationDetails: [], locationDetailReadMask: [], reviewsApi: [] } : null;
+    const scanMode = String(schemaMode || 'sample').trim().toLowerCase() === 'full' ? 'full' : 'sample';
+    const scanLimit = parsePositiveInt(schemaLimit);
+    const shouldRunSchemaScan = String(includeSchemaScan || '').trim() === '1' || String(includeSchemaScan || '').trim().toLowerCase() === 'true';
     
     if (!property) {
       return res.status(400).json({
         status: 'error',
         source: 'local-signals',
         message: 'Missing required parameter: property',
+        meta: { generatedAt: new Date().toISOString() }
+      });
+    }
+    const normalizedProperty = normalizePropertyUrl(property);
+    if (!normalizedProperty) {
+      return res.status(400).json({
+        status: 'error',
+        source: 'local-signals',
+        message: 'Invalid property URL.',
         meta: { generatedAt: new Date().toISOString() }
       });
     }
@@ -294,7 +586,8 @@ export default async function handler(req, res) {
       source: 'local-signals',
       params: { property },
       data: {
-        localBusinessSchemaPages: 0,
+          localBusinessSchemaPages: 0,
+          localBusinessSchemaScan: emptyLocalSchemaScan(scanMode, 'unavailable'),
           napConsistencyScore: null,
         knowledgePanelDetected: false,
         serviceAreas: [],
@@ -357,6 +650,7 @@ export default async function handler(req, res) {
         },
         data: {
           localBusinessSchemaPages: 0,
+          localBusinessSchemaScan: emptyLocalSchemaScan(scanMode, 'unavailable'),
           napConsistencyScore: null,
           knowledgePanelDetected: false,
           serviceAreas: [],
@@ -664,9 +958,11 @@ export default async function handler(req, res) {
       }
     }
     
-    // Step 4: LocalBusiness schema detection would require website scanning
-    // This is a placeholder - would need to scan the website for LocalBusiness schema
-    const localBusinessSchemaPages = 0; // TODO: Implement schema scanning
+    // Step 4: LocalBusiness schema detection by scanning sitemap-derived pages
+    const localBusinessSchemaScan = shouldRunSchemaScan
+      ? await runLocalSchemaScan(normalizedProperty, scanMode, scanLimit)
+      : emptyLocalSchemaScan(scanMode, 'not-run');
+    const localBusinessSchemaPages = localBusinessSchemaScan.matchedPages;
     
     // Final logging before response
     const finalLocations = locationsToProcess.length > 0 ? locationsToProcess : locations;
@@ -698,6 +994,7 @@ export default async function handler(req, res) {
       params: { property },
       data: {
         localBusinessSchemaPages,
+        localBusinessSchemaScan,
         napConsistencyScore,
         knowledgePanelDetected: locations.length > 0, // If we have locations, likely has knowledge panel
         serviceAreas,
@@ -781,6 +1078,7 @@ export default async function handler(req, res) {
         params: { property },
         data: {
           localBusinessSchemaPages: 0,
+          localBusinessSchemaScan: emptyLocalSchemaScan(scanMode, 'unavailable'),
           napConsistencyScore: napConsistencyScore,
           knowledgePanelDetected: locations.length > 0,
           serviceAreas: serviceAreas,
@@ -819,6 +1117,7 @@ export default async function handler(req, res) {
       params: { property: req.query.property || null },
       data: {
         localBusinessSchemaPages: 0,
+        localBusinessSchemaScan: emptyLocalSchemaScan(String(req.query.schemaMode || 'sample').trim().toLowerCase() === 'full' ? 'full' : 'sample', 'unavailable'),
         napConsistencyScore: null,
         knowledgePanelDetected: false,
         serviceAreas: [],
