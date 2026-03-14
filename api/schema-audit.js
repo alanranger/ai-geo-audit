@@ -773,16 +773,25 @@ function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full') {
       });
     }
 
-    const blockIssues = pageIssues.filter((issue) => issue.severity === 'block_deploy');
-    const warningIssues = pageIssues.filter((issue) => issue.severity === 'warning');
+    const dedupedIssues = [];
+    const seenIssueKeys = new Set();
+    pageIssues.forEach((issue) => {
+      const issueKey = `${issue.severity}|${issue.code}|${issue.detail}`;
+      if (seenIssueKeys.has(issueKey)) return;
+      seenIssueKeys.add(issueKey);
+      dedupedIssues.push(issue);
+    });
+
+    const blockIssues = dedupedIssues.filter((issue) => issue.severity === 'block_deploy');
+    const warningIssues = dedupedIssues.filter((issue) => issue.severity === 'warning');
     let status = 'pass';
     if (blockIssues.length > 0) {
       status = 'block_deploy';
     } else if (warningIssues.length > 0) {
       status = 'warning';
     }
-    const summary = pageIssues.length > 0
-      ? pageIssues.slice(0, 3).map((issue) => issue.detail).join(' | ')
+    const summary = dedupedIssues.length > 0
+      ? dedupedIssues.slice(0, 3).map((issue) => issue.detail).join(' | ')
       : 'Schema QA checks passed';
 
     return {
@@ -792,7 +801,7 @@ function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full') {
       blockIssueCount: blockIssues.length,
       warningIssueCount: warningIssues.length,
       summary,
-      issueCodes: pageIssues.map((issue) => issue.code)
+      issueCodes: [...new Set(dedupedIssues.map((issue) => issue.code))]
     };
   });
 
