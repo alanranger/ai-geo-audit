@@ -652,6 +652,7 @@ const QA_REQUIRED_FIELDS_BY_TYPE = {
 const QA_SUPPORTED_TYPES = new Set(Object.keys(QA_REQUIRED_FIELDS_BY_TYPE));
 const ISO_DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_DATE_TIME_PREFIX_PATTERN = /^\d{4}-\d{2}-\d{2}T/;
+const QA_MAX_ISSUES_PER_ROW = 50;
 
 function hasValue(value) {
   if (value === null || value === undefined) return false;
@@ -713,7 +714,9 @@ function evaluateTypedSchemaNode(typeName, schemaNode) {
       issues.push({
         severity: 'block_deploy',
         code: 'missing_required_field',
-        detail: `${typeName}: missing required field "${fieldPath}"`
+        detail: `${typeName}: missing required field "${fieldPath}"`,
+        typeName,
+        fieldPath
       });
     }
   });
@@ -723,13 +726,17 @@ function evaluateTypedSchemaNode(typeName, schemaNode) {
     issues.push({
       severity: 'warning',
       code: 'missing_id',
-      detail: `${typeName}: missing @id`
+      detail: `${typeName}: missing @id`,
+      typeName,
+      fieldPath: '@id'
     });
   } else if (typeof atId === 'string' && !/^https?:\/\//i.test(atId.trim())) {
     issues.push({
       severity: 'warning',
       code: 'non_absolute_id',
-      detail: `${typeName}: @id is not absolute URL`
+      detail: `${typeName}: @id is not absolute URL`,
+      typeName,
+      fieldPath: '@id'
     });
   }
 
@@ -740,7 +747,9 @@ function evaluateTypedSchemaNode(typeName, schemaNode) {
       issues.push({
         severity: 'block_deploy',
         code: 'invalid_iso_date',
-        detail: `${typeName}: "${dateField}" is not valid ISO date`
+        detail: `${typeName}: "${dateField}" is not valid ISO date`,
+        typeName,
+        fieldPath: dateField
       });
     }
   });
@@ -755,13 +764,17 @@ function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full') {
       pageIssues.push({
         severity: 'warning',
         code: 'crawl_failed',
-        detail: `Crawl failed: ${result?.error || 'Unknown error'}`
+        detail: `Crawl failed: ${result?.error || 'Unknown error'}`,
+        typeName: 'Crawler',
+        fieldPath: null
       });
     } else if (!Array.isArray(result.schemas) || result.schemas.length === 0) {
       pageIssues.push({
         severity: 'block_deploy',
         code: 'missing_jsonld',
-        detail: 'No JSON-LD schema detected on page'
+        detail: 'No JSON-LD schema detected on page',
+        typeName: 'Page',
+        fieldPath: null
       });
     } else {
       result.schemas.forEach((schemaBlock) => {
@@ -801,7 +814,15 @@ function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full') {
       blockIssueCount: blockIssues.length,
       warningIssueCount: warningIssues.length,
       summary,
-      issueCodes: [...new Set(dedupedIssues.map((issue) => issue.code))]
+      issueCodes: [...new Set(dedupedIssues.map((issue) => issue.code))],
+      issueDetails: dedupedIssues.slice(0, QA_MAX_ISSUES_PER_ROW).map((issue) => ({
+        severity: issue.severity,
+        code: issue.code,
+        detail: issue.detail,
+        typeName: issue.typeName || null,
+        fieldPath: issue.fieldPath || null
+      })),
+      issueDetailsTruncated: dedupedIssues.length > QA_MAX_ISSUES_PER_ROW
     };
   });
 

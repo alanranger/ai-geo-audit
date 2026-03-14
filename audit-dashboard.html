@@ -22943,6 +22943,55 @@
       return { label: 'Pass', chipClass: 'impl-status-green' };
     }
 
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function getQaIssueKindMeta(row) {
+      const details = Array.isArray(row?.issueDetails) ? row.issueDetails : [];
+      const hasToolingIssue = details.some((issue) => issue?.code === 'crawl_failed')
+        || Number(row?.statusCode || 0) === 429;
+      const hasAnyIssue = details.length > 0 || Number(row?.blockIssueCount || 0) > 0 || Number(row?.warningIssueCount || 0) > 0;
+      if (!hasAnyIssue) return { label: 'No issue', chipClass: 'impl-status-green' };
+      if (hasToolingIssue) return { label: 'Tooling issue', chipClass: 'impl-status-amber' };
+      return { label: 'Real issue', chipClass: 'impl-status-red' };
+    }
+
+    function renderQaIssueDetails(row) {
+      const details = Array.isArray(row?.issueDetails) ? row.issueDetails : [];
+      if (!details.length) return '<span style="opacity: 0.8;">No failing fields</span>';
+      const issueList = details.map((issue) => {
+        const severity = issue?.severity === 'block_deploy' ? 'block_deploy' : 'warning';
+        const code = escapeHtml(issue?.code || 'unknown_issue');
+        const fieldPath = issue?.fieldPath ? ` | field: <code>${escapeHtml(issue.fieldPath)}</code>` : '';
+        const typeName = issue?.typeName ? ` | type: <code>${escapeHtml(issue.typeName)}</code>` : '';
+        return `
+          <li style="margin-bottom: 0.35rem;">
+            <span class="impl-status-chip ${severity === 'block_deploy' ? 'impl-status-red' : 'impl-status-amber'}" style="margin-right: 0.35rem;">${severity === 'block_deploy' ? 'Block' : 'Warn'}</span>
+            <code>${code}</code>${typeName}${fieldPath}
+            <div style="margin-top: 0.2rem; opacity: 0.92;">${escapeHtml(issue?.detail || '')}</div>
+          </li>
+        `;
+      }).join('');
+      const truncationNote = row?.issueDetailsTruncated
+        ? '<div style="margin-top: 0.35rem; font-size: 0.8rem; opacity: 0.8;">Showing first 50 issues for this row.</div>'
+        : '';
+      return `
+        <details>
+          <summary style="cursor: pointer;">View exact failing fields (${details.length})</summary>
+          <ul style="margin: 0.5rem 0 0; padding-left: 1rem;">
+            ${issueList}
+          </ul>
+          ${truncationNote}
+        </details>
+      `;
+    }
+
     function sortQaRows(rows, sortKey, sortDir) {
       const dir = sortDir === 'desc' ? -1 : 1;
       const statusWeight = (status) => {
@@ -22972,7 +23021,10 @@
       return rows.filter((row) => {
         if (state.statusFilter !== 'all' && row.status !== state.statusFilter) return false;
         if (!state.search) return true;
-        const haystack = `${row.url || ''} ${row.summary || ''}`.toLowerCase();
+        const detailText = Array.isArray(row?.issueDetails)
+          ? row.issueDetails.map((issue) => `${issue?.detail || ''} ${issue?.code || ''} ${issue?.fieldPath || ''}`).join(' ')
+          : '';
+        const haystack = `${row.url || ''} ${row.summary || ''} ${detailText}`.toLowerCase();
         return haystack.includes(state.search);
       });
     }
@@ -22993,7 +23045,7 @@
       const nextBtn = document.getElementById('impl-qa-page-next');
 
       if (!sortedRows.length) {
-        tableBody.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No rows match your filter.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="7" class="ranking-table-empty">No rows match your filter.</td></tr>';
         if (infoEl) infoEl.textContent = '0 results';
         if (prevBtn) prevBtn.disabled = true;
         if (nextBtn) nextBtn.disabled = true;
@@ -23002,18 +23054,23 @@
 
       tableBody.innerHTML = pageRows.map((row) => {
         const statusMeta = getQaStatusMeta(row.status);
+        const issueKindMeta = getQaIssueKindMeta(row);
         const safeUrl = row.url || '';
         const urlCell = safeUrl
-          ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color: #60a5fa; text-decoration: underline;">${safeUrl}</a>`
+          ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" style="color: #60a5fa; text-decoration: underline;">${escapeHtml(safeUrl)}</a>`
           : '-';
         return `
           <tr>
             <td style="word-break: break-word; text-align: left;">${urlCell}</td>
             <td>${row.statusCode ?? '-'}</td>
             <td><span class="impl-status-chip ${statusMeta.chipClass}">${statusMeta.label}</span></td>
+            <td><span class="impl-status-chip ${issueKindMeta.chipClass}">${issueKindMeta.label}</span></td>
             <td>${Number(row.blockIssueCount || 0)}</td>
             <td>${Number(row.warningIssueCount || 0)}</td>
-            <td>${row.summary || '-'}</td>
+            <td style="text-align: left;">
+              <div style="margin-bottom: 0.35rem;">${escapeHtml(row.summary || '-')}</div>
+              ${renderQaIssueDetails(row)}
+            </td>
           </tr>
         `;
       }).join('');
@@ -23154,13 +23211,14 @@
                   <th style="text-align: left;"><button type="button" class="btn btn-small" onclick="window.onImplQaSort('url')">URL</button></th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplQaSort('statusCode')">HTTP</button></th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplQaSort('status')">QA Status</button></th>
+                  <th>Issue Type</th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplQaSort('blockIssueCount')">Block Issues</button></th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplQaSort('warningIssueCount')">Warnings</button></th>
-                  <th><button type="button" class="btn btn-small" onclick="window.onImplQaSort('summary')">Summary</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplQaSort('summary')">Summary + Exact Fields</button></th>
                 </tr>
               </thead>
               <tbody id="impl-qa-table-body">
-                <tr><td colspan="6" class="ranking-table-empty">Loading rows...</td></tr>
+                <tr><td colspan="7" class="ranking-table-empty">Loading rows...</td></tr>
               </tbody>
             </table>
           </div>
