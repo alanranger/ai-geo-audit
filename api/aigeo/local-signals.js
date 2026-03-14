@@ -20,6 +20,10 @@ const LOCAL_SCHEMA_DEFAULT_BATCH_SIZE = 25;
 const LOCAL_SCHEMA_DEFAULT_REQUEST_DELAY_MS = 80;
 const LOCAL_SCHEMA_DEFAULT_BATCH_DELAY_MS = 900;
 const LOCAL_SCHEMA_MAX_SCAN_LIMIT = 1000;
+const LOCAL_SCHEMA_DEFAULT_RETRIES = 2;
+const LOCAL_SCHEMA_DEFAULT_RETRY_BASE_DELAY_MS = 1200;
+const LOCAL_SCHEMA_RETRY_COOLDOWN_MS = 10000;
+const LOCAL_SCHEMA_RETRY_REQUEST_DELAY_MS = 1200;
 
 function normalizePropertyUrl(value) {
   if (!value || typeof value !== 'string') return null;
@@ -241,38 +245,93 @@ async function scanLocalBusinessSchemaPages(urlsToCheck, options = {}) {
   const requestDelayMs = clampInt(options.requestDelayMs, LOCAL_SCHEMA_DEFAULT_REQUEST_DELAY_MS, 0, 5000);
   const batchDelayMs = clampInt(options.batchDelayMs, LOCAL_SCHEMA_DEFAULT_BATCH_DELAY_MS, 0, 10000);
   const timeoutMs = clampInt(options.timeoutMs, LOCAL_SCHEMA_DEFAULT_TIMEOUT_MS, 3000, 30000);
+  const retries = clampInt(options.retries, LOCAL_SCHEMA_DEFAULT_RETRIES, 0, 6);
+  const retryBaseDelayMs = clampInt(options.retryBaseDelayMs, LOCAL_SCHEMA_DEFAULT_RETRY_BASE_DELAY_MS, 250, 12000);
 
   const results = [];
   for (let i = 0; i < urlsToCheck.length; i += 1) {
     const url = urlsToCheck[i];
-    results.push(await scanSingleLocalSchemaPage(url, timeoutMs));
+    results.push(await attemptSingleLocalSchemaPage(url, {
+      timeoutMs,
+      retries,
+      retryBaseDelayMs
+    }));
 
     const isLast = i === urlsToCheck.length - 1;
     if (!isLast && requestDelayMs > 0) await sleep(requestDelayMs);
     if (!isLast && (i + 1) % batchSize === 0 && batchDelayMs > 0) await sleep(batchDelayMs);
   }
 
+  const retry = await rerunRateLimitedLocalSchemaRows(results, {
+    timeoutMs,
+    retries: retries + 1,
+    retryBaseDelayMs: Math.max(retryBaseDelayMs, 2000),
+    cooldownMs: LOCAL_SCHEMA_RETRY_COOLDOWN_MS,
+    retryRequestDelayMs: LOCAL_SCHEMA_RETRY_REQUEST_DELAY_MS
+  });
+
   const pagesChecked = results.length;
   const matchedPages = results.filter((r) => r.hasLocalBusiness).length;
-  const missingPages = pagesChecked - matchedPages;
   const rateLimitedCount = results.filter((r) => r.rateLimited).length;
+  const unknownPages = rateLimitedCount;
+  const missingPages = results.filter((r) => !r.hasLocalBusiness && !r.rateLimited).length;
   return {
     pagesChecked,
     matchedPages,
     missingPages,
+    unknownPages,
     rateLimitedCount,
     pass: missingPages === 0,
+    retry,
     results
   };
+}
+
+function parseRetryAfterMs(retryAfterHeader) {
+  const value = String(retryAfterHeader || '').trim();
+  if (!value) return null;
+  const asNumber = Number(value);
+  if (Number.isFinite(asNumber) && asNumber >= 0) return Math.floor(asNumber * 1000);
+  const retryDate = Date.parse(value);
+  if (!Number.isFinite(retryDate)) return null;
+  const waitMs = retryDate - Date.now();
+  return waitMs > 0 ? waitMs : null;
+}
+
+function computeBackoffDelayMs(attempt, retryBaseDelayMs, retryAfterMs = null) {
+  if (Number.isFinite(retryAfterMs) && retryAfterMs >= 0) return Math.min(15000, Math.floor(retryAfterMs));
+  const exp = Math.max(0, Number(attempt) || 0);
+  const base = Math.max(250, Number(retryBaseDelayMs) || LOCAL_SCHEMA_DEFAULT_RETRY_BASE_DELAY_MS);
+  return Math.min(15000, Math.floor(base * (2 ** exp)));
+}
+
+async function attemptSingleLocalSchemaPage(url, options = {}) {
+  const timeoutMs = clampInt(options.timeoutMs, LOCAL_SCHEMA_DEFAULT_TIMEOUT_MS, 3000, 30000);
+  const retries = clampInt(options.retries, LOCAL_SCHEMA_DEFAULT_RETRIES, 0, 6);
+  const retryBaseDelayMs = clampInt(options.retryBaseDelayMs, LOCAL_SCHEMA_DEFAULT_RETRY_BASE_DELAY_MS, 250, 12000);
+
+  let attempt = 0;
+  while (attempt <= retries) {
+    const row = await scanSingleLocalSchemaPage(url, timeoutMs);
+    if (!row.rateLimited) return row;
+    if (attempt >= retries) return row;
+    const retryAfterMs = parseRetryAfterMs(row.retryAfter || '');
+    const waitMs = computeBackoffDelayMs(attempt, retryBaseDelayMs, retryAfterMs);
+    if (waitMs > 0) await sleep(waitMs);
+    attempt += 1;
+  }
+  return scanSingleLocalSchemaPage(url, timeoutMs);
 }
 
 async function scanSingleLocalSchemaPage(url, timeoutMs) {
   let statusCode = null;
   let hasLocalBusiness = false;
   let reason = 'No LocalBusiness JSON-LD detected';
+  let retryAfter = null;
   try {
     const response = await fetchWithTimeout(url, { headers: { 'User-Agent': 'AI-GEO-Audit/1.0' } }, timeoutMs);
     statusCode = response.status;
+    retryAfter = response.headers?.get('retry-after') || null;
     if (response.ok) {
       const html = await response.text();
       hasLocalBusiness = findLocalBusinessFromHtml(html);
@@ -283,13 +342,51 @@ async function scanSingleLocalSchemaPage(url, timeoutMs) {
   } catch (error) {
     reason = `Fetch failed: ${error.message}`;
   }
+  let pass = false;
+  if (hasLocalBusiness) pass = true;
+  else if (statusCode === 429) pass = null;
   return {
     url,
     statusCode,
     hasLocalBusiness,
-    pass: hasLocalBusiness,
+    pass,
     rateLimited: statusCode === 429,
+    retryAfter,
     reason
+  };
+}
+
+async function rerunRateLimitedLocalSchemaRows(results, options = {}) {
+  const targetIndexes = [];
+  for (let i = 0; i < results.length; i += 1) {
+    if (results[i]?.rateLimited) targetIndexes.push(i);
+  }
+  if (!targetIndexes.length) {
+    return { retried: 0, resolved: 0, stillRateLimited: 0 };
+  }
+
+  const retries = clampInt(options.retries, LOCAL_SCHEMA_DEFAULT_RETRIES + 1, 0, 6);
+  const timeoutMs = clampInt(options.timeoutMs, LOCAL_SCHEMA_DEFAULT_TIMEOUT_MS, 3000, 30000);
+  const retryBaseDelayMs = clampInt(options.retryBaseDelayMs, 2000, 250, 12000);
+  const cooldownMs = clampInt(options.cooldownMs, LOCAL_SCHEMA_RETRY_COOLDOWN_MS, 0, 20000);
+  const retryRequestDelayMs = clampInt(options.retryRequestDelayMs, LOCAL_SCHEMA_RETRY_REQUEST_DELAY_MS, 0, 5000);
+  if (cooldownMs > 0) await sleep(cooldownMs);
+
+  let resolved = 0;
+  for (let i = 0; i < targetIndexes.length; i += 1) {
+    const idx = targetIndexes[i];
+    const prev = results[idx];
+    const updated = await attemptSingleLocalSchemaPage(prev.url, { timeoutMs, retries, retryBaseDelayMs });
+    results[idx] = updated;
+    if (!updated.rateLimited) resolved += 1;
+    const isLast = i === targetIndexes.length - 1;
+    if (!isLast && retryRequestDelayMs > 0) await sleep(retryRequestDelayMs);
+  }
+
+  return {
+    retried: targetIndexes.length,
+    resolved,
+    stillRateLimited: targetIndexes.length - resolved
   };
 }
 
@@ -300,8 +397,14 @@ function emptyLocalSchemaScan(mode = 'sample', source = 'not-run') {
     pagesChecked: 0,
     matchedPages: 0,
     missingPages: 0,
+    unknownPages: 0,
     rateLimitedCount: 0,
     pass: false,
+    retry: {
+      retried: 0,
+      resolved: 0,
+      stillRateLimited: 0
+    },
     results: []
   };
 }
@@ -323,8 +426,10 @@ async function runLocalSchemaScan(propertyBaseUrl, mode, limit) {
     pagesChecked: localSchemaScan.pagesChecked,
     matchedPages: localSchemaScan.matchedPages,
     missingPages: localSchemaScan.missingPages,
+    unknownPages: localSchemaScan.unknownPages,
     rateLimitedCount: localSchemaScan.rateLimitedCount,
     pass: localSchemaScan.pass,
+    retry: localSchemaScan.retry,
     results: localSchemaScan.results
   };
 }

@@ -22126,7 +22126,8 @@
     function filterLocalSchemaRows(rows, state) {
       return rows.filter((row) => {
         if (state.statusFilter === 'has_schema' && !row.hasLocalBusiness) return false;
-        if (state.statusFilter === 'missing_schema' && row.hasLocalBusiness) return false;
+        if (state.statusFilter === 'missing_schema' && (row.hasLocalBusiness || row.rateLimited)) return false;
+        if (state.statusFilter === 'unknown_retry' && !row.rateLimited) return false;
         if (state.search) {
           const haystack = `${row.url || ''} ${row.reason || ''}`.toLowerCase();
           return haystack.includes(state.search);
@@ -22161,7 +22162,9 @@
         const schemaMeta = row.hasLocalBusiness
           ? { label: 'Present', chipClass: 'impl-status-green' }
           : (row.rateLimited ? { label: 'Transient (429)', chipClass: 'impl-status-amber' } : { label: 'Missing', chipClass: 'impl-status-red' });
-        const passMeta = getPassFailMeta(row.pass);
+        const passMeta = row.rateLimited
+          ? { label: 'Unknown (Retry needed)', chipClass: 'impl-status-amber' }
+          : getPassFailMeta(!!row.pass);
         const safeUrl = row.url || '';
         const urlCell = safeUrl
           ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color: #60a5fa; text-decoration: underline;">${safeUrl}</a>`
@@ -22261,9 +22264,12 @@
         const pagesChecked = Number(scan.pagesChecked || 0);
         const matchedPages = Number(scan.matchedPages || 0);
         const missingPages = Number(scan.missingPages || 0);
+        const unknownPages = Number(scan.unknownPages || scan.rateLimitedCount || 0);
         const rateLimitedCount = Number(scan.rateLimitedCount || 0);
-        const passRatio = pagesChecked > 0 ? Math.round((matchedPages / pagesChecked) * 100) : 0;
+        const knownPages = Math.max(0, pagesChecked - unknownPages);
+        const passRatio = knownPages > 0 ? Math.round((matchedPages / knownPages) * 100) : 0;
         const passVisual = getProgressVisuals(passRatio);
+        const retry = scan.retry || {};
         implLocalSchemaTableState.rows = Array.isArray(scan.results) ? scan.results : [];
         implLocalSchemaTableState.page = 1;
 
@@ -22277,7 +22283,7 @@
           </div>
           <div style="margin-top: 0.85rem;">
             <div style="display: flex; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.3rem;">
-              <span>Schema coverage ratio</span>
+              <span>Schema coverage ratio (known pages)</span>
               <span>${passRatio}%</span>
             </div>
             <div class="impl-progress-track">
@@ -22287,16 +22293,16 @@
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; margin-top: 1rem;">
             <div class="card ${matchedPages > 0 ? 'impl-status-card-green' : 'impl-status-card-red'}" style="margin: 0;">
               <strong>Pages With LocalBusiness</strong>
-              <div style="margin-top: 0.3rem;">${matchedPages}/${pagesChecked}</div>
+              <div style="margin-top: 0.3rem;">${matchedPages}/${knownPages || pagesChecked}</div>
             </div>
             <div class="card ${missingPages > 0 ? 'impl-status-card-amber' : 'impl-status-card-green'}" style="margin: 0;">
-              <strong>Pages Missing LocalBusiness</strong>
+              <strong>Confirmed Missing LocalBusiness</strong>
               <div style="margin-top: 0.3rem;">${missingPages}</div>
             </div>
             <div class="card ${rateLimitedCount > 0 ? 'impl-status-card-amber' : 'impl-status-card-green'}" style="margin: 0;">
-              <strong>Rate-Limited (429)</strong>
-              <div style="margin-top: 0.3rem;">${rateLimitedCount}</div>
-              <div style="font-size: 0.8rem; opacity: 0.85; margin-top: 0.25rem;">Source: ${scan.source || 'unknown'} | Mode: ${scan.mode || requestedMode}</div>
+              <strong>Unknown / Retry Needed (429)</strong>
+              <div style="margin-top: 0.3rem;">${unknownPages}</div>
+              <div style="font-size: 0.8rem; opacity: 0.85; margin-top: 0.25rem;">Retry pass: ${Number(retry.resolved || 0)} resolved, ${Number(retry.stillRateLimited || 0)} still limited | Source: ${scan.source || 'unknown'} | Mode: ${scan.mode || requestedMode}</div>
             </div>
           </div>
           <div style="margin-top: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
@@ -22306,6 +22312,7 @@
                 <option value="all">All</option>
                 <option value="missing_schema">Missing schema</option>
                 <option value="has_schema">Has LocalBusiness schema</option>
+                <option value="unknown_retry">Unknown (429 retry needed)</option>
               </select>
             </label>
             <label style="display: flex; flex-direction: column; gap: 0.25rem; min-width: 240px; flex: 1;">
