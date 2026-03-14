@@ -704,13 +704,15 @@ function collectTypedNodes(node, bucket = [], depth = 0) {
   return bucket;
 }
 
-function evaluateTypedSchemaNode(typeName, schemaNode) {
+function evaluateTypedSchemaTypeGroup(typeName, schemaNodes = []) {
   const issues = [];
   const requiredFields = QA_REQUIRED_FIELDS_BY_TYPE[typeName] || [];
+  const nodes = Array.isArray(schemaNodes) ? schemaNodes : [];
+  if (!nodes.length) return issues;
 
   requiredFields.forEach((fieldPath) => {
-    const fieldValue = getPathValue(schemaNode, fieldPath);
-    if (!hasValue(fieldValue)) {
+    const hasFieldInAnyNode = nodes.some((schemaNode) => hasValue(getPathValue(schemaNode, fieldPath)));
+    if (!hasFieldInAnyNode) {
       issues.push({
         severity: 'block_deploy',
         code: 'missing_required_field',
@@ -721,8 +723,13 @@ function evaluateTypedSchemaNode(typeName, schemaNode) {
     }
   });
 
-  const atId = schemaNode?.['@id'];
-  if (!hasValue(atId)) {
+  const idValues = nodes
+    .map((schemaNode) => (typeof schemaNode?.['@id'] === 'string' ? schemaNode['@id'].trim() : ''))
+    .filter(Boolean);
+  const hasAnyId = idValues.length > 0;
+  const hasAnyAbsoluteId = idValues.some((atId) => /^https?:\/\//i.test(atId));
+
+  if (!hasAnyId) {
     issues.push({
       severity: 'warning',
       code: 'missing_id',
@@ -730,7 +737,7 @@ function evaluateTypedSchemaNode(typeName, schemaNode) {
       typeName,
       fieldPath: '@id'
     });
-  } else if (typeof atId === 'string' && !/^https?:\/\//i.test(atId.trim())) {
+  } else if (!hasAnyAbsoluteId) {
     issues.push({
       severity: 'warning',
       code: 'non_absolute_id',
@@ -741,9 +748,12 @@ function evaluateTypedSchemaNode(typeName, schemaNode) {
   }
 
   QA_DATE_FIELDS.forEach((dateField) => {
-    const rawDate = getPathValue(schemaNode, dateField);
-    if (!hasValue(rawDate) || typeof rawDate !== 'string') return;
-    if (!isValidIsoDateString(rawDate)) {
+    const dateValues = nodes
+      .map((schemaNode) => getPathValue(schemaNode, dateField))
+      .filter((rawDate) => hasValue(rawDate) && typeof rawDate === 'string');
+    if (!dateValues.length) return;
+    const hasValidDate = dateValues.some((rawDate) => isValidIsoDateString(rawDate));
+    if (!hasValidDate) {
       issues.push({
         severity: 'block_deploy',
         code: 'invalid_iso_date',
@@ -777,12 +787,17 @@ function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full') {
         fieldPath: null
       });
     } else {
+      const typedNodeMap = new Map();
       result.schemas.forEach((schemaBlock) => {
         const typedNodes = collectTypedNodes(schemaBlock);
         typedNodes.forEach(({ type, node }) => {
           if (!QA_SUPPORTED_TYPES.has(type)) return;
-          pageIssues.push(...evaluateTypedSchemaNode(type, node));
+          if (!typedNodeMap.has(type)) typedNodeMap.set(type, []);
+          typedNodeMap.get(type).push(node);
         });
+      });
+      typedNodeMap.forEach((nodes, typeName) => {
+        pageIssues.push(...evaluateTypedSchemaTypeGroup(typeName, nodes));
       });
     }
 
