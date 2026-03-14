@@ -601,6 +601,53 @@ function detectRichResultEligibility(typesArray) {
   return eligible;
 }
 
+function isServiceIntentUrl(url) {
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    if (!pathname || pathname === '/') return false;
+    const serviceHints = [
+      '/photography-services',
+      '/service',
+      '/services',
+      '/professional-commercial-photographer',
+      '/commercial-photographer',
+      '/photo-print-preparation-service',
+      '/camera-sensor-clean'
+    ];
+    return serviceHints.some((hint) => pathname.includes(hint));
+  } catch {
+    return false;
+  }
+}
+
+function buildServiceSchemaCoverage(pages = []) {
+  const servicePages = [];
+  const servicePagesMissingSchema = [];
+  let pagesWithServiceSchema = 0;
+
+  pages.forEach((page) => {
+    if (!isServiceIntentUrl(page?.url || '')) return;
+    servicePages.push(page.url);
+    const types = Array.isArray(page.schemaTypes) ? page.schemaTypes : [];
+    const hasService = types.some((type) => String(type || '').toLowerCase() === 'service');
+    if (hasService) pagesWithServiceSchema += 1;
+    else servicePagesMissingSchema.push(page.url);
+  });
+
+  const totalServicePages = servicePages.length;
+  const serviceCoverage = totalServicePages > 0
+    ? Math.round((pagesWithServiceSchema / totalServicePages) * 10000) / 100
+    : 0;
+
+  return {
+    totalServicePages,
+    pagesWithServiceSchema,
+    serviceCoverage,
+    missingServiceSchemaCount: servicePagesMissingSchema.length,
+    missingServiceSchemaPages: servicePagesMissingSchema.length > 0 ? servicePagesMissingSchema : []
+  };
+}
+
 /**
  * Get parent collection page URL for a given URL
  * Returns null if no parent collection page exists
@@ -1479,7 +1526,7 @@ export default async function handler(req, res) {
     const coverage = totalPages > 0 ? (pagesWithSchema / totalPages) * 100 : 0;
     
     // Determine missing types (common types that should be present)
-    const commonTypes = ['Organization', 'Person', 'LocalBusiness', 'WebSite', 'BreadcrumbList'];
+    const commonTypes = ['Organization', 'Person', 'LocalBusiness', 'WebSite', 'BreadcrumbList', 'Service'];
     const missingTypes = commonTypes.filter(type => !allTypes.has(type));
     
     // Debug: Log all detected types and check for BreadcrumbList and Review
@@ -1521,6 +1568,7 @@ export default async function handler(req, res) {
       error: result.success ? null : (result.error || null),
       errorType: result.success ? null : (result.errorType || null)
     }));
+    const serviceSchemaCoverage = buildServiceSchemaCoverage(pages);
     
     return res.status(200).json({
       status: 'ok',
@@ -1535,6 +1583,7 @@ export default async function handler(req, res) {
         missingTypes: missingTypes.length > 0 ? missingTypes : undefined,
         missingSchemaCount: missingSchemaPages.length,
         missingSchemaPages: missingSchemaPages.length > 0 ? missingSchemaPages : undefined,
+        serviceSchemaCoverage,
         richEligible,
         errors: errors.length > 0 ? errors : undefined,
         pages // Array of all pages with metadata (title, metaDescription)
