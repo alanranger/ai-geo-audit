@@ -894,9 +894,14 @@ function evaluateTypedSchemaTypeGroup(typeName, schemaNodes = []) {
   const requiredFields = QA_REQUIRED_FIELDS_BY_TYPE[typeName] || [];
   const nodes = Array.isArray(schemaNodes) ? schemaNodes : [];
   if (!nodes.length) return issues;
+  const actionableNodes = nodes.filter((schemaNode) => {
+    if (!schemaNode || typeof schemaNode !== 'object') return false;
+    return schemaNode._recovered !== true && schemaNode._parseError !== true;
+  });
+  if (!actionableNodes.length) return issues;
 
   requiredFields.forEach((fieldPath) => {
-    const hasFieldInAnyNode = nodes.some((schemaNode) => hasValue(getPathValue(schemaNode, fieldPath)));
+    const hasFieldInAnyNode = actionableNodes.some((schemaNode) => hasValue(getPathValue(schemaNode, fieldPath)));
     if (!hasFieldInAnyNode) {
       issues.push({
         severity: 'block_deploy',
@@ -908,7 +913,7 @@ function evaluateTypedSchemaTypeGroup(typeName, schemaNodes = []) {
     }
   });
 
-  const idValues = nodes
+  const idValues = actionableNodes
     .map((schemaNode) => (typeof schemaNode?.['@id'] === 'string' ? schemaNode['@id'].trim() : ''))
     .filter(Boolean);
   const hasAnyId = idValues.length > 0;
@@ -934,7 +939,7 @@ function evaluateTypedSchemaTypeGroup(typeName, schemaNodes = []) {
   }
 
   QA_DATE_FIELDS.forEach((dateField) => {
-    const dateValues = nodes
+    const dateValues = actionableNodes
       .map((schemaNode) => getPathValue(schemaNode, dateField))
       .filter((rawDate) => hasValue(rawDate) && typeof rawDate === 'string');
     if (!dateValues.length) return;
