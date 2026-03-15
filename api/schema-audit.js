@@ -663,13 +663,32 @@ function tierKeyFromHeader(header) {
 
 function toQaTierUrlKey(rawUrl) {
   try {
-    const parsed = new URL(String(rawUrl || '').trim(), 'https://www.alanranger.com');
-    const host = parsed.hostname.toLowerCase();
-    let path = parsed.pathname.toLowerCase();
-    if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
-    return `${host}${path || '/'}`;
+    let url = String(rawUrl || '').trim().toLowerCase();
+    if (!url) return '';
+    url = url.replace(/^https?:\/\//, '');
+    url = url.split('#')[0].split('?')[0];
+    const slashIndex = url.indexOf('/');
+    if (slashIndex > -1) {
+      url = url.slice(slashIndex);
+    } else {
+      url = `/${url}`;
+    }
+    url = url.replace(/^www\./, '');
+    try { url = decodeURIComponent(url); } catch {}
+    if (url.length > 1 && url.endsWith('/')) url = url.slice(0, -1);
+    return url;
   } catch {
     return null;
+  }
+}
+
+function setQaTierLookupWithAliases(lookup, key, tier) {
+  if (!(lookup instanceof Map) || !key || !tier) return;
+  lookup.set(key, tier);
+  if (/\/home$/i.test(key)) {
+    lookup.set(key.replace(/\/home$/i, '/'), tier);
+  } else if (/\/$/i.test(key)) {
+    lookup.set(key.replace(/\/$/i, '/home'), tier);
   }
 }
 
@@ -711,7 +730,7 @@ async function getQaTierSegmentationLookup() {
       if (!raw) return;
       const key = toQaTierUrlKey(raw);
       if (!key) return;
-      if (!lookup.has(key)) lookup.set(key, tier);
+      if (!lookup.has(key)) setQaTierLookupWithAliases(lookup, key, tier);
     });
   });
 
@@ -1585,10 +1604,10 @@ export default async function handler(req, res) {
       let noUrlMessage = '';
       if (runServiceOnly) {
         noUrlMessage = 'No service-intent URLs matched the current source list.';
-      } else if (runTier !== 'all') {
-        noUrlMessage = `No URLs matched tier "${runTier}" in the current source list.`;
-      } else {
+      } else if (runTier === 'all') {
         noUrlMessage = 'No URLs found in CSV file';
+      } else {
+        noUrlMessage = `No URLs matched tier "${runTier}" in the current source list.`;
       }
       return res.status(400).json({
         status: 'error',

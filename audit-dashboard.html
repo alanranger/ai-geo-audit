@@ -22968,6 +22968,50 @@
       return 'Tier F Unmapped';
     }
 
+    function getQaTierOptionDefs() {
+      return [
+        { value: 'all', label: 'All tiers' },
+        { value: 'landing', label: 'Tier A Landing' },
+        { value: 'product', label: 'Tier B Product' },
+        { value: 'event', label: 'Tier C Event' },
+        { value: 'blog', label: 'Tier D Blog' },
+        { value: 'academy', label: 'Tier E Academy' },
+        { value: 'unmapped', label: 'Tier F Unmapped' }
+      ];
+    }
+
+    function countQaRowsByTier(rows) {
+      const counts = { all: Array.isArray(rows) ? rows.length : 0 };
+      getQaTierOptionDefs()
+        .filter((option) => option.value !== 'all')
+        .forEach((option) => {
+          counts[option.value] = 0;
+        });
+      (Array.isArray(rows) ? rows : []).forEach((row) => {
+        const key = String(row?.pageTier || 'unmapped').trim().toLowerCase();
+        if (Object.prototype.hasOwnProperty.call(counts, key)) {
+          counts[key] += 1;
+        } else {
+          counts.unmapped += 1;
+        }
+      });
+      return counts;
+    }
+
+    function applyQaTierCountsToSelect(selectId, counts = {}) {
+      const selectEl = document.getElementById(selectId);
+      if (!selectEl) return;
+      const currentValue = String(selectEl.value || 'all').toLowerCase();
+      const optionsHtml = getQaTierOptionDefs()
+        .map((option) => {
+          const count = Number(counts[option.value] || 0);
+          return `<option value="${option.value}"${currentValue === option.value ? ' selected' : ''}>${option.label} (${count})</option>`;
+        })
+        .join('');
+      selectEl.innerHTML = optionsHtml;
+      selectEl.value = getQaTierOptionDefs().some((option) => option.value === currentValue) ? currentValue : 'all';
+    }
+
     function escapeHtml(value) {
       return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -23181,6 +23225,7 @@
 
         const qaGate = payload.data?.qaGate || {};
         const rows = Array.isArray(qaGate.rows) ? qaGate.rows : [];
+        const tierCounts = countQaRowsByTier(rows);
         const pagesChecked = Number(qaGate.pagesChecked || rows.length || 0);
         const passPages = Number(qaGate.passPages || 0);
         const warningPages = Number(qaGate.warningPages || 0);
@@ -23283,6 +23328,8 @@
             </div>
           </div>
         `;
+        applyQaTierCountsToSelect('impl-qa-tier-select', tierCounts);
+        applyQaTierCountsToSelect('impl-qa-filter-tier', tierCounts);
         renderQaGateTableRows();
       } catch (error) {
         auditSucceeded = false;
