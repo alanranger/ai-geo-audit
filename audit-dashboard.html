@@ -23082,18 +23082,20 @@
       return normalized;
     }
 
-    function applyQaTierCountsToSelect(selectId, counts = {}) {
+    function applyQaTierCountsToSelect(selectId, counts = {}, preferredValue = null) {
       const selectEl = document.getElementById(selectId);
       if (!selectEl) return;
       const currentValue = String(selectEl.value || 'all').toLowerCase();
+      const preferred = preferredValue ? String(preferredValue).toLowerCase() : null;
+      const selectedValue = preferred || currentValue;
       const optionsHtml = getQaTierOptionDefs()
         .map((option) => {
           const count = Number(counts[option.value] || 0);
-          return `<option value="${option.value}"${currentValue === option.value ? ' selected' : ''}>${option.label} (${count})</option>`;
+          return `<option value="${option.value}"${selectedValue === option.value ? ' selected' : ''}>${option.label} (${count})</option>`;
         })
         .join('');
       selectEl.innerHTML = optionsHtml;
-      selectEl.value = getQaTierOptionDefs().some((option) => option.value === currentValue) ? currentValue : 'all';
+      selectEl.value = getQaTierOptionDefs().some((option) => option.value === selectedValue) ? selectedValue : 'all';
     }
 
     async function preloadImplQaTierSourceCounts() {
@@ -23366,6 +23368,8 @@
         const sourceTierCounts = normalizeQaTierCounts(qaSelectionMeta.sourceTierCounts || implQaTierSourceCounts);
         const tableTierCounts = countQaRowsByTier(rows);
         const runScopeTierCounts = sourceTierCounts.all > 0 ? sourceTierCounts : tableTierCounts;
+        const payloadTier = normalizeQaTierValue(qaGate.tier || tierValue || 'all');
+        const initialTableTier = payloadTier === 'all' ? 'all' : payloadTier;
         implQaTierSourceCounts = runScopeTierCounts;
         const pagesChecked = Number(qaGate.pagesChecked || rows.length || 0);
         const passPages = Number(qaGate.passPages || 0);
@@ -23374,13 +23378,16 @@
         const passRate = pagesChecked > 0 ? Math.round((passPages / pagesChecked) * 100) : 0;
         const passVisual = getProgressVisuals(passRate);
         implQaGateTableState.rows = rows;
+        implQaGateTableState.statusFilter = 'all';
+        implQaGateTableState.tierFilter = initialTableTier;
+        implQaGateTableState.search = '';
         implQaGateTableState.page = 1;
 
         target.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
             <div>
               <strong style="font-size: 1.05rem;">Schema QA Gate Status</strong>
-              <div style="margin-top: 0.35rem; opacity: 0.9;">Mode: ${qaGate.mode || requestedMode} | Source: ${qaGate.source || 'unknown'} | Tier: ${escapeHtml(formatQaTierLabel(qaGate.tier || tierValue || 'all'))}</div>
+              <div style="margin-top: 0.35rem; opacity: 0.9;">Mode: ${qaGate.mode || requestedMode} | Source: ${qaGate.source || 'unknown'} | Tier: ${escapeHtml(formatQaTierLabel(payloadTier))}</div>
               <div style="margin-top: 0.2rem; opacity: 0.9;">Tier lookup loaded: <strong>${tierLookupLoaded ? 'yes' : 'no'}</strong></div>
             </div>
             <span class="impl-status-chip ${passRate >= 70 ? 'impl-status-green' : (passRate >= 30 ? 'impl-status-amber' : 'impl-status-red')}">${passRate}%</span>
@@ -23470,8 +23477,8 @@
             </div>
           </div>
         `;
-        applyQaTierCountsToSelect('impl-qa-tier-select', runScopeTierCounts);
-        applyQaTierCountsToSelect('impl-qa-filter-tier', tableTierCounts);
+        applyQaTierCountsToSelect('impl-qa-tier-select', runScopeTierCounts, payloadTier);
+        applyQaTierCountsToSelect('impl-qa-filter-tier', tableTierCounts, initialTableTier);
         renderQaGateTableRows();
       } catch (error) {
         auditSucceeded = false;
@@ -23990,10 +23997,9 @@
       if (cachedServicePayload) {
         await fetchAndRenderServiceSchemaStatus(implServiceSchemaRunState.mode || 'sample', cachedServicePayload);
       }
-      const cachedQaPayload = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.qa);
-      if (cachedQaPayload) {
-        await fetchAndRenderSchemaQaGateStatus(implQaGateRunState.mode || 'sample', cachedQaPayload);
-      }
+      // QA Gate is intentionally not auto-hydrated from cache on tab load.
+      // Always run explicitly via the QA buttons to keep selector state, counts,
+      // and table rows aligned to a fresh payload.
 
       // Manual-run only: do not auto-trigger heavy audits on tab load.
     };
