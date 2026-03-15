@@ -23012,6 +23012,26 @@
       selectEl.value = getQaTierOptionDefs().some((option) => option.value === currentValue) ? currentValue : 'all';
     }
 
+    async function remapQaRowsToCanonicalTiers(rows) {
+      const safeRows = Array.isArray(rows) ? rows : [];
+      if (!safeRows.length) return [];
+      try {
+        if (typeof fetchDashboardTierSegmentationLookup !== 'function'
+          || typeof buildDashboardMoneySubsegmentLookup !== 'function'
+          || typeof resolveDashboardSubsegmentFromLookup !== 'function') {
+          return safeRows;
+        }
+        const tierCsvLookup = await fetchDashboardTierSegmentationLookup();
+        const canonicalLookup = buildDashboardMoneySubsegmentLookup(window.currentAudit || null, tierCsvLookup);
+        return safeRows.map((row) => ({
+          ...row,
+          pageTier: resolveDashboardSubsegmentFromLookup(row?.url || '', canonicalLookup)
+        }));
+      } catch (err) {
+        return safeRows;
+      }
+    }
+
     function escapeHtml(value) {
       return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -23224,7 +23244,8 @@
         }
 
         const qaGate = payload.data?.qaGate || {};
-        const rows = Array.isArray(qaGate.rows) ? qaGate.rows : [];
+        const rawRows = Array.isArray(qaGate.rows) ? qaGate.rows : [];
+        const rows = await remapQaRowsToCanonicalTiers(rawRows);
         const tierCounts = countQaRowsByTier(rows);
         const pagesChecked = Number(qaGate.pagesChecked || rows.length || 0);
         const passPages = Number(qaGate.passPages || 0);
