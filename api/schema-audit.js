@@ -958,11 +958,11 @@ function evaluateTypedSchemaTypeGroup(typeName, schemaNodes = []) {
   return issues;
 }
 
-function shouldEvaluateQaTypeForTier(typeName, pageTier) {
-  // Service schema can appear site-wide, but required-field enforcement is only
-  // intended for money/service pages (landing + product tiers).
+function shouldEvaluateQaTypeForTier(typeName, pageTier, pageUrl) {
+  // Service schema can appear site-wide via shared/global graphs. Enforce
+  // required Service fields only on service-intent URLs.
   if (typeName === 'Service') {
-    return pageTier === 'landing' || pageTier === 'product';
+    return isServiceIntentUrl(pageUrl) || pageTier === 'product';
   }
   return true;
 }
@@ -998,7 +998,7 @@ function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full', tier
         });
       });
       typedNodeMap.forEach((nodes, typeName) => {
-        if (!shouldEvaluateQaTypeForTier(typeName, pageTier)) {
+        if (!shouldEvaluateQaTypeForTier(typeName, pageTier, result?.url || '')) {
           return;
         }
         pageIssues.push(...evaluateTypedSchemaTypeGroup(typeName, nodes));
