@@ -7161,6 +7161,18 @@
               <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.75rem;">
                 <button id="impl-qa-run-sample-btn" class="btn btn-small" type="button" onclick="window.runImplSchemaQaGateAudit('sample')">Check Schema QA Gate (Sample)</button>
                 <button id="impl-qa-run-full-btn" class="btn btn-small" type="button" onclick="window.runImplSchemaQaGateAudit('full')">Check Schema QA Gate (Whole Site)</button>
+                <label style="display: flex; flex-direction: column; gap: 0.2rem; min-width: 170px;">
+                  <span style="font-size: 0.85rem; opacity: 0.9;">Tier filter (run scope)</span>
+                  <select id="impl-qa-tier-select" class="filter-control">
+                    <option value="all" selected>All tiers</option>
+                    <option value="product">Product</option>
+                    <option value="event">Event</option>
+                    <option value="landing">Landing</option>
+                    <option value="blog">Blog</option>
+                    <option value="about">About</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
                 <label style="display: flex; flex-direction: column; gap: 0.2rem; min-width: 140px;">
                   <span style="font-size: 0.85rem; opacity: 0.9;">Whole-site limit</span>
                   <select id="impl-qa-limit-select" class="filter-control">
@@ -22867,6 +22879,7 @@
       sortKey: 'url',
       sortDir: 'asc',
       statusFilter: 'all',
+      tierFilter: 'all',
       search: '',
       page: 1,
       pageSize: 25
@@ -22941,6 +22954,12 @@
       if (status === 'block_deploy') return { label: 'Block Deploy', chipClass: 'impl-status-red' };
       if (status === 'warning') return { label: 'Warning', chipClass: 'impl-status-amber' };
       return { label: 'Pass', chipClass: 'impl-status-green' };
+    }
+
+    function formatQaTierLabel(tier) {
+      const normalized = String(tier || '').trim().toLowerCase();
+      if (!normalized) return 'Other';
+      return normalized.charAt(0).toUpperCase() + normalized.slice(1);
     }
 
     function escapeHtml(value) {
@@ -23020,6 +23039,8 @@
     function filterQaRows(rows, state) {
       return rows.filter((row) => {
         if (state.statusFilter !== 'all' && row.status !== state.statusFilter) return false;
+        const rowTier = String(row?.pageTier || 'other').trim().toLowerCase();
+        if (state.tierFilter !== 'all' && rowTier !== state.tierFilter) return false;
         if (!state.search) return true;
         const detailText = Array.isArray(row?.issueDetails)
           ? row.issueDetails.map((issue) => `${issue?.detail || ''} ${issue?.code || ''} ${issue?.fieldPath || ''}`).join(' ')
@@ -23045,7 +23066,7 @@
       const nextBtn = document.getElementById('impl-qa-page-next');
 
       if (!sortedRows.length) {
-        tableBody.innerHTML = '<tr><td colspan="7" class="ranking-table-empty">No rows match your filter.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="8" class="ranking-table-empty">No rows match your filter.</td></tr>';
         if (infoEl) infoEl.textContent = '0 results';
         if (prevBtn) prevBtn.disabled = true;
         if (nextBtn) nextBtn.disabled = true;
@@ -23062,6 +23083,7 @@
         return `
           <tr>
             <td style="word-break: break-word; text-align: left;">${urlCell}</td>
+            <td>${escapeHtml(formatQaTierLabel(row.pageTier || 'other'))}</td>
             <td>${row.statusCode ?? '-'}</td>
             <td><span class="impl-status-chip ${statusMeta.chipClass}">${statusMeta.label}</span></td>
             <td><span class="impl-status-chip ${issueKindMeta.chipClass}">${issueKindMeta.label}</span></td>
@@ -23095,8 +23117,10 @@
 
     window.onImplQaFilterChange = function() {
       const statusEl = document.getElementById('impl-qa-filter-status');
+      const tierEl = document.getElementById('impl-qa-filter-tier');
       const searchEl = document.getElementById('impl-qa-filter-search');
       implQaGateTableState.statusFilter = statusEl?.value || 'all';
+      implQaGateTableState.tierFilter = tierEl?.value || 'all';
       implQaGateTableState.search = String(searchEl?.value || '').trim().toLowerCase();
       implQaGateTableState.page = 1;
       renderQaGateTableRows();
@@ -23137,10 +23161,12 @@
       target.innerHTML = `<p class="card-subtitle">Running ${requestedMode === 'full' ? 'whole-site' : 'sample'} schema QA gate checks...</p>`;
       try {
         const limitValue = document.getElementById('impl-qa-limit-select')?.value || 'all';
+        const tierValue = document.getElementById('impl-qa-tier-select')?.value || 'all';
         const params = new URLSearchParams({ mode: requestedMode });
         if (requestedMode === 'full' && limitValue !== 'all') {
           params.set('limit', limitValue);
         }
+        params.set('tier', tierValue);
         const response = await fetch(apiUrl(`/api/schema-audit?${params.toString()}`));
         const payload = await response.json();
         if (!response.ok || payload?.status !== 'ok' || !payload?.data) {
@@ -23162,7 +23188,7 @@
           <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
             <div>
               <strong style="font-size: 1.05rem;">Schema QA Gate Status</strong>
-              <div style="margin-top: 0.35rem; opacity: 0.9;">Mode: ${qaGate.mode || requestedMode} | Source: ${qaGate.source || 'unknown'}</div>
+              <div style="margin-top: 0.35rem; opacity: 0.9;">Mode: ${qaGate.mode || requestedMode} | Source: ${qaGate.source || 'unknown'} | Tier: ${escapeHtml(formatQaTierLabel(qaGate.tier || tierValue || 'all'))}</div>
             </div>
             <span class="impl-status-chip ${passRate >= 70 ? 'impl-status-green' : (passRate >= 30 ? 'impl-status-amber' : 'impl-status-red')}">${passRate}%</span>
           </div>
@@ -23199,6 +23225,18 @@
                 <option value="pass">Pass</option>
               </select>
             </label>
+            <label style="display: flex; flex-direction: column; gap: 0.25rem; min-width: 150px;">
+              <span>Tier</span>
+              <select id="impl-qa-filter-tier" class="filter-control" onchange="window.onImplQaFilterChange()">
+                <option value="all">All</option>
+                <option value="product">Product</option>
+                <option value="event">Event</option>
+                <option value="landing">Landing</option>
+                <option value="blog">Blog</option>
+                <option value="about">About</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
             <label style="display: flex; flex-direction: column; gap: 0.25rem; min-width: 240px; flex: 1;">
               <span>Search</span>
               <input id="impl-qa-filter-search" class="filter-control" type="text" placeholder="Filter by URL or issue..." oninput="window.onImplQaFilterChange()" />
@@ -23209,6 +23247,7 @@
               <thead>
                 <tr>
                   <th style="text-align: left;"><button type="button" class="btn btn-small" onclick="window.onImplQaSort('url')">URL</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplQaSort('pageTier')">Tier</button></th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplQaSort('statusCode')">HTTP</button></th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplQaSort('status')">QA Status</button></th>
                   <th>Issue Type</th>
@@ -23218,7 +23257,7 @@
                 </tr>
               </thead>
               <tbody id="impl-qa-table-body">
-                <tr><td colspan="7" class="ranking-table-empty">Loading rows...</td></tr>
+                <tr><td colspan="8" class="ranking-table-empty">Loading rows...</td></tr>
               </tbody>
             </table>
           </div>

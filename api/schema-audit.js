@@ -612,6 +612,37 @@ function isServiceIntentUrl(url) {
   }
 }
 
+const QA_TIER_VALUES = new Set(['all', 'product', 'event', 'landing', 'blog', 'about', 'other']);
+
+function normalizeQaTierInput(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return QA_TIER_VALUES.has(normalized) ? normalized : 'all';
+}
+
+function getSchemaQaTierForUrl(url) {
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    if (!pathname || pathname === '/') return 'landing';
+    if (pathname.startsWith('/blog')) return 'blog';
+    if (pathname.startsWith('/about')) return 'about';
+    if (pathname.includes('/photography-services-near-me/') || pathname.includes('/photo-workshops-uk/')) {
+      return 'product';
+    }
+    if (pathname.includes('/event') || pathname.includes('/events') || pathname.includes('/workshop') || pathname.includes('/workshops')) {
+      return 'event';
+    }
+    return 'landing';
+  } catch {
+    return 'other';
+  }
+}
+
+function filterUrlsByQaTier(urls, tier) {
+  if (!Array.isArray(urls) || !urls.length) return [];
+  if (tier === 'all') return urls;
+  return urls.filter((url) => getSchemaQaTierForUrl(url) === tier);
+}
+
 function buildServiceSchemaCoverage(pages = []) {
   const servicePages = [];
   const servicePagesMissingSchema = [];
@@ -767,7 +798,7 @@ function evaluateTypedSchemaTypeGroup(typeName, schemaNodes = []) {
   return issues;
 }
 
-function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full') {
+function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full', tier = 'all') {
   const rows = results.map((result) => {
     const pageIssues = [];
     if (!result?.success) {
@@ -824,6 +855,7 @@ function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full') {
 
     return {
       url: result?.url || '',
+      pageTier: getSchemaQaTierForUrl(result?.url || ''),
       statusCode: Number.isFinite(result?.statusCode) ? result.statusCode : null,
       status,
       blockIssueCount: blockIssues.length,
@@ -850,6 +882,7 @@ function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full') {
   return {
     source,
     mode,
+    tier,
     pagesChecked,
     passPages,
     warningPages,
@@ -1388,6 +1421,7 @@ export default async function handler(req, res) {
     const queryLimit = parsePositiveInt(query.limit);
     const querySampleSize = parsePositiveInt(query.sampleSize);
     const queryServiceOnly = parseBoolean(query.serviceOnly);
+    const queryTier = normalizeQaTierInput(query.tier);
 
     // Check if manual URL list is provided in request body
     let urls = [];
@@ -1397,6 +1431,7 @@ export default async function handler(req, res) {
     let bodyLimit = null;
     let bodySampleSize = null;
     let bodyServiceOnly = false;
+    let bodyTier = 'all';
     
     if (req.method === 'POST') {
       // Parse request body
@@ -1414,6 +1449,7 @@ export default async function handler(req, res) {
       bodyLimit = parsePositiveInt(body.limit);
       bodySampleSize = parsePositiveInt(body.sampleSize);
       bodyServiceOnly = parseBoolean(body.serviceOnly);
+      bodyTier = normalizeQaTierInput(body.tier);
       
       if (body.urls && Array.isArray(body.urls)) {
         // Use manual URL list from request
@@ -1440,23 +1476,36 @@ export default async function handler(req, res) {
     const runLimit = queryLimit || bodyLimit || null;
     const runSampleSize = querySampleSize || bodySampleSize || 25;
     const runServiceOnly = queryServiceOnly || bodyServiceOnly;
+    let runTier = bodyTier;
+    if (queryTier === 'all') {
+      runTier = bodyTier;
+    } else {
+      runTier = queryTier;
+    }
 
     urls = ensureRootUrlIncluded(urls);
     const inputUrlCount = urls.length;
     if (runServiceOnly) {
       urls = urls.filter((url) => isServiceIntentUrl(url));
     }
+    urls = filterUrlsByQaTier(urls, runTier);
 
     const candidateUrlCount = urls.length;
     urls = selectUrlsForMode(urls, runMode, runLimit, runSampleSize);
     
     if (urls.length === 0) {
+      let noUrlMessage = 'No URLs found in CSV file';
+      if (runServiceOnly) {
+        noUrlMessage = 'No service-intent URLs matched the current source list.';
+      } else if (runTier === 'all') {
+        noUrlMessage = 'No URLs found in CSV file';
+      } else {
+        noUrlMessage = `No URLs matched tier "${runTier}" in the current source list.`;
+      }
       return res.status(400).json({
         status: 'error',
         source: 'schema-audit',
-        message: runServiceOnly
-          ? 'No service-intent URLs matched the current source list.'
-          : 'No URLs found in CSV file',
+        message: noUrlMessage,
         meta: { generatedAt: new Date().toISOString() }
       });
     }
@@ -1886,7 +1935,7 @@ export default async function handler(req, res) {
       errorType: result.success ? null : (result.errorType || null)
     }));
     const serviceSchemaCoverage = buildServiceSchemaCoverage(pages);
-    const qaGate = buildSchemaQaGate(results, urlSource, runMode);
+    const qaGate = buildSchemaQaGate(results, urlSource, runMode, runTier);
     
     return res.status(200).json({
       status: 'ok',
@@ -1917,6 +1966,7 @@ export default async function handler(req, res) {
           limit: runLimit,
           sampleSize: runSampleSize,
           serviceOnly: runServiceOnly,
+          tier: runTier,
           inputUrlCount,
           candidateUrlCount
         },
