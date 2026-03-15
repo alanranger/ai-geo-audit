@@ -22557,10 +22557,42 @@
         const parsed = JSON.parse(raw);
         const savedAt = Number(parsed?.savedAt || 0);
         if (!savedAt || (Date.now() - savedAt) > maxAgeMs) return null;
-        return parsed?.payload || null;
+        const payload = parsed?.payload || null;
+        if (payload && typeof payload === 'object') {
+          payload.__cacheSavedAt = savedAt;
+        }
+        return payload;
       } catch (err) {
         return null;
       }
+    }
+
+    function formatImplAuditRunTimestamp(ts) {
+      const safeTs = Number(ts || 0);
+      if (!safeTs || !Number.isFinite(safeTs)) return 'Unknown';
+      try {
+        return new Date(safeTs).toLocaleString('en-GB', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        });
+      } catch (err) {
+        return 'Unknown';
+      }
+    }
+
+    function buildImplAuditRunStampHtml(payload, usingCache) {
+      const generatedAtRaw = payload?.meta?.generatedAt || payload?.generatedAt || null;
+      const generatedAtTs = generatedAtRaw ? Date.parse(String(generatedAtRaw)) : NaN;
+      const cacheSavedAtTs = Number(payload?.__cacheSavedAt || 0);
+      const chosenTs = Number.isFinite(generatedAtTs) && generatedAtTs > 0
+        ? generatedAtTs
+        : (cacheSavedAtTs > 0 ? cacheSavedAtTs : Date.now());
+      const sourceLabel = usingCache ? 'cached snapshot' : 'fresh run';
+      return `<div style="margin-top: 0.2rem; opacity: 0.9;">Last run: ${escapeHtml(formatImplAuditRunTimestamp(chosenTs))} (${sourceLabel})</div>`;
     }
 
     const implExtractabilityRunState = {
@@ -22787,6 +22819,7 @@
           }
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.extractability, payload);
         }
+        const runStampHtml = buildImplAuditRunStampHtml(payload, usingCache);
 
         const data = payload.data || {};
         const rows = await remapQaRowsToCanonicalTiers(Array.isArray(data.rows) ? data.rows : []);
@@ -22818,6 +22851,7 @@
             <div>
               <strong style="font-size: 1.05rem;">Content Extractability Status</strong>
               <div style="margin-top: 0.35rem; opacity: 0.9;">Mode: ${escapeHtml(data.mode || requestedMode)} | Tier: ${escapeHtml(formatQaTierLabel(payloadTier))} | Pages checked: ${pagesChecked}</div>
+              ${runStampHtml}
             </div>
             <span class="impl-status-chip ${passRate >= 70 ? 'impl-status-green' : (passRate >= 30 ? 'impl-status-amber' : 'impl-status-red')}">${passRate}% pass</span>
           </div>
@@ -22962,6 +22996,7 @@
           }
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.local, payload);
         }
+        const runStampHtml = buildImplAuditRunStampHtml(payload, usingCache);
         const scan = payload.data.localBusinessSchemaScan || {};
         const pagesChecked = Number(scan.pagesChecked || 0);
         const matchedPages = Number(scan.matchedPages || 0);
@@ -22980,6 +23015,7 @@
             <div>
               <strong style="font-size: 1.05rem;">LocalBusiness Schema Coverage</strong>
               <div style="margin-top: 0.35rem; opacity: 0.9;">Property: ${property}</div>
+              ${runStampHtml}
             </div>
             <span class="impl-status-chip ${passRatio >= 70 ? 'impl-status-green' : (passRatio >= 30 ? 'impl-status-amber' : 'impl-status-red')}">${passRatio}%</span>
           </div>
@@ -23319,6 +23355,7 @@
           }
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.service, payload);
         }
+        const runStampHtml = buildImplAuditRunStampHtml(payload, usingCache);
 
         const pages = Array.isArray(payload.data.pages) ? payload.data.pages : [];
         const selection = payload.meta?.selection || {};
@@ -23352,6 +23389,7 @@
             <div>
               <strong style="font-size: 1.05rem;">Service Schema Coverage</strong>
               <div style="margin-top: 0.35rem; opacity: 0.9;">Property: ${property}</div>
+              ${runStampHtml}
             </div>
             <span class="impl-status-chip ${passRatio >= 70 ? 'impl-status-green' : (passRatio >= 30 ? 'impl-status-amber' : 'impl-status-red')}">${passRatio}%</span>
           </div>
@@ -23895,6 +23933,7 @@
           }
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.qa, payload);
         }
+        const runStampHtml = buildImplAuditRunStampHtml(payload, usingCache);
 
         const qaGate = payload.data?.qaGate || {};
         const qaSelectionMeta = payload?.meta?.selection || {};
@@ -23935,6 +23974,7 @@
               <strong style="font-size: 1.05rem;">Schema QA Gate Status</strong>
               <div style="margin-top: 0.35rem; opacity: 0.9;">Mode: ${qaGate.mode || requestedMode} | Source: ${qaGate.source || 'unknown'} | Tier: ${escapeHtml(formatQaTierLabel(payloadTier))}</div>
               <div style="margin-top: 0.2rem; opacity: 0.9;">Tier lookup loaded: <strong>${tierLookupLoaded ? 'yes' : 'no'}</strong></div>
+              ${runStampHtml}
             </div>
             <span class="impl-status-chip ${passRate >= 70 ? 'impl-status-green' : (passRate >= 30 ? 'impl-status-amber' : 'impl-status-red')}">${passRate}%</span>
           </div>
@@ -24306,6 +24346,7 @@
           }
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.tech, payload);
         }
+        const runStampHtml = buildImplAuditRunStampHtml(payload, usingCache);
 
         const data = payload.data;
         const blockerCount = Array.isArray(data.overall?.blockers) ? data.overall.blockers.length : 0;
@@ -24337,6 +24378,7 @@
             <div>
               <strong style="font-size: 1.05rem;">Overall Foundation Status</strong>
               <div style="margin-top: 0.35rem; opacity: 0.9;">Property: ${property}</div>
+              ${runStampHtml}
             </div>
             <span class="impl-status-chip ${overallMeta.chipClass}">${overallMeta.label}</span>
           </div>
