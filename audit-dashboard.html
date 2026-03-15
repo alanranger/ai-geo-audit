@@ -23811,6 +23811,15 @@
     };
 
     window.renderImplementationProgressTab = async function() {
+      applyQaTierCountsToSelect('impl-qa-tier-select', normalizeQaTierCounts(implQaTierSourceCounts));
+      try {
+        const preloadTierCounts = await preloadImplQaTierSourceCounts();
+        applyQaTierCountsToSelect('impl-qa-tier-select', preloadTierCounts);
+        applyQaTierCountsToSelect('impl-qa-filter-tier', preloadTierCounts);
+      } catch (err) {
+        applyQaTierCountsToSelect('impl-qa-tier-select', normalizeQaTierCounts(implQaTierSourceCounts));
+      }
+
       const summary = IMPLEMENTATION_PROGRESS_TICKETS.reduce((acc, t) => {
         acc.total += 1;
         acc[t.status] = (acc[t.status] || 0) + 1;
@@ -23860,10 +23869,6 @@
       renderImplementationLane("impl-list-next", "next");
       renderImplementationLane("impl-list-later", "later");
 
-      const preloadTierCounts = await preloadImplQaTierSourceCounts();
-      applyQaTierCountsToSelect('impl-qa-tier-select', preloadTierCounts);
-      applyQaTierCountsToSelect('impl-qa-filter-tier', preloadTierCounts);
-
       const body = document.getElementById("impl-outstanding-body");
       if (!body) return;
       const rows = IMPLEMENTATION_PROGRESS_TICKETS.filter(t => t.status !== "done");
@@ -23885,9 +23890,7 @@
       `;
       }).join("");
 
-      await fetchAndRenderTechnicalFoundationStatus();
-      await fetchAndRenderLocalBusinessSchemaStatus();
-      await fetchAndRenderServiceSchemaStatus();
+      // Manual-run only: do not auto-trigger heavy audits on tab load.
     };
 
     // Portfolio Tab Functions
