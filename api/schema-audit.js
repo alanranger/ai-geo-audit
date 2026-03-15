@@ -834,6 +834,7 @@ const QA_REQUIRED_FIELDS_BY_TYPE = {
   Service: ['name', 'provider']
 };
 const QA_SUPPORTED_TYPES = new Set(Object.keys(QA_REQUIRED_FIELDS_BY_TYPE));
+const QA_OPTIONAL_ID_TYPES = new Set(['FAQPage']);
 const ISO_DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_DATE_TIME_PREFIX_PATTERN = /^\d{4}-\d{2}-\d{2}T/;
 const QA_MAX_ISSUES_PER_ROW = 50;
@@ -912,8 +913,9 @@ function evaluateTypedSchemaTypeGroup(typeName, schemaNodes = []) {
     .filter(Boolean);
   const hasAnyId = idValues.length > 0;
   const hasAnyAbsoluteId = idValues.some((atId) => /^https?:\/\//i.test(atId));
+  const idRequiredForType = !QA_OPTIONAL_ID_TYPES.has(typeName);
 
-  if (!hasAnyId) {
+  if (!hasAnyId && idRequiredForType) {
     issues.push({
       severity: 'warning',
       code: 'missing_id',
@@ -921,7 +923,7 @@ function evaluateTypedSchemaTypeGroup(typeName, schemaNodes = []) {
       typeName,
       fieldPath: '@id'
     });
-  } else if (!hasAnyAbsoluteId) {
+  } else if (!hasAnyAbsoluteId && idRequiredForType) {
     issues.push({
       severity: 'warning',
       code: 'non_absolute_id',
