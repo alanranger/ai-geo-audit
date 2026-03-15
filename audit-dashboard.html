@@ -7033,6 +7033,8 @@
               <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplServiceSchemaAudit('full')">Check Service Schema (Whole Site)</button>
               <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplSchemaQaGateAudit('sample')">Check Schema QA Gate (Sample)</button>
               <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplSchemaQaGateAudit('full')">Check Schema QA Gate (Whole Site)</button>
+              <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplExtractabilityAudit('sample')">Check Extractability (Sample)</button>
+              <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplExtractabilityAudit('full')">Check Extractability (Whole Site)</button>
             </div>
           </div>
 
@@ -7186,6 +7188,50 @@
               </div>
               <div id="impl-qa-gate-status">
                 <p class="card-subtitle">Select run scope and click a Schema QA Gate button to load results.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 1.5rem;">
+            <div class="card-header">
+              <h3 style="margin: 0;">Content Extractability Audit (Live)</h3>
+              <p class="card-subtitle">Checks if pages are easy for AI to parse: TLDR/summary, direct answer, FAQ presence, and last-updated signal.</p>
+              <p class="card-subtitle" style="margin-top: 0.4rem;">
+                Plain English: this phase checks whether a page is easy for AI to read and quote quickly. It is not just "is schema valid?".
+              </p>
+              <p class="card-subtitle" style="margin-top: 0.2rem;">
+                We score each page on 4 things: clear TLDR/summary cue, direct-answer paragraph near the top, FAQ presence (FAQ schema or obvious FAQ headings), and last-updated signal.
+              </p>
+            </div>
+            <div class="card-body">
+              <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.75rem;">
+                <button id="impl-extract-run-sample-btn" class="btn btn-small" type="button" onclick="window.runImplExtractabilityAudit('sample')">Check Extractability (Sample)</button>
+                <button id="impl-extract-run-full-btn" class="btn btn-small" type="button" onclick="window.runImplExtractabilityAudit('full')">Check Extractability (Whole Site)</button>
+                <label style="display: flex; flex-direction: column; gap: 0.2rem; min-width: 170px;">
+                  <span style="font-size: 0.85rem; opacity: 0.9;">Tier filter (run scope)</span>
+                  <select id="impl-extract-tier-select" class="filter-control">
+                    <option value="all" selected>All tiers</option>
+                    <option value="landing">Tier A Landing</option>
+                    <option value="product">Tier B Product</option>
+                    <option value="event">Tier C Event</option>
+                    <option value="blog">Tier D Blog</option>
+                    <option value="academy">Tier E Academy</option>
+                    <option value="unmapped">Tier F Unmapped</option>
+                  </select>
+                </label>
+                <label style="display: flex; flex-direction: column; gap: 0.2rem; min-width: 140px;">
+                  <span style="font-size: 0.85rem; opacity: 0.9;">Whole-site limit</span>
+                  <select id="impl-extract-limit-select" class="filter-control">
+                    <option value="all">All URLs</option>
+                    <option value="100">100 URLs</option>
+                    <option value="250">250 URLs</option>
+                    <option value="500">500 URLs</option>
+                    <option value="1000">1000 URLs</option>
+                  </select>
+                </label>
+              </div>
+              <div id="impl-extractability-status">
+                <p class="card-subtitle">Click an extractability button to load results.</p>
               </div>
             </div>
           </div>
@@ -22074,6 +22120,7 @@
       }
     ];
     const IMPL_QA_GATE_TICKET_TITLE = "Add pre-deploy schema QA gate (@id, ISO dates, required fields)";
+    const IMPL_EXTRACTABILITY_TICKET_TITLE = "Add content extractability checks (TLDR/direct answer/FAQ/last-updated)";
 
     function getImplStatusMeta(status) {
       switch (status) {
@@ -22156,6 +22203,18 @@
       const blocks = Number(blockPages || 0);
       const qaGateReady = modeValue === 'full' && tierValue === 'all' && checked > 0 && warnings === 0 && blocks === 0;
       qaTicket.status = qaGateReady ? 'done' : 'in_progress';
+    }
+
+    function syncExtractabilityImplementationTicketStatus({ mode, tier, pagesChecked, failPages }) {
+      const ticket = IMPLEMENTATION_PROGRESS_TICKETS.find((item) => item.title === IMPL_EXTRACTABILITY_TICKET_TITLE);
+      if (!ticket) return;
+      const modeValue = String(mode || '').toLowerCase();
+      const tierValue = normalizeQaTierValue(tier || 'all');
+      const checked = Number(pagesChecked || 0);
+      const fails = Number(failPages || 0);
+      const ready = modeValue === 'full' && tierValue === 'all' && checked > 0 && fails === 0;
+      ticket.status = ready ? 'done' : 'in_progress';
+      ticket.lane = ready ? 'now' : 'next';
     }
 
     function renderImplementationSummaryAndLanes() {
@@ -22462,7 +22521,8 @@
       local: 'impl_local_schema_last_payload_v1',
       service: 'impl_service_schema_last_payload_v1',
       qa: 'impl_schema_qa_last_payload_v1',
-      tech: 'impl_tech_foundation_last_payload_v1'
+      tech: 'impl_tech_foundation_last_payload_v1',
+      extractability: 'impl_content_extractability_last_payload_v1'
     };
 
     function saveImplementationAuditCache(key, payload) {
@@ -22487,6 +22547,221 @@
         return null;
       }
     }
+
+    const implExtractabilityRunState = {
+      mode: 'sample',
+      isLoading: false
+    };
+    const implExtractabilityTableState = {
+      rows: [],
+      statusFilter: 'all',
+      tierFilter: 'all',
+      search: ''
+    };
+
+    function setImplExtractabilityButtonState(isLoading) {
+      const sampleBtn = document.getElementById('impl-extract-run-sample-btn');
+      const fullBtn = document.getElementById('impl-extract-run-full-btn');
+      if (sampleBtn) sampleBtn.disabled = isLoading;
+      if (fullBtn) fullBtn.disabled = isLoading;
+      if (sampleBtn) sampleBtn.textContent = isLoading && implExtractabilityRunState.mode === 'sample' ? 'Running Sample...' : 'Check Extractability (Sample)';
+      if (fullBtn) fullBtn.textContent = isLoading && implExtractabilityRunState.mode === 'full' ? 'Running Whole-Site...' : 'Check Extractability (Whole Site)';
+    }
+
+    function extractabilityBooleanChip(value) {
+      return value
+        ? '<span class="impl-status-chip impl-status-green">Yes</span>'
+        : '<span class="impl-status-chip impl-status-red">No</span>';
+    }
+
+    function renderExtractabilityTableRows() {
+      const body = document.getElementById('impl-extract-table-body');
+      const info = document.getElementById('impl-extract-table-info');
+      if (!body) return;
+      const searchTerm = String(implExtractabilityTableState.search || '').trim().toLowerCase();
+      let rows = Array.isArray(implExtractabilityTableState.rows) ? implExtractabilityTableState.rows : [];
+      if (implExtractabilityTableState.statusFilter !== 'all') {
+        const wantPass = implExtractabilityTableState.statusFilter === 'pass';
+        rows = rows.filter((row) => Boolean(row?.pass) === wantPass);
+      }
+      if (implExtractabilityTableState.tierFilter !== 'all') {
+        rows = rows.filter((row) => String(row?.pageTier || '').toLowerCase() === implExtractabilityTableState.tierFilter);
+      }
+      if (searchTerm) {
+        rows = rows.filter((row) => {
+          const issuesText = Array.isArray(row?.issues) ? row.issues.join(' ').toLowerCase() : '';
+          const urlText = String(row?.url || '').toLowerCase();
+          return urlText.includes(searchTerm) || issuesText.includes(searchTerm);
+        });
+      }
+      if (info) {
+        info.textContent = `${rows.length}/${implExtractabilityTableState.rows.length} rows shown`;
+      }
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="10" class="ranking-table-empty">No rows match current filters.</td></tr>';
+        return;
+      }
+      body.innerHTML = rows.map((row) => `
+        <tr>
+          <td style="text-align:left; max-width: 360px; word-break: break-word;"><a href="${escapeHtml(row.url || '#')}" target="_blank" rel="noopener">${escapeHtml(row.url || '')}</a></td>
+          <td>${escapeHtml(formatQaTierLabel(row.pageTier || 'unmapped'))}</td>
+          <td>${Number.isFinite(Number(row.statusCode)) ? Number(row.statusCode) : 'N/A'}</td>
+          <td><span class="impl-status-chip ${row.pass ? 'impl-status-green' : 'impl-status-red'}">${row.pass ? 'Pass' : 'Fail'}</span></td>
+          <td>${Number(row.score || 0)}%</td>
+          <td>${extractabilityBooleanChip(Boolean(row.hasTldr))}</td>
+          <td>${extractabilityBooleanChip(Boolean(row.hasDirectAnswer))}</td>
+          <td>${extractabilityBooleanChip(Boolean(row.hasFaq))}</td>
+          <td>${extractabilityBooleanChip(Boolean(row.hasLastUpdated))}</td>
+          <td style="text-align:left; max-width: 340px; word-break: break-word;">${escapeHtml((Array.isArray(row.issues) ? row.issues.slice(0, 2).join(' | ') : '') || 'None')}</td>
+        </tr>
+      `).join('');
+    }
+
+    window.onImplExtractabilityFilterChange = function() {
+      const statusEl = document.getElementById('impl-extract-filter-status');
+      const tierEl = document.getElementById('impl-extract-filter-tier');
+      const searchEl = document.getElementById('impl-extract-filter-search');
+      implExtractabilityTableState.statusFilter = statusEl?.value || 'all';
+      implExtractabilityTableState.tierFilter = tierEl?.value || 'all';
+      implExtractabilityTableState.search = searchEl?.value || '';
+      renderExtractabilityTableRows();
+    };
+
+    async function fetchAndRenderContentExtractabilityStatus(modeOverride = null, cachedPayload = null) {
+      const target = document.getElementById('impl-extractability-status');
+      if (!target) return;
+      const usingCache = !!cachedPayload;
+      const requestedMode = modeOverride || implExtractabilityRunState.mode || 'sample';
+      const runTier = document.getElementById('impl-extract-tier-select')?.value || 'all';
+      implExtractabilityRunState.mode = requestedMode;
+      if (!usingCache) {
+        implExtractabilityRunState.isLoading = true;
+        setImplExtractabilityButtonState(true);
+        target.innerHTML = `<p class="card-subtitle">Running ${requestedMode === 'full' ? 'whole-site' : 'sample'} content extractability checks...</p>`;
+      }
+      try {
+        let payload = cachedPayload;
+        if (!payload) {
+          const limitValue = document.getElementById('impl-extract-limit-select')?.value || 'all';
+          const params = new URLSearchParams({ mode: requestedMode, tier: runTier });
+          if (requestedMode === 'full' && limitValue !== 'all') {
+            params.set('limit', limitValue);
+          }
+          const response = await fetch(apiUrl(`/api/aigeo/content-extractability?${params.toString()}`));
+          payload = await response.json();
+          if (!response.ok || payload?.status !== 'ok' || !payload?.data) {
+            throw new Error(payload?.message || `HTTP ${response.status}`);
+          }
+          saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.extractability, payload);
+        }
+
+        const data = payload.data || {};
+        const pagesChecked = Number(data.pagesChecked || 0);
+        const passPages = Number(data.passPages || 0);
+        const failPages = Number(data.failPages || 0);
+        const passRate = Number(data.passRate || 0);
+        const avgScore = Number(data.avgScore || 0);
+        const counts = data.counts || {};
+        const rows = Array.isArray(data.rows) ? data.rows : [];
+        const sourceTierCounts = normalizeQaTierCounts(data.sourceTierCounts || {});
+        const payloadTier = normalizeQaTierValue(data.tier || runTier || 'all');
+
+        syncExtractabilityImplementationTicketStatus({
+          mode: data.mode || requestedMode,
+          tier: data.tier || runTier,
+          pagesChecked,
+          failPages
+        });
+        renderImplementationSummaryAndLanes();
+        implExtractabilityTableState.rows = rows.slice(0, 1000);
+        implExtractabilityTableState.statusFilter = 'all';
+        implExtractabilityTableState.tierFilter = payloadTier === 'all' ? 'all' : payloadTier;
+        implExtractabilityTableState.search = '';
+        target.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+            <div>
+              <strong style="font-size: 1.05rem;">Content Extractability Status</strong>
+              <div style="margin-top: 0.35rem; opacity: 0.9;">Mode: ${escapeHtml(data.mode || requestedMode)} | Tier: ${escapeHtml(formatQaTierLabel(payloadTier))} | Pages checked: ${pagesChecked}</div>
+            </div>
+            <span class="impl-status-chip ${passRate >= 70 ? 'impl-status-green' : (passRate >= 30 ? 'impl-status-amber' : 'impl-status-red')}">${passRate}% pass</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin-top: 1rem;">
+            <div class="card ${passPages > 0 ? 'impl-status-card-green' : 'impl-status-card-amber'}" style="margin:0;"><strong>Pass</strong><div style="margin-top:0.3rem;">${passPages}</div></div>
+            <div class="card ${failPages > 0 ? 'impl-status-card-red' : 'impl-status-card-green'}" style="margin:0;"><strong>Fail</strong><div style="margin-top:0.3rem;">${failPages}</div></div>
+            <div class="card impl-status-card-amber" style="margin:0;"><strong>Avg Score</strong><div style="margin-top:0.3rem;">${avgScore}%</div></div>
+            <div class="card impl-status-card-amber" style="margin:0;"><strong>TLDR / Direct / FAQ / Updated</strong><div style="margin-top:0.3rem;">${Number(counts.hasTldr || 0)} / ${Number(counts.hasDirectAnswer || 0)} / ${Number(counts.hasFaq || 0)} / ${Number(counts.hasLastUpdated || 0)}</div></div>
+            <div class="card impl-status-card-amber" style="margin:0;"><strong>Tier counts (source)</strong><div style="margin-top:0.3rem;">A ${sourceTierCounts.landing || 0} | B ${sourceTierCounts.product || 0} | C ${sourceTierCounts.event || 0} | D ${sourceTierCounts.blog || 0} | E ${sourceTierCounts.academy || 0} | F ${sourceTierCounts.unmapped || 0}</div></div>
+          </div>
+          <div style="margin-top: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <label style="display: flex; flex-direction: column; gap: 0.25rem;">
+              <span>Status</span>
+              <select id="impl-extract-filter-status" class="filter-control" onchange="window.onImplExtractabilityFilterChange()">
+                <option value="all">All</option>
+                <option value="pass">Pass</option>
+                <option value="fail">Fail</option>
+              </select>
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 0.25rem;">
+              <span>Tier</span>
+              <select id="impl-extract-filter-tier" class="filter-control" onchange="window.onImplExtractabilityFilterChange()">
+                <option value="all">All</option>
+                <option value="landing">Tier A Landing</option>
+                <option value="product">Tier B Product</option>
+                <option value="event">Tier C Event</option>
+                <option value="blog">Tier D Blog</option>
+                <option value="academy">Tier E Academy</option>
+                <option value="unmapped">Tier F Unmapped</option>
+              </select>
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 0.25rem; min-width: 240px; flex: 1;">
+              <span>Search</span>
+              <input id="impl-extract-filter-search" class="filter-control" type="text" placeholder="Filter by URL or issue..." oninput="window.onImplExtractabilityFilterChange()" />
+            </label>
+          </div>
+          <div style="margin-top: 0.85rem; overflow-x: auto;">
+            <table class="ranking-table">
+              <thead>
+                <tr>
+                  <th style="text-align:left;">URL</th>
+                  <th>Tier</th>
+                  <th>HTTP</th>
+                  <th>Pass</th>
+                  <th>Score</th>
+                  <th>TLDR</th>
+                  <th>Direct Answer</th>
+                  <th>FAQ</th>
+                  <th>Last Updated</th>
+                  <th style="text-align:left;">Issues</th>
+                </tr>
+              </thead>
+              <tbody id="impl-extract-table-body">
+                <tr><td colspan="10" class="ranking-table-empty">Loading rows...</td></tr>
+              </tbody>
+            </table>
+            <div id="impl-extract-table-info" style="margin-top: 0.5rem; font-size: 0.85rem; opacity: 0.85;">0 rows shown</div>
+          </div>
+        `;
+        const filterStatusEl = document.getElementById('impl-extract-filter-status');
+        const filterTierEl = document.getElementById('impl-extract-filter-tier');
+        const filterSearchEl = document.getElementById('impl-extract-filter-search');
+        if (filterStatusEl) filterStatusEl.value = implExtractabilityTableState.statusFilter;
+        if (filterTierEl) filterTierEl.value = implExtractabilityTableState.tierFilter;
+        if (filterSearchEl) filterSearchEl.value = implExtractabilityTableState.search;
+        renderExtractabilityTableRows();
+      } catch (error) {
+        target.innerHTML = `<p class="card-subtitle">Could not load content extractability status: ${escapeHtml(error.message || 'Unknown error')}</p>`;
+      } finally {
+        if (!usingCache) {
+          implExtractabilityRunState.isLoading = false;
+          setImplExtractabilityButtonState(false);
+        }
+      }
+    }
+
+    window.runImplExtractabilityAudit = async function(mode) {
+      const nextMode = mode === 'full' ? 'full' : 'sample';
+      await fetchAndRenderContentExtractabilityStatus(nextMode);
+    };
 
     async function fetchAndRenderLocalBusinessSchemaStatus(modeOverride = null, cachedPayload = null) {
       const target = document.getElementById('impl-local-schema-status');
@@ -24021,6 +24296,10 @@
       const cachedServicePayload = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.service);
       if (cachedServicePayload) {
         await fetchAndRenderServiceSchemaStatus(implServiceSchemaRunState.mode || 'sample', cachedServicePayload);
+      }
+      const cachedExtractabilityPayload = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.extractability);
+      if (cachedExtractabilityPayload) {
+        await fetchAndRenderContentExtractabilityStatus(implExtractabilityRunState.mode || 'sample', cachedExtractabilityPayload);
       }
       // QA Gate is intentionally not auto-hydrated from cache on tab load.
       // Always run explicitly via the QA buttons to keep selector state, counts,
