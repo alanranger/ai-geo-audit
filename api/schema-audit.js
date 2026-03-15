@@ -682,6 +682,26 @@ function toQaTierUrlKey(rawUrl) {
   }
 }
 
+function classifyQaTierFromUrl(url) {
+  try {
+    const pathname = String(new URL(String(url || '')).pathname || '/').toLowerCase();
+    if (pathname === '/' || pathname === '/home') return 'landing';
+    if (pathname.includes('/s/')) return 'academy';
+    if (pathname.includes('/workshops') || pathname.includes('/event') || pathname.includes('/webinar')) return 'event';
+    if (pathname.includes('/academy') || pathname.includes('/free-online-photography-course')) return 'academy';
+    if (pathname.includes('/blog') || pathname.includes('/article') || pathname.includes('/guides')) return 'blog';
+    if (pathname.includes('/photography-services-near-me/')
+      || pathname.includes('/product')
+      || pathname.includes('/courses')
+      || pathname.includes('/mentoring')
+      || pathname.includes('/subscription')) return 'product';
+    if (pathname.split('/').filter(Boolean).length <= 1) return 'landing';
+    return 'unmapped';
+  } catch {
+    return 'unmapped';
+  }
+}
+
 function setQaTierLookupWithAliases(lookup, key, tier) {
   if (!(lookup instanceof Map) || !key || !tier) return;
   lookup.set(key, tier);
@@ -711,13 +731,11 @@ async function getQaTierSegmentationLookup() {
 
   const lookup = new Map();
   if (!csvText) {
-    qaTierLookupCache = lookup;
     return lookup;
   }
 
   const lines = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
   if (lines.length < 2) {
-    qaTierLookupCache = lookup;
     return lookup;
   }
 
@@ -734,17 +752,19 @@ async function getQaTierSegmentationLookup() {
     });
   });
 
-  qaTierLookupCache = lookup;
+  if (lookup.size > 0) {
+    qaTierLookupCache = lookup;
+  }
   return lookup;
 }
 
 function getSchemaQaTierForUrl(url, tierLookup = null) {
   const key = toQaTierUrlKey(url);
-  if (!key) return 'unmapped';
+  if (!key) return classifyQaTierFromUrl(url);
   if (tierLookup instanceof Map && tierLookup.has(key)) {
     return tierLookup.get(key);
   }
-  return 'unmapped';
+  return classifyQaTierFromUrl(url);
 }
 
 function filterUrlsByQaTier(urls, tier, tierLookup = null) {
@@ -1589,6 +1609,7 @@ export default async function handler(req, res) {
     const runTier = queryTier === 'all' ? bodyTier : queryTier;
 
     const qaTierLookup = await getQaTierSegmentationLookup();
+    const qaTierLookupLoaded = qaTierLookup instanceof Map && qaTierLookup.size > 0;
 
     urls = ensureRootUrlIncluded(urls);
     const inputUrlCount = urls.length;
@@ -2042,7 +2063,10 @@ export default async function handler(req, res) {
       errorType: result.success ? null : (result.errorType || null)
     }));
     const serviceSchemaCoverage = buildServiceSchemaCoverage(pages);
-    const qaGate = buildSchemaQaGate(results, urlSource, runMode, runTier, qaTierLookup);
+    const qaGate = {
+      ...buildSchemaQaGate(results, urlSource, runMode, runTier, qaTierLookup),
+      tierLookupLoaded: qaTierLookupLoaded
+    };
     
     return res.status(200).json({
       status: 'ok',
@@ -2075,7 +2099,8 @@ export default async function handler(req, res) {
           serviceOnly: runServiceOnly,
           tier: runTier,
           inputUrlCount,
-          candidateUrlCount
+          candidateUrlCount,
+          qaTierLookupLoaded
         },
         diagnostic: diagnosticInfo
       }

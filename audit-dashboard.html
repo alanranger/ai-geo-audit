@@ -23244,6 +23244,10 @@
         }
 
         const qaGate = payload.data?.qaGate || {};
+        const qaSelectionMeta = payload?.meta?.selection || {};
+        const tierLookupLoaded = typeof qaSelectionMeta.qaTierLookupLoaded === 'boolean'
+          ? qaSelectionMeta.qaTierLookupLoaded
+          : Boolean(qaGate?.tierLookupLoaded);
         const rawRows = Array.isArray(qaGate.rows) ? qaGate.rows : [];
         const rows = await remapQaRowsToCanonicalTiers(rawRows);
         const tierCounts = countQaRowsByTier(rows);
@@ -23261,6 +23265,7 @@
             <div>
               <strong style="font-size: 1.05rem;">Schema QA Gate Status</strong>
               <div style="margin-top: 0.35rem; opacity: 0.9;">Mode: ${qaGate.mode || requestedMode} | Source: ${qaGate.source || 'unknown'} | Tier: ${escapeHtml(formatQaTierLabel(qaGate.tier || tierValue || 'all'))}</div>
+              <div style="margin-top: 0.2rem; opacity: 0.9;">Tier lookup loaded: <strong>${tierLookupLoaded ? 'yes' : 'no'}</strong></div>
             </div>
             <span class="impl-status-chip ${passRate >= 70 ? 'impl-status-green' : (passRate >= 30 ? 'impl-status-amber' : 'impl-status-red')}">${passRate}%</span>
           </div>
