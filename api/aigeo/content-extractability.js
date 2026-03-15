@@ -11,6 +11,12 @@ function parsePositiveInt(value) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function parseBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes';
+}
+
 function normalizeTierInput(value) {
   const normalized = String(value || '').trim().toLowerCase();
   return TIER_VALUES.has(normalized) ? normalized : 'all';
@@ -260,10 +266,18 @@ async function checkUrl(url) {
       signal: AbortSignal.timeout(10000)
     });
     if (!response.ok) {
+      let errorType = 'HTTP Error';
+      if (response.status === 429) {
+        errorType = 'Rate Limited';
+      } else if (response.status >= 500) {
+        errorType = 'Server Error';
+      }
       return {
         url,
         pageTier,
+        requestOk: false,
         statusCode: response.status,
+        errorType,
         pass: false,
         score: 0,
         hasTldr: false,
@@ -280,7 +294,9 @@ async function checkUrl(url) {
     return {
       url,
       pageTier,
+      requestOk: true,
       statusCode: response.status,
+      errorType: null,
       pass: result.pass,
       score: result.score,
       hasTldr: result.hasTldr,
@@ -294,7 +310,9 @@ async function checkUrl(url) {
     return {
       url,
       pageTier,
+      requestOk: false,
       statusCode: null,
+      errorType: 'Request Error',
       pass: false,
       score: 0,
       hasTldr: false,
@@ -303,6 +321,49 @@ async function checkUrl(url) {
       hasLastUpdated: false,
       issues: [error?.message || 'Request failed']
     };
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+class Semaphore {
+  constructor(max) {
+    this.max = max;
+    this.current = 0;
+    this.queue = [];
+  }
+
+  async acquire() {
+    return new Promise((resolve) => {
+      if (this.current < this.max) {
+        this.current += 1;
+        resolve();
+      } else {
+        this.queue.push(resolve);
+      }
+    });
+  }
+
+  release() {
+    this.current -= 1;
+    if (this.queue.length > 0) {
+      this.current += 1;
+      const next = this.queue.shift();
+      next();
+    }
+  }
+}
+
+async function checkUrlWithPacing(url, semaphore, delayAfterMs = 0) {
+  await semaphore.acquire();
+  try {
+    const result = await checkUrl(url);
+    if (delayAfterMs > 0) await delay(delayAfterMs);
+    return result;
+  } finally {
+    semaphore.release();
   }
 }
 
@@ -325,10 +386,46 @@ export default async function handler(req, res) {
     const mode = String(query.mode || 'sample').toLowerCase() === 'full' ? 'full' : 'sample';
     const limit = parsePositiveInt(query.limit);
     const tier = normalizeTierInput(query.tier);
+    const countsOnly = parseBoolean(query.countsOnly);
     const urls = await parseCsvUrls();
     const sourceTierCounts = countUrlsByTier(urls);
     const tierScopedUrls = filterUrlsByTier(urls, tier);
     const selectedUrls = selectUrlsForMode(tierScopedUrls, mode, limit);
+    if (countsOnly) {
+      return res.status(200).json({
+        status: 'ok',
+        source: 'content-extractability',
+        data: {
+          mode,
+          tier,
+          pagesChecked: 0,
+          passPages: 0,
+          failPages: 0,
+          passRate: 0,
+          avgScore: 0,
+          counts: {
+            hasTldr: 0,
+            hasDirectAnswer: 0,
+            hasFaq: 0,
+            hasLastUpdated: 0
+          },
+          sourceTierCounts,
+          rows: []
+        },
+        meta: {
+          generatedAt: new Date().toISOString(),
+          selection: {
+            mode,
+            tier,
+            countsOnly: true,
+            inputUrlCount: urls.length,
+            candidateUrlCount: tierScopedUrls.length,
+            selectedUrlCount: 0,
+            limit: limit || null
+          }
+        }
+      });
+    }
     if (!selectedUrls.length) {
       return res.status(400).json({
         status: 'error',
@@ -338,7 +435,24 @@ export default async function handler(req, res) {
       });
     }
 
-    const results = await Promise.all(selectedUrls.map((url) => checkUrl(url)));
+    const initialSemaphore = new Semaphore(2);
+    const delayBetweenRequests = 300;
+    let results = await Promise.all(selectedUrls.map((url) => checkUrlWithPacing(url, initialSemaphore, delayBetweenRequests)));
+
+    const retryCandidates = results.filter((row) => row.requestOk === false);
+    if (retryCandidates.length > 0) {
+      const hasRateLimited = retryCandidates.some((row) => row.errorType === 'Rate Limited');
+      await delay(hasRateLimited ? 8000 : 2500);
+      const retrySemaphore = new Semaphore(1);
+      const retryResults = await Promise.all(retryCandidates.map(async (row) => {
+        if (row.errorType === 'Rate Limited') {
+          await delay(1500);
+        }
+        return checkUrlWithPacing(row.url, retrySemaphore, 800);
+      }));
+      const retryMap = new Map(retryResults.map((row) => [row.url, row]));
+      results = results.map((row) => retryMap.get(row.url) || row);
+    }
     const checkedPages = results.length;
     const passPages = results.filter((row) => row.pass).length;
     const passRate = checkedPages > 0 ? Math.round((passPages / checkedPages) * 100) : 0;

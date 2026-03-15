@@ -7302,6 +7302,19 @@
           </div>
         </div>
       </div>
+      <div id="impl-extract-progress-modal" class="impl-progress-modal-backdrop" aria-hidden="true">
+        <div class="impl-progress-modal" role="status" aria-live="polite">
+          <h4 id="impl-extract-progress-title" class="impl-progress-modal-title">Running content extractability audit...</h4>
+          <p id="impl-extract-progress-subtitle" class="impl-progress-modal-subtitle">Please wait while we check pages for TLDR, direct answer, FAQ, and last-updated signals.</p>
+          <div class="impl-progress-modal-track">
+            <div id="impl-extract-progress-fill" class="impl-progress-modal-fill"></div>
+          </div>
+          <div class="impl-progress-modal-meta">
+            <span id="impl-extract-progress-percent">5%</span>
+            <span id="impl-extract-progress-elapsed">Elapsed: 0s</span>
+          </div>
+        </div>
+      </div>
 
       <!-- Local & Reviews Panel -->
       <section class="aigeo-panel" data-panel="local">
@@ -22550,7 +22563,10 @@
 
     const implExtractabilityRunState = {
       mode: 'sample',
-      isLoading: false
+      isLoading: false,
+      progressTimer: null,
+      progressPercent: 0,
+      startedAt: null
     };
     const implExtractabilityTableState = {
       rows: [],
@@ -22558,6 +22574,7 @@
       tierFilter: 'all',
       search: ''
     };
+    let implExtractTierSourceCounts = normalizeQaTierCounts(null);
 
     function setImplExtractabilityButtonState(isLoading) {
       const sampleBtn = document.getElementById('impl-extract-run-sample-btn');
@@ -22566,6 +22583,64 @@
       if (fullBtn) fullBtn.disabled = isLoading;
       if (sampleBtn) sampleBtn.textContent = isLoading && implExtractabilityRunState.mode === 'sample' ? 'Running Sample...' : 'Check Extractability (Sample)';
       if (fullBtn) fullBtn.textContent = isLoading && implExtractabilityRunState.mode === 'full' ? 'Running Whole-Site...' : 'Check Extractability (Whole Site)';
+    }
+
+    function showImplExtractProgressModal(mode) {
+      const modal = document.getElementById('impl-extract-progress-modal');
+      const title = document.getElementById('impl-extract-progress-title');
+      const subtitle = document.getElementById('impl-extract-progress-subtitle');
+      const fill = document.getElementById('impl-extract-progress-fill');
+      const pct = document.getElementById('impl-extract-progress-percent');
+      const elapsed = document.getElementById('impl-extract-progress-elapsed');
+      if (!modal || !title || !subtitle || !fill || !pct || !elapsed) return;
+
+      implExtractabilityRunState.progressPercent = 7;
+      implExtractabilityRunState.startedAt = Date.now();
+      title.textContent = mode === 'full'
+        ? 'Running whole-site content extractability audit'
+        : 'Running sample content extractability audit';
+      subtitle.textContent = mode === 'full'
+        ? 'Processing URLs in paced batches with retry handling for transient 429 responses.'
+        : 'Checking a sample of URLs for extractability signals.';
+      fill.style.width = `${implExtractabilityRunState.progressPercent}%`;
+      pct.textContent = `${implExtractabilityRunState.progressPercent}%`;
+      elapsed.textContent = 'Elapsed: 0s';
+      modal.classList.add('is-open');
+      modal.setAttribute('aria-hidden', 'false');
+
+      if (implExtractabilityRunState.progressTimer) {
+        clearInterval(implExtractabilityRunState.progressTimer);
+      }
+      implExtractabilityRunState.progressTimer = setInterval(() => {
+        const elapsedSec = Math.max(0, Math.floor((Date.now() - (implExtractabilityRunState.startedAt || Date.now())) / 1000));
+        const step = mode === 'full' ? 2 : 5;
+        if (implExtractabilityRunState.progressPercent < 92) {
+          implExtractabilityRunState.progressPercent = Math.min(92, implExtractabilityRunState.progressPercent + step);
+        }
+        fill.style.width = `${implExtractabilityRunState.progressPercent}%`;
+        pct.textContent = `${implExtractabilityRunState.progressPercent}%`;
+        elapsed.textContent = `Elapsed: ${elapsedSec}s`;
+      }, 1000);
+    }
+
+    function hideImplExtractProgressModal(success = true) {
+      const modal = document.getElementById('impl-extract-progress-modal');
+      const fill = document.getElementById('impl-extract-progress-fill');
+      const pct = document.getElementById('impl-extract-progress-percent');
+      if (implExtractabilityRunState.progressTimer) {
+        clearInterval(implExtractabilityRunState.progressTimer);
+        implExtractabilityRunState.progressTimer = null;
+      }
+      if (fill && pct) {
+        implExtractabilityRunState.progressPercent = success ? 100 : Math.max(implExtractabilityRunState.progressPercent, 95);
+        fill.style.width = `${implExtractabilityRunState.progressPercent}%`;
+        pct.textContent = `${implExtractabilityRunState.progressPercent}%`;
+      }
+      setTimeout(() => {
+        if (!modal) return;
+        modal.classList.remove('is-open');
+        modal.setAttribute('aria-hidden', 'true');
+      }, 250);
     }
 
     function extractabilityBooleanChip(value) {
@@ -22633,10 +22708,12 @@
       const usingCache = !!cachedPayload;
       const requestedMode = modeOverride || implExtractabilityRunState.mode || 'sample';
       const runTier = document.getElementById('impl-extract-tier-select')?.value || 'all';
+      let auditSucceeded = true;
       implExtractabilityRunState.mode = requestedMode;
       if (!usingCache) {
         implExtractabilityRunState.isLoading = true;
         setImplExtractabilityButtonState(true);
+        showImplExtractProgressModal(requestedMode);
         target.innerHTML = `<p class="card-subtitle">Running ${requestedMode === 'full' ? 'whole-site' : 'sample'} content extractability checks...</p>`;
       }
       try {
@@ -22656,15 +22733,16 @@
         }
 
         const data = payload.data || {};
+        const rows = await remapQaRowsToCanonicalTiers(Array.isArray(data.rows) ? data.rows : []);
         const pagesChecked = Number(data.pagesChecked || 0);
         const passPages = Number(data.passPages || 0);
         const failPages = Number(data.failPages || 0);
         const passRate = Number(data.passRate || 0);
         const avgScore = Number(data.avgScore || 0);
         const counts = data.counts || {};
-        const rows = Array.isArray(data.rows) ? data.rows : [];
-        const sourceTierCounts = normalizeQaTierCounts(data.sourceTierCounts || {});
+        const sourceTierCounts = normalizeQaTierCounts(data.sourceTierCounts || implExtractTierSourceCounts);
         const payloadTier = normalizeQaTierValue(data.tier || runTier || 'all');
+        implExtractTierSourceCounts = sourceTierCounts;
 
         syncExtractabilityImplementationTicketStatus({
           mode: data.mode || requestedMode,
@@ -22747,13 +22825,17 @@
         if (filterStatusEl) filterStatusEl.value = implExtractabilityTableState.statusFilter;
         if (filterTierEl) filterTierEl.value = implExtractabilityTableState.tierFilter;
         if (filterSearchEl) filterSearchEl.value = implExtractabilityTableState.search;
+        applyQaTierCountsToSelect('impl-extract-tier-select', sourceTierCounts, payloadTier);
+        applyQaTierCountsToSelect('impl-extract-filter-tier', countQaRowsByTier(rows), implExtractabilityTableState.tierFilter);
         renderExtractabilityTableRows();
       } catch (error) {
+        auditSucceeded = false;
         target.innerHTML = `<p class="card-subtitle">Could not load content extractability status: ${escapeHtml(error.message || 'Unknown error')}</p>`;
       } finally {
         if (!usingCache) {
           implExtractabilityRunState.isLoading = false;
           setImplExtractabilityButtonState(false);
+          hideImplExtractProgressModal(auditSucceeded);
         }
       }
     }
@@ -23470,6 +23552,26 @@
         const hasAnyCounts = Object.values(counts).some((v) => Number(v || 0) > 0);
         if (hasAnyCounts) {
           implQaTierSourceCounts = counts;
+          return counts;
+        }
+        return fallbackCounts;
+      } catch (err) {
+        return fallbackCounts;
+      }
+    }
+
+    async function preloadImplExtractTierSourceCounts() {
+      const fallbackCounts = normalizeQaTierCounts(implExtractTierSourceCounts);
+      try {
+        const response = await fetch(apiUrl('/api/aigeo/content-extractability?countsOnly=1&tier=all'));
+        const payload = await response.json();
+        if (!response.ok || payload?.status !== 'ok') {
+          return fallbackCounts;
+        }
+        const counts = normalizeQaTierCounts(payload?.data?.sourceTierCounts || null);
+        const hasAnyCounts = Object.values(counts).some((v) => Number(v || 0) > 0);
+        if (hasAnyCounts) {
+          implExtractTierSourceCounts = counts;
           return counts;
         }
         return fallbackCounts;
@@ -24275,12 +24377,19 @@
 
     window.renderImplementationProgressTab = async function() {
       applyQaTierCountsToSelect('impl-qa-tier-select', normalizeQaTierCounts(implQaTierSourceCounts));
+      applyQaTierCountsToSelect('impl-extract-tier-select', normalizeQaTierCounts(implExtractTierSourceCounts));
       try {
         const preloadTierCounts = await preloadImplQaTierSourceCounts();
         applyQaTierCountsToSelect('impl-qa-tier-select', preloadTierCounts);
         applyQaTierCountsToSelect('impl-qa-filter-tier', preloadTierCounts);
       } catch (err) {
         applyQaTierCountsToSelect('impl-qa-tier-select', normalizeQaTierCounts(implQaTierSourceCounts));
+      }
+      try {
+        const preloadExtractTierCounts = await preloadImplExtractTierSourceCounts();
+        applyQaTierCountsToSelect('impl-extract-tier-select', preloadExtractTierCounts);
+      } catch (err) {
+        applyQaTierCountsToSelect('impl-extract-tier-select', normalizeQaTierCounts(implExtractTierSourceCounts));
       }
 
       renderImplementationSummaryAndLanes();
