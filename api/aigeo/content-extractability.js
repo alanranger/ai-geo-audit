@@ -21,7 +21,14 @@ function classifyTierFromUrl(url) {
     const pathname = String(new URL(String(url || '')).pathname || '/').toLowerCase();
     if (pathname === '/' || pathname === '/home') return 'landing';
     if (pathname.includes('/s/')) return 'academy';
-    if (pathname.includes('/workshops') || pathname.includes('/event') || pathname.includes('/webinar')) return 'event';
+    if (
+      pathname.includes('/photographic-workshops-near-me')
+      || pathname.includes('/photography-workshops-near-me')
+      || pathname.includes('/event')
+      || pathname.includes('/webinar')
+    ) {
+      return 'event';
+    }
     if (pathname.includes('/academy') || pathname.includes('/free-online-photography-course')) return 'academy';
     if (pathname.includes('/blog') || pathname.includes('/article') || pathname.includes('/guides')) return 'blog';
     if (pathname.includes('/photography-services-near-me/')
@@ -112,7 +119,7 @@ async function parseCsvUrls() {
   const urls = [];
   for (let i = 1; i < lines.length; i += 1) {
     const cols = parseCsvLine(lines[i]);
-    const raw = String(cols[urlIdx] || '').trim().replace(/^"|"$/g, '');
+    const raw = String(cols[urlIdx] || '').trim().replaceAll(/^"|"$/g, '');
     if (/^https?:\/\//i.test(raw)) urls.push(raw);
   }
   return urls;
@@ -221,8 +228,13 @@ function evaluateExtractability(html, jsonLdBlocks = []) {
 
   const modifiedMetaRegex = /<(?:meta)\b[^>]*(?:property|name)=["'](?:article:modified_time|last-modified|dateModified|og:updated_time)["'][^>]*content=["']([^"']+)["'][^>]*>/i;
   const updatedLabelRegex = /\b(last\s*updated|updated)\b/i;
-  const updatedDateRegex = /\b(\d{4}-\d{2}-\d{2}|[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\b/i;
-  checks.hasLastUpdated = modifiedMetaRegex.test(html) || (updatedLabelRegex.test(html) && updatedDateRegex.test(html));
+  const updatedIsoDateRegex = /\b\d{4}-\d{2}-\d{2}\b/i;
+  const updatedMonthDayYearRegex = /\b[A-Z]{3,9}\s+\d{1,2},?\s+\d{4}\b/i;
+  const updatedDayMonthYearRegex = /\b\d{1,2}\s+[A-Z]{3,9}\s+\d{4}\b/i;
+  const hasUpdatedDate = updatedIsoDateRegex.test(html)
+    || updatedMonthDayYearRegex.test(html)
+    || updatedDayMonthYearRegex.test(html);
+  checks.hasLastUpdated = modifiedMetaRegex.test(html) || (updatedLabelRegex.test(html) && hasUpdatedDate);
 
   const passCount = Object.values(checks).filter(Boolean).length;
   const score = Math.round((passCount / 4) * 100);
