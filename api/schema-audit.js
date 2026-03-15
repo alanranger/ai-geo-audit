@@ -953,8 +953,18 @@ function evaluateTypedSchemaTypeGroup(typeName, schemaNodes = []) {
   return issues;
 }
 
+function shouldEvaluateQaTypeForTier(typeName, pageTier) {
+  // Service schema can appear site-wide, but required-field enforcement is only
+  // intended for money/service pages (landing + product tiers).
+  if (typeName === 'Service') {
+    return pageTier === 'landing' || pageTier === 'product';
+  }
+  return true;
+}
+
 function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full', tier = 'all', tierLookup = null) {
   const rows = results.map((result) => {
+    const pageTier = getSchemaQaTierForUrl(result?.url || '', tierLookup);
     const pageIssues = [];
     if (!result?.success) {
       pageIssues.push({
@@ -983,6 +993,9 @@ function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full', tier
         });
       });
       typedNodeMap.forEach((nodes, typeName) => {
+        if (!shouldEvaluateQaTypeForTier(typeName, pageTier)) {
+          return;
+        }
         pageIssues.push(...evaluateTypedSchemaTypeGroup(typeName, nodes));
       });
     }
@@ -1010,7 +1023,7 @@ function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full', tier
 
     return {
       url: result?.url || '',
-      pageTier: getSchemaQaTierForUrl(result?.url || '', tierLookup),
+      pageTier,
       statusCode: Number.isFinite(result?.statusCode) ? result.statusCode : null,
       status,
       blockIssueCount: blockIssues.length,
