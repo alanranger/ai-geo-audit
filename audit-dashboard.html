@@ -7025,6 +7025,8 @@
               <p class="card-subtitle">Click one of these to run the checks without scrolling.</p>
             </div>
             <div class="card-body" style="display: flex; flex-wrap: wrap; gap: 0.75rem;">
+              <button id="impl-run-all-sample-btn" class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplAllAudits('sample')">Run All Audits (Sample)</button>
+              <button id="impl-run-all-full-btn" class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplAllAudits('full')">Run All Audits (Whole Site)</button>
               <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplTechAudit('sample')">Check Technical Basics (Sample)</button>
               <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplTechAudit('full')">Check Technical Basics (Whole Site)</button>
               <button class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplLocalSchemaAudit('sample')">Check LocalBusiness Schema (Sample)</button>
@@ -22570,11 +22572,17 @@
     };
     const implExtractabilityTableState = {
       rows: [],
+      sortKey: 'url',
+      sortDir: 'asc',
       statusFilter: 'all',
       tierFilter: 'all',
       search: ''
     };
     let implExtractTierSourceCounts = normalizeQaTierCounts(null);
+    const implRunAllAuditsState = {
+      isLoading: false,
+      mode: 'sample'
+    };
 
     function setImplExtractabilityButtonState(isLoading) {
       const sampleBtn = document.getElementById('impl-extract-run-sample-btn');
@@ -22649,6 +22657,43 @@
         : '<span class="impl-status-chip impl-status-red">No</span>';
     }
 
+    function setImplRunAllButtonsState(isLoading) {
+      const sampleBtn = document.getElementById('impl-run-all-sample-btn');
+      const fullBtn = document.getElementById('impl-run-all-full-btn');
+      if (sampleBtn) sampleBtn.disabled = isLoading;
+      if (fullBtn) fullBtn.disabled = isLoading;
+      if (sampleBtn) sampleBtn.textContent = isLoading && implRunAllAuditsState.mode === 'sample' ? 'Running All (Sample)...' : 'Run All Audits (Sample)';
+      if (fullBtn) fullBtn.textContent = isLoading && implRunAllAuditsState.mode === 'full' ? 'Running All (Whole Site)...' : 'Run All Audits (Whole Site)';
+    }
+
+    function sortExtractabilityRows(rows, sortKey, sortDir) {
+      const dir = sortDir === 'desc' ? -1 : 1;
+      return [...rows].sort((a, b) => {
+        let left = a?.[sortKey];
+        let right = b?.[sortKey];
+        if (sortKey === 'pass'
+          || sortKey === 'hasTldr'
+          || sortKey === 'hasDirectAnswer'
+          || sortKey === 'hasFaq'
+          || sortKey === 'hasLastUpdated') {
+          left = left ? 1 : 0;
+          right = right ? 1 : 0;
+        } else if (sortKey === 'statusCode' || sortKey === 'score') {
+          left = Number(left || 0);
+          right = Number(right || 0);
+        } else if (sortKey === 'issues') {
+          left = Array.isArray(a?.issues) ? a.issues.join(' | ') : '';
+          right = Array.isArray(b?.issues) ? b.issues.join(' | ') : '';
+        } else {
+          left = String(left ?? '').toLowerCase();
+          right = String(right ?? '').toLowerCase();
+        }
+        if (left < right) return -1 * dir;
+        if (left > right) return 1 * dir;
+        return 0;
+      });
+    }
+
     function renderExtractabilityTableRows() {
       const body = document.getElementById('impl-extract-table-body');
       const info = document.getElementById('impl-extract-table-info');
@@ -22669,6 +22714,7 @@
           return urlText.includes(searchTerm) || issuesText.includes(searchTerm);
         });
       }
+      rows = sortExtractabilityRows(rows, implExtractabilityTableState.sortKey, implExtractabilityTableState.sortDir);
       if (info) {
         info.textContent = `${rows.length}/${implExtractabilityTableState.rows.length} rows shown`;
       }
@@ -22699,6 +22745,16 @@
       implExtractabilityTableState.statusFilter = statusEl?.value || 'all';
       implExtractabilityTableState.tierFilter = tierEl?.value || 'all';
       implExtractabilityTableState.search = searchEl?.value || '';
+      renderExtractabilityTableRows();
+    };
+
+    window.onImplExtractabilitySort = function(sortKey) {
+      if (implExtractabilityTableState.sortKey === sortKey) {
+        implExtractabilityTableState.sortDir = implExtractabilityTableState.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        implExtractabilityTableState.sortKey = sortKey;
+        implExtractabilityTableState.sortDir = 'asc';
+      }
       renderExtractabilityTableRows();
     };
 
@@ -22752,6 +22808,8 @@
         });
         renderImplementationSummaryAndLanes();
         implExtractabilityTableState.rows = rows.slice(0, 1000);
+        implExtractabilityTableState.sortKey = 'url';
+        implExtractabilityTableState.sortDir = 'asc';
         implExtractabilityTableState.statusFilter = 'all';
         implExtractabilityTableState.tierFilter = payloadTier === 'all' ? 'all' : payloadTier;
         implExtractabilityTableState.search = '';
@@ -22800,16 +22858,16 @@
             <table class="ranking-table">
               <thead>
                 <tr>
-                  <th style="text-align:left;">URL</th>
-                  <th>Tier</th>
-                  <th>HTTP</th>
-                  <th>Pass</th>
-                  <th>Score</th>
-                  <th>TLDR</th>
-                  <th>Direct Answer</th>
-                  <th>FAQ</th>
-                  <th>Last Updated</th>
-                  <th style="text-align:left;">Issues</th>
+                  <th style="text-align:left;"><button type="button" class="btn btn-small" onclick="window.onImplExtractabilitySort('url')">URL</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplExtractabilitySort('pageTier')">Tier</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplExtractabilitySort('statusCode')">HTTP</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplExtractabilitySort('pass')">Pass</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplExtractabilitySort('score')">Score</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplExtractabilitySort('hasTldr')">TLDR</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplExtractabilitySort('hasDirectAnswer')">Direct Answer</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplExtractabilitySort('hasFaq')">FAQ</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplExtractabilitySort('hasLastUpdated')">Last Updated</button></th>
+                  <th style="text-align:left;"><button type="button" class="btn btn-small" onclick="window.onImplExtractabilitySort('issues')">Issues</button></th>
                 </tr>
               </thead>
               <tbody id="impl-extract-table-body">
@@ -22843,6 +22901,24 @@
     window.runImplExtractabilityAudit = async function(mode) {
       const nextMode = mode === 'full' ? 'full' : 'sample';
       await fetchAndRenderContentExtractabilityStatus(nextMode);
+    };
+
+    window.runImplAllAudits = async function(mode) {
+      const nextMode = mode === 'full' ? 'full' : 'sample';
+      if (implRunAllAuditsState.isLoading) return;
+      implRunAllAuditsState.isLoading = true;
+      implRunAllAuditsState.mode = nextMode;
+      setImplRunAllButtonsState(true);
+      try {
+        await window.runImplTechAudit(nextMode);
+        await window.runImplLocalSchemaAudit(nextMode);
+        await window.runImplServiceSchemaAudit(nextMode);
+        await window.runImplSchemaQaGateAudit(nextMode);
+        await window.runImplExtractabilityAudit(nextMode);
+      } finally {
+        implRunAllAuditsState.isLoading = false;
+        setImplRunAllButtonsState(false);
+      }
     };
 
     async function fetchAndRenderLocalBusinessSchemaStatus(modeOverride = null, cachedPayload = null) {
@@ -24410,9 +24486,10 @@
       if (cachedExtractabilityPayload) {
         await fetchAndRenderContentExtractabilityStatus(implExtractabilityRunState.mode || 'sample', cachedExtractabilityPayload);
       }
-      // QA Gate is intentionally not auto-hydrated from cache on tab load.
-      // Always run explicitly via the QA buttons to keep selector state, counts,
-      // and table rows aligned to a fresh payload.
+      const cachedQaPayload = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.qa);
+      if (cachedQaPayload) {
+        await fetchAndRenderSchemaQaGateStatus(implQaGateRunState.mode || 'sample', cachedQaPayload);
+      }
 
       // Manual-run only: do not auto-trigger heavy audits on tab load.
     };
