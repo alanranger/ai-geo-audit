@@ -612,35 +612,126 @@ function isServiceIntentUrl(url) {
   }
 }
 
-const QA_TIER_VALUES = new Set(['all', 'product', 'event', 'landing', 'blog', 'about', 'other']);
+const QA_TIER_VALUES = new Set(['all', 'landing', 'product', 'event', 'blog', 'academy', 'unmapped']);
+const QA_TIER_SEGMENTATION_URLS = [
+  'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/page%20segmentation%20by%20tier.csv',
+  'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/page%20segmentation%20by%20tier.csv'
+];
+
+let qaTierLookupCache = null;
 
 function normalizeQaTierInput(value) {
   const normalized = String(value || '').trim().toLowerCase();
   return QA_TIER_VALUES.has(normalized) ? normalized : 'all';
 }
 
-function getSchemaQaTierForUrl(url) {
+function parseTierCsvLine(line) {
+  const columns = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    const next = line[i + 1];
+    if (ch === '"') {
+      if (inQuotes && next === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      columns.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  columns.push(current.trim());
+  return columns;
+}
+
+function tierKeyFromHeader(header) {
+  const h = String(header || '').toLowerCase();
+  if (h.includes('tier a') || h.includes('landing')) return 'landing';
+  if (h.includes('tier b') || h.includes('product')) return 'product';
+  if (h.includes('tier c') || h.includes('event')) return 'event';
+  if (h.includes('tier d') || h.includes('blog')) return 'blog';
+  if (h.includes('tier e') || h.includes('academy')) return 'academy';
+  if (h.includes('tier f') || h.includes('unmapped')) return 'unmapped';
+  return null;
+}
+
+function toQaTierUrlKey(rawUrl) {
   try {
-    const pathname = new URL(url).pathname.toLowerCase();
-    if (!pathname || pathname === '/') return 'landing';
-    if (pathname.startsWith('/blog')) return 'blog';
-    if (pathname.startsWith('/about')) return 'about';
-    if (pathname.includes('/photography-services-near-me/') || pathname.includes('/photo-workshops-uk/')) {
-      return 'product';
-    }
-    if (pathname.includes('/event') || pathname.includes('/events') || pathname.includes('/workshop') || pathname.includes('/workshops')) {
-      return 'event';
-    }
-    return 'landing';
+    const parsed = new URL(String(rawUrl || '').trim(), 'https://www.alanranger.com');
+    const host = parsed.hostname.toLowerCase();
+    let path = parsed.pathname.toLowerCase();
+    if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+    return `${host}${path || '/'}`;
   } catch {
-    return 'other';
+    return null;
   }
 }
 
-function filterUrlsByQaTier(urls, tier) {
+async function getQaTierSegmentationLookup() {
+  if (qaTierLookupCache instanceof Map) return qaTierLookupCache;
+
+  let csvText = '';
+  for (const sourceUrl of QA_TIER_SEGMENTATION_URLS) {
+    try {
+      const res = await fetch(sourceUrl);
+      if (!res.ok) continue;
+      const text = await res.text();
+      if (!text?.trim()) continue;
+      csvText = text;
+      break;
+    } catch {
+      // Try next source
+    }
+  }
+
+  const lookup = new Map();
+  if (!csvText) {
+    qaTierLookupCache = lookup;
+    return lookup;
+  }
+
+  const lines = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (lines.length < 2) {
+    qaTierLookupCache = lookup;
+    return lookup;
+  }
+
+  const headers = parseTierCsvLine(lines[0]);
+  const columnDefs = headers.map((header, idx) => ({ idx, tier: tierKeyFromHeader(header) })).filter((item) => item.tier);
+  lines.slice(1).forEach((line) => {
+    const cols = parseTierCsvLine(line);
+    columnDefs.forEach(({ idx, tier }) => {
+      const raw = String(cols[idx] || '').trim();
+      if (!raw) return;
+      const key = toQaTierUrlKey(raw);
+      if (!key) return;
+      if (!lookup.has(key)) lookup.set(key, tier);
+    });
+  });
+
+  qaTierLookupCache = lookup;
+  return lookup;
+}
+
+function getSchemaQaTierForUrl(url, tierLookup = null) {
+  const key = toQaTierUrlKey(url);
+  if (!key) return 'unmapped';
+  if (tierLookup instanceof Map && tierLookup.has(key)) {
+    return tierLookup.get(key);
+  }
+  return 'unmapped';
+}
+
+function filterUrlsByQaTier(urls, tier, tierLookup = null) {
   if (!Array.isArray(urls) || !urls.length) return [];
   if (tier === 'all') return urls;
-  return urls.filter((url) => getSchemaQaTierForUrl(url) === tier);
+  return urls.filter((url) => getSchemaQaTierForUrl(url, tierLookup) === tier);
 }
 
 function buildServiceSchemaCoverage(pages = []) {
@@ -798,7 +889,7 @@ function evaluateTypedSchemaTypeGroup(typeName, schemaNodes = []) {
   return issues;
 }
 
-function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full', tier = 'all') {
+function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full', tier = 'all', tierLookup = null) {
   const rows = results.map((result) => {
     const pageIssues = [];
     if (!result?.success) {
@@ -855,7 +946,7 @@ function buildSchemaQaGate(results = [], source = 'unknown', mode = 'full', tier
 
     return {
       url: result?.url || '',
-      pageTier: getSchemaQaTierForUrl(result?.url || ''),
+      pageTier: getSchemaQaTierForUrl(result?.url || '', tierLookup),
       statusCode: Number.isFinite(result?.statusCode) ? result.statusCode : null,
       status,
       blockIssueCount: blockIssues.length,
@@ -1476,31 +1567,28 @@ export default async function handler(req, res) {
     const runLimit = queryLimit || bodyLimit || null;
     const runSampleSize = querySampleSize || bodySampleSize || 25;
     const runServiceOnly = queryServiceOnly || bodyServiceOnly;
-    let runTier = bodyTier;
-    if (queryTier === 'all') {
-      runTier = bodyTier;
-    } else {
-      runTier = queryTier;
-    }
+    const runTier = queryTier === 'all' ? bodyTier : queryTier;
+
+    const qaTierLookup = await getQaTierSegmentationLookup();
 
     urls = ensureRootUrlIncluded(urls);
     const inputUrlCount = urls.length;
     if (runServiceOnly) {
       urls = urls.filter((url) => isServiceIntentUrl(url));
     }
-    urls = filterUrlsByQaTier(urls, runTier);
+    urls = filterUrlsByQaTier(urls, runTier, qaTierLookup);
 
     const candidateUrlCount = urls.length;
     urls = selectUrlsForMode(urls, runMode, runLimit, runSampleSize);
     
     if (urls.length === 0) {
-      let noUrlMessage = 'No URLs found in CSV file';
+      let noUrlMessage = '';
       if (runServiceOnly) {
         noUrlMessage = 'No service-intent URLs matched the current source list.';
-      } else if (runTier === 'all') {
-        noUrlMessage = 'No URLs found in CSV file';
-      } else {
+      } else if (runTier !== 'all') {
         noUrlMessage = `No URLs matched tier "${runTier}" in the current source list.`;
+      } else {
+        noUrlMessage = 'No URLs found in CSV file';
       }
       return res.status(400).json({
         status: 'error',
@@ -1935,7 +2023,7 @@ export default async function handler(req, res) {
       errorType: result.success ? null : (result.errorType || null)
     }));
     const serviceSchemaCoverage = buildServiceSchemaCoverage(pages);
-    const qaGate = buildSchemaQaGate(results, urlSource, runMode, runTier);
+    const qaGate = buildSchemaQaGate(results, urlSource, runMode, runTier, qaTierLookup);
     
     return res.status(200).json({
       status: 'ok',
