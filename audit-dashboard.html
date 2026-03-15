@@ -23364,8 +23364,9 @@
         const rawRows = Array.isArray(qaGate.rows) ? qaGate.rows : [];
         const rows = await remapQaRowsToCanonicalTiers(rawRows);
         const sourceTierCounts = normalizeQaTierCounts(qaSelectionMeta.sourceTierCounts || implQaTierSourceCounts);
-        const tierCounts = sourceTierCounts.all > 0 ? sourceTierCounts : countQaRowsByTier(rows);
-        implQaTierSourceCounts = tierCounts;
+        const tableTierCounts = countQaRowsByTier(rows);
+        const runScopeTierCounts = sourceTierCounts.all > 0 ? sourceTierCounts : tableTierCounts;
+        implQaTierSourceCounts = runScopeTierCounts;
         const pagesChecked = Number(qaGate.pagesChecked || rows.length || 0);
         const passPages = Number(qaGate.passPages || 0);
         const warningPages = Number(qaGate.warningPages || 0);
@@ -23469,8 +23470,8 @@
             </div>
           </div>
         `;
-        applyQaTierCountsToSelect('impl-qa-tier-select', tierCounts);
-        applyQaTierCountsToSelect('impl-qa-filter-tier', tierCounts);
+        applyQaTierCountsToSelect('impl-qa-tier-select', runScopeTierCounts);
+        applyQaTierCountsToSelect('impl-qa-filter-tier', tableTierCounts);
         renderQaGateTableRows();
       } catch (error) {
         auditSucceeded = false;
