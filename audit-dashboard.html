@@ -23009,8 +23009,21 @@
       return { label: 'Pass', chipClass: 'impl-status-green' };
     }
 
-    function formatQaTierLabel(tier) {
+    function normalizeQaTierValue(tier) {
       const normalized = String(tier || '').trim().toLowerCase();
+      if (!normalized) return 'unmapped';
+      if (normalized === 'all') return 'all';
+      if (normalized === 'landing' || normalized === 'tier a landing') return 'landing';
+      if (normalized === 'product' || normalized === 'tier b product') return 'product';
+      if (normalized === 'event' || normalized === 'tier c event') return 'event';
+      if (normalized === 'blog' || normalized === 'tier d blog') return 'blog';
+      if (normalized === 'academy' || normalized === 'tier e academy') return 'academy';
+      if (normalized === 'unmapped' || normalized === 'tier f unmapped') return 'unmapped';
+      return 'unmapped';
+    }
+
+    function formatQaTierLabel(tier) {
+      const normalized = normalizeQaTierValue(tier);
       if (normalized === 'landing') return 'Tier A Landing';
       if (normalized === 'product') return 'Tier B Product';
       if (normalized === 'event') return 'Tier C Event';
@@ -23041,7 +23054,7 @@
           counts[option.value] = 0;
         });
       (Array.isArray(rows) ? rows : []).forEach((row) => {
-        const key = String(row?.pageTier || 'unmapped').trim().toLowerCase();
+        const key = normalizeQaTierValue(row?.pageTier || 'unmapped');
         if (Object.hasOwn(counts, key)) {
           counts[key] += 1;
         } else {
@@ -23200,7 +23213,7 @@
     function filterQaRows(rows, state) {
       return rows.filter((row) => {
         if (state.statusFilter !== 'all' && row.status !== state.statusFilter) return false;
-        const rowTier = String(row?.pageTier || 'other').trim().toLowerCase();
+        const rowTier = normalizeQaTierValue(row?.pageTier || 'unmapped');
         if (state.tierFilter !== 'all' && rowTier !== state.tierFilter) return false;
         if (!state.search) return true;
         const detailText = Array.isArray(row?.issueDetails)
