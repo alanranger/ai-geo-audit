@@ -22073,6 +22073,7 @@
         expectedBenefit: "Creates visibility baseline for social sources that are often cited by AI."
       }
     ];
+    const IMPL_QA_GATE_TICKET_TITLE = "Add pre-deploy schema QA gate (@id, ISO dates, required fields)";
 
     function getImplStatusMeta(status) {
       switch (status) {
@@ -22143,6 +22144,90 @@
       const coverage = deriveServiceSchemaCoverage(schemaData);
       if (!coverage || !Number.isFinite(coverage.totalServicePages)) return 'N/A';
       return `${coverage.pagesWithServiceSchema || 0}/${coverage.totalServicePages || 0} (${(coverage.serviceCoverage || 0).toFixed(1)}%)`;
+    }
+
+    function syncQaGateImplementationTicketStatus({ mode, tier, pagesChecked, warningPages, blockPages }) {
+      const qaTicket = IMPLEMENTATION_PROGRESS_TICKETS.find((ticket) => ticket.title === IMPL_QA_GATE_TICKET_TITLE);
+      if (!qaTicket) return;
+      const modeValue = String(mode || '').toLowerCase();
+      const tierValue = normalizeQaTierValue(tier || 'all');
+      const checked = Number(pagesChecked || 0);
+      const warnings = Number(warningPages || 0);
+      const blocks = Number(blockPages || 0);
+      const qaGateReady = modeValue === 'full' && tierValue === 'all' && checked > 0 && warnings === 0 && blocks === 0;
+      qaTicket.status = qaGateReady ? 'done' : 'in_progress';
+    }
+
+    function renderImplementationSummaryAndLanes() {
+      const summary = IMPLEMENTATION_PROGRESS_TICKETS.reduce((acc, t) => {
+        acc.total += 1;
+        acc[t.status] = (acc[t.status] || 0) + 1;
+        if ((t.status === "planned" || t.status === "in_progress" || t.status === "blocked") && t.impact === "High") {
+          acc.highImpactOpen += 1;
+        }
+        return acc;
+      }, { total: 0, highImpactOpen: 0 });
+
+      const map = {
+        planned: "impl-summary-planned",
+        in_progress: "impl-summary-in-progress",
+        done: "impl-summary-done",
+        blocked: "impl-summary-blocked"
+      };
+      Object.entries(map).forEach(([status, id]) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = summary[status] || 0;
+      });
+      const highImpactEl = document.getElementById("impl-summary-high-impact-open");
+      if (highImpactEl) highImpactEl.textContent = summary.highImpactOpen;
+      const nextActionEl = document.getElementById('impl-what-next');
+      if (nextActionEl) {
+        if (summary.highImpactOpen > 0) {
+          nextActionEl.textContent = 'Next action: run "Check Technical Basics (Whole Site)" first, then fix confirmed red failures.';
+        } else {
+          nextActionEl.textContent = 'Next action: no high-priority items open right now.';
+        }
+      }
+
+      const completionPercent = summary.total > 0
+        ? Math.round(((summary.done || 0) / summary.total) * 100)
+        : 0;
+      const progressBar = document.getElementById('impl-overall-progress-bar');
+      const progressText = document.getElementById('impl-overall-progress-text');
+      const progressVisuals = getProgressVisuals(completionPercent);
+      if (progressBar) {
+        progressBar.style.width = `${completionPercent}%`;
+        progressBar.style.background = progressVisuals.color;
+      }
+      if (progressText) {
+        progressText.className = `impl-status-chip ${progressVisuals.chipClass}`;
+        progressText.textContent = `${completionPercent}%`;
+      }
+
+      renderImplementationLane("impl-list-now", "now");
+      renderImplementationLane("impl-list-next", "next");
+      renderImplementationLane("impl-list-later", "later");
+
+      const body = document.getElementById("impl-outstanding-body");
+      if (!body) return;
+      const rows = IMPLEMENTATION_PROGRESS_TICKETS.filter(t => t.status !== "done");
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No outstanding implementation tickets.</td></tr>';
+        return;
+      }
+      body.innerHTML = rows.map(t => {
+        const statusMeta = getImplStatusMeta(t.status);
+        return `
+        <tr>
+          <td>${t.priority}</td>
+          <td>${t.title}</td>
+          <td><span class="impl-status-chip ${statusMeta.chipClass}">${statusMeta.label}</span></td>
+          <td>${t.expectedBenefit}</td>
+          <td>${t.impact}</td>
+          <td>${t.owner}</td>
+        </tr>
+      `;
+      }).join("");
     }
 
     function renderImplementationLane(laneId, laneName) {
@@ -23375,6 +23460,14 @@
         const passPages = Number(qaGate.passPages || 0);
         const warningPages = Number(qaGate.warningPages || 0);
         const blockPages = Number(qaGate.blockPages || 0);
+        syncQaGateImplementationTicketStatus({
+          mode: qaGate.mode || requestedMode,
+          tier: payloadTier,
+          pagesChecked,
+          warningPages,
+          blockPages
+        });
+        renderImplementationSummaryAndLanes();
         const passRate = pagesChecked > 0 ? Math.round((passPages / pagesChecked) * 100) : 0;
         const passVisual = getProgressVisuals(passRate);
         implQaGateTableState.rows = rows;
@@ -23915,75 +24008,7 @@
         applyQaTierCountsToSelect('impl-qa-tier-select', normalizeQaTierCounts(implQaTierSourceCounts));
       }
 
-      const summary = IMPLEMENTATION_PROGRESS_TICKETS.reduce((acc, t) => {
-        acc.total += 1;
-        acc[t.status] = (acc[t.status] || 0) + 1;
-        if ((t.status === "planned" || t.status === "in_progress" || t.status === "blocked") && t.impact === "High") {
-          acc.highImpactOpen += 1;
-        }
-        return acc;
-      }, { total: 0, highImpactOpen: 0 });
-
-      const map = {
-        planned: "impl-summary-planned",
-        in_progress: "impl-summary-in-progress",
-        done: "impl-summary-done",
-        blocked: "impl-summary-blocked"
-      };
-      Object.entries(map).forEach(([status, id]) => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = summary[status] || 0;
-      });
-      const highImpactEl = document.getElementById("impl-summary-high-impact-open");
-      if (highImpactEl) highImpactEl.textContent = summary.highImpactOpen;
-      const nextActionEl = document.getElementById('impl-what-next');
-      if (nextActionEl) {
-        if (summary.highImpactOpen > 0) {
-          nextActionEl.textContent = 'Next action: run "Check Technical Basics (Whole Site)" first, then fix confirmed red failures.';
-        } else {
-          nextActionEl.textContent = 'Next action: no high-priority items open right now.';
-        }
-      }
-
-      const completionPercent = summary.total > 0
-        ? Math.round(((summary.done || 0) / summary.total) * 100)
-        : 0;
-      const progressBar = document.getElementById('impl-overall-progress-bar');
-      const progressText = document.getElementById('impl-overall-progress-text');
-      const progressVisuals = getProgressVisuals(completionPercent);
-      if (progressBar) {
-        progressBar.style.width = `${completionPercent}%`;
-        progressBar.style.background = progressVisuals.color;
-      }
-      if (progressText) {
-        progressText.className = `impl-status-chip ${progressVisuals.chipClass}`;
-        progressText.textContent = `${completionPercent}%`;
-      }
-
-      renderImplementationLane("impl-list-now", "now");
-      renderImplementationLane("impl-list-next", "next");
-      renderImplementationLane("impl-list-later", "later");
-
-      const body = document.getElementById("impl-outstanding-body");
-      if (!body) return;
-      const rows = IMPLEMENTATION_PROGRESS_TICKETS.filter(t => t.status !== "done");
-      if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No outstanding implementation tickets.</td></tr>';
-        return;
-      }
-      body.innerHTML = rows.map(t => {
-        const statusMeta = getImplStatusMeta(t.status);
-        return `
-        <tr>
-          <td>${t.priority}</td>
-          <td>${t.title}</td>
-          <td><span class="impl-status-chip ${statusMeta.chipClass}">${statusMeta.label}</span></td>
-          <td>${t.expectedBenefit}</td>
-          <td>${t.impact}</td>
-          <td>${t.owner}</td>
-        </tr>
-      `;
-      }).join("");
+      renderImplementationSummaryAndLanes();
 
       const cachedTechPayload = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.tech);
       if (cachedTechPayload) {
