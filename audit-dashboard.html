@@ -22891,6 +22891,7 @@
       progressPercent: 0,
       startedAt: null
     };
+    let implQaTierSourceCounts = null;
 
     function showImplQaProgressModal(mode) {
       const modal = document.getElementById('impl-qa-progress-modal');
@@ -22989,13 +22990,31 @@
         });
       (Array.isArray(rows) ? rows : []).forEach((row) => {
         const key = String(row?.pageTier || 'unmapped').trim().toLowerCase();
-        if (Object.prototype.hasOwnProperty.call(counts, key)) {
+        if (Object.hasOwn(counts, key)) {
           counts[key] += 1;
         } else {
           counts.unmapped += 1;
         }
       });
       return counts;
+    }
+
+    function normalizeQaTierCounts(rawCounts = null) {
+      const normalized = {
+        all: 0,
+        landing: 0,
+        product: 0,
+        event: 0,
+        blog: 0,
+        academy: 0,
+        unmapped: 0
+      };
+      if (!rawCounts || typeof rawCounts !== 'object') return normalized;
+      Object.keys(normalized).forEach((key) => {
+        const value = Number(rawCounts[key] || 0);
+        normalized[key] = Number.isFinite(value) && value >= 0 ? value : 0;
+      });
+      return normalized;
     }
 
     function applyQaTierCountsToSelect(selectId, counts = {}) {
@@ -23010,6 +23029,26 @@
         .join('');
       selectEl.innerHTML = optionsHtml;
       selectEl.value = getQaTierOptionDefs().some((option) => option.value === currentValue) ? currentValue : 'all';
+    }
+
+    async function preloadImplQaTierSourceCounts() {
+      const fallbackCounts = normalizeQaTierCounts(implQaTierSourceCounts);
+      try {
+        const response = await fetch(apiUrl('/api/schema-audit?countsOnly=1&tier=all'));
+        const payload = await response.json();
+        if (!response.ok || payload?.status !== 'ok') {
+          return fallbackCounts;
+        }
+        const counts = normalizeQaTierCounts(payload?.meta?.selection?.sourceTierCounts || null);
+        const hasAnyCounts = Object.values(counts).some((v) => Number(v || 0) > 0);
+        if (hasAnyCounts) {
+          implQaTierSourceCounts = counts;
+          return counts;
+        }
+        return fallbackCounts;
+      } catch (err) {
+        return fallbackCounts;
+      }
     }
 
     async function remapQaRowsToCanonicalTiers(rows) {
@@ -23250,7 +23289,9 @@
           : Boolean(qaGate?.tierLookupLoaded);
         const rawRows = Array.isArray(qaGate.rows) ? qaGate.rows : [];
         const rows = await remapQaRowsToCanonicalTiers(rawRows);
-        const tierCounts = countQaRowsByTier(rows);
+        const sourceTierCounts = normalizeQaTierCounts(qaSelectionMeta.sourceTierCounts || implQaTierSourceCounts);
+        const tierCounts = sourceTierCounts.all > 0 ? sourceTierCounts : countQaRowsByTier(rows);
+        implQaTierSourceCounts = tierCounts;
         const pagesChecked = Number(qaGate.pagesChecked || rows.length || 0);
         const passPages = Number(qaGate.passPages || 0);
         const warningPages = Number(qaGate.warningPages || 0);
@@ -23818,6 +23859,10 @@
       renderImplementationLane("impl-list-now", "now");
       renderImplementationLane("impl-list-next", "next");
       renderImplementationLane("impl-list-later", "later");
+
+      const preloadTierCounts = await preloadImplQaTierSourceCounts();
+      applyQaTierCountsToSelect('impl-qa-tier-select', preloadTierCounts);
+      applyQaTierCountsToSelect('impl-qa-filter-tier', preloadTierCounts);
 
       const body = document.getElementById("impl-outstanding-body");
       if (!body) return;

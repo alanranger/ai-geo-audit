@@ -773,6 +773,29 @@ function filterUrlsByQaTier(urls, tier, tierLookup = null) {
   return urls.filter((url) => getSchemaQaTierForUrl(url, tierLookup) === tier);
 }
 
+function countUrlsByQaTier(urls = [], tierLookup = null) {
+  const counts = {
+    all: 0,
+    landing: 0,
+    product: 0,
+    event: 0,
+    blog: 0,
+    academy: 0,
+    unmapped: 0
+  };
+  if (!Array.isArray(urls) || !urls.length) return counts;
+  counts.all = urls.length;
+  urls.forEach((url) => {
+    const tier = getSchemaQaTierForUrl(url, tierLookup);
+    if (Object.hasOwn(counts, tier)) {
+      counts[tier] += 1;
+    } else {
+      counts.unmapped += 1;
+    }
+  });
+  return counts;
+}
+
 function buildServiceSchemaCoverage(pages = []) {
   const servicePages = [];
   const servicePagesMissingSchema = [];
@@ -1552,6 +1575,7 @@ export default async function handler(req, res) {
     const querySampleSize = parsePositiveInt(query.sampleSize);
     const queryServiceOnly = parseBoolean(query.serviceOnly);
     const queryTier = normalizeQaTierInput(query.tier);
+    const queryCountsOnly = parseBoolean(query.countsOnly);
 
     // Check if manual URL list is provided in request body
     let urls = [];
@@ -1562,6 +1586,7 @@ export default async function handler(req, res) {
     let bodySampleSize = null;
     let bodyServiceOnly = false;
     let bodyTier = 'all';
+    let bodyCountsOnly = false;
     
     if (req.method === 'POST') {
       // Parse request body
@@ -1580,6 +1605,7 @@ export default async function handler(req, res) {
       bodySampleSize = parsePositiveInt(body.sampleSize);
       bodyServiceOnly = parseBoolean(body.serviceOnly);
       bodyTier = normalizeQaTierInput(body.tier);
+      bodyCountsOnly = parseBoolean(body.countsOnly);
       
       if (body.urls && Array.isArray(body.urls)) {
         // Use manual URL list from request
@@ -1607,6 +1633,7 @@ export default async function handler(req, res) {
     const runSampleSize = querySampleSize || bodySampleSize || 25;
     const runServiceOnly = queryServiceOnly || bodyServiceOnly;
     const runTier = queryTier === 'all' ? bodyTier : queryTier;
+    const runCountsOnly = queryCountsOnly || bodyCountsOnly;
 
     const qaTierLookup = await getQaTierSegmentationLookup();
     const qaTierLookupLoaded = qaTierLookup instanceof Map && qaTierLookup.size > 0;
@@ -1616,10 +1643,47 @@ export default async function handler(req, res) {
     if (runServiceOnly) {
       urls = urls.filter((url) => isServiceIntentUrl(url));
     }
-    urls = filterUrlsByQaTier(urls, runTier, qaTierLookup);
+    const sourceTierCounts = countUrlsByQaTier(urls, qaTierLookup);
+    const tierScopedUrls = filterUrlsByQaTier(urls, runTier, qaTierLookup);
+    const candidateUrlCount = tierScopedUrls.length;
 
-    const candidateUrlCount = urls.length;
-    urls = selectUrlsForMode(urls, runMode, runLimit, runSampleSize);
+    if (runCountsOnly) {
+      return res.status(200).json({
+        status: 'ok',
+        source: 'schema-audit',
+        data: {
+          qaGate: {
+            source: urlSource,
+            mode: runMode,
+            tier: runTier,
+            pagesChecked: 0,
+            passPages: 0,
+            warningPages: 0,
+            blockPages: 0,
+            passRate: 0,
+            rows: [],
+            tierLookupLoaded: qaTierLookupLoaded
+          }
+        },
+        meta: {
+          generatedAt: new Date().toISOString(),
+          selection: {
+            mode: runMode,
+            limit: runLimit,
+            sampleSize: runSampleSize,
+            serviceOnly: runServiceOnly,
+            tier: runTier,
+            countsOnly: true,
+            inputUrlCount,
+            candidateUrlCount,
+            qaTierLookupLoaded,
+            sourceTierCounts
+          }
+        }
+      });
+    }
+
+    urls = selectUrlsForMode(tierScopedUrls, runMode, runLimit, runSampleSize);
     
     if (urls.length === 0) {
       let noUrlMessage = '';
@@ -2100,7 +2164,8 @@ export default async function handler(req, res) {
           tier: runTier,
           inputUrlCount,
           candidateUrlCount,
-          qaTierLookupLoaded
+          qaTierLookupLoaded,
+          sourceTierCounts
         },
         diagnostic: diagnosticInfo
       }
