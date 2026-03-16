@@ -168,7 +168,8 @@ function findJsonLdBlocks(html = '') {
   const regex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
   const matches = html.matchAll(regex);
   for (const match of matches) {
-    const parsed = safeJsonParse(String(match[1] || '').trim());
+    const raw = String(match[1] || '').trim();
+    const parsed = safeJsonParse(raw) || safeJsonParse(decodeBasicHtmlEntities(raw));
     if (!parsed) continue;
     if (Array.isArray(parsed)) blocks.push(...parsed);
     else blocks.push(parsed);
@@ -176,12 +177,17 @@ function findJsonLdBlocks(html = '') {
   return blocks;
 }
 
+function hasDeferredFaqLoaderSignal(html = '') {
+  const source = String(html || '');
+  return /\/[a-z0-9._\-/]*_faq\.json(?:["'?#&]|$)/i.exec(source) !== null;
+}
+
 function extractSnippetLoaderTargets(html = '', baseUrl = '') {
   const targets = [];
   const tagRegex = /<[^>]*data-m-plugin=["']load["'][^>]*>/gi;
   const tags = html.match(tagRegex) || [];
   tags.forEach((tag) => {
-    const targetMatch = tag.match(/data-target=["']([^"']+)["']/i);
+    const targetMatch = /data-target=["']([^"']+)["']/i.exec(tag);
     if (!targetMatch?.[1]) return;
     const rawTarget = String(targetMatch[1]).trim();
     if (!rawTarget) return;
@@ -275,7 +281,9 @@ function evaluateExtractability(html, jsonLdBlocks = []) {
   jsonLdBlocks.forEach((block) => collectTypes(block, faqTypes));
   const hasFaqFromSchema = faqTypes.has('faqpage');
   const questionHeadings = (html.match(/<h[2-4][^>]*>[^<]*\?[^<]*<\/h[2-4]>/gi) || []).length;
-  checks.hasFaq = hasFaqFromSchema || questionHeadings >= 2;
+  const hasFaqHeading = /<h[1-4][^>]*>\s*(?:faqs?|frequently\s+asked\s+questions)\s*<\/h[1-4]>/i.test(html);
+  const hasDeferredFaqLoader = hasDeferredFaqLoaderSignal(html);
+  checks.hasFaq = hasFaqFromSchema || questionHeadings >= 2 || hasFaqHeading || hasDeferredFaqLoader;
 
   const modifiedMetaRegex = /<(?:meta)\b[^>]*(?:property|name)=["'](?:article:modified_time|last-modified|dateModified|og:updated_time)["'][^>]*content=["']([^"']+)["'][^>]*>/i;
   const updatedLabelRegex = /\b(last\s*updated|updated)\b/i;
