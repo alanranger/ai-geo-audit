@@ -176,6 +176,51 @@ function findJsonLdBlocks(html = '') {
   return blocks;
 }
 
+function extractSnippetLoaderTargets(html = '', baseUrl = '') {
+  const targets = [];
+  const tagRegex = /<[^>]*data-m-plugin=["']load["'][^>]*>/gi;
+  const tags = html.match(tagRegex) || [];
+  tags.forEach((tag) => {
+    const targetMatch = tag.match(/data-target=["']([^"']+)["']/i);
+    if (!targetMatch?.[1]) return;
+    const rawTarget = String(targetMatch[1]).trim();
+    if (!rawTarget) return;
+    let absoluteTarget = rawTarget;
+    try {
+      absoluteTarget = new URL(rawTarget, baseUrl).toString();
+    } catch {
+      absoluteTarget = rawTarget;
+    }
+    if (!targets.includes(absoluteTarget)) targets.push(absoluteTarget);
+  });
+  return targets.slice(0, 6);
+}
+
+async function fetchHtmlText(url, timeoutMs = 10000) {
+  const response = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AI-GEO-Audit/1.0; +https://ai-geo-audit.vercel.app)' },
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+  if (!response.ok) return '';
+  return response.text();
+}
+
+async function enrichHtmlWithSnippetLoaderContent(pageUrl, html = '') {
+  const snippetTargets = extractSnippetLoaderTargets(html, pageUrl);
+  if (!snippetTargets.length) return html;
+
+  const parts = [String(html || '')];
+  for (const targetUrl of snippetTargets) {
+    try {
+      const snippetHtml = await fetchHtmlText(targetUrl, 8000);
+      if (snippetHtml?.trim()) parts.push(snippetHtml);
+    } catch {
+      // Ignore snippet fetch errors for resilience.
+    }
+  }
+  return parts.join('\n');
+}
+
 function collectTypes(node, bucket = new Set()) {
   if (!node || typeof node !== 'object') return bucket;
   if (Array.isArray(node)) {
@@ -288,9 +333,10 @@ async function checkUrl(url) {
       };
     }
     const html = await response.text();
-    const jsonLdBlocks = findJsonLdBlocks(html);
-    const result = evaluateExtractability(html, jsonLdBlocks);
-    const plainText = stripHtmlToText(html);
+    const htmlForChecks = await enrichHtmlWithSnippetLoaderContent(url, html);
+    const jsonLdBlocks = findJsonLdBlocks(htmlForChecks);
+    const result = evaluateExtractability(htmlForChecks, jsonLdBlocks);
+    const plainText = stripHtmlToText(htmlForChecks);
     return {
       url,
       pageTier,
