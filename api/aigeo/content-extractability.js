@@ -182,6 +182,17 @@ function hasDeferredFaqLoaderSignal(html = '') {
   return /\/[a-z0-9._\-/]*_faq\.json(?:["'?#&]|$)/i.exec(source) !== null;
 }
 
+function hasDeferredTldrLoaderSignal(html = '') {
+  const source = String(html || '');
+  // Detect common deferred TLDR loader patterns used in global script injectors.
+  return (
+    /injectTldrBlock\s*\(/i.test(source)
+    || /hasExistingTldrSignal\s*\(/i.test(source)
+    || /id\s*=\s*["']ar-tldr-block["']/i.test(source)
+    || /textContent\s*=\s*["']TLDR["']/i.test(source)
+  );
+}
+
 function extractSnippetLoaderTargets(html = '', baseUrl = '') {
   const targets = [];
   const tagRegex = /<[^>]*data-m-plugin=["']load["'][^>]*>/gi;
@@ -256,7 +267,8 @@ function evaluateExtractability(html, jsonLdBlocks = []) {
   };
 
   const headingTldrRegex = /<h[1-4][^>]*>\s*(?:tl;?\s*dr|tldr|summary|quick answer)\s*<\/h[1-4]>/i;
-  checks.hasTldr = headingTldrRegex.test(html) || /\btl;?\s*dr\b/i.test(html);
+  const hasDeferredTldrLoader = hasDeferredTldrLoaderSignal(html);
+  checks.hasTldr = headingTldrRegex.test(html) || /\btl;?\s*dr\b/i.test(html) || hasDeferredTldrLoader;
 
   const paragraphRegex = /<p[^>]*>([\s\S]*?)<\/p>/gi;
   let paragraphCount = 0;
