@@ -7481,6 +7481,19 @@
           </div>
         </div>
       </div>
+      <div id="impl-global-progress-modal" class="impl-progress-modal-backdrop" aria-hidden="true">
+        <div class="impl-progress-modal" role="status" aria-live="polite">
+          <h4 id="impl-global-progress-title" class="impl-progress-modal-title">Running global priority audit...</h4>
+          <p id="impl-global-progress-subtitle" class="impl-progress-modal-subtitle">Preparing full-site, all-tier audit sweep.</p>
+          <div class="impl-progress-modal-track">
+            <div id="impl-global-progress-fill" class="impl-progress-modal-fill"></div>
+          </div>
+          <div class="impl-progress-modal-meta">
+            <span id="impl-global-progress-percent">5%</span>
+            <span id="impl-global-progress-elapsed">Elapsed: 0s</span>
+          </div>
+        </div>
+      </div>
 
       <!-- Local & Reviews Panel -->
       <section class="aigeo-panel" data-panel="local">
@@ -22779,6 +22792,10 @@
       isLoading: false,
       mode: 'sample'
     };
+    const implGlobalAuditRunState = {
+      isOpen: false,
+      startedAt: null
+    };
     const implPriorityMatrixState = {
       rows: [],
       sortKey: 'priority',
@@ -22880,6 +22897,43 @@
       if (sampleBtn) sampleBtn.textContent = isLoading && implRunAllAuditsState.mode === 'sample' ? 'Running All (Sample)...' : 'Run All Audits (Sample)';
       if (fullBtn) fullBtn.textContent = isLoading && implRunAllAuditsState.mode === 'full' ? 'Running All (Whole Site)...' : 'Run All Audits (Whole Site)';
       if (globalBtn) globalBtn.textContent = isLoading ? 'Running Global Priority Audit...' : 'Run Global Priority Audit (Whole Site)';
+    }
+
+    function showImplGlobalProgressModal() {
+      const modal = document.getElementById('impl-global-progress-modal');
+      if (!modal) return;
+      implGlobalAuditRunState.isOpen = true;
+      implGlobalAuditRunState.startedAt = Date.now();
+      modal.classList.add('is-open');
+      modal.setAttribute('aria-hidden', 'false');
+      updateImplGlobalProgress(5, 'Preparing full-site requests for all priority audits.');
+    }
+
+    function updateImplGlobalProgress(percent, subtitle) {
+      if (!implGlobalAuditRunState.isOpen) return;
+      const fill = document.getElementById('impl-global-progress-fill');
+      const pct = document.getElementById('impl-global-progress-percent');
+      const elapsed = document.getElementById('impl-global-progress-elapsed');
+      const sub = document.getElementById('impl-global-progress-subtitle');
+      const safePercent = Math.max(1, Math.min(100, Number(percent || 0)));
+      if (fill) fill.style.width = `${safePercent}%`;
+      if (pct) pct.textContent = `${safePercent}%`;
+      if (sub && subtitle) sub.textContent = subtitle;
+      if (elapsed) {
+        const elapsedSec = Math.max(0, Math.floor((Date.now() - (implGlobalAuditRunState.startedAt || Date.now())) / 1000));
+        elapsed.textContent = `Elapsed: ${elapsedSec}s`;
+      }
+    }
+
+    function hideImplGlobalProgressModal() {
+      const modal = document.getElementById('impl-global-progress-modal');
+      implGlobalAuditRunState.isOpen = false;
+      implGlobalAuditRunState.startedAt = null;
+      if (!modal) return;
+      setTimeout(() => {
+        modal.classList.remove('is-open');
+        modal.setAttribute('aria-hidden', 'true');
+      }, 220);
     }
 
     function formatImplPriorityMatrixStamp(ts) {
@@ -23597,6 +23651,7 @@
       implRunAllAuditsState.isLoading = true;
       implRunAllAuditsState.mode = 'full';
       setImplRunAllButtonsState(true);
+      showImplGlobalProgressModal();
       try {
         const targetIds = [
           'impl-tech-foundation-status',
@@ -23609,31 +23664,38 @@
           const el = document.getElementById(id);
           if (el) el.innerHTML = '<p class="card-subtitle">Running global audit sweep (all URLs, all tiers)...</p>';
         });
+        updateImplGlobalProgress(15, 'Requesting full payloads for all priority audits in parallel.');
         const payloads = await fetchImplGlobalPayloads();
+        updateImplGlobalProgress(55, 'Payloads received. Rendering audit panels and matrix rows.');
         if (payloads.tech) {
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.tech, payloads.tech);
           implLatestAuditPayloads.tech = payloads.tech;
           await fetchAndRenderTechnicalFoundationStatus('full', payloads.tech);
+          updateImplGlobalProgress(65, 'Rendered technical foundation results.');
         }
         if (payloads.local) {
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.local, payloads.local);
           implLatestAuditPayloads.local = payloads.local;
           await fetchAndRenderLocalBusinessSchemaStatus('full', payloads.local);
+          updateImplGlobalProgress(73, 'Rendered local business schema results.');
         }
         if (payloads.service) {
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.service, payloads.service);
           implLatestAuditPayloads.service = payloads.service;
           await fetchAndRenderServiceSchemaStatus('full', payloads.service);
+          updateImplGlobalProgress(81, 'Rendered service schema results.');
         }
         if (payloads.qa) {
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.qa, payloads.qa);
           implLatestAuditPayloads.qa = payloads.qa;
           await fetchAndRenderSchemaQaGateStatus('full', payloads.qa);
+          updateImplGlobalProgress(89, 'Rendered schema QA gate results.');
         }
         if (payloads.extractability) {
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.extractability, payloads.extractability);
           implLatestAuditPayloads.extractability = payloads.extractability;
           await fetchAndRenderContentExtractabilityStatus('full', payloads.extractability);
+          updateImplGlobalProgress(96, 'Rendered content extractability results.');
         }
       } catch (error) {
         const msg = escapeHtml(error?.message || 'Unknown global audit failure');
@@ -23642,9 +23704,11 @@
           matrixBody.innerHTML = `<tr><td colspan="11" class="ranking-table-empty">Global audit failed: ${msg}</td></tr>`;
         }
       } finally {
+        updateImplGlobalProgress(100, 'Global priority audit complete.');
         implRunAllAuditsState.isLoading = false;
         setImplRunAllButtonsState(false);
         renderImplementationPriorityMatrix();
+        hideImplGlobalProgressModal();
       }
     };
 
