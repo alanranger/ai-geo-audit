@@ -6859,32 +6859,10 @@
       </section>
 
       <style>
-        section[data-panel="implementation-progress"] {
-          background: #0b0f14;
-          color: #e8eaed;
-        }
-        section[data-panel="implementation-progress"] .card {
-          background: #121821;
-          border: 1px solid #263241;
-          box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
-        }
-        section[data-panel="implementation-progress"] .card-subtitle,
-        section[data-panel="implementation-progress"] p {
-          color: #a8b3c2;
-        }
-        section[data-panel="implementation-progress"] .btn {
-          background: #1f2937;
-          border-color: #374151;
-          color: #e8eaed;
-        }
-        section[data-panel="implementation-progress"] .btn:hover {
-          background: #273547;
-          border-color: #4b5f77;
-        }
         .impl-priority-matrix-shell {
           border: 1px solid #2d3a4c;
           border-radius: 12px;
-          background: #0f151e;
+          background: #111827;
           padding: 0.9rem;
         }
         .impl-priority-controls {
@@ -6935,6 +6913,7 @@
           border: 1px solid #324255;
           border-radius: 10px;
           overflow: hidden;
+          color: #e5e7eb;
         }
         #impl-priority-matrix-table th,
         #impl-priority-matrix-table td {
@@ -6943,6 +6922,10 @@
         #impl-priority-matrix-table thead th {
           background: #111a25;
           color: #d6deea;
+        }
+        #impl-priority-matrix-table td {
+          color: #e5e7eb;
+          font-weight: 500;
         }
         #impl-priority-matrix-table tbody tr:nth-child(even) td {
           background: rgba(255, 255, 255, 0.01);
@@ -22907,8 +22890,17 @@
 
     function getImplPayloadRunTs(payload) {
       if (!payload || typeof payload !== 'object') return 0;
-      const generatedAt = Date.parse(String(payload.generatedAt || payload.generated_at || ''));
-      if (Number.isFinite(generatedAt) && generatedAt > 0) return generatedAt;
+      const tsCandidates = [
+        payload?.meta?.generatedAt,
+        payload?.generatedAt,
+        payload?.generated_at,
+        payload?.meta?.selection?.generatedAt,
+        payload?.data?.generatedAt
+      ];
+      for (const raw of tsCandidates) {
+        const parsed = Date.parse(String(raw || ''));
+        if (Number.isFinite(parsed) && parsed > 0) return parsed;
+      }
       const cachedAt = Number(payload.__cacheSavedAt || 0);
       if (Number.isFinite(cachedAt) && cachedAt > 0) return cachedAt;
       return 0;
@@ -23023,7 +23015,7 @@
           fail: localFail,
           issues: localIssues,
           breakdown: localHasData ? `known ${localKnown ?? 'N/A'} | missing ${localFail ?? 'N/A'} | retry ${localIssues ?? 'N/A'}` : 'No result payload yet',
-          tierScope: 'all',
+          tierScope: normalizeImplTierScope(localPayload?.meta?.selection?.tier || localPayload?.data?.tier || 'all'),
           runTs: getImplPayloadRunTs(localPayload)
         },
         {
@@ -23036,7 +23028,7 @@
           fail: techFail,
           issues: techIssues,
           breakdown: techHasData ? `indexable ${techPass ?? 'N/A'}/${techPages ?? 'N/A'} | blockers ${techIssues ?? 'N/A'}` : 'No result payload yet',
-          tierScope: 'all',
+          tierScope: normalizeImplTierScope(techPayload?.meta?.selection?.tier || techPayload?.data?.tier || 'all'),
           runTs: getImplPayloadRunTs(techPayload)
         },
         {
@@ -23049,7 +23041,7 @@
           fail: serviceFail,
           issues: serviceIssues,
           breakdown: serviceHasData ? `tier-b known ${serviceKnown ?? 'N/A'} | retry ${serviceIssues ?? 'N/A'}` : 'No result payload yet',
-          tierScope: 'product',
+          tierScope: normalizeImplTierScope(servicePayload?.meta?.selection?.tier || servicePayload?.data?.tier || 'all'),
           runTs: getImplPayloadRunTs(servicePayload)
         },
         {
@@ -23204,6 +23196,7 @@
       const updatedEl = document.getElementById('impl-priority-matrix-updated');
       if (!tbody) return;
       const rows = derivePriorityMatrixRowsFromCaches();
+      syncImplementationTicketsFromPriorityRows(rows);
       implPriorityMatrixState.rows = rows;
       const visibleRows = getFilteredAndSortedImplPriorityRows();
       renderImplPriorityRagSummary(visibleRows);
@@ -23241,6 +23234,32 @@
           </tr>
         `;
       }).join('');
+    }
+
+    function syncImplementationTicketsFromPriorityRows(rows) {
+      if (!Array.isArray(rows) || !rows.length) return;
+      const titleByAudit = {
+        'LocalBusiness Schema Scanner': 'Implement localBusinessSchemaPages scanner in local-signals',
+        'Technical Foundation (robots/sitemap/indexability)': 'Build technical foundation audit (robots/sitemap/indexability)',
+        'Service Schema Coverage': 'Add Service schema to validation and coverage reporting',
+        'Schema QA Gate': 'Add pre-deploy schema QA gate (@id, ISO dates, required fields)',
+        'Content Extractability': 'Add content extractability checks (TLDR/direct answer/FAQ/last-updated)'
+      };
+      rows.forEach((row) => {
+        const ticketTitle = titleByAudit[row?.audit];
+        if (!ticketTitle) return;
+        const ticket = IMPLEMENTATION_PROGRESS_TICKETS.find((item) => item.title === ticketTitle);
+        if (!ticket) return;
+        if (!Number(row?.runTs || 0)) return;
+        const fail = Number(row?.fail ?? 0);
+        const issues = Number(row?.issues ?? 0);
+        const healthy = (Number.isFinite(fail) ? fail : 0) === 0 && (Number.isFinite(issues) ? issues : 0) === 0;
+        ticket.status = healthy ? 'done' : 'in_progress';
+        if (ticket.title === IMPL_EXTRACTABILITY_TICKET_TITLE) {
+          ticket.lane = healthy ? 'now' : 'next';
+        }
+      });
+      renderImplementationSummaryAndLanes();
     }
 
     window.onImplPriorityMatrixSort = function(sortKey) {
@@ -23529,7 +23548,38 @@
       }
     };
 
+    async function fetchImplGlobalPayloads() {
+      const property =
+        (document.getElementById('propertyUrl')?.value || '').trim() ||
+        (localStorage.getItem('gsc_property_url') || '').trim() ||
+        (localStorage.getItem('last_property_url') || '').trim() ||
+        'https://www.alanranger.com';
+      const techParams = new URLSearchParams({ property, mode: 'full' });
+      const localParams = new URLSearchParams({ property, includeSchemaScan: '1', schemaMode: 'full' });
+      const serviceParams = new URLSearchParams({ mode: 'full', serviceOnly: '1' });
+      const qaParams = new URLSearchParams({ mode: 'full', tier: 'all' });
+      const extractParams = new URLSearchParams({ mode: 'full', tier: 'all' });
+      const calls = [
+        fetch(apiUrl(`/api/aigeo/technical-foundation?${techParams.toString()}`)).then(async (r) => ({ key: 'tech', ok: r.ok, status: r.status, payload: await r.json() })),
+        fetch(apiUrl(`/api/aigeo/local-signals?${localParams.toString()}`)).then(async (r) => ({ key: 'local', ok: r.ok, status: r.status, payload: await r.json() })),
+        fetch(apiUrl(`/api/schema-audit?${serviceParams.toString()}`)).then(async (r) => ({ key: 'service', ok: r.ok, status: r.status, payload: await r.json() })),
+        fetch(apiUrl(`/api/schema-audit?${qaParams.toString()}`)).then(async (r) => ({ key: 'qa', ok: r.ok, status: r.status, payload: await r.json() })),
+        fetch(apiUrl(`/api/aigeo/content-extractability?${extractParams.toString()}`)).then(async (r) => ({ key: 'extractability', ok: r.ok, status: r.status, payload: await r.json() }))
+      ];
+      const results = await Promise.all(calls);
+      const output = {};
+      for (const result of results) {
+        const body = result?.payload;
+        if (!result?.ok || body?.status !== 'ok' || !body?.data) {
+          throw new Error(`${result?.key || 'audit'} failed (${result?.status || 'unknown'})`);
+        }
+        output[result.key] = body;
+      }
+      return output;
+    }
+
     window.runImplGlobalPriorityAudit = async function() {
+      if (implRunAllAuditsState.isLoading) return;
       const allSelectors = [
         'impl-tech-limit-select',
         'impl-local-limit-select',
@@ -23542,11 +23592,60 @@
       allSelectors.forEach((id) => {
         const el = document.getElementById(id);
         if (!el) return;
-        if (id.includes('tier')) el.value = 'all';
-        else el.value = 'all';
+        el.value = 'all';
       });
-      await window.runImplAllAudits('full');
-      renderImplementationPriorityMatrix();
+      implRunAllAuditsState.isLoading = true;
+      implRunAllAuditsState.mode = 'full';
+      setImplRunAllButtonsState(true);
+      try {
+        const targetIds = [
+          'impl-tech-foundation-status',
+          'impl-local-schema-status',
+          'impl-service-schema-status',
+          'impl-schema-qa-gate-status',
+          'impl-extractability-status'
+        ];
+        targetIds.forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.innerHTML = '<p class="card-subtitle">Running global audit sweep (all URLs, all tiers)...</p>';
+        });
+        const payloads = await fetchImplGlobalPayloads();
+        if (payloads.tech) {
+          saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.tech, payloads.tech);
+          implLatestAuditPayloads.tech = payloads.tech;
+          await fetchAndRenderTechnicalFoundationStatus('full', payloads.tech);
+        }
+        if (payloads.local) {
+          saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.local, payloads.local);
+          implLatestAuditPayloads.local = payloads.local;
+          await fetchAndRenderLocalBusinessSchemaStatus('full', payloads.local);
+        }
+        if (payloads.service) {
+          saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.service, payloads.service);
+          implLatestAuditPayloads.service = payloads.service;
+          await fetchAndRenderServiceSchemaStatus('full', payloads.service);
+        }
+        if (payloads.qa) {
+          saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.qa, payloads.qa);
+          implLatestAuditPayloads.qa = payloads.qa;
+          await fetchAndRenderSchemaQaGateStatus('full', payloads.qa);
+        }
+        if (payloads.extractability) {
+          saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.extractability, payloads.extractability);
+          implLatestAuditPayloads.extractability = payloads.extractability;
+          await fetchAndRenderContentExtractabilityStatus('full', payloads.extractability);
+        }
+      } catch (error) {
+        const msg = escapeHtml(error?.message || 'Unknown global audit failure');
+        const matrixBody = document.getElementById('impl-priority-matrix-body');
+        if (matrixBody) {
+          matrixBody.innerHTML = `<tr><td colspan="11" class="ranking-table-empty">Global audit failed: ${msg}</td></tr>`;
+        }
+      } finally {
+        implRunAllAuditsState.isLoading = false;
+        setImplRunAllButtonsState(false);
+        renderImplementationPriorityMatrix();
+      }
     };
 
     async function fetchAndRenderLocalBusinessSchemaStatus(modeOverride = null, cachedPayload = null) {
