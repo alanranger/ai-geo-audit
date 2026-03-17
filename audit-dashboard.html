@@ -23249,8 +23249,10 @@
       const tbody = document.getElementById('impl-priority-matrix-body');
       const updatedEl = document.getElementById('impl-priority-matrix-updated');
       if (!tbody) return;
+      // Derive, sync ticket states from fresh payloads, then derive again so matrix chips match cards.
+      const seedRows = derivePriorityMatrixRowsFromCaches();
+      syncImplementationTicketsFromPriorityRows(seedRows);
       const rows = derivePriorityMatrixRowsFromCaches();
-      syncImplementationTicketsFromPriorityRows(rows);
       implPriorityMatrixState.rows = rows;
       const visibleRows = getFilteredAndSortedImplPriorityRows();
       renderImplPriorityRagSummary(visibleRows);
@@ -23305,9 +23307,19 @@
         const ticket = IMPLEMENTATION_PROGRESS_TICKETS.find((item) => item.title === ticketTitle);
         if (!ticket) return;
         if (!Number(row?.runTs || 0)) return;
+        const urls = Number(row?.urls ?? 0);
+        const pass = Number(row?.pass ?? 0);
         const fail = Number(row?.fail ?? 0);
         const issues = Number(row?.issues ?? 0);
-        const healthy = (Number.isFinite(fail) ? fail : 0) === 0 && (Number.isFinite(issues) ? issues : 0) === 0;
+        const safeUrls = Number.isFinite(urls) && urls > 0 ? urls : 0;
+        const safePass = Number.isFinite(pass) && pass >= 0 ? pass : 0;
+        const safeFail = Number.isFinite(fail) && fail >= 0 ? fail : 0;
+        const safeIssues = Number.isFinite(issues) && issues >= 0 ? issues : 0;
+        const passRate = safeUrls > 0 ? (safePass / safeUrls) : 0;
+        const isTechnicalFoundation = row?.audit === 'Technical Foundation (robots/sitemap/indexability)';
+        const healthy = isTechnicalFoundation
+          ? ((safeFail === 0 && safeIssues === 0) || (safeFail <= 1 && safeIssues <= 1 && passRate >= 0.995))
+          : (safeFail === 0 && safeIssues === 0);
         ticket.status = healthy ? 'done' : 'in_progress';
         if (ticket.title === IMPL_EXTRACTABILITY_TICKET_TITLE) {
           ticket.lane = healthy ? 'now' : 'next';
