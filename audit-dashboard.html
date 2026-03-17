@@ -7040,6 +7040,40 @@
             </div>
           </div>
 
+          <div class="card" style="margin-bottom: 1.5rem;">
+            <div class="card-header">
+              <h3 style="margin: 0;">Priority Audit Matrix (7 Priorities)</h3>
+              <p class="card-subtitle">Top-level view of all implementation priorities with score and URL pass/fail/issue breakdowns.</p>
+            </div>
+            <div class="card-body">
+              <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.75rem;">
+                <button id="impl-run-global-priority-btn" class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplGlobalPriorityAudit()">Run Global Priority Audit (Whole Site)</button>
+                <span id="impl-priority-matrix-updated" class="card-subtitle">Last refreshed: never</span>
+              </div>
+              <div style="overflow-x: auto;">
+                <table class="ranking-table" id="impl-priority-matrix-table">
+                  <thead>
+                    <tr>
+                      <th>Priority</th>
+                      <th>Audit</th>
+                      <th>Status</th>
+                      <th>Score</th>
+                      <th>URLs</th>
+                      <th>Pass</th>
+                      <th>Fail</th>
+                      <th>Issues</th>
+                      <th>Breakdown</th>
+                      <th>Last Run</th>
+                    </tr>
+                  </thead>
+                  <tbody id="impl-priority-matrix-body">
+                    <tr><td colspan="10" class="ranking-table-empty">Run a global priority audit to populate the matrix.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
             <div class="card">
               <div class="card-header"><h3 style="margin: 0;">Done / Current</h3></div>
@@ -22692,10 +22726,214 @@
     function setImplRunAllButtonsState(isLoading) {
       const sampleBtn = document.getElementById('impl-run-all-sample-btn');
       const fullBtn = document.getElementById('impl-run-all-full-btn');
+      const globalBtn = document.getElementById('impl-run-global-priority-btn');
       if (sampleBtn) sampleBtn.disabled = isLoading;
       if (fullBtn) fullBtn.disabled = isLoading;
+      if (globalBtn) globalBtn.disabled = isLoading;
       if (sampleBtn) sampleBtn.textContent = isLoading && implRunAllAuditsState.mode === 'sample' ? 'Running All (Sample)...' : 'Run All Audits (Sample)';
       if (fullBtn) fullBtn.textContent = isLoading && implRunAllAuditsState.mode === 'full' ? 'Running All (Whole Site)...' : 'Run All Audits (Whole Site)';
+      if (globalBtn) globalBtn.textContent = isLoading ? 'Running Global Priority Audit...' : 'Run Global Priority Audit (Whole Site)';
+    }
+
+    function formatImplPriorityMatrixStamp(ts) {
+      const value = Number(ts || 0);
+      if (!value || !Number.isFinite(value)) return 'Never';
+      return formatImplAuditRunTimestamp(value);
+    }
+
+    function getImplPayloadRunTs(payload) {
+      if (!payload || typeof payload !== 'object') return 0;
+      const generatedAt = Date.parse(String(payload.generatedAt || payload.generated_at || ''));
+      if (Number.isFinite(generatedAt) && generatedAt > 0) return generatedAt;
+      const cachedAt = Number(payload.__cacheSavedAt || 0);
+      if (Number.isFinite(cachedAt) && cachedAt > 0) return cachedAt;
+      return 0;
+    }
+
+    function asPercent(value, fallback = 0) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return fallback;
+      return Math.max(0, Math.min(100, Math.round(n)));
+    }
+
+    function getTicketStatusByTitle(title) {
+      const ticket = IMPLEMENTATION_PROGRESS_TICKETS.find((item) => item.title === title);
+      return ticket ? getImplStatusMeta(ticket.status) : getImplStatusMeta('planned');
+    }
+
+    function derivePriorityMatrixRowsFromCaches() {
+      const cachedTech = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.tech);
+      const cachedLocal = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.local);
+      const cachedService = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.service);
+      const cachedQa = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.qa);
+      const cachedExtract = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.extractability);
+
+      const techIndexability = cachedTech?.data?.indexability || {};
+      const techPages = Number(techIndexability.pagesChecked || 0);
+      const techPass = Number(techIndexability.passCount || 0);
+      const techFail = Math.max(0, techPages - techPass);
+      const techIssues = Array.isArray(cachedTech?.data?.overall?.blockers) ? cachedTech.data.overall.blockers.length : 0;
+      const techScore = techPages > 0 ? asPercent((techPass / techPages) * 100) : null;
+
+      const localScan = cachedLocal?.data?.localBusinessSchemaScan || {};
+      const localPages = Number(localScan.pagesChecked || 0);
+      const localPass = Number(localScan.matchedPages || 0);
+      const localFail = Number(localScan.missingPages || 0);
+      const localIssues = Number(localScan.unknownPages || localScan.rateLimitedCount || 0);
+      const localKnown = Math.max(0, localPages - localIssues);
+      const localScore = localKnown > 0 ? asPercent((localPass / localKnown) * 100) : null;
+
+      const servicePagesRaw = Array.isArray(cachedService?.data?.pages) ? cachedService.data.pages : [];
+      const serviceRows = servicePagesRaw.filter((page) => isTierBProductUrlForUi(page?.url)).map((page) => {
+        const schemaTypes = Array.isArray(page?.schemaTypes) ? page.schemaTypes : [];
+        const hasService = schemaTypes.some((type) => String(type || '').toLowerCase() === 'service');
+        const statusCode = Number.isFinite(page?.statusCode) ? Number(page.statusCode) : parseStatusCodeFromError(page?.error);
+        const rateLimited = Number(statusCode) === 429 || String(page?.errorType || '').toLowerCase().includes('rate limited');
+        return { hasService, rateLimited };
+      });
+      const servicePages = serviceRows.length;
+      const servicePass = serviceRows.filter((row) => row.hasService).length;
+      const serviceIssues = serviceRows.filter((row) => row.rateLimited).length;
+      const serviceFail = Math.max(0, servicePages - servicePass - serviceIssues);
+      const serviceKnown = Math.max(0, servicePages - serviceIssues);
+      const serviceScore = serviceKnown > 0 ? asPercent((servicePass / serviceKnown) * 100) : null;
+
+      const qaGate = cachedQa?.data?.qaGate || {};
+      const qaPages = Number(qaGate.pagesChecked || 0);
+      const qaPass = Number(qaGate.passPages || 0);
+      const qaFail = Number(qaGate.blockPages || 0);
+      const qaIssues = Number(qaGate.warningPages || 0);
+      const qaScore = qaPages > 0 ? asPercent((qaPass / qaPages) * 100) : null;
+
+      const extractData = cachedExtract?.data || {};
+      const extractPages = Number(extractData.pagesChecked || 0);
+      const extractPass = Number(extractData.passPages || 0);
+      const extractFail = Number(extractData.failPages || 0);
+      const extractIssues = Math.max(0, extractFail);
+      const extractScore = Number.isFinite(Number(extractData.avgScore))
+        ? asPercent(Number(extractData.avgScore))
+        : (extractPages > 0 ? asPercent((extractPass / extractPages) * 100) : null);
+
+      return [
+        {
+          priority: 'P0',
+          audit: 'LocalBusiness Schema Scanner',
+          statusMeta: getTicketStatusByTitle('Implement localBusinessSchemaPages scanner in local-signals'),
+          score: localScore,
+          urls: localPages,
+          pass: localPass,
+          fail: localFail,
+          issues: localIssues,
+          breakdown: `known ${localKnown} | missing ${localFail} | retry ${localIssues}`,
+          runTs: getImplPayloadRunTs(cachedLocal)
+        },
+        {
+          priority: 'P0',
+          audit: 'Technical Foundation (robots/sitemap/indexability)',
+          statusMeta: getTicketStatusByTitle('Build technical foundation audit (robots/sitemap/indexability)'),
+          score: techScore,
+          urls: techPages,
+          pass: techPass,
+          fail: techFail,
+          issues: techIssues,
+          breakdown: `indexable ${techPass}/${techPages || 0} | blockers ${techIssues}`,
+          runTs: getImplPayloadRunTs(cachedTech)
+        },
+        {
+          priority: 'P0',
+          audit: 'Service Schema Coverage',
+          statusMeta: getTicketStatusByTitle('Add Service schema to validation and coverage reporting'),
+          score: serviceScore,
+          urls: servicePages,
+          pass: servicePass,
+          fail: serviceFail,
+          issues: serviceIssues,
+          breakdown: `tier-b known ${serviceKnown} | retry ${serviceIssues}`,
+          runTs: getImplPayloadRunTs(cachedService)
+        },
+        {
+          priority: 'P1',
+          audit: 'Schema QA Gate',
+          statusMeta: getTicketStatusByTitle('Add pre-deploy schema QA gate (@id, ISO dates, required fields)'),
+          score: qaScore,
+          urls: qaPages,
+          pass: qaPass,
+          fail: qaFail,
+          issues: qaIssues,
+          breakdown: `warnings ${qaIssues} | block deploy ${qaFail}`,
+          runTs: getImplPayloadRunTs(cachedQa)
+        },
+        {
+          priority: 'P1',
+          audit: 'Content Extractability',
+          statusMeta: getTicketStatusByTitle('Add content extractability checks (TLDR/direct answer/FAQ/last-updated)'),
+          score: extractScore,
+          urls: extractPages,
+          pass: extractPass,
+          fail: extractFail,
+          issues: extractIssues,
+          breakdown: `avg score ${extractScore == null ? 'N/A' : `${extractScore}%`}`,
+          runTs: getImplPayloadRunTs(cachedExtract)
+        },
+        {
+          priority: 'P1',
+          audit: 'Citation Consistency Monitor',
+          statusMeta: getTicketStatusByTitle('Add citation consistency monitor (core directories and NAP drift)'),
+          score: null,
+          urls: null,
+          pass: null,
+          fail: null,
+          issues: null,
+          breakdown: 'Planned - endpoint not wired yet',
+          runTs: 0
+        },
+        {
+          priority: 'P2',
+          audit: 'Social Mentions Ingestion (Reddit/LinkedIn/YouTube)',
+          statusMeta: getTicketStatusByTitle('Add Reddit, LinkedIn, and YouTube mention ingestion baseline'),
+          score: null,
+          urls: null,
+          pass: null,
+          fail: null,
+          issues: null,
+          breakdown: 'Planned - endpoint not wired yet',
+          runTs: 0
+        }
+      ];
+    }
+
+    function renderImplementationPriorityMatrix() {
+      const tbody = document.getElementById('impl-priority-matrix-body');
+      const updatedEl = document.getElementById('impl-priority-matrix-updated');
+      if (!tbody) return;
+      const rows = derivePriorityMatrixRowsFromCaches();
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="10" class="ranking-table-empty">No priority audits found.</td></tr>';
+        if (updatedEl) updatedEl.textContent = 'Last refreshed: never';
+        return;
+      }
+      const latestRun = rows.reduce((max, row) => Math.max(max, Number(row.runTs || 0)), 0);
+      if (updatedEl) {
+        updatedEl.textContent = `Last refreshed: ${formatImplPriorityMatrixStamp(Date.now())}${latestRun ? ` | latest audit run: ${formatImplPriorityMatrixStamp(latestRun)}` : ''}`;
+      }
+      tbody.innerHTML = rows.map((row) => {
+        const scoreText = row.score == null ? 'N/A' : `${asPercent(row.score)}%`;
+        const valueOrDash = (value) => (value == null ? 'N/A' : String(value));
+        return `
+          <tr>
+            <td>${escapeHtml(row.priority)}</td>
+            <td style="text-align:left;">${escapeHtml(row.audit)}</td>
+            <td><span class="impl-status-chip ${row.statusMeta.chipClass}">${row.statusMeta.label}</span></td>
+            <td>${scoreText}</td>
+            <td>${valueOrDash(row.urls)}</td>
+            <td>${valueOrDash(row.pass)}</td>
+            <td>${valueOrDash(row.fail)}</td>
+            <td>${valueOrDash(row.issues)}</td>
+            <td style="text-align:left;">${escapeHtml(row.breakdown || 'N/A')}</td>
+            <td>${row.runTs ? formatImplPriorityMatrixStamp(row.runTs) : 'Never'}</td>
+          </tr>
+        `;
+      }).join('');
     }
 
     function sortExtractabilityRows(rows, sortKey, sortDir) {
@@ -22935,6 +23173,7 @@
     window.runImplExtractabilityAudit = async function(mode) {
       const nextMode = mode === 'full' ? 'full' : 'sample';
       await fetchAndRenderContentExtractabilityStatus(nextMode);
+      renderImplementationPriorityMatrix();
     };
 
     window.runImplAllAudits = async function(mode) {
@@ -22952,7 +23191,13 @@
       } finally {
         implRunAllAuditsState.isLoading = false;
         setImplRunAllButtonsState(false);
+        renderImplementationPriorityMatrix();
       }
+    };
+
+    window.runImplGlobalPriorityAudit = async function() {
+      await window.runImplAllAudits('full');
+      renderImplementationPriorityMatrix();
     };
 
     async function fetchAndRenderLocalBusinessSchemaStatus(modeOverride = null, cachedPayload = null) {
@@ -23106,6 +23351,7 @@
     window.runImplLocalSchemaAudit = async function(mode) {
       const nextMode = mode === 'full' ? 'full' : 'sample';
       await fetchAndRenderLocalBusinessSchemaStatus(nextMode);
+      renderImplementationPriorityMatrix();
     };
 
     const implServiceSchemaTableState = {
@@ -23480,6 +23726,7 @@
     window.runImplServiceSchemaAudit = async function(mode) {
       const nextMode = mode === 'full' ? 'full' : 'sample';
       await fetchAndRenderServiceSchemaStatus(nextMode);
+      renderImplementationPriorityMatrix();
     };
 
     const implQaGateTableState = {
@@ -24081,6 +24328,7 @@
     window.runImplSchemaQaGateAudit = async function(mode) {
       const nextMode = mode === 'full' ? 'full' : 'sample';
       await fetchAndRenderSchemaQaGateStatus(nextMode);
+      renderImplementationPriorityMatrix();
     };
 
     const implTechFoundationTableState = {
@@ -24491,6 +24739,7 @@
     window.runImplTechAudit = async function(mode) {
       const nextMode = mode === 'full' ? 'full' : 'sample';
       await fetchAndRenderTechnicalFoundationStatus(nextMode);
+      renderImplementationPriorityMatrix();
     };
 
     window.renderImplementationProgressTab = async function() {
@@ -24532,6 +24781,8 @@
       if (cachedQaPayload) {
         await fetchAndRenderSchemaQaGateStatus(implQaGateRunState.mode || 'sample', cachedQaPayload);
       }
+
+      renderImplementationPriorityMatrix();
 
       // Manual-run only: do not auto-trigger heavy audits on tab load.
     };

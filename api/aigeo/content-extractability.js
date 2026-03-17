@@ -188,6 +188,17 @@ function hasDeferredFaqLoaderSignal(html = '') {
   );
 }
 
+function hasManifestFaqLoaderSignal(html = '', pageUrl = '') {
+  const source = String(html || '');
+  const currentUrl = String(pageUrl || '').toLowerCase();
+  const isEventPage = /\/(?:beginners-photography-lessons|photographic-workshops-near-me)\//i.test(currentUrl);
+  if (!isEventPage) return false;
+  // Detect manifest-driven event loader variants that resolve FAQ file names at runtime.
+  const hasManifestRef = /events-manifest\.json/i.test(source);
+  const hasFaqRuntimePattern = /(faqFileName|faqUrl|shouldSkipExternalFaq|fetch\(\s*faqUrl\s*\))/i.test(source);
+  return hasManifestRef && hasFaqRuntimePattern;
+}
+
 function hasDeferredTldrLoaderSignal(html = '') {
   const source = String(html || '');
   // Detect common deferred TLDR loader patterns used in global script injectors.
@@ -264,7 +275,7 @@ function collectTypes(node, bucket = new Set()) {
   return bucket;
 }
 
-function evaluateExtractability(html, jsonLdBlocks = []) {
+function evaluateExtractability(html, jsonLdBlocks = [], pageUrl = '') {
   const checks = {
     hasTldr: false,
     hasDirectAnswer: false,
@@ -301,7 +312,8 @@ function evaluateExtractability(html, jsonLdBlocks = []) {
   const questionHeadings = (html.match(/<h[2-4][^>]*>[^<]*\?[^<]*<\/h[2-4]>/gi) || []).length;
   const hasFaqHeading = /<h[1-4][^>]*>\s*(?:faqs?|frequently\s+asked\s+questions)\s*<\/h[1-4]>/i.test(html);
   const hasDeferredFaqLoader = hasDeferredFaqLoaderSignal(html);
-  checks.hasFaq = hasFaqFromSchema || questionHeadings >= 2 || hasFaqHeading || hasDeferredFaqLoader;
+  const hasManifestFaqLoader = hasManifestFaqLoaderSignal(html, pageUrl);
+  checks.hasFaq = hasFaqFromSchema || questionHeadings >= 2 || hasFaqHeading || hasDeferredFaqLoader || hasManifestFaqLoader;
 
   const modifiedMetaRegex = /<(?:meta)\b[^>]*(?:property|name)=["'](?:article:modified_time|last-modified|dateModified|og:updated_time)["'][^>]*content=["']([^"']+)["'][^>]*>/i;
   const updatedLabelRegex = /\b(last\s*updated|updated)\b/i;
@@ -361,7 +373,7 @@ async function checkUrl(url) {
     const html = await response.text();
     const htmlForChecks = await enrichHtmlWithSnippetLoaderContent(url, html);
     const jsonLdBlocks = findJsonLdBlocks(htmlForChecks);
-    const result = evaluateExtractability(htmlForChecks, jsonLdBlocks);
+    const result = evaluateExtractability(htmlForChecks, jsonLdBlocks, url);
     const plainText = stripHtmlToText(htmlForChecks);
     return {
       url,
