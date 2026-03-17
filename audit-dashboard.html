@@ -6859,6 +6859,108 @@
       </section>
 
       <style>
+        section[data-panel="implementation-progress"] {
+          background: #0b0f14;
+          color: #e8eaed;
+        }
+        section[data-panel="implementation-progress"] .card {
+          background: #121821;
+          border: 1px solid #263241;
+          box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+        }
+        section[data-panel="implementation-progress"] .card-subtitle,
+        section[data-panel="implementation-progress"] p {
+          color: #a8b3c2;
+        }
+        section[data-panel="implementation-progress"] .btn {
+          background: #1f2937;
+          border-color: #374151;
+          color: #e8eaed;
+        }
+        section[data-panel="implementation-progress"] .btn:hover {
+          background: #273547;
+          border-color: #4b5f77;
+        }
+        .impl-priority-matrix-shell {
+          border: 1px solid #2d3a4c;
+          border-radius: 12px;
+          background: #0f151e;
+          padding: 0.9rem;
+        }
+        .impl-priority-controls {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+          gap: 0.6rem;
+          margin-bottom: 0.8rem;
+        }
+        .impl-priority-controls label {
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+          font-size: 0.82rem;
+          color: #9fb0c4;
+        }
+        .impl-priority-controls .filter-control {
+          background: #0b1118;
+          border: 1px solid #2e3b4c;
+          color: #e8eaed;
+        }
+        .impl-priority-rag-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+          gap: 0.6rem;
+          margin-bottom: 0.75rem;
+        }
+        .impl-rag-card {
+          border: 1px solid #2b394b;
+          border-radius: 10px;
+          padding: 0.55rem 0.7rem;
+          background: #101722;
+        }
+        .impl-rag-value {
+          font-size: 1.35rem;
+          font-weight: 800;
+          line-height: 1.1;
+        }
+        .impl-rag-label {
+          font-size: 0.78rem;
+          color: #9fb0c4;
+          margin-top: 0.2rem;
+        }
+        .impl-rag-green { color: #34d399; }
+        .impl-rag-amber { color: #fbbf24; }
+        .impl-rag-red { color: #f87171; }
+        .impl-rag-muted { color: #94a3b8; }
+        #impl-priority-matrix-table {
+          border: 1px solid #324255;
+          border-radius: 10px;
+          overflow: hidden;
+        }
+        #impl-priority-matrix-table th,
+        #impl-priority-matrix-table td {
+          border-color: #233040;
+        }
+        #impl-priority-matrix-table thead th {
+          background: #111a25;
+          color: #d6deea;
+        }
+        #impl-priority-matrix-table tbody tr:nth-child(even) td {
+          background: rgba(255, 255, 255, 0.01);
+        }
+        #impl-priority-matrix-table tbody tr:hover td {
+          background: rgba(56, 189, 248, 0.08);
+        }
+        .impl-priority-sort-btn {
+          background: transparent;
+          border: none;
+          color: inherit;
+          font: inherit;
+          cursor: pointer;
+          padding: 0;
+        }
+        .impl-priority-sort-btn:hover {
+          color: #7dd3fc;
+        }
         .impl-status-chip {
           display: inline-flex;
           align-items: center;
@@ -7050,26 +7152,71 @@
                 <button id="impl-run-global-priority-btn" class="btn" type="button" style="padding: 0.85rem 1.2rem; font-weight: 700;" onclick="window.runImplGlobalPriorityAudit()">Run Global Priority Audit (Whole Site)</button>
                 <span id="impl-priority-matrix-updated" class="card-subtitle">Last refreshed: never</span>
               </div>
-              <div style="overflow-x: auto;">
-                <table class="ranking-table" id="impl-priority-matrix-table">
-                  <thead>
-                    <tr>
-                      <th>Priority</th>
-                      <th>Audit</th>
-                      <th>Status</th>
-                      <th>Score</th>
-                      <th>URLs</th>
-                      <th>Pass</th>
-                      <th>Fail</th>
-                      <th>Issues</th>
-                      <th>Breakdown</th>
-                      <th>Last Run</th>
-                    </tr>
-                  </thead>
-                  <tbody id="impl-priority-matrix-body">
-                    <tr><td colspan="10" class="ranking-table-empty">Run a global priority audit to populate the matrix.</td></tr>
-                  </tbody>
-                </table>
+              <div class="impl-priority-matrix-shell">
+                <div id="impl-priority-rag-summary" class="impl-priority-rag-grid"></div>
+                <div class="impl-priority-controls">
+                  <label>Priority
+                    <select id="impl-priority-filter-priority" class="filter-control" onchange="window.onImplPriorityMatrixFilterChange()">
+                      <option value="all">All priorities</option>
+                      <option value="P0">P0</option>
+                      <option value="P1">P1</option>
+                      <option value="P2">P2</option>
+                    </select>
+                  </label>
+                  <label>Phase
+                    <select id="impl-priority-filter-phase" class="filter-control" onchange="window.onImplPriorityMatrixFilterChange()">
+                      <option value="all">All phases</option>
+                      <option value="DONE">Done</option>
+                      <option value="IN PROGRESS">In progress</option>
+                      <option value="PLANNED">Planned</option>
+                      <option value="NO DATA">No data</option>
+                    </select>
+                  </label>
+                  <label>Tier scope
+                    <select id="impl-priority-filter-tier" class="filter-control" onchange="window.onImplPriorityMatrixFilterChange()">
+                      <option value="all">All tiers</option>
+                      <option value="global">All tiers (global)</option>
+                      <option value="landing">Tier A Landing</option>
+                      <option value="product">Tier B Product</option>
+                      <option value="event">Tier C Event</option>
+                      <option value="blog">Tier D Blog</option>
+                      <option value="academy">Tier E Academy</option>
+                      <option value="unmapped">Tier F Unmapped</option>
+                    </select>
+                  </label>
+                  <label>Issues
+                    <select id="impl-priority-filter-issues" class="filter-control" onchange="window.onImplPriorityMatrixFilterChange()">
+                      <option value="all">All</option>
+                      <option value="has_fail_or_issues">Has fail/issues</option>
+                      <option value="clean">No fail/issues</option>
+                    </select>
+                  </label>
+                  <label>Search
+                    <input id="impl-priority-filter-search" class="filter-control" type="text" placeholder="Audit name or breakdown..." oninput="window.onImplPriorityMatrixFilterChange()">
+                  </label>
+                </div>
+                <div style="overflow-x: auto;">
+                  <table class="ranking-table" id="impl-priority-matrix-table">
+                    <thead>
+                      <tr>
+                        <th><button type="button" class="impl-priority-sort-btn" onclick="window.onImplPriorityMatrixSort('priority')">Priority</button></th>
+                        <th><button type="button" class="impl-priority-sort-btn" onclick="window.onImplPriorityMatrixSort('audit')">Audit</button></th>
+                        <th><button type="button" class="impl-priority-sort-btn" onclick="window.onImplPriorityMatrixSort('status')">Status</button></th>
+                        <th><button type="button" class="impl-priority-sort-btn" onclick="window.onImplPriorityMatrixSort('score')">Score</button></th>
+                        <th><button type="button" class="impl-priority-sort-btn" onclick="window.onImplPriorityMatrixSort('urls')">URLs</button></th>
+                        <th><button type="button" class="impl-priority-sort-btn" onclick="window.onImplPriorityMatrixSort('pass')">Pass</button></th>
+                        <th><button type="button" class="impl-priority-sort-btn" onclick="window.onImplPriorityMatrixSort('fail')">Fail</button></th>
+                        <th><button type="button" class="impl-priority-sort-btn" onclick="window.onImplPriorityMatrixSort('issues')">Issues</button></th>
+                        <th><button type="button" class="impl-priority-sort-btn" onclick="window.onImplPriorityMatrixSort('breakdown')">Breakdown</button></th>
+                        <th><button type="button" class="impl-priority-sort-btn" onclick="window.onImplPriorityMatrixSort('tierScope')">Tier Scope</button></th>
+                        <th><button type="button" class="impl-priority-sort-btn" onclick="window.onImplPriorityMatrixSort('runTs')">Last Run</button></th>
+                      </tr>
+                    </thead>
+                    <tbody id="impl-priority-matrix-body">
+                      <tr><td colspan="11" class="ranking-table-empty">Run a global priority audit to populate the matrix.</td></tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
@@ -22649,6 +22796,23 @@
       isLoading: false,
       mode: 'sample'
     };
+    const implPriorityMatrixState = {
+      rows: [],
+      sortKey: 'priority',
+      sortDir: 'asc',
+      priorityFilter: 'all',
+      phaseFilter: 'all',
+      tierFilter: 'all',
+      issueFilter: 'all',
+      search: ''
+    };
+    const implLatestAuditPayloads = {
+      tech: null,
+      local: null,
+      service: null,
+      qa: null,
+      extractability: null
+    };
 
     function setImplExtractabilityButtonState(isLoading) {
       const sampleBtn = document.getElementById('impl-extract-run-sample-btn');
@@ -22761,29 +22925,59 @@
       return ticket ? getImplStatusMeta(ticket.status) : getImplStatusMeta('planned');
     }
 
+    function getLatestImplPayload(key, cacheKey) {
+      if (implLatestAuditPayloads[key] && typeof implLatestAuditPayloads[key] === 'object') return implLatestAuditPayloads[key];
+      return loadImplementationAuditCache(cacheKey);
+    }
+
+    function numberOrNull(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function normalizeImplTierScope(value) {
+      const normalized = String(value || 'all').trim().toLowerCase();
+      return normalized || 'all';
+    }
+
+    function formatImplTierScopeLabel(value) {
+      const normalized = normalizeImplTierScope(value);
+      if (normalized === 'all') return 'All tiers';
+      if (normalized === 'landing') return 'Tier A Landing';
+      if (normalized === 'product') return 'Tier B Product';
+      if (normalized === 'event') return 'Tier C Event';
+      if (normalized === 'blog') return 'Tier D Blog';
+      if (normalized === 'academy') return 'Tier E Academy';
+      if (normalized === 'unmapped') return 'Tier F Unmapped';
+      return normalized.toUpperCase();
+    }
+
     function derivePriorityMatrixRowsFromCaches() {
-      const cachedTech = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.tech);
-      const cachedLocal = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.local);
-      const cachedService = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.service);
-      const cachedQa = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.qa);
-      const cachedExtract = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.extractability);
+      const techPayload = getLatestImplPayload('tech', IMPL_AUDIT_CACHE_KEYS.tech);
+      const localPayload = getLatestImplPayload('local', IMPL_AUDIT_CACHE_KEYS.local);
+      const servicePayload = getLatestImplPayload('service', IMPL_AUDIT_CACHE_KEYS.service);
+      const qaPayload = getLatestImplPayload('qa', IMPL_AUDIT_CACHE_KEYS.qa);
+      const extractPayload = getLatestImplPayload('extractability', IMPL_AUDIT_CACHE_KEYS.extractability);
 
-      const techIndexability = cachedTech?.data?.indexability || {};
-      const techPages = Number(techIndexability.pagesChecked || 0);
-      const techPass = Number(techIndexability.passCount || 0);
-      const techFail = Math.max(0, techPages - techPass);
-      const techIssues = Array.isArray(cachedTech?.data?.overall?.blockers) ? cachedTech.data.overall.blockers.length : 0;
-      const techScore = techPages > 0 ? asPercent((techPass / techPages) * 100) : null;
+      const techHasData = !!(techPayload && techPayload.data && techPayload.data.indexability);
+      const techIndexability = techPayload?.data?.indexability || {};
+      const techPages = techHasData ? numberOrNull(techIndexability.pagesChecked) : null;
+      const techPass = techHasData ? numberOrNull(techIndexability.passCount) : null;
+      const techFail = (techPages != null && techPass != null) ? Math.max(0, techPages - techPass) : null;
+      const techIssues = techHasData && Array.isArray(techPayload?.data?.overall?.blockers) ? techPayload.data.overall.blockers.length : null;
+      const techScore = (techPages != null && techPass != null && techPages > 0) ? asPercent((techPass / techPages) * 100) : null;
 
-      const localScan = cachedLocal?.data?.localBusinessSchemaScan || {};
-      const localPages = Number(localScan.pagesChecked || 0);
-      const localPass = Number(localScan.matchedPages || 0);
-      const localFail = Number(localScan.missingPages || 0);
-      const localIssues = Number(localScan.unknownPages || localScan.rateLimitedCount || 0);
-      const localKnown = Math.max(0, localPages - localIssues);
-      const localScore = localKnown > 0 ? asPercent((localPass / localKnown) * 100) : null;
+      const localHasData = !!(localPayload && localPayload.data && localPayload.data.localBusinessSchemaScan);
+      const localScan = localPayload?.data?.localBusinessSchemaScan || {};
+      const localPages = localHasData ? numberOrNull(localScan.pagesChecked) : null;
+      const localPass = localHasData ? numberOrNull(localScan.matchedPages) : null;
+      const localFail = localHasData ? numberOrNull(localScan.missingPages) : null;
+      const localIssues = localHasData ? numberOrNull(localScan.unknownPages ?? localScan.rateLimitedCount) : null;
+      const localKnown = (localPages != null && localIssues != null) ? Math.max(0, localPages - localIssues) : null;
+      const localScore = (localKnown != null && localPass != null && localKnown > 0) ? asPercent((localPass / localKnown) * 100) : null;
 
-      const servicePagesRaw = Array.isArray(cachedService?.data?.pages) ? cachedService.data.pages : [];
+      const serviceHasData = !!(servicePayload && servicePayload.data && Array.isArray(servicePayload.data.pages));
+      const servicePagesRaw = Array.isArray(servicePayload?.data?.pages) ? servicePayload.data.pages : [];
       const serviceRows = servicePagesRaw.filter((page) => isTierBProductUrlForUi(page?.url)).map((page) => {
         const schemaTypes = Array.isArray(page?.schemaTypes) ? page.schemaTypes : [];
         const hasService = schemaTypes.some((type) => String(type || '').toLowerCase() === 'service');
@@ -22791,28 +22985,32 @@
         const rateLimited = Number(statusCode) === 429 || String(page?.errorType || '').toLowerCase().includes('rate limited');
         return { hasService, rateLimited };
       });
-      const servicePages = serviceRows.length;
-      const servicePass = serviceRows.filter((row) => row.hasService).length;
-      const serviceIssues = serviceRows.filter((row) => row.rateLimited).length;
-      const serviceFail = Math.max(0, servicePages - servicePass - serviceIssues);
-      const serviceKnown = Math.max(0, servicePages - serviceIssues);
-      const serviceScore = serviceKnown > 0 ? asPercent((servicePass / serviceKnown) * 100) : null;
+      const servicePages = serviceHasData ? serviceRows.length : null;
+      const servicePass = serviceHasData ? serviceRows.filter((row) => row.hasService).length : null;
+      const serviceIssues = serviceHasData ? serviceRows.filter((row) => row.rateLimited).length : null;
+      const serviceFail = (servicePages != null && servicePass != null && serviceIssues != null) ? Math.max(0, servicePages - servicePass - serviceIssues) : null;
+      const serviceKnown = (servicePages != null && serviceIssues != null) ? Math.max(0, servicePages - serviceIssues) : null;
+      const serviceScore = (serviceKnown != null && servicePass != null && serviceKnown > 0) ? asPercent((servicePass / serviceKnown) * 100) : null;
 
-      const qaGate = cachedQa?.data?.qaGate || {};
-      const qaPages = Number(qaGate.pagesChecked || 0);
-      const qaPass = Number(qaGate.passPages || 0);
-      const qaFail = Number(qaGate.blockPages || 0);
-      const qaIssues = Number(qaGate.warningPages || 0);
-      const qaScore = qaPages > 0 ? asPercent((qaPass / qaPages) * 100) : null;
+      const qaHasData = !!(qaPayload && qaPayload.data && qaPayload.data.qaGate);
+      const qaGate = qaPayload?.data?.qaGate || {};
+      const qaTierScope = normalizeQaTierValue(qaGate.tier || 'all');
+      const qaPages = qaHasData ? numberOrNull(qaGate.pagesChecked) : null;
+      const qaPass = qaHasData ? numberOrNull(qaGate.passPages) : null;
+      const qaFail = qaHasData ? numberOrNull(qaGate.blockPages) : null;
+      const qaIssues = qaHasData ? numberOrNull(qaGate.warningPages) : null;
+      const qaScore = (qaPages != null && qaPass != null && qaPages > 0) ? asPercent((qaPass / qaPages) * 100) : null;
 
-      const extractData = cachedExtract?.data || {};
-      const extractPages = Number(extractData.pagesChecked || 0);
-      const extractPass = Number(extractData.passPages || 0);
-      const extractFail = Number(extractData.failPages || 0);
-      const extractIssues = Math.max(0, extractFail);
-      const extractScore = Number.isFinite(Number(extractData.avgScore))
+      const extractHasData = !!(extractPayload && extractPayload.data);
+      const extractData = extractPayload?.data || {};
+      const extractTierScope = normalizeQaTierValue(extractData.tier || 'all');
+      const extractPages = extractHasData ? numberOrNull(extractData.pagesChecked) : null;
+      const extractPass = extractHasData ? numberOrNull(extractData.passPages) : null;
+      const extractFail = extractHasData ? numberOrNull(extractData.failPages) : null;
+      const extractIssues = extractFail != null ? Math.max(0, extractFail) : null;
+      const extractScore = extractHasData && Number.isFinite(Number(extractData.avgScore))
         ? asPercent(Number(extractData.avgScore))
-        : (extractPages > 0 ? asPercent((extractPass / extractPages) * 100) : null);
+        : ((extractPages != null && extractPass != null && extractPages > 0) ? asPercent((extractPass / extractPages) * 100) : null);
 
       return [
         {
@@ -22824,8 +23022,9 @@
           pass: localPass,
           fail: localFail,
           issues: localIssues,
-          breakdown: `known ${localKnown} | missing ${localFail} | retry ${localIssues}`,
-          runTs: getImplPayloadRunTs(cachedLocal)
+          breakdown: localHasData ? `known ${localKnown ?? 'N/A'} | missing ${localFail ?? 'N/A'} | retry ${localIssues ?? 'N/A'}` : 'No result payload yet',
+          tierScope: 'all',
+          runTs: getImplPayloadRunTs(localPayload)
         },
         {
           priority: 'P0',
@@ -22836,8 +23035,9 @@
           pass: techPass,
           fail: techFail,
           issues: techIssues,
-          breakdown: `indexable ${techPass}/${techPages || 0} | blockers ${techIssues}`,
-          runTs: getImplPayloadRunTs(cachedTech)
+          breakdown: techHasData ? `indexable ${techPass ?? 'N/A'}/${techPages ?? 'N/A'} | blockers ${techIssues ?? 'N/A'}` : 'No result payload yet',
+          tierScope: 'all',
+          runTs: getImplPayloadRunTs(techPayload)
         },
         {
           priority: 'P0',
@@ -22848,8 +23048,9 @@
           pass: servicePass,
           fail: serviceFail,
           issues: serviceIssues,
-          breakdown: `tier-b known ${serviceKnown} | retry ${serviceIssues}`,
-          runTs: getImplPayloadRunTs(cachedService)
+          breakdown: serviceHasData ? `tier-b known ${serviceKnown ?? 'N/A'} | retry ${serviceIssues ?? 'N/A'}` : 'No result payload yet',
+          tierScope: 'product',
+          runTs: getImplPayloadRunTs(servicePayload)
         },
         {
           priority: 'P1',
@@ -22860,8 +23061,9 @@
           pass: qaPass,
           fail: qaFail,
           issues: qaIssues,
-          breakdown: `warnings ${qaIssues} | block deploy ${qaFail}`,
-          runTs: getImplPayloadRunTs(cachedQa)
+          breakdown: qaHasData ? `warnings ${qaIssues ?? 'N/A'} | block deploy ${qaFail ?? 'N/A'}` : 'No result payload yet',
+          tierScope: qaTierScope || 'all',
+          runTs: getImplPayloadRunTs(qaPayload)
         },
         {
           priority: 'P1',
@@ -22872,8 +23074,9 @@
           pass: extractPass,
           fail: extractFail,
           issues: extractIssues,
-          breakdown: `avg score ${extractScore == null ? 'N/A' : `${extractScore}%`}`,
-          runTs: getImplPayloadRunTs(cachedExtract)
+          breakdown: extractHasData ? `avg score ${extractScore == null ? 'N/A' : `${extractScore}%`}` : 'No result payload yet',
+          tierScope: extractTierScope || 'all',
+          runTs: getImplPayloadRunTs(extractPayload)
         },
         {
           priority: 'P1',
@@ -22885,6 +23088,7 @@
           fail: null,
           issues: null,
           breakdown: 'Planned - endpoint not wired yet',
+          tierScope: 'all',
           runTs: 0
         },
         {
@@ -22897,9 +23101,102 @@
           fail: null,
           issues: null,
           breakdown: 'Planned - endpoint not wired yet',
+          tierScope: 'all',
           runTs: 0
         }
       ];
+    }
+
+    function getImplPriorityPhaseLabel(row) {
+      if (!row?.runTs && String(row?.statusMeta?.label || '').toLowerCase() === 'done') return 'NO DATA';
+      return String(row?.statusMeta?.label || 'UNKNOWN').toUpperCase();
+    }
+
+    function classifyImplPriorityRowRag(row) {
+      if (!row?.runTs) return 'nodata';
+      const fail = Number(row?.fail ?? 0);
+      const issues = Number(row?.issues ?? 0);
+      const score = row?.score == null ? null : Number(row.score);
+      if (Number.isFinite(fail) && fail > 0) return 'red';
+      if (Number.isFinite(issues) && issues > 0) return 'amber';
+      if (score != null && Number.isFinite(score) && score < 60) return 'red';
+      if (score != null && Number.isFinite(score) && score < 85) return 'amber';
+      return 'green';
+    }
+
+    function renderImplPriorityRagSummary(rows) {
+      const target = document.getElementById('impl-priority-rag-summary');
+      if (!target) return;
+      const ragCounts = { green: 0, amber: 0, red: 0, nodata: 0 };
+      rows.forEach((row) => {
+        const key = classifyImplPriorityRowRag(row);
+        if (ragCounts[key] != null) ragCounts[key] += 1;
+      });
+      target.innerHTML = `
+        <div class="impl-rag-card"><div class="impl-rag-value impl-rag-green">${ragCounts.green}</div><div class="impl-rag-label">Green (healthy)</div></div>
+        <div class="impl-rag-card"><div class="impl-rag-value impl-rag-amber">${ragCounts.amber}</div><div class="impl-rag-label">Amber (watch)</div></div>
+        <div class="impl-rag-card"><div class="impl-rag-value impl-rag-red">${ragCounts.red}</div><div class="impl-rag-label">Red (action needed)</div></div>
+        <div class="impl-rag-card"><div class="impl-rag-value impl-rag-muted">${ragCounts.nodata}</div><div class="impl-rag-label">No data yet</div></div>
+      `;
+    }
+
+    function sortImplPriorityRows(rows, sortKey, sortDir) {
+      const dir = sortDir === 'desc' ? -1 : 1;
+      const rank = { p0: 0, p1: 1, p2: 2 };
+      return [...rows].sort((leftRow, rightRow) => {
+        let left = leftRow?.[sortKey];
+        let right = rightRow?.[sortKey];
+        if (sortKey === 'priority') {
+          left = rank[String(left || '').toLowerCase()] ?? 99;
+          right = rank[String(right || '').toLowerCase()] ?? 99;
+        } else if (sortKey === 'status') {
+          left = getImplPriorityPhaseLabel(leftRow);
+          right = getImplPriorityPhaseLabel(rightRow);
+        } else if (sortKey === 'runTs' || sortKey === 'score' || sortKey === 'urls' || sortKey === 'pass' || sortKey === 'fail' || sortKey === 'issues') {
+          left = Number(left ?? -1);
+          right = Number(right ?? -1);
+        } else {
+          left = String(left ?? '').toLowerCase();
+          right = String(right ?? '').toLowerCase();
+        }
+        if (left < right) return -1 * dir;
+        if (left > right) return 1 * dir;
+        return 0;
+      });
+    }
+
+    function getFilteredAndSortedImplPriorityRows() {
+      const searchTerm = String(implPriorityMatrixState.search || '').trim().toLowerCase();
+      let rows = Array.isArray(implPriorityMatrixState.rows) ? implPriorityMatrixState.rows : [];
+      if (implPriorityMatrixState.priorityFilter !== 'all') {
+        rows = rows.filter((row) => String(row?.priority || '') === implPriorityMatrixState.priorityFilter);
+      }
+      if (implPriorityMatrixState.phaseFilter !== 'all') {
+        rows = rows.filter((row) => getImplPriorityPhaseLabel(row) === implPriorityMatrixState.phaseFilter);
+      }
+      if (implPriorityMatrixState.tierFilter !== 'all') {
+        rows = rows.filter((row) => {
+          const scope = normalizeImplTierScope(row?.tierScope);
+          if (implPriorityMatrixState.tierFilter === 'global') return scope === 'all';
+          return scope === implPriorityMatrixState.tierFilter;
+        });
+      }
+      if (implPriorityMatrixState.issueFilter !== 'all') {
+        rows = rows.filter((row) => {
+          const fail = Number(row?.fail ?? 0);
+          const issues = Number(row?.issues ?? 0);
+          const hasIssues = (Number.isFinite(fail) && fail > 0) || (Number.isFinite(issues) && issues > 0);
+          return implPriorityMatrixState.issueFilter === 'has_fail_or_issues' ? hasIssues : !hasIssues;
+        });
+      }
+      if (searchTerm) {
+        rows = rows.filter((row) => {
+          const auditText = String(row?.audit || '').toLowerCase();
+          const breakdownText = String(row?.breakdown || '').toLowerCase();
+          return auditText.includes(searchTerm) || breakdownText.includes(searchTerm);
+        });
+      }
+      return sortImplPriorityRows(rows, implPriorityMatrixState.sortKey, implPriorityMatrixState.sortDir);
     }
 
     function renderImplementationPriorityMatrix() {
@@ -22907,34 +23204,69 @@
       const updatedEl = document.getElementById('impl-priority-matrix-updated');
       if (!tbody) return;
       const rows = derivePriorityMatrixRowsFromCaches();
-      if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="10" class="ranking-table-empty">No priority audits found.</td></tr>';
-        if (updatedEl) updatedEl.textContent = 'Last refreshed: never';
+      implPriorityMatrixState.rows = rows;
+      const visibleRows = getFilteredAndSortedImplPriorityRows();
+      renderImplPriorityRagSummary(visibleRows);
+      if (!visibleRows.length) {
+        tbody.innerHTML = '<tr><td colspan="11" class="ranking-table-empty">No rows match current matrix filters.</td></tr>';
+        const latestRunEmpty = rows.reduce((max, row) => Math.max(max, Number(row?.runTs || 0)), 0);
+        if (updatedEl) {
+          updatedEl.textContent = `Last refreshed: ${formatImplPriorityMatrixStamp(Date.now())}${latestRunEmpty ? ` | latest audit run: ${formatImplPriorityMatrixStamp(latestRunEmpty)}` : ''}`;
+        }
         return;
       }
       const latestRun = rows.reduce((max, row) => Math.max(max, Number(row.runTs || 0)), 0);
       if (updatedEl) {
         updatedEl.textContent = `Last refreshed: ${formatImplPriorityMatrixStamp(Date.now())}${latestRun ? ` | latest audit run: ${formatImplPriorityMatrixStamp(latestRun)}` : ''}`;
       }
-      tbody.innerHTML = rows.map((row) => {
+      tbody.innerHTML = visibleRows.map((row) => {
         const scoreText = row.score == null ? 'N/A' : `${asPercent(row.score)}%`;
         const valueOrDash = (value) => (value == null ? 'N/A' : String(value));
+        const chipMeta = (!row.runTs && String(row.statusMeta?.label || '').toLowerCase() === 'done')
+          ? { chipClass: 'impl-status-amber', label: 'NO DATA' }
+          : row.statusMeta;
         return `
           <tr>
             <td>${escapeHtml(row.priority)}</td>
             <td style="text-align:left;">${escapeHtml(row.audit)}</td>
-            <td><span class="impl-status-chip ${row.statusMeta.chipClass}">${row.statusMeta.label}</span></td>
+            <td><span class="impl-status-chip ${chipMeta.chipClass}">${chipMeta.label}</span></td>
             <td>${scoreText}</td>
             <td>${valueOrDash(row.urls)}</td>
             <td>${valueOrDash(row.pass)}</td>
             <td>${valueOrDash(row.fail)}</td>
             <td>${valueOrDash(row.issues)}</td>
             <td style="text-align:left;">${escapeHtml(row.breakdown || 'N/A')}</td>
+            <td>${escapeHtml(formatImplTierScopeLabel(row.tierScope))}</td>
             <td>${row.runTs ? formatImplPriorityMatrixStamp(row.runTs) : 'Never'}</td>
           </tr>
         `;
       }).join('');
     }
+
+    window.onImplPriorityMatrixSort = function(sortKey) {
+      const nextKey = String(sortKey || 'priority');
+      if (implPriorityMatrixState.sortKey === nextKey) {
+        implPriorityMatrixState.sortDir = implPriorityMatrixState.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        implPriorityMatrixState.sortKey = nextKey;
+        implPriorityMatrixState.sortDir = 'asc';
+      }
+      renderImplementationPriorityMatrix();
+    };
+
+    window.onImplPriorityMatrixFilterChange = function() {
+      const priorityEl = document.getElementById('impl-priority-filter-priority');
+      const phaseEl = document.getElementById('impl-priority-filter-phase');
+      const tierEl = document.getElementById('impl-priority-filter-tier');
+      const issuesEl = document.getElementById('impl-priority-filter-issues');
+      const searchEl = document.getElementById('impl-priority-filter-search');
+      implPriorityMatrixState.priorityFilter = priorityEl ? priorityEl.value : 'all';
+      implPriorityMatrixState.phaseFilter = phaseEl ? phaseEl.value : 'all';
+      implPriorityMatrixState.tierFilter = tierEl ? tierEl.value : 'all';
+      implPriorityMatrixState.issueFilter = issuesEl ? issuesEl.value : 'all';
+      implPriorityMatrixState.search = searchEl ? searchEl.value : '';
+      renderImplementationPriorityMatrix();
+    };
 
     function sortExtractabilityRows(rows, sortKey, sortDir) {
       const dir = sortDir === 'desc' ? -1 : 1;
@@ -23057,6 +23389,7 @@
           }
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.extractability, payload);
         }
+        implLatestAuditPayloads.extractability = payload;
         const runStampHtml = buildImplAuditRunStampHtml(payload, usingCache);
 
         const data = payload.data || {};
@@ -23159,6 +23492,7 @@
         applyQaTierCountsToSelect('impl-extract-filter-tier', countQaRowsByTier(rows), implExtractabilityTableState.tierFilter);
         renderExtractabilityTableRows();
       } catch (error) {
+        implLatestAuditPayloads.extractability = { __error: String(error?.message || 'Unknown error'), __cacheSavedAt: Date.now() };
         auditSucceeded = false;
         target.innerHTML = `<p class="card-subtitle">Could not load content extractability status: ${escapeHtml(error.message || 'Unknown error')}</p>`;
       } finally {
@@ -23196,6 +23530,21 @@
     };
 
     window.runImplGlobalPriorityAudit = async function() {
+      const allSelectors = [
+        'impl-tech-limit-select',
+        'impl-local-limit-select',
+        'impl-service-limit-select',
+        'impl-qa-limit-select',
+        'impl-extract-limit-select',
+        'impl-qa-tier-select',
+        'impl-extract-tier-select'
+      ];
+      allSelectors.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (id.includes('tier')) el.value = 'all';
+        else el.value = 'all';
+      });
       await window.runImplAllAudits('full');
       renderImplementationPriorityMatrix();
     };
@@ -23241,6 +23590,7 @@
           }
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.local, payload);
         }
+        implLatestAuditPayloads.local = payload;
         const runStampHtml = buildImplAuditRunStampHtml(payload, usingCache);
         const scan = payload.data.localBusinessSchemaScan || {};
         const pagesChecked = Number(scan.pagesChecked || 0);
@@ -23337,6 +23687,7 @@
         `;
         renderLocalSchemaTableRows();
       } catch (error) {
+        implLatestAuditPayloads.local = { __error: String(error?.message || 'Unknown error'), __cacheSavedAt: Date.now() };
         auditSucceeded = false;
         target.innerHTML = `<p class="card-subtitle">Could not load LocalBusiness schema audit: ${error.message}</p>`;
       } finally {
@@ -23601,6 +23952,7 @@
           }
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.service, payload);
         }
+        implLatestAuditPayloads.service = payload;
         const runStampHtml = buildImplAuditRunStampHtml(payload, usingCache);
 
         const pages = Array.isArray(payload.data.pages) ? payload.data.pages : [];
@@ -23712,6 +24064,7 @@
         `;
         renderServiceSchemaTableRows();
       } catch (error) {
+        implLatestAuditPayloads.service = { __error: String(error?.message || 'Unknown error'), __cacheSavedAt: Date.now() };
         auditSucceeded = false;
         target.innerHTML = `<p class="card-subtitle">Could not load Service schema audit: ${error.message}</p>`;
       } finally {
@@ -24180,6 +24533,7 @@
           }
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.qa, payload);
         }
+        implLatestAuditPayloads.qa = payload;
         const runStampHtml = buildImplAuditRunStampHtml(payload, usingCache);
 
         const qaGate = payload.data?.qaGate || {};
@@ -24314,6 +24668,7 @@
         applyQaTierCountsToSelect('impl-qa-filter-tier', tableTierCounts, initialTableTier);
         renderQaGateTableRows();
       } catch (error) {
+        implLatestAuditPayloads.qa = { __error: String(error?.message || 'Unknown error'), __cacheSavedAt: Date.now() };
         auditSucceeded = false;
         target.innerHTML = `<p class="card-subtitle">Could not load schema QA gate: ${error.message}</p>`;
       } finally {
@@ -24594,6 +24949,7 @@
           }
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.tech, payload);
         }
+        implLatestAuditPayloads.tech = payload;
         const runStampHtml = buildImplAuditRunStampHtml(payload, usingCache);
 
         const data = payload.data;
@@ -24723,6 +25079,7 @@
         `;
         renderTechFoundationTableRows();
       } catch (error) {
+        implLatestAuditPayloads.tech = { __error: String(error?.message || 'Unknown error'), __cacheSavedAt: Date.now() };
         auditSucceeded = false;
         const blockersEl = document.getElementById('impl-technical-blockers-open');
         if (blockersEl) blockersEl.textContent = 'Unknown';
