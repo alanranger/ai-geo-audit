@@ -179,7 +179,13 @@ function findJsonLdBlocks(html = '') {
 
 function hasDeferredFaqLoaderSignal(html = '') {
   const source = String(html || '');
-  return /\/[a-z0-9._\-/]*_faq\.json(?:["'?#&]|$)/i.exec(source) !== null;
+  // Support both literal FAQ JSON URLs and dynamic loader construction patterns.
+  return (
+    /\/[a-z0-9._\-/]*_faq\.json(?:["'?#&]|$)/i.test(source)
+    || /_faq\.json["'`]/i.test(source)
+    || /const\s+faqUrl\s*=.*_faq\.json/i.test(source)
+    || /fetch\(\s*faqUrl\s*\)/i.test(source)
+  );
 }
 
 function hasDeferredTldrLoaderSignal(html = '') {
