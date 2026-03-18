@@ -12,7 +12,12 @@
  */
 
 import { getBusinessProfileAccessToken } from './utils.js';
-import { fetchTierSegmentationEntries, urlsFromTierEntries } from './tier-segmentation.js';
+import {
+  fetchTierSegmentationEntries,
+  urlsFromTierEntries,
+  buildTierLookupFromEntries,
+  getTierForUrlFromLookup
+} from './tier-segmentation.js';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -430,8 +435,9 @@ function emptyLocalSchemaScan(mode = 'sample', source = 'not-run') {
   };
 }
 
-async function runLocalSchemaScan(propertyBaseUrl, mode, limit) {
-  const tierEntries = await fetchTierSegmentationEntries();
+async function runLocalSchemaScan(propertyBaseUrl, mode, limit, tierFetchOptions = {}) {
+  const tierEntries = await fetchTierSegmentationEntries(tierFetchOptions);
+  const tierLookup = buildTierLookupFromEntries(tierEntries);
   const sourceUrls = filterUrlsToPropertyHost(urlsFromTierEntries(tierEntries), propertyBaseUrl);
   const selected = selectLocalSchemaScanUrls(propertyBaseUrl, sourceUrls, mode, limit);
   const localSchemaScan = await scanLocalBusinessSchemaPages(selected.urls, {
@@ -449,7 +455,10 @@ async function runLocalSchemaScan(propertyBaseUrl, mode, limit) {
     rateLimitedCount: localSchemaScan.rateLimitedCount,
     pass: localSchemaScan.pass,
     retry: localSchemaScan.retry,
-    results: localSchemaScan.results
+    results: (Array.isArray(localSchemaScan.results) ? localSchemaScan.results : []).map((row) => ({
+      ...row,
+      pageTier: getTierForUrlFromLookup(row?.url || '', tierLookup)
+    }))
   };
 }
 
@@ -665,6 +674,10 @@ export default async function handler(req, res) {
     const scanMode = String(schemaMode || 'sample').trim().toLowerCase() === 'full' ? 'full' : 'sample';
     const scanLimit = parsePositiveInt(schemaLimit);
     const shouldRunSchemaScan = String(includeSchemaScan || '').trim() === '1' || String(includeSchemaScan || '').trim().toLowerCase() === 'true';
+    const refreshTierSource = String(req.query.refreshTierSource || '').trim() === '1'
+      || String(req.query.refreshTierSource || '').trim().toLowerCase() === 'true';
+    const tierSnapshotKey = String(req.query.tierSnapshotKey || '').trim();
+    const tierCacheTtlMs = parsePositiveInt(req.query.tierCacheTtlMs);
     
     if (!property) {
       return res.status(400).json({
@@ -1084,7 +1097,11 @@ export default async function handler(req, res) {
     
     // Step 4: LocalBusiness schema detection by scanning sitemap-derived pages
     const localBusinessSchemaScan = shouldRunSchemaScan
-      ? await runLocalSchemaScan(normalizedProperty, scanMode, scanLimit)
+      ? await runLocalSchemaScan(normalizedProperty, scanMode, scanLimit, {
+        forceRefresh: refreshTierSource,
+        snapshotKey: tierSnapshotKey,
+        cacheTtlMs: tierCacheTtlMs
+      })
       : emptyLocalSchemaScan(scanMode, 'not-run');
     const localBusinessSchemaPages = localBusinessSchemaScan.matchedPages;
     

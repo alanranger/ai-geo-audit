@@ -634,9 +634,11 @@ function classifyQaTierFromUrl(url) {
   return classifyTierFromUrlHeuristic(url);
 }
 
-async function getQaTierSegmentationLookup() {
-  if (qaTierLookupCache instanceof Map) return qaTierLookupCache;
-  const entries = await fetchTierSegmentationEntries();
+async function getQaTierSegmentationLookup(options = {}) {
+  const forceRefresh = options?.forceRefresh === true;
+  const snapshotKey = String(options?.snapshotKey || '').trim();
+  if (!forceRefresh && !snapshotKey && qaTierLookupCache instanceof Map) return qaTierLookupCache;
+  const entries = await fetchTierSegmentationEntries(options);
   const lookup = buildTierLookupFromEntries(entries);
 
   if (lookup.size > 0) {
@@ -1057,8 +1059,8 @@ async function checkInheritedSchema(url, parentCollectionUrl) {
 /**
  * Parse CSV and extract URLs from column A (skip header)
  */
-async function parseCsvUrls() {
-  const entries = await fetchTierSegmentationEntries();
+async function parseCsvUrls(options = {}) {
+  const entries = await fetchTierSegmentationEntries(options);
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new Error("Unable to load page segmentation by tier CSV from configured sources.");
   }
@@ -1380,6 +1382,9 @@ export default async function handler(req, res) {
     const queryServiceOnly = parseBoolean(query.serviceOnly);
     const queryTier = normalizeQaTierInput(query.tier);
     const queryCountsOnly = parseBoolean(query.countsOnly);
+    const queryRefreshTierSource = parseBoolean(query.refreshTierSource);
+    const queryTierSnapshotKey = String(query.tierSnapshotKey || '').trim();
+    const queryTierCacheTtlMs = parsePositiveInt(query.tierCacheTtlMs);
 
     // Check if manual URL list is provided in request body
     let urls = [];
@@ -1391,6 +1396,9 @@ export default async function handler(req, res) {
     let bodyServiceOnly = false;
     let bodyTier = 'all';
     let bodyCountsOnly = false;
+    let bodyRefreshTierSource = false;
+    let bodyTierSnapshotKey = '';
+    let bodyTierCacheTtlMs = null;
     
     if (req.method === 'POST') {
       // Parse request body
@@ -1410,6 +1418,9 @@ export default async function handler(req, res) {
       bodyServiceOnly = parseBoolean(body.serviceOnly);
       bodyTier = normalizeQaTierInput(body.tier);
       bodyCountsOnly = parseBoolean(body.countsOnly);
+      bodyRefreshTierSource = parseBoolean(body.refreshTierSource);
+      bodyTierSnapshotKey = String(body.tierSnapshotKey || '').trim();
+      bodyTierCacheTtlMs = parsePositiveInt(body.tierCacheTtlMs);
       
       if (body.urls && Array.isArray(body.urls)) {
         // Use manual URL list from request
@@ -1418,12 +1429,20 @@ export default async function handler(req, res) {
         console.log(`📄 Using manual URL list: ${urls.length} URLs provided`);
       } else {
         // POST but no URLs provided, fall back to CSV
-        urls = await parseCsvUrls();
+        urls = await parseCsvUrls({
+          forceRefresh: queryRefreshTierSource || bodyRefreshTierSource,
+          snapshotKey: queryTierSnapshotKey || bodyTierSnapshotKey,
+          cacheTtlMs: queryTierCacheTtlMs || bodyTierCacheTtlMs
+        });
         urlSource = 'csv';
       }
     } else {
       // GET request - parse CSV and get URLs from GitHub/hosted CSV
-      urls = await parseCsvUrls();
+      urls = await parseCsvUrls({
+        forceRefresh: queryRefreshTierSource,
+        snapshotKey: queryTierSnapshotKey,
+        cacheTtlMs: queryTierCacheTtlMs
+      });
       urlSource = 'csv';
     }
 
@@ -1439,7 +1458,11 @@ export default async function handler(req, res) {
     const runTier = queryTier === 'all' ? bodyTier : queryTier;
     const runCountsOnly = queryCountsOnly || bodyCountsOnly;
 
-    const qaTierLookup = await getQaTierSegmentationLookup();
+    const qaTierLookup = await getQaTierSegmentationLookup({
+      forceRefresh: queryRefreshTierSource || bodyRefreshTierSource,
+      snapshotKey: queryTierSnapshotKey || bodyTierSnapshotKey,
+      cacheTtlMs: queryTierCacheTtlMs || bodyTierCacheTtlMs
+    });
     const qaTierLookupLoaded = qaTierLookup instanceof Map && qaTierLookup.size > 0;
 
     urls = ensureRootUrlIncluded(urls);

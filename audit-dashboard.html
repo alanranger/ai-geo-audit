@@ -22754,6 +22754,23 @@
       }
     }
 
+    function loadImplementationAuditCacheAnyAge(key) {
+      try {
+        if (!key) return null;
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        const savedAt = Number(parsed?.savedAt || 0);
+        const payload = parsed?.payload || null;
+        if (payload && typeof payload === 'object') {
+          payload.__cacheSavedAt = savedAt || Date.now();
+        }
+        return payload;
+      } catch (err) {
+        return null;
+      }
+    }
+
     function formatImplAuditRunTimestamp(ts) {
       const safeTs = Number(ts || 0);
       if (!safeTs || !Number.isFinite(safeTs)) return 'Unknown';
@@ -22800,6 +22817,28 @@
     };
     let implExtractTierSourceCounts = normalizeQaTierCounts(null);
     let implCanonicalTierSourceCounts = normalizeQaTierCounts(null);
+    const IMPL_TIER_REFRESH_TTL_MS = 60000;
+    function getOrCreateImplTierSnapshotKey(forceNew = false, prefix = 'run') {
+      if (forceNew || !window.__implTierSnapshotKey) {
+        window.__implTierSnapshotKey = `${prefix}-${Date.now()}`;
+      }
+      return String(window.__implTierSnapshotKey || '');
+    }
+    function invalidateDashboardTierLookupCache() {
+      window.__dashboardTierSegmentationLookup = null;
+      window.__dashboardTierSegmentationLookupKey = '';
+    }
+    function applyTierRefreshParams(params, mode = 'sample', options = {}) {
+      if (!(params instanceof URLSearchParams)) return params;
+      if (String(mode || 'sample').toLowerCase() !== 'full') return params;
+      const forceNewKey = options.forceNewSnapshotKey === true;
+      const prefix = String(options.snapshotPrefix || 'run');
+      const snapshotKey = String(options.snapshotKey || getOrCreateImplTierSnapshotKey(forceNewKey, prefix)).trim();
+      params.set('refreshTierSource', '1');
+      params.set('tierCacheTtlMs', String(IMPL_TIER_REFRESH_TTL_MS));
+      if (snapshotKey) params.set('tierSnapshotKey', snapshotKey);
+      return params;
+    }
     const implRunAllAuditsState = {
       isLoading: false,
       mode: 'sample'
@@ -23043,7 +23082,7 @@
 
     function getLatestImplPayload(key, cacheKey) {
       if (implLatestAuditPayloads[key] && typeof implLatestAuditPayloads[key] === 'object') return implLatestAuditPayloads[key];
-      return loadImplementationAuditCache(cacheKey);
+      return loadImplementationAuditCacheAnyAge(cacheKey) || loadImplementationAuditCache(cacheKey);
     }
 
     function numberOrNull(value) {
@@ -23546,6 +23585,10 @@
           if (requestedMode === 'full' && limitValue !== 'all') {
             params.set('limit', limitValue);
           }
+          applyTierRefreshParams(params, requestedMode, {
+            forceNewSnapshotKey: requestedMode === 'full',
+            snapshotPrefix: 'extract'
+          });
           const response = await fetch(apiUrl(`/api/aigeo/content-extractability?${params.toString()}`));
           payload = await response.json();
           if (!response.ok || payload?.status !== 'ok' || !payload?.data) {
@@ -23701,17 +23744,17 @@
       }
     };
 
-    async function fetchImplGlobalPayloads() {
+    async function fetchImplGlobalPayloads(snapshotKey = '') {
       const property =
         (document.getElementById('propertyUrl')?.value || '').trim() ||
         (localStorage.getItem('gsc_property_url') || '').trim() ||
         (localStorage.getItem('last_property_url') || '').trim() ||
         'https://www.alanranger.com';
-      const techParams = new URLSearchParams({ property, mode: 'full' });
-      const localParams = new URLSearchParams({ property, includeSchemaScan: '1', schemaMode: 'full' });
-      const serviceParams = new URLSearchParams({ mode: 'full', serviceOnly: '1' });
-      const qaParams = new URLSearchParams({ mode: 'full', tier: 'all' });
-      const extractParams = new URLSearchParams({ mode: 'full', tier: 'all' });
+      const techParams = applyTierRefreshParams(new URLSearchParams({ property, mode: 'full' }), 'full', { snapshotKey });
+      const localParams = applyTierRefreshParams(new URLSearchParams({ property, includeSchemaScan: '1', schemaMode: 'full' }), 'full', { snapshotKey });
+      const serviceParams = applyTierRefreshParams(new URLSearchParams({ mode: 'full', serviceOnly: '1' }), 'full', { snapshotKey });
+      const qaParams = applyTierRefreshParams(new URLSearchParams({ mode: 'full', tier: 'all' }), 'full', { snapshotKey });
+      const extractParams = applyTierRefreshParams(new URLSearchParams({ mode: 'full', tier: 'all' }), 'full', { snapshotKey });
       const calls = [
         fetch(apiUrl(`/api/aigeo/technical-foundation?${techParams.toString()}`)).then(async (r) => ({ key: 'tech', ok: r.ok, status: r.status, payload: await r.json() })),
         fetch(apiUrl(`/api/aigeo/local-signals?${localParams.toString()}`)).then(async (r) => ({ key: 'local', ok: r.ok, status: r.status, payload: await r.json() })),
@@ -23747,6 +23790,8 @@
         if (!el) return;
         el.value = 'all';
       });
+      const globalTierSnapshotKey = getOrCreateImplTierSnapshotKey(true, 'global');
+      invalidateDashboardTierLookupCache();
       implRunAllAuditsState.isLoading = true;
       implRunAllAuditsState.mode = 'full';
       setImplRunAllButtonsState(true);
@@ -23764,7 +23809,7 @@
           if (el) el.innerHTML = '<p class="card-subtitle">Running global audit sweep (all URLs, all tiers)...</p>';
         });
         updateImplGlobalProgress(15, 'Requesting full payloads for all priority audits in parallel.');
-        const payloads = await fetchImplGlobalPayloads();
+        const payloads = await fetchImplGlobalPayloads(globalTierSnapshotKey);
         updateImplGlobalProgress(55, 'Payloads received. Rendering audit panels and matrix rows.');
         if (payloads.tech) {
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.tech, payloads.tech);
@@ -23845,6 +23890,10 @@
           if (requestedMode === 'full' && limitValue !== 'all') {
             params.set('schemaLimit', limitValue);
           }
+          applyTierRefreshParams(params, requestedMode, {
+            forceNewSnapshotKey: requestedMode === 'full',
+            snapshotPrefix: 'local'
+          });
           const response = await fetch(apiUrl(`/api/aigeo/local-signals?${params.toString()}`));
           payload = await response.json();
           if (!response.ok || payload?.status !== 'ok' || !payload?.data) {
@@ -24244,6 +24293,10 @@
           if (requestedMode === 'full' && limitValue !== 'all') {
             params.set('limit', limitValue);
           }
+          applyTierRefreshParams(params, requestedMode, {
+            forceNewSnapshotKey: requestedMode === 'full',
+            snapshotPrefix: 'service'
+          });
           const response = await fetch(apiUrl(`/api/schema-audit?${params.toString()}`));
           payload = await response.json();
           if (!response.ok || payload?.status !== 'ok' || !payload?.data) {
@@ -24868,6 +24921,10 @@
             params.set('limit', limitValue);
           }
           params.set('tier', tierValue);
+          applyTierRefreshParams(params, requestedMode, {
+            forceNewSnapshotKey: requestedMode === 'full',
+            snapshotPrefix: 'qa'
+          });
           const response = await fetch(apiUrl(`/api/schema-audit?${params.toString()}`));
           payload = await response.json();
           if (!response.ok || payload?.status !== 'ok' || !payload?.data) {
@@ -25304,6 +25361,10 @@
           if (requestedMode === 'full' && limitValue !== 'all') {
             params.set('limit', limitValue);
           }
+          applyTierRefreshParams(params, requestedMode, {
+            forceNewSnapshotKey: requestedMode === 'full',
+            snapshotPrefix: 'tech'
+          });
           const response = await fetch(apiUrl(`/api/aigeo/technical-foundation?${params.toString()}`));
           payload = await response.json();
           if (!response.ok || payload?.status !== 'ok' || !payload?.data) {
@@ -25509,23 +25570,23 @@
 
       renderImplementationSummaryAndLanes();
 
-      const cachedTechPayload = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.tech);
+      const cachedTechPayload = loadImplementationAuditCacheAnyAge(IMPL_AUDIT_CACHE_KEYS.tech) || loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.tech);
       if (cachedTechPayload) {
         await fetchAndRenderTechnicalFoundationStatus(implTechFoundationRunState.mode || 'sample', cachedTechPayload);
       }
-      const cachedLocalPayload = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.local);
+      const cachedLocalPayload = loadImplementationAuditCacheAnyAge(IMPL_AUDIT_CACHE_KEYS.local) || loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.local);
       if (cachedLocalPayload) {
         await fetchAndRenderLocalBusinessSchemaStatus(implLocalSchemaRunState.mode || 'sample', cachedLocalPayload);
       }
-      const cachedServicePayload = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.service);
+      const cachedServicePayload = loadImplementationAuditCacheAnyAge(IMPL_AUDIT_CACHE_KEYS.service) || loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.service);
       if (cachedServicePayload) {
         await fetchAndRenderServiceSchemaStatus(implServiceSchemaRunState.mode || 'sample', cachedServicePayload);
       }
-      const cachedExtractabilityPayload = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.extractability);
+      const cachedExtractabilityPayload = loadImplementationAuditCacheAnyAge(IMPL_AUDIT_CACHE_KEYS.extractability) || loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.extractability);
       if (cachedExtractabilityPayload) {
         await fetchAndRenderContentExtractabilityStatus(implExtractabilityRunState.mode || 'sample', cachedExtractabilityPayload);
       }
-      const cachedQaPayload = loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.qa);
+      const cachedQaPayload = loadImplementationAuditCacheAnyAge(IMPL_AUDIT_CACHE_KEYS.qa) || loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.qa);
       if (cachedQaPayload) {
         await fetchAndRenderSchemaQaGateStatus(implQaGateRunState.mode || 'sample', cachedQaPayload);
       }
@@ -64553,19 +64614,28 @@ Final Score: ${score}/100`;
         return null;
       }
 
-      async function fetchDashboardTierSegmentationLookup() {
+      async function fetchDashboardTierSegmentationLookup(options = {}) {
         try {
-          if (window.__dashboardTierSegmentationLookup instanceof Map) {
+          const forceRefresh = options?.forceRefresh === true;
+          const requestedKey = String(options?.snapshotKey || window.__implTierSnapshotKey || '').trim();
+          const activeKey = String(window.__dashboardTierSegmentationLookupKey || '').trim();
+          if (!forceRefresh && window.__dashboardTierSegmentationLookup instanceof Map && activeKey === requestedKey) {
             return window.__dashboardTierSegmentationLookup;
+          }
+          if (forceRefresh) {
+            window.__dashboardTierSegmentationLookup = null;
+            window.__dashboardTierSegmentationLookupKey = '';
           }
           const urls = [
             'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/page%20segmentation%20by%20tier.csv',
             'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/page%20segmentation%20by%20tier.csv'
           ];
           let csvText = '';
+          const cacheBuster = requestedKey || String(Date.now());
           for (const sourceUrl of urls) {
             try {
-              const res = await fetch(`${sourceUrl}?cb=${Date.now()}`, { cache: 'no-store' });
+              const separator = sourceUrl.includes('?') ? '&' : '?';
+              const res = await fetch(`${sourceUrl}${separator}cb=${encodeURIComponent(cacheBuster)}`, { cache: 'no-store' });
               if (!res.ok) continue;
               csvText = await res.text();
               if (csvText && csvText.trim()) break;
@@ -64576,11 +64646,13 @@ Final Score: ${score}/100`;
           const lookup = new Map();
           if (!csvText || !csvText.trim()) {
             window.__dashboardTierSegmentationLookup = lookup;
+            window.__dashboardTierSegmentationLookupKey = requestedKey;
             return lookup;
           }
           const lines = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
           if (lines.length < 2) {
             window.__dashboardTierSegmentationLookup = lookup;
+            window.__dashboardTierSegmentationLookupKey = requestedKey;
             return lookup;
           }
           const headers = parseDashboardCsvLine(lines[0]);
@@ -64596,6 +64668,7 @@ Final Score: ${score}/100`;
             });
           }
           window.__dashboardTierSegmentationLookup = lookup;
+          window.__dashboardTierSegmentationLookupKey = requestedKey;
           return lookup;
         } catch (err) {
           return new Map();

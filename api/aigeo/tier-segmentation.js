@@ -5,8 +5,51 @@ const DEFAULT_SEGMENTATION_SOURCES = [
 
 const KNOWN_TIERS = new Set(['all', 'landing', 'product', 'event', 'blog', 'academy', 'unmapped']);
 const DEFAULT_SITE_ORIGIN = 'https://www.alanranger.com';
+const DEFAULT_TIER_CACHE_TTL_MS = 60 * 1000;
 
-let tierEntriesCache = null;
+let tierEntriesCache = {
+  entries: null,
+  fetchedAt: 0
+};
+const tierEntriesSnapshotCache = new Map();
+
+function resolveTierCacheTtlMs(value) {
+  if (!Number.isFinite(Number(value))) return DEFAULT_TIER_CACHE_TTL_MS;
+  return Math.max(0, Math.floor(Number(value)));
+}
+
+function buildSegmentationSourceUrl(sourceUrl, forceRefresh, now) {
+  if (!forceRefresh) return sourceUrl;
+  try {
+    const parsed = new URL(sourceUrl);
+    parsed.searchParams.set('_ts', String(now));
+    return parsed.toString();
+  } catch {
+    const separator = String(sourceUrl).includes('?') ? '&' : '?';
+    return `${sourceUrl}${separator}_ts=${now}`;
+  }
+}
+
+async function fetchTierSegmentationCsvText(sources, forceRefresh, now) {
+  for (const sourceUrl of sources) {
+    try {
+      const requestUrl = buildSegmentationSourceUrl(sourceUrl, forceRefresh, now);
+      const response = await fetch(requestUrl, { cache: forceRefresh ? 'no-store' : 'default' });
+      if (!response.ok) continue;
+      const text = await response.text();
+      if (text?.trim()) return text;
+    } catch {
+      // Try next source.
+    }
+  }
+  return '';
+}
+
+function saveTierEntriesToCache(entries, now, snapshotKey = '') {
+  tierEntriesCache = { entries, fetchedAt: now };
+  if (snapshotKey) tierEntriesSnapshotCache.set(snapshotKey, entries);
+  return entries;
+}
 
 export function normalizeTierInput(value, fallback = 'all') {
   const normalized = String(value || '').trim().toLowerCase();
@@ -121,38 +164,37 @@ function setLookupWithAliases(lookup, key, tier) {
 }
 
 export async function fetchTierSegmentationEntries(options = {}) {
+  const cacheTtlMs = resolveTierCacheTtlMs(options.cacheTtlMs);
   const forceRefresh = options.forceRefresh === true;
-  if (!forceRefresh && Array.isArray(tierEntriesCache) && tierEntriesCache.length > 0) {
-    return tierEntriesCache;
+  const snapshotKey = String(options.snapshotKey || '').trim();
+  const now = Date.now();
+
+  if (!forceRefresh && snapshotKey && tierEntriesSnapshotCache.has(snapshotKey)) {
+    return tierEntriesSnapshotCache.get(snapshotKey) || [];
+  }
+
+  if (
+    !forceRefresh
+    && Array.isArray(tierEntriesCache.entries)
+    && (cacheTtlMs <= 0 || (now - Number(tierEntriesCache.fetchedAt || 0)) <= cacheTtlMs)
+  ) {
+    if (snapshotKey) tierEntriesSnapshotCache.set(snapshotKey, tierEntriesCache.entries);
+    return tierEntriesCache.entries;
   }
 
   const sources = Array.isArray(options.sources) && options.sources.length > 0
     ? options.sources
     : DEFAULT_SEGMENTATION_SOURCES;
 
-  let csvText = '';
-  for (const sourceUrl of sources) {
-    try {
-      const response = await fetch(sourceUrl);
-      if (!response.ok) continue;
-      const text = await response.text();
-      if (!text?.trim()) continue;
-      csvText = text;
-      break;
-    } catch {
-      // Try next source.
-    }
-  }
+  const csvText = await fetchTierSegmentationCsvText(sources, forceRefresh, now);
 
   if (!csvText) {
-    tierEntriesCache = [];
-    return tierEntriesCache;
+    return saveTierEntriesToCache([], now, snapshotKey);
   }
 
   const lines = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
   if (lines.length < 2) {
-    tierEntriesCache = [];
-    return tierEntriesCache;
+    return saveTierEntriesToCache([], now, snapshotKey);
   }
 
   const headers = parseCsvLine(lines[0]);
@@ -172,8 +214,8 @@ export async function fetchTierSegmentationEntries(options = {}) {
     });
   }
 
-  tierEntriesCache = Array.from(byPath.values());
-  return tierEntriesCache;
+  const entries = Array.from(byPath.values());
+  return saveTierEntriesToCache(entries, now, snapshotKey);
 }
 
 export function buildTierLookupFromEntries(entries = []) {

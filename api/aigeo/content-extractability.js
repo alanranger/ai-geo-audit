@@ -145,8 +145,8 @@ function parseCsvLine(line) {
   return columns;
 }
 
-async function parseTierSegmentationEntries() {
-  return fetchTierSegmentationEntries();
+async function parseTierSegmentationEntries(options = {}) {
+  return fetchTierSegmentationEntries(options);
 }
 
 function selectUrlsForMode(urls, mode, limit) {
@@ -489,7 +489,14 @@ export default async function handler(req, res) {
     const limit = parsePositiveInt(query.limit);
     const tier = normalizeTierInput(query.tier);
     const countsOnly = parseBoolean(query.countsOnly);
-    const tierEntries = await parseTierSegmentationEntries();
+    const refreshTierSource = parseBoolean(query.refreshTierSource);
+    const tierSnapshotKey = String(query.tierSnapshotKey || '').trim();
+    const tierCacheTtlMs = parsePositiveInt(query.tierCacheTtlMs);
+    const tierEntries = await parseTierSegmentationEntries({
+      forceRefresh: refreshTierSource,
+      snapshotKey: tierSnapshotKey,
+      cacheTtlMs: tierCacheTtlMs
+    });
     const tierLookup = buildTierLookup(tierEntries);
     const urls = tierEntries.map((entry) => entry.url);
     const sourceTierCounts = countUrlsByTier(tierEntries);

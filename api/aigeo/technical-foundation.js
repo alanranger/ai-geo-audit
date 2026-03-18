@@ -1,5 +1,10 @@
 import { getGSCAccessToken, getGscDateRange, normalizePropertyUrl } from './utils.js';
-import { fetchTierSegmentationEntries, urlsFromTierEntries } from './tier-segmentation.js';
+import {
+  fetchTierSegmentationEntries,
+  urlsFromTierEntries,
+  buildTierLookupFromEntries,
+  getTierForUrlFromLookup
+} from './tier-segmentation.js';
 
 /**
  * Technical Foundation Audit API
@@ -720,6 +725,10 @@ export default async function handler(req, res) {
     const modeRaw = String(req.query.mode || 'sample').trim().toLowerCase();
     const mode = modeRaw === 'full' ? 'full' : 'sample';
     const limit = parsePositiveInt(req.query.limit);
+    const refreshTierSource = String(req.query.refreshTierSource || '').trim() === '1'
+      || String(req.query.refreshTierSource || '').trim().toLowerCase() === 'true';
+    const tierSnapshotKey = String(req.query.tierSnapshotKey || '').trim();
+    const tierCacheTtlMs = parsePositiveInt(req.query.tierCacheTtlMs);
     const includeGoogleIndex = String(req.query.includeGoogleIndex ?? '1').trim() !== '0';
     if (!baseUrl) {
       return res.status(400).json({
@@ -747,10 +756,15 @@ export default async function handler(req, res) {
       checkRobots(robotsUrl),
       checkSitemap(sitemapUrl, pageUrlLimit)
     ]);
-    const tierEntries = await fetchTierSegmentationEntries();
+    const tierEntries = await fetchTierSegmentationEntries({
+      forceRefresh: refreshTierSource,
+      snapshotKey: tierSnapshotKey,
+      cacheTtlMs: tierCacheTtlMs
+    });
+    const tierLookup = buildTierLookupFromEntries(tierEntries);
     const canonicalUrls = filterUrlsToPropertyHost(urlsFromTierEntries(tierEntries), baseUrl);
     const selection = pickIndexabilityUrls(baseUrl, canonicalUrls, sitemap.pageUrls, mode, limit);
-    const indexability = await checkIndexability(selection.urls, selection.source, selection.mode, {
+    const indexabilityRaw = await checkIndexability(selection.urls, selection.source, selection.mode, {
       baseUrl,
       includeGoogleIndex,
       batchSize,
@@ -760,6 +774,13 @@ export default async function handler(req, res) {
       timeoutMs,
       retryBaseDelayMs
     });
+    const indexability = {
+      ...indexabilityRaw,
+      results: (Array.isArray(indexabilityRaw.results) ? indexabilityRaw.results : []).map((row) => ({
+        ...row,
+        pageTier: getTierForUrlFromLookup(row?.url || '', tierLookup)
+      }))
+    };
     const overall = buildOverallResult(robots, sitemap, indexability);
 
     return res.status(200).json({
