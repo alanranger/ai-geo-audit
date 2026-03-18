@@ -2,7 +2,7 @@
  * Schema Audit API
  * 
  * CSV-based schema coverage scanner.
- * Reads URLs from 06-site-urls.csv and crawls each for JSON-LD schema markup.
+ * Reads URLs from page segmentation by tier CSV and crawls each for JSON-LD schema markup.
  * 
  * Returns comprehensive schema inventory, coverage metrics, and rich result eligibility.
  */
@@ -1171,116 +1171,63 @@ async function checkInheritedSchema(url, parentCollectionUrl) {
  * Parse CSV and extract URLs from column A (skip header)
  */
 async function parseCsvUrls() {
-  // Fetch CSV directly from GitHub (primary source)
-  const GITHUB_CSV_URL = process.env.GITHUB_CSV_URL || 
-    "https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/06-site-urls.csv";
-  
-  // Fallback to hosted CSV if GitHub fails
-  const FALLBACK_CSV_URL = process.env.CSV_URL || 
-    "https://schema-tools-six.vercel.app/06-site-urls.csv";
-
-  console.log("📄 Fetching CSV from GitHub:", GITHUB_CSV_URL);
-
   let csvText = "";
-  let source = 'github';
-
-  try {
-    // Try GitHub first
-    const res = await fetch(GITHUB_CSV_URL);
-
-    if (res.ok) {
-      csvText = await res.text();
-      console.log("✓ CSV fetched from GitHub successfully");
-    } else {
-      throw new Error(`GitHub fetch failed: HTTP ${res.status}`);
-    }
-  } catch (githubErr) {
-    console.warn("⚠ GitHub fetch failed, trying fallback:", githubErr.message);
-    
-    // Fallback to hosted CSV
+  let source = "none";
+  for (const sourceUrl of QA_TIER_SEGMENTATION_URLS) {
     try {
-      const fallbackRes = await fetch(FALLBACK_CSV_URL);
-      if (fallbackRes.ok) {
-        csvText = await fallbackRes.text();
-        source = 'hosted';
-        console.log("✓ CSV fetched from fallback location");
-      } else {
-        throw new Error(`Fallback fetch failed: HTTP ${fallbackRes.status}`);
-      }
-    } catch (fallbackErr) {
-      console.error("❌ CSV fetch error from both sources:", fallbackErr);
-      throw new Error(`Unable to load site URLs CSV from GitHub or fallback. GitHub: ${githubErr.message}, Fallback: ${fallbackErr.message}`);
+      const res = await fetch(sourceUrl);
+      if (!res.ok) continue;
+      const text = await res.text();
+      if (!text?.trim()) continue;
+      csvText = text;
+      source = sourceUrl;
+      break;
+    } catch {
+      // Try next source URL.
     }
   }
-  
-  console.log(`✓ CSV loaded from ${source}, size: ${csvText.length} bytes`);
-  const csvContent = csvText;
-  
-  // Parse CSV - extract URLs from url column (skip header)
-  const lines = csvContent.split('\n').filter(line => line.trim());
-  const urls = [];
-  
-  // Parse header row to find URL column index
-  let urlColumnIndex = 0; // Default to first column
-  if (lines.length > 0) {
-    const headerLine = lines[0].trim();
-    const headers = parseCsvLine(headerLine);
-    const urlHeaderIndex = headers.findIndex(h => h.toLowerCase() === 'url');
-    if (urlHeaderIndex !== -1) {
-      urlColumnIndex = urlHeaderIndex;
-    }
+
+  if (!csvText?.trim()) {
+    throw new Error("Unable to load page segmentation by tier CSV from configured sources.");
   }
-  
-  // Helper function to parse CSV line with proper quote handling
-  function parseCsvLine(line) {
-    const columns = [];
-    let current = '';
-    let inQuotes = false;
-    
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      const nextChar = line[i + 1];
-      
-      if (char === '"') {
-        if (inQuotes && nextChar === '"') {
-          // Escaped quote
-          current += '"';
-          i++; // Skip next quote
-        } else {
-          // Toggle quote state
-          inQuotes = !inQuotes;
-        }
-      } else if (char === ',' && !inQuotes) {
-        // End of column
-        columns.push(current);
-        current = '';
-      } else {
-        current += char;
-      }
-    }
-    columns.push(current); // Add last column
-    return columns;
-  }
-  
-  for (let i = 1; i < lines.length; i++) { // Skip header row
-    const line = lines[i].trim();
-    if (!line) continue; // Skip empty rows
-    
+
+  console.log(`✓ Segmentation CSV loaded from ${source}, size: ${csvText.length} bytes`);
+  const lines = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (lines.length < 2) return [];
+
+  const headers = parseTierCsvLine(lines[0]);
+  const columnDefs = headers
+    .map((header, idx) => ({ idx, tier: tierKeyFromHeader(header) }))
+    .filter((item) => item.tier);
+  const urlsByKey = new Map();
+
+  const normalizeSegmentationSourceUrl = (rawValue) => {
+    const raw = String(rawValue || "").trim();
+    if (!raw) return "";
+    if (raw === "/") return "https://www.alanranger.com/";
+    if (!/^https?:\/\//i.test(raw)) return "";
     try {
-      const columns = parseCsvLine(line);
-      if (columns[urlColumnIndex]) {
-        const url = columns[urlColumnIndex].trim().replace(/^"|"$/g, '');
-        if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
-          urls.push(url);
-        }
-      }
-    } catch (e) {
-      // Skip malformed lines
-      continue;
+      const parsed = new URL(raw);
+      const pathname = String(parsed.pathname || "/").replace(/\/{2,}/g, "/");
+      const normalizedPath = pathname.length > 1 ? pathname.replace(/\/+$/, "") : "/";
+      return `${parsed.origin}${normalizedPath}`;
+    } catch {
+      return "";
     }
+  };
+
+  for (let i = 1; i < lines.length; i += 1) {
+    const cols = parseTierCsvLine(lines[i]);
+    columnDefs.forEach(({ idx }) => {
+      const url = normalizeSegmentationSourceUrl(cols[idx]);
+      if (!url) return;
+      const key = normalizeUrlForComparison(url);
+      if (!key) return;
+      if (!urlsByKey.has(key)) urlsByKey.set(key, url);
+    });
   }
-  
-  return urls;
+
+  return Array.from(urlsByKey.values());
 }
 
 /**

@@ -1,9 +1,10 @@
 import { safeJsonParse } from './utils.js';
 
-const CSV_SOURCES = [
-  'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/06-site-urls.csv',
-  'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/06-site-urls.csv'
+const TIER_SEGMENTATION_SOURCES = [
+  'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/page%20segmentation%20by%20tier.csv',
+  'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/page%20segmentation%20by%20tier.csv'
 ];
+const DEFAULT_SITE_ORIGIN = 'https://www.alanranger.com';
 const TIER_VALUES = new Set(['all', 'landing', 'product', 'event', 'blog', 'academy', 'unmapped']);
 
 function parsePositiveInt(value) {
@@ -20,6 +21,17 @@ function parseBoolean(value) {
 function normalizeTierInput(value) {
   const normalized = String(value || '').trim().toLowerCase();
   return TIER_VALUES.has(normalized) ? normalized : 'all';
+}
+
+function tierKeyFromHeader(header) {
+  const h = String(header || '').toLowerCase();
+  if (h.includes('tier a') || h.includes('landing')) return 'landing';
+  if (h.includes('tier b') || h.includes('product')) return 'product';
+  if (h.includes('tier c') || h.includes('event')) return 'event';
+  if (h.includes('tier d') || h.includes('blog')) return 'blog';
+  if (h.includes('tier e') || h.includes('academy')) return 'academy';
+  if (h.includes('tier f') || h.includes('unmapped')) return 'unmapped';
+  return null;
 }
 
 function classifyTierFromUrl(url) {
@@ -50,13 +62,62 @@ function classifyTierFromUrl(url) {
   }
 }
 
-function filterUrlsByTier(urls, tier) {
-  if (!Array.isArray(urls) || !urls.length) return [];
-  if (tier === 'all') return urls;
-  return urls.filter((url) => classifyTierFromUrl(url) === tier);
+function normalizeSourceUrl(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  if (value === '/') {
+    return `${DEFAULT_SITE_ORIGIN}/`;
+  }
+  if (!/^https?:\/\//i.test(value)) return '';
+  try {
+    const parsed = new URL(value);
+    const pathname = String(parsed.pathname || '/').replaceAll(/\/{2,}/g, '/');
+    const normalizedPath = pathname.length > 1 ? pathname.replaceAll(/\/+$/, '') : '/';
+    return `${parsed.origin}${normalizedPath}`;
+  } catch {
+    return '';
+  }
 }
 
-function countUrlsByTier(urls = []) {
+function toTierUrlKey(url) {
+  try {
+    const parsed = new URL(String(url || ''));
+    const pathname = String(parsed.pathname || '/').replaceAll(/\/{2,}/g, '/');
+    const normalizedPath = pathname.length > 1 ? pathname.replaceAll(/\/+$/, '') : '/';
+    return normalizedPath.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function buildTierLookup(entries = []) {
+  const lookup = new Map();
+  entries.forEach((entry) => {
+    const key = toTierUrlKey(entry?.url || '');
+    const tier = String(entry?.tier || '').toLowerCase();
+    if (!key || !TIER_VALUES.has(tier) || tier === 'all') return;
+    if (!lookup.has(key)) lookup.set(key, tier);
+  });
+  return lookup;
+}
+
+function getTierForUrl(url, tierLookup = null) {
+  const key = toTierUrlKey(url);
+  if (key && tierLookup instanceof Map && tierLookup.has(key)) {
+    return tierLookup.get(key);
+  }
+  return classifyTierFromUrl(url);
+}
+
+function filterUrlsByTier(entries, tier) {
+  if (!Array.isArray(entries) || !entries.length) return [];
+  if (tier === 'all') return entries.map((entry) => entry.url);
+  return entries
+    .filter((entry) => String(entry?.tier || '').toLowerCase() === tier)
+    .map((entry) => entry.url);
+}
+
+function countUrlsByTier(entries = []) {
   const counts = {
     all: 0,
     landing: 0,
@@ -66,10 +127,10 @@ function countUrlsByTier(urls = []) {
     academy: 0,
     unmapped: 0
   };
-  if (!Array.isArray(urls) || !urls.length) return counts;
-  counts.all = urls.length;
-  urls.forEach((url) => {
-    const tier = classifyTierFromUrl(url);
+  if (!Array.isArray(entries) || !entries.length) return counts;
+  counts.all = entries.length;
+  entries.forEach((entry) => {
+    const tier = String(entry?.tier || 'unmapped').toLowerCase();
     if (Object.hasOwn(counts, tier)) counts[tier] += 1;
     else counts.unmapped += 1;
   });
@@ -101,9 +162,9 @@ function parseCsvLine(line) {
   return columns;
 }
 
-async function parseCsvUrls() {
+async function parseTierSegmentationEntries() {
   let csvText = '';
-  for (const source of CSV_SOURCES) {
+  for (const source of TIER_SEGMENTATION_SOURCES) {
     try {
       const res = await fetch(source);
       if (!res.ok) continue;
@@ -119,16 +180,25 @@ async function parseCsvUrls() {
   if (!csvText) return [];
   const lines = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
   if (lines.length < 2) return [];
-  const headers = parseCsvLine(lines[0]).map((h) => String(h || '').trim().toLowerCase());
-  const urlCol = headers.indexOf('url');
-  const urlIdx = Math.max(urlCol, 0);
-  const urls = [];
+  const headers = parseCsvLine(lines[0]);
+  const columnDefs = headers
+    .map((header, idx) => ({ idx, tier: tierKeyFromHeader(header) }))
+    .filter((item) => item.tier);
+  const entriesByPath = new Map();
   for (let i = 1; i < lines.length; i += 1) {
     const cols = parseCsvLine(lines[i]);
-    const raw = String(cols[urlIdx] || '').trim().replaceAll(/^"|"$/g, '');
-    if (/^https?:\/\//i.test(raw)) urls.push(raw);
+    columnDefs.forEach(({ idx, tier }) => {
+      const raw = String(cols[idx] || '').trim().replaceAll(/^"|"$/g, '');
+      const url = normalizeSourceUrl(raw);
+      if (!url) return;
+      const key = toTierUrlKey(url);
+      if (!key) return;
+      if (!entriesByPath.has(key)) {
+        entriesByPath.set(key, { url, tier });
+      }
+    });
   }
-  return urls;
+  return Array.from(entriesByPath.values());
 }
 
 function selectUrlsForMode(urls, mode, limit) {
@@ -341,8 +411,8 @@ function evaluateExtractability(html, jsonLdBlocks = [], pageUrl = '') {
   };
 }
 
-async function checkUrl(url) {
-  const pageTier = classifyTierFromUrl(url);
+async function checkUrl(url, tierLookup = null) {
+  const pageTier = getTierForUrl(url, tierLookup);
   try {
     const response = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AI-GEO-Audit/1.0; +https://ai-geo-audit.vercel.app)' },
@@ -440,10 +510,10 @@ class Semaphore {
   }
 }
 
-async function checkUrlWithPacing(url, semaphore, delayAfterMs = 0) {
+async function checkUrlWithPacing(url, semaphore, delayAfterMs = 0, tierLookup = null) {
   await semaphore.acquire();
   try {
-    const result = await checkUrl(url);
+    const result = await checkUrl(url, tierLookup);
     if (delayAfterMs > 0) await delay(delayAfterMs);
     return result;
   } finally {
@@ -471,9 +541,11 @@ export default async function handler(req, res) {
     const limit = parsePositiveInt(query.limit);
     const tier = normalizeTierInput(query.tier);
     const countsOnly = parseBoolean(query.countsOnly);
-    const urls = await parseCsvUrls();
-    const sourceTierCounts = countUrlsByTier(urls);
-    const tierScopedUrls = filterUrlsByTier(urls, tier);
+    const tierEntries = await parseTierSegmentationEntries();
+    const tierLookup = buildTierLookup(tierEntries);
+    const urls = tierEntries.map((entry) => entry.url);
+    const sourceTierCounts = countUrlsByTier(tierEntries);
+    const tierScopedUrls = filterUrlsByTier(tierEntries, tier);
     const selectedUrls = selectUrlsForMode(tierScopedUrls, mode, limit);
     if (countsOnly) {
       return res.status(200).json({
@@ -521,7 +593,7 @@ export default async function handler(req, res) {
 
     const initialSemaphore = new Semaphore(2);
     const delayBetweenRequests = 300;
-    let results = await Promise.all(selectedUrls.map((url) => checkUrlWithPacing(url, initialSemaphore, delayBetweenRequests)));
+    let results = await Promise.all(selectedUrls.map((url) => checkUrlWithPacing(url, initialSemaphore, delayBetweenRequests, tierLookup)));
 
     const retryCandidates = results.filter((row) => row.requestOk === false);
     if (retryCandidates.length > 0) {
@@ -532,7 +604,7 @@ export default async function handler(req, res) {
         if (row.errorType === 'Rate Limited') {
           await delay(1500);
         }
-        return checkUrlWithPacing(row.url, retrySemaphore, 800);
+        return checkUrlWithPacing(row.url, retrySemaphore, 800, tierLookup);
       }));
       const retryMap = new Map(retryResults.map((row) => [row.url, row]));
       results = results.map((row) => retryMap.get(row.url) || row);

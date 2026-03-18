@@ -24623,7 +24623,13 @@
         const canonicalLookup = buildDashboardMoneySubsegmentLookup(window.currentAudit || null, tierCsvLookup);
         return safeRows.map((row) => ({
           ...row,
-          pageTier: resolveDashboardSubsegmentFromLookup(row?.url || '', canonicalLookup)
+          pageTier: (() => {
+            const existingTier = normalizeQaTierValue(row?.pageTier || '');
+            if (existingTier && existingTier !== 'all' && existingTier !== 'unmapped') {
+              return existingTier;
+            }
+            return resolveDashboardSubsegmentFromLookup(row?.url || '', canonicalLookup);
+          })()
         }));
       } catch (err) {
         return safeRows;
