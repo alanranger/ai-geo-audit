@@ -22514,6 +22514,8 @@
       sortKey: 'url',
       sortDir: 'asc',
       statusFilter: 'all',
+      tierFilter: 'all',
+      errorsOnly: true,
       search: '',
       page: 1,
       pageSize: 25
@@ -22609,6 +22611,9 @@
         if (state.statusFilter === 'has_schema' && !row.hasLocalBusiness) return false;
         if (state.statusFilter === 'missing_schema' && (row.hasLocalBusiness || row.rateLimited)) return false;
         if (state.statusFilter === 'unknown_retry' && !row.rateLimited) return false;
+        const rowTier = normalizeQaTierValue(row?.pageTier || 'unmapped');
+        if (state.tierFilter !== 'all' && rowTier !== state.tierFilter) return false;
+        if (state.errorsOnly && !isLocalRowError(row)) return false;
         if (state.search) {
           const haystack = `${row.url || ''} ${row.reason || ''}`.toLowerCase();
           return haystack.includes(state.search);
@@ -22633,7 +22638,7 @@
       const nextBtn = document.getElementById('impl-local-page-next');
 
       if (!sortedRows.length) {
-        tableBody.innerHTML = '<tr><td colspan="5" class="ranking-table-empty">No rows match your filter.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No rows match your filter.</td></tr>';
         if (infoEl) infoEl.textContent = '0 results';
         if (prevBtn) prevBtn.disabled = true;
         if (nextBtn) nextBtn.disabled = true;
@@ -22653,6 +22658,7 @@
         return `
           <tr>
             <td style="word-break: break-word; text-align: left;">${urlCell}</td>
+            <td>${escapeHtml(formatQaTierLabel(row.pageTier || 'unmapped'))}</td>
             <td>${row.statusCode ?? '-'}</td>
             <td><span class="impl-status-chip ${schemaMeta.chipClass}">${schemaMeta.label}</span></td>
             <td><span class="impl-status-chip ${passMeta.chipClass}">${passMeta.label}</span></td>
@@ -22680,9 +22686,13 @@
 
     window.onImplLocalFilterChange = function() {
       const statusEl = document.getElementById('impl-local-filter-status');
+      const tierEl = document.getElementById('impl-local-filter-tier');
       const searchEl = document.getElementById('impl-local-filter-search');
+      const errorsOnlyEl = document.getElementById('impl-local-filter-errors-only');
       implLocalSchemaTableState.statusFilter = statusEl?.value || 'all';
+      implLocalSchemaTableState.tierFilter = tierEl?.value || 'all';
       implLocalSchemaTableState.search = String(searchEl?.value || '').trim().toLowerCase();
+      implLocalSchemaTableState.errorsOnly = errorsOnlyEl ? Boolean(errorsOnlyEl.checked) : true;
       implLocalSchemaTableState.page = 1;
       renderLocalSchemaTableRows();
     };
@@ -22785,6 +22795,7 @@
       sortDir: 'asc',
       statusFilter: 'all',
       tierFilter: 'all',
+      errorsOnly: true,
       search: ''
     };
     let implExtractTierSourceCounts = normalizeQaTierCounts(null);
@@ -22885,6 +22896,64 @@
       return value
         ? '<span class="impl-status-chip impl-status-green">Yes</span>'
         : '<span class="impl-status-chip impl-status-red">No</span>';
+    }
+
+    function isExtractabilityRowError(row) {
+      if (!row) return false;
+      if (!row.pass) return true;
+      if (!row.hasTldr || !row.hasDirectAnswer || !row.hasFaq || !row.hasLastUpdated) return true;
+      const issues = Array.isArray(row.issues) ? row.issues : [];
+      return issues.length > 0;
+    }
+
+    function inferDashboardTierFromUrl(rawUrl) {
+      try {
+        const url = String(rawUrl || '');
+        if (!url) return 'unmapped';
+        if (typeof window.classifyUrlForRankingAi === 'function') {
+          const classification = window.classifyUrlForRankingAi(url);
+          const pageType = String(classification?.pageType || '').toLowerCase();
+          if (pageType === 'landing') return 'landing';
+          if (pageType === 'product') return 'product';
+          if (pageType === 'event') return 'event';
+          if (pageType === 'blog') return 'blog';
+          if (pageType === 'academy') return 'academy';
+        }
+        const pathname = new URL(url, window.location.origin).pathname.toLowerCase();
+        if (pathname === '/' || pathname.includes('/photography-courses-coventry') || pathname.includes('/contact') || pathname.includes('/services')) return 'landing';
+        if (pathname.includes('/blog-on-photography/')) return 'blog';
+        if (pathname.includes('/academy/')) return 'academy';
+        if (pathname.includes('/photographic-workshops-near-me/') || pathname.includes('/beginners-photography-lessons/')) return 'event';
+        if (pathname.includes('/photography-services-near-me/') || pathname.includes('/photo-workshops-uk') || pathname.includes('/shop')) return 'product';
+      } catch (_) {
+        // fall through
+      }
+      return 'unmapped';
+    }
+
+    function isLocalRowError(row) {
+      if (!row) return false;
+      if (row.rateLimited) return true;
+      return !row.pass || !row.hasLocalBusiness;
+    }
+
+    function isServiceRowError(row) {
+      if (!row) return false;
+      if (row.rateLimited) return true;
+      return !row.pass || !row.hasService;
+    }
+
+    function isQaRowError(row) {
+      if (!row) return false;
+      if (String(row.status || '').toLowerCase() !== 'pass') return true;
+      if (Number(row.blockIssueCount || 0) > 0 || Number(row.warningIssueCount || 0) > 0) return true;
+      return Array.isArray(row.issueDetails) && row.issueDetails.length > 0;
+    }
+
+    function isTechRowError(row) {
+      if (!row) return false;
+      if (row.rateLimited) return true;
+      return !row.pass;
     }
 
     function setImplRunAllButtonsState(isLoading) {
@@ -23394,6 +23463,9 @@
       if (implExtractabilityTableState.tierFilter !== 'all') {
         rows = rows.filter((row) => String(row?.pageTier || '').toLowerCase() === implExtractabilityTableState.tierFilter);
       }
+      if (implExtractabilityTableState.errorsOnly) {
+        rows = rows.filter((row) => isExtractabilityRowError(row));
+      }
       if (searchTerm) {
         rows = rows.filter((row) => {
           const issuesText = Array.isArray(row?.issues) ? row.issues.join(' ').toLowerCase() : '';
@@ -23429,9 +23501,11 @@
       const statusEl = document.getElementById('impl-extract-filter-status');
       const tierEl = document.getElementById('impl-extract-filter-tier');
       const searchEl = document.getElementById('impl-extract-filter-search');
+      const errorsOnlyEl = document.getElementById('impl-extract-filter-errors-only');
       implExtractabilityTableState.statusFilter = statusEl?.value || 'all';
       implExtractabilityTableState.tierFilter = tierEl?.value || 'all';
       implExtractabilityTableState.search = searchEl?.value || '';
+      implExtractabilityTableState.errorsOnly = errorsOnlyEl ? Boolean(errorsOnlyEl.checked) : true;
       renderExtractabilityTableRows();
     };
 
@@ -23501,6 +23575,7 @@
         implExtractabilityTableState.sortDir = 'asc';
         implExtractabilityTableState.statusFilter = 'all';
         implExtractabilityTableState.tierFilter = payloadTier === 'all' ? 'all' : payloadTier;
+        implExtractabilityTableState.errorsOnly = true;
         implExtractabilityTableState.search = '';
         target.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
@@ -23543,6 +23618,10 @@
               <span>Search</span>
               <input id="impl-extract-filter-search" class="filter-control" type="text" placeholder="Filter by URL or issue..." oninput="window.onImplExtractabilityFilterChange()" />
             </label>
+            <label style="display: inline-flex; align-items: center; gap: 0.5rem; margin-top: 1.45rem; white-space: nowrap;">
+              <input id="impl-extract-filter-errors-only" type="checkbox" checked onchange="window.onImplExtractabilityFilterChange()" />
+              <span>Errors only</span>
+            </label>
           </div>
           <div style="margin-top: 0.85rem; overflow-x: auto;">
             <table class="ranking-table">
@@ -23570,9 +23649,11 @@
         const filterStatusEl = document.getElementById('impl-extract-filter-status');
         const filterTierEl = document.getElementById('impl-extract-filter-tier');
         const filterSearchEl = document.getElementById('impl-extract-filter-search');
+        const filterErrorsOnlyEl = document.getElementById('impl-extract-filter-errors-only');
         if (filterStatusEl) filterStatusEl.value = implExtractabilityTableState.statusFilter;
         if (filterTierEl) filterTierEl.value = implExtractabilityTableState.tierFilter;
         if (filterSearchEl) filterSearchEl.value = implExtractabilityTableState.search;
+        if (filterErrorsOnlyEl) filterErrorsOnlyEl.checked = implExtractabilityTableState.errorsOnly;
         applyQaTierCountsToSelect('impl-extract-tier-select', sourceTierCounts, payloadTier);
         applyQaTierCountsToSelect('impl-extract-filter-tier', countQaRowsByTier(rows), implExtractabilityTableState.tierFilter);
         renderExtractabilityTableRows();
@@ -23777,7 +23858,14 @@
         const passRatio = knownPages > 0 ? Math.round((matchedPages / knownPages) * 100) : 0;
         const passVisual = getProgressVisuals(passRatio);
         const retry = scan.retry || {};
-        implLocalSchemaTableState.rows = Array.isArray(scan.results) ? scan.results : [];
+        implLocalSchemaTableState.rows = (Array.isArray(scan.results) ? scan.results : []).map((row) => ({
+          ...row,
+          pageTier: normalizeQaTierValue(row?.pageTier || inferDashboardTierFromUrl(row?.url || ''))
+        }));
+        implLocalSchemaTableState.statusFilter = 'all';
+        implLocalSchemaTableState.tierFilter = 'all';
+        implLocalSchemaTableState.search = '';
+        implLocalSchemaTableState.errorsOnly = true;
         implLocalSchemaTableState.page = 1;
 
         target.innerHTML = `
@@ -23823,9 +23911,25 @@
                 <option value="unknown_retry">Unknown (429 retry needed)</option>
               </select>
             </label>
+            <label style="display: flex; flex-direction: column; gap: 0.25rem;">
+              <span>Tier</span>
+              <select id="impl-local-filter-tier" class="filter-control" onchange="window.onImplLocalFilterChange()">
+                <option value="all">All tiers</option>
+                <option value="landing">Tier A Landing</option>
+                <option value="product">Tier B Product</option>
+                <option value="event">Tier C Event</option>
+                <option value="blog">Tier D Blog</option>
+                <option value="academy">Tier E Academy</option>
+                <option value="unmapped">Tier F Unmapped</option>
+              </select>
+            </label>
             <label style="display: flex; flex-direction: column; gap: 0.25rem; min-width: 240px; flex: 1;">
               <span>Search</span>
               <input id="impl-local-filter-search" class="filter-control" type="text" placeholder="Filter by URL or reason..." oninput="window.onImplLocalFilterChange()" />
+            </label>
+            <label style="display: inline-flex; align-items: center; gap: 0.5rem; margin-top: 1.45rem; white-space: nowrap;">
+              <input id="impl-local-filter-errors-only" type="checkbox" checked onchange="window.onImplLocalFilterChange()" />
+              <span>Errors only</span>
             </label>
           </div>
           <div style="margin-top: 0.85rem; overflow-x: auto;">
@@ -23833,6 +23937,7 @@
               <thead>
                 <tr>
                   <th style="text-align: left;"><button type="button" class="btn btn-small" onclick="window.onImplLocalSort('url')">URL</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplLocalSort('pageTier')">Tier</button></th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplLocalSort('statusCode')">HTTP</button></th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplLocalSort('hasLocalBusiness')">LocalBusiness</button></th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplLocalSort('pass')">Status</button></th>
@@ -23840,7 +23945,7 @@
                 </tr>
               </thead>
               <tbody id="impl-local-table-body">
-                <tr><td colspan="5" class="ranking-table-empty">Loading rows...</td></tr>
+                <tr><td colspan="6" class="ranking-table-empty">Loading rows...</td></tr>
               </tbody>
             </table>
           </div>
@@ -23860,6 +23965,8 @@
             </div>
           </div>
         `;
+        const localTierCounts = countQaRowsByTier(implLocalSchemaTableState.rows);
+        applyQaTierCountsToSelect('impl-local-filter-tier', localTierCounts, implLocalSchemaTableState.tierFilter);
         renderLocalSchemaTableRows();
       } catch (error) {
         implLatestAuditPayloads.local = { __error: String(error?.message || 'Unknown error'), __cacheSavedAt: Date.now() };
@@ -23885,6 +23992,8 @@
       sortKey: 'url',
       sortDir: 'asc',
       statusFilter: 'all',
+      tierFilter: 'all',
+      errorsOnly: true,
       search: '',
       page: 1,
       pageSize: 25
@@ -23987,6 +24096,9 @@
         if (state.statusFilter === 'has_schema' && !row.hasService) return false;
         if (state.statusFilter === 'missing_schema' && (row.hasService || row.rateLimited)) return false;
         if (state.statusFilter === 'unknown_retry' && !row.rateLimited) return false;
+        const rowTier = normalizeQaTierValue(row?.pageTier || 'unmapped');
+        if (state.tierFilter !== 'all' && rowTier !== state.tierFilter) return false;
+        if (state.errorsOnly && !isServiceRowError(row)) return false;
         if (state.search) {
           const haystack = `${row.url || ''} ${row.reason || ''}`.toLowerCase();
           return haystack.includes(state.search);
@@ -24011,7 +24123,7 @@
       const nextBtn = document.getElementById('impl-service-page-next');
 
       if (!sortedRows.length) {
-        tableBody.innerHTML = '<tr><td colspan="5" class="ranking-table-empty">No rows match your filter.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No rows match your filter.</td></tr>';
         if (infoEl) infoEl.textContent = '0 results';
         if (prevBtn) prevBtn.disabled = true;
         if (nextBtn) nextBtn.disabled = true;
@@ -24031,6 +24143,7 @@
         return `
           <tr>
             <td style="word-break: break-word; text-align: left;">${urlCell}</td>
+            <td>${escapeHtml(formatQaTierLabel(row.pageTier || 'unmapped'))}</td>
             <td>${row.statusCode ?? '-'}</td>
             <td><span class="impl-status-chip ${schemaMeta.chipClass}">${schemaMeta.label}</span></td>
             <td><span class="impl-status-chip ${passMeta.chipClass}">${passMeta.label}</span></td>
@@ -24058,9 +24171,13 @@
 
     window.onImplServiceFilterChange = function() {
       const statusEl = document.getElementById('impl-service-filter-status');
+      const tierEl = document.getElementById('impl-service-filter-tier');
       const searchEl = document.getElementById('impl-service-filter-search');
+      const errorsOnlyEl = document.getElementById('impl-service-filter-errors-only');
       implServiceSchemaTableState.statusFilter = statusEl?.value || 'all';
+      implServiceSchemaTableState.tierFilter = tierEl?.value || 'all';
       implServiceSchemaTableState.search = String(searchEl?.value || '').trim().toLowerCase();
+      implServiceSchemaTableState.errorsOnly = errorsOnlyEl ? Boolean(errorsOnlyEl.checked) : true;
       implServiceSchemaTableState.page = 1;
       renderServiceSchemaTableRows();
     };
@@ -24140,6 +24257,7 @@
           const rateLimited = Number(statusCode) === 429 || String(page?.errorType || '').toLowerCase().includes('rate limited');
           return {
             url: page?.url || '',
+            pageTier: normalizeQaTierValue(page?.pageTier || inferDashboardTierFromUrl(page?.url || '')),
             statusCode,
             hasService,
             pass: hasService ? true : (rateLimited ? null : false),
@@ -24155,6 +24273,10 @@
         const passRatio = knownPages > 0 ? Math.round((matchedPages / knownPages) * 100) : 0;
         const passVisual = getProgressVisuals(passRatio);
         implServiceSchemaTableState.rows = rows;
+        implServiceSchemaTableState.statusFilter = 'all';
+        implServiceSchemaTableState.tierFilter = 'all';
+        implServiceSchemaTableState.search = '';
+        implServiceSchemaTableState.errorsOnly = true;
         implServiceSchemaTableState.page = 1;
 
         target.innerHTML = `
@@ -24200,9 +24322,25 @@
                 <option value="unknown_retry">Unknown (429 retry needed)</option>
               </select>
             </label>
+            <label style="display: flex; flex-direction: column; gap: 0.25rem;">
+              <span>Tier</span>
+              <select id="impl-service-filter-tier" class="filter-control" onchange="window.onImplServiceFilterChange()">
+                <option value="all">All tiers</option>
+                <option value="landing">Tier A Landing</option>
+                <option value="product">Tier B Product</option>
+                <option value="event">Tier C Event</option>
+                <option value="blog">Tier D Blog</option>
+                <option value="academy">Tier E Academy</option>
+                <option value="unmapped">Tier F Unmapped</option>
+              </select>
+            </label>
             <label style="display: flex; flex-direction: column; gap: 0.25rem; min-width: 240px; flex: 1;">
               <span>Search</span>
               <input id="impl-service-filter-search" class="filter-control" type="text" placeholder="Filter by URL or reason..." oninput="window.onImplServiceFilterChange()" />
+            </label>
+            <label style="display: inline-flex; align-items: center; gap: 0.5rem; margin-top: 1.45rem; white-space: nowrap;">
+              <input id="impl-service-filter-errors-only" type="checkbox" checked onchange="window.onImplServiceFilterChange()" />
+              <span>Errors only</span>
             </label>
           </div>
           <div style="margin-top: 0.85rem; overflow-x: auto;">
@@ -24210,6 +24348,7 @@
               <thead>
                 <tr>
                   <th style="text-align: left;"><button type="button" class="btn btn-small" onclick="window.onImplServiceSort('url')">URL</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplServiceSort('pageTier')">Tier</button></th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplServiceSort('statusCode')">HTTP</button></th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplServiceSort('hasService')">Service</button></th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplServiceSort('pass')">Status</button></th>
@@ -24217,7 +24356,7 @@
                 </tr>
               </thead>
               <tbody id="impl-service-table-body">
-                <tr><td colspan="5" class="ranking-table-empty">Loading rows...</td></tr>
+                <tr><td colspan="6" class="ranking-table-empty">Loading rows...</td></tr>
               </tbody>
             </table>
           </div>
@@ -24237,6 +24376,7 @@
             </div>
           </div>
         `;
+        applyQaTierCountsToSelect('impl-service-filter-tier', countQaRowsByTier(rows), implServiceSchemaTableState.tierFilter);
         renderServiceSchemaTableRows();
       } catch (error) {
         implLatestAuditPayloads.service = { __error: String(error?.message || 'Unknown error'), __cacheSavedAt: Date.now() };
@@ -24263,6 +24403,7 @@
       sortDir: 'asc',
       statusFilter: 'all',
       tierFilter: 'all',
+      errorsOnly: true,
       search: '',
       page: 1,
       pageSize: 25
@@ -24568,6 +24709,7 @@
         if (state.statusFilter !== 'all' && row.status !== state.statusFilter) return false;
         const rowTier = normalizeQaTierValue(row?.pageTier || 'unmapped');
         if (state.tierFilter !== 'all' && rowTier !== state.tierFilter) return false;
+        if (state.errorsOnly && !isQaRowError(row)) return false;
         if (!state.search) return true;
         const detailText = Array.isArray(row?.issueDetails)
           ? row.issueDetails.map((issue) => `${issue?.detail || ''} ${issue?.code || ''} ${issue?.fieldPath || ''}`).join(' ')
@@ -24646,9 +24788,11 @@
       const statusEl = document.getElementById('impl-qa-filter-status');
       const tierEl = document.getElementById('impl-qa-filter-tier');
       const searchEl = document.getElementById('impl-qa-filter-search');
+      const errorsOnlyEl = document.getElementById('impl-qa-filter-errors-only');
       implQaGateTableState.statusFilter = statusEl?.value || 'all';
       implQaGateTableState.tierFilter = tierEl?.value || 'all';
       implQaGateTableState.search = String(searchEl?.value || '').trim().toLowerCase();
+      implQaGateTableState.errorsOnly = errorsOnlyEl ? Boolean(errorsOnlyEl.checked) : true;
       implQaGateTableState.page = 1;
       renderQaGateTableRows();
     };
@@ -24741,6 +24885,7 @@
         implQaGateTableState.rows = rows;
         implQaGateTableState.statusFilter = 'all';
         implQaGateTableState.tierFilter = initialTableTier;
+        implQaGateTableState.errorsOnly = true;
         implQaGateTableState.search = '';
         implQaGateTableState.page = 1;
 
@@ -24803,6 +24948,10 @@
               <span>Search</span>
               <input id="impl-qa-filter-search" class="filter-control" type="text" placeholder="Filter by URL or issue..." oninput="window.onImplQaFilterChange()" />
             </label>
+            <label style="display: inline-flex; align-items: center; gap: 0.5rem; margin-top: 1.45rem; white-space: nowrap;">
+              <input id="impl-qa-filter-errors-only" type="checkbox" checked onchange="window.onImplQaFilterChange()" />
+              <span>Errors only</span>
+            </label>
           </div>
           <div style="margin-top: 0.85rem; overflow-x: auto;">
             <table class="ranking-table" id="impl-qa-table">
@@ -24841,6 +24990,8 @@
         `;
         applyQaTierCountsToSelect('impl-qa-tier-select', runScopeTierCounts, payloadTier);
         applyQaTierCountsToSelect('impl-qa-filter-tier', tableTierCounts, initialTableTier);
+        const qaErrorsOnlyEl = document.getElementById('impl-qa-filter-errors-only');
+        if (qaErrorsOnlyEl) qaErrorsOnlyEl.checked = implQaGateTableState.errorsOnly;
         renderQaGateTableRows();
       } catch (error) {
         implLatestAuditPayloads.qa = { __error: String(error?.message || 'Unknown error'), __cacheSavedAt: Date.now() };
@@ -24867,6 +25018,8 @@
       sortDir: 'asc',
       statusFilter: 'all',
       reasonFilter: 'all',
+      tierFilter: 'all',
+      errorsOnly: true,
       search: '',
       page: 1,
       pageSize: 25
@@ -24984,6 +25137,9 @@
 
         const reasonType = getTechReasonCategory(row);
         if (state.reasonFilter !== 'all' && reasonType !== state.reasonFilter) return false;
+        const rowTier = normalizeQaTierValue(row?.pageTier || 'unmapped');
+        if (state.tierFilter !== 'all' && rowTier !== state.tierFilter) return false;
+        if (state.errorsOnly && !isTechRowError(row)) return false;
 
         if (!state.search) return true;
         const haystack = `${row.url || ''} ${row.reason || ''}`.toLowerCase();
@@ -25006,7 +25162,7 @@
       const prevBtn = document.getElementById('impl-tech-page-prev');
       const nextBtn = document.getElementById('impl-tech-page-next');
       if (!sortedRows.length) {
-        tableBody.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No rows match your filter.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="7" class="ranking-table-empty">No rows match your filter.</td></tr>';
         if (infoEl) infoEl.textContent = '0 results';
         if (prevBtn) prevBtn.disabled = true;
         if (nextBtn) nextBtn.disabled = true;
@@ -25025,6 +25181,7 @@
         return `
           <tr>
             <td style="word-break: break-word; text-align: left;">${urlCell}</td>
+            <td>${escapeHtml(formatQaTierLabel(row.pageTier || 'unmapped'))}</td>
             <td>${row.statusCode ?? '-'}</td>
             <td><span class="impl-status-chip ${statusMeta.chipClass}">${statusMeta.label}</span></td>
             <td>${category}</td>
@@ -25054,10 +25211,14 @@
     window.onImplTechFilterChange = function() {
       const statusEl = document.getElementById('impl-tech-filter-status');
       const reasonEl = document.getElementById('impl-tech-filter-reason');
+      const tierEl = document.getElementById('impl-tech-filter-tier');
       const searchEl = document.getElementById('impl-tech-filter-search');
+      const errorsOnlyEl = document.getElementById('impl-tech-filter-errors-only');
       implTechFoundationTableState.statusFilter = statusEl?.value || 'all';
       implTechFoundationTableState.reasonFilter = reasonEl?.value || 'all';
+      implTechFoundationTableState.tierFilter = tierEl?.value || 'all';
       implTechFoundationTableState.search = String(searchEl?.value || '').trim().toLowerCase();
+      implTechFoundationTableState.errorsOnly = errorsOnlyEl ? Boolean(errorsOnlyEl.checked) : true;
       implTechFoundationTableState.page = 1;
       renderTechFoundationTableRows();
     };
@@ -25150,7 +25311,15 @@
         const requestIndexingCount = Number(googleIndex.requestIndexingCandidates || 0);
         const googleUnknownCount = Number(googleIndex.googleUnknownCount || 0);
         const googleIndexedPercent = pagesChecked > 0 ? Math.round((googleIndexedCount / pagesChecked) * 100) : 0;
-        implTechFoundationTableState.rows = Array.isArray(indexability.results) ? indexability.results : [];
+        implTechFoundationTableState.rows = (Array.isArray(indexability.results) ? indexability.results : []).map((row) => ({
+          ...row,
+          pageTier: normalizeQaTierValue(row?.pageTier || inferDashboardTierFromUrl(row?.url || ''))
+        }));
+        implTechFoundationTableState.statusFilter = 'all';
+        implTechFoundationTableState.reasonFilter = 'all';
+        implTechFoundationTableState.tierFilter = 'all';
+        implTechFoundationTableState.search = '';
+        implTechFoundationTableState.errorsOnly = true;
         implTechFoundationTableState.page = 1;
         target.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
@@ -25214,9 +25383,25 @@
                 <option value="other">Other</option>
               </select>
             </label>
+            <label style="display: flex; flex-direction: column; gap: 0.25rem;">
+              <span>Tier</span>
+              <select id="impl-tech-filter-tier" class="filter-control" onchange="window.onImplTechFilterChange()">
+                <option value="all">All tiers</option>
+                <option value="landing">Tier A Landing</option>
+                <option value="product">Tier B Product</option>
+                <option value="event">Tier C Event</option>
+                <option value="blog">Tier D Blog</option>
+                <option value="academy">Tier E Academy</option>
+                <option value="unmapped">Tier F Unmapped</option>
+              </select>
+            </label>
             <label style="display: flex; flex-direction: column; gap: 0.25rem; min-width: 240px; flex: 1;">
               <span>Search</span>
               <input id="impl-tech-filter-search" class="filter-control" type="text" placeholder="Filter by URL or reason..." oninput="window.onImplTechFilterChange()" />
+            </label>
+            <label style="display: inline-flex; align-items: center; gap: 0.5rem; margin-top: 1.45rem; white-space: nowrap;">
+              <input id="impl-tech-filter-errors-only" type="checkbox" checked onchange="window.onImplTechFilterChange()" />
+              <span>Errors only</span>
             </label>
           </div>
           <div style="margin-top: 0.85rem; overflow-x: auto;">
@@ -25224,6 +25409,7 @@
               <thead>
                 <tr>
                   <th style="text-align: left;"><button type="button" class="btn btn-small" onclick="window.onImplTechSort('url')">URL</button></th>
+                  <th><button type="button" class="btn btn-small" onclick="window.onImplTechSort('pageTier')">Tier</button></th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplTechSort('statusCode')">HTTP</button></th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplTechSort('pass')">Status</button></th>
                   <th><button type="button" class="btn btn-small" onclick="window.onImplTechSort('reason')">Reason Type</button></th>
@@ -25232,7 +25418,7 @@
                 </tr>
               </thead>
               <tbody id="impl-tech-table-body">
-                <tr><td colspan="6" class="ranking-table-empty">Loading rows...</td></tr>
+                <tr><td colspan="7" class="ranking-table-empty">Loading rows...</td></tr>
               </tbody>
             </table>
           </div>
@@ -25252,6 +25438,9 @@
             </div>
           </div>
         `;
+        applyQaTierCountsToSelect('impl-tech-filter-tier', countQaRowsByTier(implTechFoundationTableState.rows), implTechFoundationTableState.tierFilter);
+        const techErrorsOnlyEl = document.getElementById('impl-tech-filter-errors-only');
+        if (techErrorsOnlyEl) techErrorsOnlyEl.checked = implTechFoundationTableState.errorsOnly;
         renderTechFoundationTableRows();
       } catch (error) {
         implLatestAuditPayloads.tech = { __error: String(error?.message || 'Unknown error'), __cacheSavedAt: Date.now() };
