@@ -6,12 +6,16 @@ const DEFAULT_SEGMENTATION_SOURCES = [
 const KNOWN_TIERS = new Set(['all', 'landing', 'product', 'event', 'blog', 'academy', 'unmapped']);
 const DEFAULT_SITE_ORIGIN = 'https://www.alanranger.com';
 const DEFAULT_TIER_CACHE_TTL_MS = 60 * 1000;
+const DEFAULT_ROBOTS_CACHE_TTL_MS = 5 * 60 * 1000;
+const INDEXABILITY_EXCLUSION_REASON_RE = /\b(noindex|robots|disallow)\b/i;
 
 let tierEntriesCache = {
   entries: null,
   fetchedAt: 0
 };
 const tierEntriesSnapshotCache = new Map();
+const runtimeIndexabilityExclusionKeys = new Set();
+const robotsDisallowCache = new Map();
 
 function resolveTierCacheTtlMs(value) {
   if (!Number.isFinite(Number(value))) return DEFAULT_TIER_CACHE_TTL_MS;
@@ -49,6 +53,150 @@ function saveTierEntriesToCache(entries, now, snapshotKey = '') {
   tierEntriesCache = { entries, fetchedAt: now };
   if (snapshotKey) tierEntriesSnapshotCache.set(snapshotKey, entries);
   return entries;
+}
+
+function escapeRegex(text) {
+  return String(text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function directiveAppliesToTrackedAgent(agentNames = []) {
+  const normalized = (Array.isArray(agentNames) ? agentNames : [])
+    .map((agent) => String(agent || '').trim().toLowerCase())
+    .filter(Boolean);
+  if (!normalized.length) return false;
+  if (normalized.includes('*')) return true;
+  return normalized.some((agent) => agent === 'googlebot' || agent === 'gptbot' || agent === 'chatgpt-user');
+}
+
+function parseRobotsDirectiveLine(line) {
+  const cleaned = String(line || '').replace(/#.*/, '').trim();
+  if (!cleaned || !cleaned.includes(':')) return null;
+  const separatorIdx = cleaned.indexOf(':');
+  const key = cleaned.slice(0, separatorIdx).trim().toLowerCase();
+  const value = cleaned.slice(separatorIdx + 1).trim();
+  if (!key) return null;
+  return { key, value };
+}
+
+function updateCurrentAgents(currentAgents, value, lastKey) {
+  const nextAgent = String(value || '').trim().toLowerCase();
+  if (!nextAgent) return currentAgents;
+  if (lastKey === 'user-agent') return [...currentAgents, nextAgent];
+  return [nextAgent];
+}
+
+function toDisallowRuleRegex(value) {
+  if (!value) return null;
+  const endAnchored = value.endsWith('$');
+  const rawPattern = endAnchored ? value.slice(0, -1) : value;
+  const regexSource = `^${escapeRegex(rawPattern).replace(/\\\*/g, '.*')}${endAnchored ? '$' : ''}`;
+  try {
+    return new RegExp(regexSource);
+  } catch {
+    return null;
+  }
+}
+
+function parseRobotsDisallowRules(robotsText) {
+  const lines = String(robotsText || '').split(/\r?\n/);
+  const rules = [];
+  let currentAgents = [];
+  let lastKey = '';
+  for (const line of lines) {
+    const directive = parseRobotsDirectiveLine(line);
+    if (!directive) continue;
+    const { key, value } = directive;
+    if (key === 'user-agent') {
+      currentAgents = updateCurrentAgents(currentAgents, value, lastKey);
+      lastKey = key;
+      continue;
+    }
+    lastKey = key;
+    if (key !== 'disallow') continue;
+    if (!directiveAppliesToTrackedAgent(currentAgents)) continue;
+    const rule = toDisallowRuleRegex(value);
+    if (rule) rules.push(rule);
+  }
+  return rules;
+}
+
+async function fetchRobotsDisallowRulesForOrigin(origin, options = {}, now = Date.now()) {
+  const cacheTtlMs = resolveTierCacheTtlMs(options.robotsCacheTtlMs ?? DEFAULT_ROBOTS_CACHE_TTL_MS);
+  const forceRefresh = options.forceRefresh === true;
+  const cached = robotsDisallowCache.get(origin);
+  if (
+    !forceRefresh
+    && cached
+    && (cacheTtlMs <= 0 || (now - Number(cached.fetchedAt || 0)) <= cacheTtlMs)
+  ) {
+    return cached.rules;
+  }
+  try {
+    const robotsUrl = `${origin}/robots.txt`;
+    const response = await fetch(robotsUrl, { cache: forceRefresh ? 'no-store' : 'default' });
+    const text = response.ok ? await response.text() : '';
+    const rules = parseRobotsDisallowRules(text);
+    robotsDisallowCache.set(origin, { rules, fetchedAt: now });
+    return rules;
+  } catch {
+    robotsDisallowCache.set(origin, { rules: [], fetchedAt: now });
+    return [];
+  }
+}
+
+async function filterEntriesByRobotsDisallow(entries = [], options = {}, now = Date.now()) {
+  const safeEntries = Array.isArray(entries) ? entries : [];
+  if (!safeEntries.length) return [];
+
+  const rulesByOrigin = new Map();
+  for (const entry of safeEntries) {
+    const urlValue = String(entry?.url || '');
+    try {
+      const parsed = new URL(urlValue);
+      if (!rulesByOrigin.has(parsed.origin)) {
+        const rules = await fetchRobotsDisallowRulesForOrigin(parsed.origin, options, now);
+        rulesByOrigin.set(parsed.origin, rules);
+      }
+    } catch {
+      // Ignore malformed URLs.
+    }
+  }
+
+  return safeEntries.filter((entry) => {
+    try {
+      const parsed = new URL(String(entry?.url || ''));
+      const pathWithQuery = `${parsed.pathname || '/'}${parsed.search || ''}`;
+      const rules = rulesByOrigin.get(parsed.origin) || [];
+      return !rules.some((rule) => rule.test(pathWithQuery));
+    } catch {
+      return false;
+    }
+  });
+}
+
+function shouldExcludeByIndexabilitySignal(row = {}) {
+  if (row?.pass === true || row?.indexable === true) return false;
+  return INDEXABILITY_EXCLUSION_REASON_RE.test(String(row?.reason || ''));
+}
+
+function filterEntriesByRuntimeExclusions(entries = []) {
+  if (!runtimeIndexabilityExclusionKeys.size) return Array.isArray(entries) ? entries : [];
+  const safeEntries = Array.isArray(entries) ? entries : [];
+  return safeEntries.filter((entry) => {
+    const key = toTierUrlKey(entry?.url || '');
+    return !key || !runtimeIndexabilityExclusionKeys.has(key);
+  });
+}
+
+export function syncTierIndexabilityExclusions(rows = []) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  safeRows.forEach((row) => {
+    const key = toTierUrlKey(row?.url || '');
+    if (!key) return;
+    if (shouldExcludeByIndexabilitySignal(row)) runtimeIndexabilityExclusionKeys.add(key);
+    else if (row?.pass === true || row?.indexable === true) runtimeIndexabilityExclusionKeys.delete(key);
+  });
+  return runtimeIndexabilityExclusionKeys.size;
 }
 
 export function normalizeTierInput(value, fallback = 'all') {
@@ -134,7 +282,7 @@ function normalizeSegmentationSourceUrl(rawValue) {
   if (!/^https?:\/\//i.test(raw)) return '';
   try {
     const parsed = new URL(raw);
-    const pathname = String(parsed.pathname || '/').replaceAll(/\/{2,}/g, '/');
+    const pathname = String(parsed.pathname || '/').replace(/\/{2,}/g, '/');
     const normalizedPath = pathname.length > 1 ? pathname.replace(/\/+$/, '') : '/';
     return `${parsed.origin}${normalizedPath}`;
   } catch {
@@ -145,7 +293,7 @@ function normalizeSegmentationSourceUrl(rawValue) {
 export function toTierUrlKey(url) {
   try {
     const parsed = new URL(String(url || ''));
-    const pathname = String(parsed.pathname || '/').replaceAll(/\/{2,}/g, '/');
+    const pathname = String(parsed.pathname || '/').replace(/\/{2,}/g, '/');
     const normalizedPath = pathname.length > 1 ? pathname.replace(/\/+$/, '') : '/';
     return normalizedPath.toLowerCase();
   } catch {
@@ -214,7 +362,8 @@ export async function fetchTierSegmentationEntries(options = {}) {
     });
   }
 
-  const entries = Array.from(byPath.values());
+  const robotsFilteredEntries = await filterEntriesByRobotsDisallow(Array.from(byPath.values()), options, now);
+  const entries = filterEntriesByRuntimeExclusions(robotsFilteredEntries);
   return saveTierEntriesToCache(entries, now, snapshotKey);
 }
 

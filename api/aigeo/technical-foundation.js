@@ -3,7 +3,8 @@ import {
   fetchTierSegmentationEntries,
   urlsFromTierEntries,
   buildTierLookupFromEntries,
-  getTierForUrlFromLookup
+  getTierForUrlFromLookup,
+  syncTierIndexabilityExclusions
 } from './tier-segmentation.js';
 
 /**
@@ -781,6 +782,7 @@ export default async function handler(req, res) {
         pageTier: getTierForUrlFromLookup(row?.url || '', tierLookup)
       }))
     };
+    syncTierIndexabilityExclusions(indexability.results);
     const overall = buildOverallResult(robots, sitemap, indexability);
 
     return res.status(200).json({
