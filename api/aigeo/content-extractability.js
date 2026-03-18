@@ -13,6 +13,14 @@ const TIER_SEGMENTATION_SOURCES = [
 ];
 const DEFAULT_SITE_ORIGIN = 'https://www.alanranger.com';
 const TIER_VALUES = new Set(['all', 'landing', 'product', 'event', 'blog', 'academy', 'unmapped']);
+const MEMBER_UTILITY_PATH_PATTERNS = [
+  /^\/academy\/login(?:\/|$)/i,
+  /^\/academy\/trial-expired(?:\/|$)/i,
+  /^\/academy\/robo-ranger(?:\/|$)/i
+];
+const INDEX_HUB_PATH_PATTERNS = [
+  /^\/photography-news-blog(?:\/|$)/i
+];
 
 function parsePositiveInt(value) {
   const parsed = Number.parseInt(String(value ?? '').trim(), 10);
@@ -27,6 +35,39 @@ function parseBoolean(value) {
 
 function normalizeTierInput(value) {
   return normalizeSharedTierInput(value, 'all');
+}
+
+function normalizeUrlPath(url) {
+  try {
+    return new URL(String(url || '')).pathname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function getPreflightExclusionReason(url) {
+  const path = normalizeUrlPath(url);
+  if (!path) return '';
+  if (MEMBER_UTILITY_PATH_PATTERNS.some((pattern) => pattern.test(path))) {
+    return 'Member/login utility page (excluded from actionable extractability scope)';
+  }
+  if (INDEX_HUB_PATH_PATTERNS.some((pattern) => pattern.test(path))) {
+    return 'Index/hub page (excluded from money-page extractability scope)';
+  }
+  return '';
+}
+
+function extractNoindexSignals(response, html = '') {
+  const xRobotsRaw = String(response?.headers?.get?.('x-robots-tag') || '').toLowerCase();
+  const hasXRobotsNoindex = /\bnoindex\b/i.test(xRobotsRaw);
+  const metaRobotsMatch = String(html || '').match(/<meta[^>]*name=["']robots["'][^>]*content=["']([^"']+)["'][^>]*>/i);
+  const metaRobotsRaw = String(metaRobotsMatch?.[1] || '');
+  const hasMetaRobotsNoindex = /\bnoindex\b/i.test(metaRobotsRaw);
+  return {
+    hasNoindex: hasXRobotsNoindex || hasMetaRobotsNoindex,
+    xRobotsTag: xRobotsRaw,
+    metaRobots: metaRobotsRaw
+  };
 }
 
 function tierKeyFromHeader(header) {
@@ -361,6 +402,25 @@ function evaluateExtractability(html, jsonLdBlocks = [], pageUrl = '') {
 
 async function checkUrl(url, tierLookup = null) {
   const pageTier = getTierForUrl(url, tierLookup);
+  const preflightExclusionReason = getPreflightExclusionReason(url);
+  if (preflightExclusionReason) {
+    return {
+      url,
+      pageTier,
+      requestOk: true,
+      statusCode: null,
+      errorType: null,
+      pass: true,
+      score: 100,
+      hasTldr: false,
+      hasDirectAnswer: false,
+      hasFaq: false,
+      hasLastUpdated: false,
+      issues: [],
+      excludedFromAudit: true,
+      exclusionReason: preflightExclusionReason
+    };
+  }
   try {
     const response = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AI-GEO-Audit/1.0; +https://ai-geo-audit.vercel.app)' },
@@ -389,6 +449,27 @@ async function checkUrl(url, tierLookup = null) {
       };
     }
     const html = await response.text();
+    const noindexSignals = extractNoindexSignals(response, html);
+    if (noindexSignals.hasNoindex) {
+      return {
+        url,
+        pageTier,
+        requestOk: true,
+        statusCode: response.status,
+        errorType: null,
+        pass: true,
+        score: 100,
+        hasTldr: false,
+        hasDirectAnswer: false,
+        hasFaq: false,
+        hasLastUpdated: false,
+        issues: [],
+        excludedFromAudit: true,
+        exclusionReason: 'Meta/X-Robots noindex page (excluded from actionable extractability scope)',
+        xRobotsTag: noindexSignals.xRobotsTag || '',
+        metaRobots: noindexSignals.metaRobots || ''
+      };
+    }
     const htmlForChecks = await enrichHtmlWithSnippetLoaderContent(url, html);
     const jsonLdBlocks = findJsonLdBlocks(htmlForChecks);
     const result = evaluateExtractability(htmlForChecks, jsonLdBlocks, url);
@@ -406,7 +487,9 @@ async function checkUrl(url, tierLookup = null) {
       hasFaq: result.hasFaq,
       hasLastUpdated: result.hasLastUpdated,
       issues: result.issues || [],
-      textLength: plainText.length
+      textLength: plainText.length,
+      excludedFromAudit: false,
+      exclusionReason: ''
     };
   } catch (error) {
     return {
@@ -421,7 +504,9 @@ async function checkUrl(url, tierLookup = null) {
       hasDirectAnswer: false,
       hasFaq: false,
       hasLastUpdated: false,
-      issues: [error?.message || 'Request failed']
+      issues: [error?.message || 'Request failed'],
+      excludedFromAudit: false,
+      exclusionReason: ''
     };
   }
 }
@@ -564,17 +649,19 @@ export default async function handler(req, res) {
       const retryMap = new Map(retryResults.map((row) => [row.url, row]));
       results = results.map((row) => retryMap.get(row.url) || row);
     }
-    const checkedPages = results.length;
-    const passPages = results.filter((row) => row.pass).length;
+    const excludedRows = results.filter((row) => row?.excludedFromAudit);
+    const includedRows = results.filter((row) => !row?.excludedFromAudit);
+    const checkedPages = includedRows.length;
+    const passPages = includedRows.filter((row) => row.pass).length;
     const passRate = checkedPages > 0 ? Math.round((passPages / checkedPages) * 100) : 0;
     const avgScore = checkedPages > 0
-      ? Math.round(results.reduce((acc, row) => acc + Number(row.score || 0), 0) / checkedPages)
+      ? Math.round(includedRows.reduce((acc, row) => acc + Number(row.score || 0), 0) / checkedPages)
       : 0;
     const counts = {
-      hasTldr: results.filter((row) => row.hasTldr).length,
-      hasDirectAnswer: results.filter((row) => row.hasDirectAnswer).length,
-      hasFaq: results.filter((row) => row.hasFaq).length,
-      hasLastUpdated: results.filter((row) => row.hasLastUpdated).length
+      hasTldr: includedRows.filter((row) => row.hasTldr).length,
+      hasDirectAnswer: includedRows.filter((row) => row.hasDirectAnswer).length,
+      hasFaq: includedRows.filter((row) => row.hasFaq).length,
+      hasLastUpdated: includedRows.filter((row) => row.hasLastUpdated).length
     };
 
     return res.status(200).json({
@@ -590,7 +677,13 @@ export default async function handler(req, res) {
         avgScore,
         counts,
         sourceTierCounts,
-        rows: results
+        excludedByPolicyCount: excludedRows.length,
+        excludedByPolicy: excludedRows.map((row) => ({
+          url: row.url,
+          pageTier: row.pageTier,
+          exclusionReason: row.exclusionReason || ''
+        })),
+        rows: includedRows
       },
       meta: {
         generatedAt: new Date().toISOString(),
@@ -600,6 +693,7 @@ export default async function handler(req, res) {
           inputUrlCount: urls.length,
           candidateUrlCount: tierScopedUrls.length,
           selectedUrlCount: selectedUrls.length,
+          excludedByPolicyCount: excludedRows.length,
           limit: limit || null
         }
       }
