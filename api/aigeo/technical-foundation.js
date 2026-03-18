@@ -37,6 +37,7 @@ const DEFAULT_RATE_LIMIT_RETRY_REQUEST_DELAY_MS = 1500;
 const MAX_INDEXABILITY_BATCH_SIZE = 500;
 const MAX_INDEXABILITY_RETRIES = 5;
 const MAX_INDEXABILITY_DELAY_MS = 15000;
+const SEGMENTATION_EXCLUSION_REASON_RE = /\b(noindex|robots|disallow)\b/i;
 
 function normalizeBaseUrl(value) {
   const raw = String(value || '').trim();
@@ -703,6 +704,34 @@ function buildOverallResult(robots, sitemap, indexability) {
   };
 }
 
+function shouldExcludeFromCanonicalSegmentation(row = {}) {
+  if (row?.pass === true || row?.indexable === true) return false;
+  return SEGMENTATION_EXCLUSION_REASON_RE.test(String(row?.reason || ''));
+}
+
+function buildSegmentationFilteredIndexability(indexabilityRaw, tierLookup) {
+  const withTier = (Array.isArray(indexabilityRaw?.results) ? indexabilityRaw.results : []).map((row) => ({
+    ...row,
+    pageTier: getTierForUrlFromLookup(row?.url || '', tierLookup)
+  }));
+  const excludedResults = withTier.filter((row) => shouldExcludeFromCanonicalSegmentation(row));
+  const results = withTier.filter((row) => !shouldExcludeFromCanonicalSegmentation(row));
+  const passCount = results.filter((row) => row?.pass).length;
+  const failCount = results.length - passCount;
+  const rateLimitedCount = results.filter((row) => row?.rateLimited).length;
+  return {
+    ...indexabilityRaw,
+    pagesChecked: results.length,
+    passCount,
+    failCount,
+    rateLimitedCount,
+    pass: failCount === 0,
+    excludedByCanonicalSegmentationCount: excludedResults.length,
+    excludedByCanonicalSegmentation: excludedResults,
+    results
+  };
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -775,14 +804,11 @@ export default async function handler(req, res) {
       timeoutMs,
       retryBaseDelayMs
     });
-    const indexability = {
-      ...indexabilityRaw,
-      results: (Array.isArray(indexabilityRaw.results) ? indexabilityRaw.results : []).map((row) => ({
-        ...row,
-        pageTier: getTierForUrlFromLookup(row?.url || '', tierLookup)
-      }))
-    };
-    syncTierIndexabilityExclusions(indexability.results);
+    const indexability = buildSegmentationFilteredIndexability(indexabilityRaw, tierLookup);
+    syncTierIndexabilityExclusions([
+      ...(Array.isArray(indexability.results) ? indexability.results : []),
+      ...(Array.isArray(indexability.excludedByCanonicalSegmentation) ? indexability.excludedByCanonicalSegmentation : [])
+    ]);
     const overall = buildOverallResult(robots, sitemap, indexability);
 
     return res.status(200).json({
