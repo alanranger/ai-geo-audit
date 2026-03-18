@@ -22724,7 +22724,8 @@
       service: 'impl_service_schema_last_payload_v1',
       qa: 'impl_schema_qa_last_payload_v1',
       tech: 'impl_tech_foundation_last_payload_v1',
-      extractability: 'impl_content_extractability_last_payload_v1'
+      extractability: 'impl_content_extractability_last_payload_v1',
+      mentions: 'impl_mentions_baseline_last_payload_v1'
     };
 
     function saveImplementationAuditCache(key, payload) {
@@ -22862,7 +22863,8 @@
       local: null,
       service: null,
       qa: null,
-      extractability: null
+      extractability: null,
+      mentions: null
     };
 
     function setImplExtractabilityButtonState(isLoading) {
@@ -23085,6 +23087,24 @@
       return loadImplementationAuditCacheAnyAge(cacheKey) || loadImplementationAuditCache(cacheKey);
     }
 
+    async function fetchAndCacheMentionsSummary() {
+      try {
+        const response = await fetch(apiUrl('/api/aigeo/mentions-summary?days=30'));
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(payload?.message || `HTTP ${response.status}`);
+        }
+        if (payload && typeof payload === 'object') {
+          saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.mentions, payload);
+          implLatestAuditPayloads.mentions = payload;
+        }
+        return payload;
+      } catch (error) {
+        implLatestAuditPayloads.mentions = { __error: String(error?.message || 'Unknown error'), __cacheSavedAt: Date.now() };
+        return null;
+      }
+    }
+
     function numberOrNull(value) {
       const n = Number(value);
       return Number.isFinite(n) ? n : null;
@@ -23113,6 +23133,7 @@
       const servicePayload = getLatestImplPayload('service', IMPL_AUDIT_CACHE_KEYS.service);
       const qaPayload = getLatestImplPayload('qa', IMPL_AUDIT_CACHE_KEYS.qa);
       const extractPayload = getLatestImplPayload('extractability', IMPL_AUDIT_CACHE_KEYS.extractability);
+      const mentionsPayload = getLatestImplPayload('mentions', IMPL_AUDIT_CACHE_KEYS.mentions);
 
       const techHasData = !!(techPayload && techPayload.data && techPayload.data.indexability);
       const techIndexability = techPayload?.data?.indexability || {};
@@ -23166,6 +23187,20 @@
       const extractScore = extractHasData && Number.isFinite(Number(extractData.avgScore))
         ? asPercent(Number(extractData.avgScore))
         : ((extractPages != null && extractPass != null && extractPages > 0) ? asPercent((extractPass / extractPages) * 100) : null);
+
+      const mentionsHasData = !!(mentionsPayload && mentionsPayload.status === 'ok' && mentionsPayload.data);
+      const mentionsData = mentionsPayload?.data || {};
+      const mentionsStats = mentionsData?.stats || {};
+      const mentionsRun = mentionsData?.latestRun || null;
+      const mentionsKeywordsUsed = numberOrNull(mentionsRun?.keywords_used);
+      const mentionsActive = numberOrNull(mentionsStats?.activeMentions);
+      const mentionsAlerts = numberOrNull(mentionsStats?.alerts);
+      const mentionsCritical = numberOrNull(mentionsStats?.critical);
+      const mentionsNew = numberOrNull(mentionsRun?.new_mentions);
+      const mentionsRunTs = getImplPayloadRunTs(mentionsPayload) || (mentionsRun?.run_started_at ? Date.parse(String(mentionsRun.run_started_at)) : 0);
+      const mentionsScore = mentionsHasData
+        ? asPercent(Math.max(0, 100 - ((Number(mentionsAlerts || 0) * 8) + (Number(mentionsCritical || 0) * 12))))
+        : null;
 
       return [
         {
@@ -23253,15 +23288,19 @@
         {
           priority: 'P2',
           audit: 'Social Mentions Ingestion (Reddit/LinkedIn/YouTube)',
-          statusMeta: getTicketStatusByTitle('Add Reddit, LinkedIn, and YouTube mention ingestion baseline'),
-          score: null,
-          urls: null,
-          pass: null,
-          fail: null,
-          issues: null,
-          breakdown: 'Planned - endpoint not wired yet',
+          statusMeta: mentionsHasData
+            ? getImplStatusMeta('done')
+            : getTicketStatusByTitle('Add Reddit, LinkedIn, and YouTube mention ingestion baseline'),
+          score: mentionsScore,
+          urls: mentionsKeywordsUsed,
+          pass: mentionsActive,
+          fail: mentionsCritical,
+          issues: mentionsAlerts,
+          breakdown: mentionsHasData
+            ? `alerts ${mentionsAlerts ?? 0} (${mentionsCritical ?? 0} critical) | active 30d ${mentionsActive ?? 0} | new run ${mentionsNew ?? 0}`
+            : 'No mentions run yet',
           tierScope: 'all',
-          runTs: 0
+          runTs: mentionsRunTs || 0
         }
       ];
     }
@@ -25590,7 +25629,13 @@
       if (cachedQaPayload) {
         await fetchAndRenderSchemaQaGateStatus(implQaGateRunState.mode || 'sample', cachedQaPayload);
       }
+      const cachedMentionsPayload = loadImplementationAuditCacheAnyAge(IMPL_AUDIT_CACHE_KEYS.mentions) || loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.mentions);
+      if (cachedMentionsPayload) {
+        implLatestAuditPayloads.mentions = cachedMentionsPayload;
+      }
 
+      renderImplementationPriorityMatrix();
+      await fetchAndCacheMentionsSummary();
       renderImplementationPriorityMatrix();
 
       // Manual-run only: do not auto-trigger heavy audits on tab load.
