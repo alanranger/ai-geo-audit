@@ -23655,7 +23655,7 @@
         if (filterSearchEl) filterSearchEl.value = implExtractabilityTableState.search;
         if (filterErrorsOnlyEl) filterErrorsOnlyEl.checked = implExtractabilityTableState.errorsOnly;
         applyQaTierCountsToSelect('impl-extract-tier-select', sourceTierCounts, payloadTier);
-        applyQaTierCountsToSelect('impl-extract-filter-tier', countQaRowsByTier(rows), implExtractabilityTableState.tierFilter);
+        applyQaTierCountsToSelect('impl-extract-filter-tier', getCanonicalTierCountsForUi(rows), implExtractabilityTableState.tierFilter);
         renderExtractabilityTableRows();
       } catch (error) {
         implLatestAuditPayloads.extractability = { __error: String(error?.message || 'Unknown error'), __cacheSavedAt: Date.now() };
@@ -23965,7 +23965,7 @@
             </div>
           </div>
         `;
-        const localTierCounts = countQaRowsByTier(implLocalSchemaTableState.rows);
+        const localTierCounts = getCanonicalTierCountsForUi(implLocalSchemaTableState.rows);
         applyQaTierCountsToSelect('impl-local-filter-tier', localTierCounts, implLocalSchemaTableState.tierFilter);
         renderLocalSchemaTableRows();
       } catch (error) {
@@ -24376,7 +24376,7 @@
             </div>
           </div>
         `;
-        applyQaTierCountsToSelect('impl-service-filter-tier', countQaRowsByTier(rows), implServiceSchemaTableState.tierFilter);
+        applyQaTierCountsToSelect('impl-service-filter-tier', getCanonicalTierCountsForUi(rows), implServiceSchemaTableState.tierFilter);
         renderServiceSchemaTableRows();
       } catch (error) {
         implLatestAuditPayloads.service = { __error: String(error?.message || 'Unknown error'), __cacheSavedAt: Date.now() };
@@ -24552,6 +24552,13 @@
         normalized[key] = Number.isFinite(value) && value >= 0 ? value : 0;
       });
       return normalized;
+    }
+
+    function getCanonicalTierCountsForUi(fallbackRows = []) {
+      const preferred = normalizeQaTierCounts(implQaTierSourceCounts || implExtractTierSourceCounts);
+      const hasPreferred = Object.values(preferred).some((value) => Number(value || 0) > 0);
+      if (hasPreferred) return preferred;
+      return normalizeQaTierCounts(countQaRowsByTier(fallbackRows));
     }
 
     function applyQaTierCountsToSelect(selectId, counts = {}, preferredValue = null) {
@@ -24995,7 +25002,7 @@
           </div>
         `;
         applyQaTierCountsToSelect('impl-qa-tier-select', runScopeTierCounts, payloadTier);
-        applyQaTierCountsToSelect('impl-qa-filter-tier', tableTierCounts, initialTableTier);
+        applyQaTierCountsToSelect('impl-qa-filter-tier', getCanonicalTierCountsForUi(rows), initialTableTier);
         const qaErrorsOnlyEl = document.getElementById('impl-qa-filter-errors-only');
         if (qaErrorsOnlyEl) qaErrorsOnlyEl.checked = implQaGateTableState.errorsOnly;
         renderQaGateTableRows();
@@ -25444,7 +25451,7 @@
             </div>
           </div>
         `;
-        applyQaTierCountsToSelect('impl-tech-filter-tier', countQaRowsByTier(implTechFoundationTableState.rows), implTechFoundationTableState.tierFilter);
+        applyQaTierCountsToSelect('impl-tech-filter-tier', getCanonicalTierCountsForUi(implTechFoundationTableState.rows), implTechFoundationTableState.tierFilter);
         const techErrorsOnlyEl = document.getElementById('impl-tech-filter-errors-only');
         if (techErrorsOnlyEl) techErrorsOnlyEl.checked = implTechFoundationTableState.errorsOnly;
         renderTechFoundationTableRows();

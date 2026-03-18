@@ -8,6 +8,14 @@
  */
 
 import { safeJsonParse } from './aigeo/utils.js';
+import {
+  fetchTierSegmentationEntries,
+  normalizeTierInput as normalizeSharedTierInput,
+  toTierUrlKey,
+  classifyTierFromUrlHeuristic,
+  buildTierLookupFromEntries,
+  urlsFromTierEntries
+} from './aigeo/tier-segmentation.js';
 
 // Rich result eligible schema types
 const RICH_RESULT_TYPES = [
@@ -612,145 +620,24 @@ function isServiceIntentUrl(url) {
   }
 }
 
-const QA_TIER_VALUES = new Set(['all', 'landing', 'product', 'event', 'blog', 'academy', 'unmapped']);
-const QA_TIER_SEGMENTATION_URLS = [
-  'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/page%20segmentation%20by%20tier.csv',
-  'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/page%20segmentation%20by%20tier.csv'
-];
-
 let qaTierLookupCache = null;
 
 function normalizeQaTierInput(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  return QA_TIER_VALUES.has(normalized) ? normalized : 'all';
-}
-
-function parseTierCsvLine(line) {
-  const columns = [];
-  let current = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-    const next = line[i + 1];
-    if (ch === '"') {
-      if (inQuotes && next === '"') {
-        current += '"';
-        i += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (ch === ',' && !inQuotes) {
-      columns.push(current.trim());
-      current = '';
-    } else {
-      current += ch;
-    }
-  }
-  columns.push(current.trim());
-  return columns;
-}
-
-function tierKeyFromHeader(header) {
-  const h = String(header || '').toLowerCase();
-  if (h.includes('tier a') || h.includes('landing')) return 'landing';
-  if (h.includes('tier b') || h.includes('product')) return 'product';
-  if (h.includes('tier c') || h.includes('event')) return 'event';
-  if (h.includes('tier d') || h.includes('blog')) return 'blog';
-  if (h.includes('tier e') || h.includes('academy')) return 'academy';
-  if (h.includes('tier f') || h.includes('unmapped')) return 'unmapped';
-  return null;
+  return normalizeSharedTierInput(value, 'all');
 }
 
 function toQaTierUrlKey(rawUrl) {
-  try {
-    let url = String(rawUrl || '').trim().toLowerCase();
-    if (!url) return '';
-    url = url.replace(/^https?:\/\//, '');
-    url = url.split('#')[0].split('?')[0];
-    const slashIndex = url.indexOf('/');
-    if (slashIndex > -1) {
-      url = url.slice(slashIndex);
-    } else {
-      url = `/${url}`;
-    }
-    url = url.replace(/^www\./, '');
-    try { url = decodeURIComponent(url); } catch {}
-    if (url.length > 1 && url.endsWith('/')) url = url.slice(0, -1);
-    return url;
-  } catch {
-    return null;
-  }
+  return toTierUrlKey(rawUrl);
 }
 
 function classifyQaTierFromUrl(url) {
-  try {
-    const pathname = String(new URL(String(url || '')).pathname || '/').toLowerCase();
-    if (pathname === '/' || pathname === '/home') return 'landing';
-    if (pathname.includes('/s/')) return 'academy';
-    if (pathname.includes('/workshops') || pathname.includes('/event') || pathname.includes('/webinar')) return 'event';
-    if (pathname.includes('/academy') || pathname.includes('/free-online-photography-course')) return 'academy';
-    if (pathname.includes('/blog') || pathname.includes('/article') || pathname.includes('/guides')) return 'blog';
-    if (pathname.includes('/photography-services-near-me/')
-      || pathname.includes('/product')
-      || pathname.includes('/courses')
-      || pathname.includes('/mentoring')
-      || pathname.includes('/subscription')) return 'product';
-    if (pathname.split('/').filter(Boolean).length <= 1) return 'landing';
-    return 'unmapped';
-  } catch {
-    return 'unmapped';
-  }
-}
-
-function setQaTierLookupWithAliases(lookup, key, tier) {
-  if (!(lookup instanceof Map) || !key || !tier) return;
-  lookup.set(key, tier);
-  if (/\/home$/i.test(key)) {
-    lookup.set(key.replace(/\/home$/i, '/'), tier);
-  } else if (/\/$/i.test(key)) {
-    lookup.set(key.replace(/\/$/i, '/home'), tier);
-  }
+  return classifyTierFromUrlHeuristic(url);
 }
 
 async function getQaTierSegmentationLookup() {
   if (qaTierLookupCache instanceof Map) return qaTierLookupCache;
-
-  let csvText = '';
-  for (const sourceUrl of QA_TIER_SEGMENTATION_URLS) {
-    try {
-      const res = await fetch(sourceUrl);
-      if (!res.ok) continue;
-      const text = await res.text();
-      if (!text?.trim()) continue;
-      csvText = text;
-      break;
-    } catch {
-      // Try next source
-    }
-  }
-
-  const lookup = new Map();
-  if (!csvText) {
-    return lookup;
-  }
-
-  const lines = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  if (lines.length < 2) {
-    return lookup;
-  }
-
-  const headers = parseTierCsvLine(lines[0]);
-  const columnDefs = headers.map((header, idx) => ({ idx, tier: tierKeyFromHeader(header) })).filter((item) => item.tier);
-  lines.slice(1).forEach((line) => {
-    const cols = parseTierCsvLine(line);
-    columnDefs.forEach(({ idx, tier }) => {
-      const raw = String(cols[idx] || '').trim();
-      if (!raw) return;
-      const key = toQaTierUrlKey(raw);
-      if (!key) return;
-      if (!lookup.has(key)) setQaTierLookupWithAliases(lookup, key, tier);
-    });
-  });
+  const entries = await fetchTierSegmentationEntries();
+  const lookup = buildTierLookupFromEntries(entries);
 
   if (lookup.size > 0) {
     qaTierLookupCache = lookup;
@@ -1171,63 +1058,13 @@ async function checkInheritedSchema(url, parentCollectionUrl) {
  * Parse CSV and extract URLs from column A (skip header)
  */
 async function parseCsvUrls() {
-  let csvText = "";
-  let source = "none";
-  for (const sourceUrl of QA_TIER_SEGMENTATION_URLS) {
-    try {
-      const res = await fetch(sourceUrl);
-      if (!res.ok) continue;
-      const text = await res.text();
-      if (!text?.trim()) continue;
-      csvText = text;
-      source = sourceUrl;
-      break;
-    } catch {
-      // Try next source URL.
-    }
-  }
-
-  if (!csvText?.trim()) {
+  const entries = await fetchTierSegmentationEntries();
+  if (!Array.isArray(entries) || entries.length === 0) {
     throw new Error("Unable to load page segmentation by tier CSV from configured sources.");
   }
-
-  console.log(`✓ Segmentation CSV loaded from ${source}, size: ${csvText.length} bytes`);
-  const lines = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  if (lines.length < 2) return [];
-
-  const headers = parseTierCsvLine(lines[0]);
-  const columnDefs = headers
-    .map((header, idx) => ({ idx, tier: tierKeyFromHeader(header) }))
-    .filter((item) => item.tier);
-  const urlsByKey = new Map();
-
-  const normalizeSegmentationSourceUrl = (rawValue) => {
-    const raw = String(rawValue || "").trim();
-    if (!raw) return "";
-    if (raw === "/") return "https://www.alanranger.com/";
-    if (!/^https?:\/\//i.test(raw)) return "";
-    try {
-      const parsed = new URL(raw);
-      const pathname = String(parsed.pathname || "/").replace(/\/{2,}/g, "/");
-      const normalizedPath = pathname.length > 1 ? pathname.replace(/\/+$/, "") : "/";
-      return `${parsed.origin}${normalizedPath}`;
-    } catch {
-      return "";
-    }
-  };
-
-  for (let i = 1; i < lines.length; i += 1) {
-    const cols = parseTierCsvLine(lines[i]);
-    columnDefs.forEach(({ idx }) => {
-      const url = normalizeSegmentationSourceUrl(cols[idx]);
-      if (!url) return;
-      const key = normalizeUrlForComparison(url);
-      if (!key) return;
-      if (!urlsByKey.has(key)) urlsByKey.set(key, url);
-    });
-  }
-
-  return Array.from(urlsByKey.values());
+  const urls = urlsFromTierEntries(entries);
+  console.log(`✓ Segmentation CSV loaded, URL count: ${urls.length}`);
+  return urls;
 }
 
 /**

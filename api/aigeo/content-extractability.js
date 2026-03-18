@@ -1,4 +1,11 @@
 import { safeJsonParse } from './utils.js';
+import {
+  fetchTierSegmentationEntries,
+  normalizeTierInput as normalizeSharedTierInput,
+  getTierForUrlFromLookup,
+  filterTierEntriesByTier,
+  countTierEntries
+} from './tier-segmentation.js';
 
 const TIER_SEGMENTATION_SOURCES = [
   'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/page%20segmentation%20by%20tier.csv',
@@ -19,8 +26,7 @@ function parseBoolean(value) {
 }
 
 function normalizeTierInput(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  return TIER_VALUES.has(normalized) ? normalized : 'all';
+  return normalizeSharedTierInput(value, 'all');
 }
 
 function tierKeyFromHeader(header) {
@@ -102,39 +108,16 @@ function buildTierLookup(entries = []) {
 }
 
 function getTierForUrl(url, tierLookup = null) {
-  const key = toTierUrlKey(url);
-  if (key && tierLookup instanceof Map && tierLookup.has(key)) {
-    return tierLookup.get(key);
-  }
-  return classifyTierFromUrl(url);
+  return getTierForUrlFromLookup(url, tierLookup);
 }
 
 function filterUrlsByTier(entries, tier) {
-  if (!Array.isArray(entries) || !entries.length) return [];
-  if (tier === 'all') return entries.map((entry) => entry.url);
-  return entries
-    .filter((entry) => String(entry?.tier || '').toLowerCase() === tier)
-    .map((entry) => entry.url);
+  const filtered = filterTierEntriesByTier(entries, tier);
+  return filtered.map((entry) => entry.url);
 }
 
 function countUrlsByTier(entries = []) {
-  const counts = {
-    all: 0,
-    landing: 0,
-    product: 0,
-    event: 0,
-    blog: 0,
-    academy: 0,
-    unmapped: 0
-  };
-  if (!Array.isArray(entries) || !entries.length) return counts;
-  counts.all = entries.length;
-  entries.forEach((entry) => {
-    const tier = String(entry?.tier || 'unmapped').toLowerCase();
-    if (Object.hasOwn(counts, tier)) counts[tier] += 1;
-    else counts.unmapped += 1;
-  });
-  return counts;
+  return countTierEntries(entries);
 }
 
 function parseCsvLine(line) {
@@ -163,42 +146,7 @@ function parseCsvLine(line) {
 }
 
 async function parseTierSegmentationEntries() {
-  let csvText = '';
-  for (const source of TIER_SEGMENTATION_SOURCES) {
-    try {
-      const res = await fetch(source);
-      if (!res.ok) continue;
-      const body = await res.text();
-      if (body?.trim()) {
-        csvText = body;
-        break;
-      }
-    } catch {
-      // Try next source.
-    }
-  }
-  if (!csvText) return [];
-  const lines = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  if (lines.length < 2) return [];
-  const headers = parseCsvLine(lines[0]);
-  const columnDefs = headers
-    .map((header, idx) => ({ idx, tier: tierKeyFromHeader(header) }))
-    .filter((item) => item.tier);
-  const entriesByPath = new Map();
-  for (let i = 1; i < lines.length; i += 1) {
-    const cols = parseCsvLine(lines[i]);
-    columnDefs.forEach(({ idx, tier }) => {
-      const raw = String(cols[idx] || '').trim().replaceAll(/^"|"$/g, '');
-      const url = normalizeSourceUrl(raw);
-      if (!url) return;
-      const key = toTierUrlKey(url);
-      if (!key) return;
-      if (!entriesByPath.has(key)) {
-        entriesByPath.set(key, { url, tier });
-      }
-    });
-  }
-  return Array.from(entriesByPath.values());
+  return fetchTierSegmentationEntries();
 }
 
 function selectUrlsForMode(urls, mode, limit) {

@@ -1,4 +1,5 @@
 import { getGSCAccessToken, getGscDateRange, normalizePropertyUrl } from './utils.js';
+import { fetchTierSegmentationEntries, urlsFromTierEntries } from './tier-segmentation.js';
 
 /**
  * Technical Foundation Audit API
@@ -45,6 +46,26 @@ function normalizeBaseUrl(value) {
 
 function buildDefaultUrls(baseUrl) {
   return ['/', '/about', '/contact', '/services', '/workshops'].map((path) => `${baseUrl}${path}`);
+}
+
+function filterUrlsToPropertyHost(urls = [], propertyUrl = '') {
+  const safeUrls = Array.isArray(urls) ? urls : [];
+  if (!safeUrls.length) return [];
+  let propertyHost = '';
+  try {
+    propertyHost = new URL(String(propertyUrl || '')).hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    propertyHost = '';
+  }
+  if (!propertyHost) return safeUrls;
+  return safeUrls.filter((url) => {
+    try {
+      const host = new URL(String(url || '')).hostname.replace(/^www\./i, '').toLowerCase();
+      return host === propertyHost;
+    } catch {
+      return false;
+    }
+  });
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
@@ -430,30 +451,23 @@ async function readChildSitemapUrls(childSitemapUrl) {
   }
 }
 
-function pickIndexabilityUrls(baseUrl, sitemapPageUrls, mode = 'sample', limit = null) {
+function collectUniqueHttpUrls(urls = [], seedSeen = null) {
+  const seen = seedSeen instanceof Set ? seedSeen : new Set();
   const unique = [];
-  const seen = new Set();
-  for (const raw of sitemapPageUrls || []) {
+  for (const raw of urls || []) {
     const normalized = normalizeAbsoluteHttpUrl(raw);
     if (!normalized || seen.has(normalized)) continue;
     seen.add(normalized);
     unique.push(normalized);
   }
-  if (!unique.length) return { urls: buildDefaultUrls(baseUrl), source: 'fallback-defaults', mode: 'sample' };
+  return { unique, seen };
+}
 
-  const effectiveLimit = limit || unique.length;
-  if (mode === 'full') {
-    return {
-      urls: unique.slice(0, effectiveLimit),
-      source: 'sitemap-derived',
-      mode: 'full'
-    };
-  }
-
+function buildIndexabilitySampleUrls(baseUrl, uniqueUrls = []) {
   const baseHost = new URL(baseUrl).hostname.toLowerCase();
   const home = `${new URL(baseUrl).protocol}//${baseHost}/`;
   const preferred = [];
-  const hasHome = unique.some((u) => {
+  const hasHome = uniqueUrls.some((u) => {
     try { return new URL(u).hostname.toLowerCase() === baseHost && new URL(u).pathname === '/'; } catch { return false; }
   });
   if (hasHome) preferred.push(home);
@@ -465,14 +479,34 @@ function pickIndexabilityUrls(baseUrl, sitemapPageUrls, mode = 'sample', limit =
     ['blog', 'article', 'academy']
   ];
   for (const bucket of buckets) {
-    const hit = unique.find((u) => containsAny(u.toLowerCase(), bucket) && !preferred.includes(u));
+    const hit = uniqueUrls.find((u) => containsAny(u.toLowerCase(), bucket) && !preferred.includes(u));
     if (hit) preferred.push(hit);
   }
-  for (const url of unique) {
+  for (const url of uniqueUrls) {
     if (preferred.length >= 5) break;
     if (!preferred.includes(url)) preferred.push(url);
   }
-  return { urls: preferred.slice(0, 5), source: 'sitemap-derived', mode: 'sample' };
+  return preferred.slice(0, 5);
+}
+
+function pickIndexabilityUrls(baseUrl, canonicalUrls = [], sitemapPageUrls = [], mode = 'sample', limit = null) {
+  const canonicalCollected = collectUniqueHttpUrls(canonicalUrls);
+  const unique = [...canonicalCollected.unique];
+  if (!unique.length) {
+    unique.push(...collectUniqueHttpUrls(sitemapPageUrls, canonicalCollected.seen).unique);
+  }
+  if (!unique.length) return { urls: buildDefaultUrls(baseUrl), source: 'fallback-defaults', mode: 'sample' };
+
+  const effectiveLimit = limit || unique.length;
+  const source = canonicalUrls.length ? 'tier-segmentation-csv' : 'sitemap-derived';
+  if (mode === 'full') {
+    return {
+      urls: unique.slice(0, effectiveLimit),
+      source,
+      mode: 'full'
+    };
+  }
+  return { urls: buildIndexabilitySampleUrls(baseUrl, unique), source, mode: 'sample' };
 }
 
 async function checkSitemap(sitemapUrl, pageUrlLimit = 5000) {
@@ -713,7 +747,9 @@ export default async function handler(req, res) {
       checkRobots(robotsUrl),
       checkSitemap(sitemapUrl, pageUrlLimit)
     ]);
-    const selection = pickIndexabilityUrls(baseUrl, sitemap.pageUrls, mode, limit);
+    const tierEntries = await fetchTierSegmentationEntries();
+    const canonicalUrls = filterUrlsToPropertyHost(urlsFromTierEntries(tierEntries), baseUrl);
+    const selection = pickIndexabilityUrls(baseUrl, canonicalUrls, sitemap.pageUrls, mode, limit);
     const indexability = await checkIndexability(selection.urls, selection.source, selection.mode, {
       baseUrl,
       includeGoogleIndex,

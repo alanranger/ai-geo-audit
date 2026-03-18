@@ -12,6 +12,7 @@
  */
 
 import { getBusinessProfileAccessToken } from './utils.js';
+import { fetchTierSegmentationEntries, urlsFromTierEntries } from './tier-segmentation.js';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -36,6 +37,26 @@ function normalizePropertyUrl(value) {
   } catch {
     return raw;
   }
+}
+
+function filterUrlsToPropertyHost(urls = [], propertyUrl = '') {
+  const safeUrls = Array.isArray(urls) ? urls : [];
+  if (!safeUrls.length) return [];
+  let propertyHost = '';
+  try {
+    propertyHost = new URL(String(propertyUrl || '')).hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    propertyHost = '';
+  }
+  if (!propertyHost) return safeUrls;
+  return safeUrls.filter((url) => {
+    try {
+      const host = new URL(String(url || '')).hostname.replace(/^www\./i, '').toLowerCase();
+      return host === propertyHost;
+    } catch {
+      return false;
+    }
+  });
 }
 
 function hasLocationMatchForProperty(locations = [], propertyUrl) {
@@ -201,10 +222,10 @@ async function fetchSitemapPageUrls(baseUrl, urlLimit = 300) {
   }
 }
 
-function selectLocalSchemaScanUrls(baseUrl, sitemapUrls, mode = 'sample', limit = null) {
+function selectLocalSchemaScanUrls(baseUrl, candidateUrls, mode = 'sample', limit = null) {
   const unique = [];
   const seen = new Set();
-  for (const raw of sitemapUrls || []) {
+  for (const raw of candidateUrls || []) {
     const normalized = normalizeAbsoluteHttpUrl(raw);
     if (!normalized || seen.has(normalized)) continue;
     seen.add(normalized);
@@ -221,7 +242,7 @@ function selectLocalSchemaScanUrls(baseUrl, sitemapUrls, mode = 'sample', limit 
 
   if (mode === 'full') {
     const max = clampInt(limit, unique.length, 1, LOCAL_SCHEMA_MAX_SCAN_LIMIT);
-    return { urls: unique.slice(0, max), source: 'sitemap-derived', mode: 'full' };
+    return { urls: unique.slice(0, max), source: 'tier-segmentation-csv', mode: 'full' };
   }
 
   const preferred = [];
@@ -237,7 +258,7 @@ function selectLocalSchemaScanUrls(baseUrl, sitemapUrls, mode = 'sample', limit 
   }
 
   const max = clampInt(limit, 10, 1, 50);
-  return { urls: preferred.slice(0, max), source: 'sitemap-derived', mode: 'sample' };
+  return { urls: preferred.slice(0, max), source: 'tier-segmentation-csv', mode: 'sample' };
 }
 
 async function scanLocalBusinessSchemaPages(urlsToCheck, options = {}) {
@@ -410,11 +431,9 @@ function emptyLocalSchemaScan(mode = 'sample', source = 'not-run') {
 }
 
 async function runLocalSchemaScan(propertyBaseUrl, mode, limit) {
-  const sitemapPageLimit = mode === 'full'
-    ? clampInt(limit, 400, 1, LOCAL_SCHEMA_MAX_SCAN_LIMIT)
-    : clampInt(limit, 25, 1, 80);
-  const sitemapUrls = await fetchSitemapPageUrls(propertyBaseUrl, sitemapPageLimit);
-  const selected = selectLocalSchemaScanUrls(propertyBaseUrl, sitemapUrls, mode, limit);
+  const tierEntries = await fetchTierSegmentationEntries();
+  const sourceUrls = filterUrlsToPropertyHost(urlsFromTierEntries(tierEntries), propertyBaseUrl);
+  const selected = selectLocalSchemaScanUrls(propertyBaseUrl, sourceUrls, mode, limit);
   const localSchemaScan = await scanLocalBusinessSchemaPages(selected.urls, {
     batchSize: mode === 'full' ? 25 : 10,
     requestDelayMs: mode === 'full' ? 120 : 60,
