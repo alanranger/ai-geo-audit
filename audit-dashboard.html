@@ -22725,6 +22725,7 @@
       qa: 'impl_schema_qa_last_payload_v1',
       tech: 'impl_tech_foundation_last_payload_v1',
       extractability: 'impl_content_extractability_last_payload_v1',
+      citation: 'impl_citation_consistency_last_payload_v1',
       mentions: 'impl_mentions_baseline_last_payload_v1'
     };
 
@@ -22864,6 +22865,7 @@
       service: null,
       qa: null,
       extractability: null,
+      citation: null,
       mentions: null
     };
 
@@ -23105,6 +23107,24 @@
       }
     }
 
+    async function fetchAndCacheCitationSummary() {
+      try {
+        const response = await fetch(apiUrl('/api/aigeo/citation-consistency-summary?days=30'));
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(payload?.message || `HTTP ${response.status}`);
+        }
+        if (payload && typeof payload === 'object') {
+          saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.citation, payload);
+          implLatestAuditPayloads.citation = payload;
+        }
+        return payload;
+      } catch (error) {
+        implLatestAuditPayloads.citation = { __error: String(error?.message || 'Unknown error'), __cacheSavedAt: Date.now() };
+        return null;
+      }
+    }
+
     function numberOrNull(value) {
       const n = Number(value);
       return Number.isFinite(n) ? n : null;
@@ -23133,6 +23153,7 @@
       const servicePayload = getLatestImplPayload('service', IMPL_AUDIT_CACHE_KEYS.service);
       const qaPayload = getLatestImplPayload('qa', IMPL_AUDIT_CACHE_KEYS.qa);
       const extractPayload = getLatestImplPayload('extractability', IMPL_AUDIT_CACHE_KEYS.extractability);
+      const citationPayload = getLatestImplPayload('citation', IMPL_AUDIT_CACHE_KEYS.citation);
       const mentionsPayload = getLatestImplPayload('mentions', IMPL_AUDIT_CACHE_KEYS.mentions);
 
       const techHasData = !!(techPayload && techPayload.data && techPayload.data.indexability);
@@ -23187,6 +23208,19 @@
       const extractScore = extractHasData && Number.isFinite(Number(extractData.avgScore))
         ? asPercent(Number(extractData.avgScore))
         : ((extractPages != null && extractPass != null && extractPages > 0) ? asPercent((extractPass / extractPages) * 100) : null);
+
+      const citationHasData = !!(citationPayload && citationPayload.status === 'ok' && citationPayload.data);
+      const citationData = citationPayload?.data || {};
+      const citationStats = citationData?.stats || {};
+      const citationRun = citationData?.latestRun || null;
+      const citationEntries = numberOrNull(citationStats?.entriesChecked);
+      const citationDrift = numberOrNull(citationStats?.driftCount);
+      const citationAlerts = numberOrNull(citationStats?.alerts);
+      const citationAverageScore = numberOrNull(citationStats?.averageScore);
+      const citationPass = (citationEntries != null && citationDrift != null)
+        ? Math.max(0, citationEntries - citationDrift)
+        : null;
+      const citationRunTs = getImplPayloadRunTs(citationPayload) || (citationRun?.run_started_at ? Date.parse(String(citationRun.run_started_at)) : 0);
 
       const mentionsHasData = !!(mentionsPayload && mentionsPayload.status === 'ok' && mentionsPayload.data);
       const mentionsData = mentionsPayload?.data || {};
@@ -23275,15 +23309,19 @@
         {
           priority: 'P1',
           audit: 'Citation Consistency Monitor',
-          statusMeta: getTicketStatusByTitle('Add citation consistency monitor (core directories and NAP drift)'),
-          score: null,
-          urls: null,
-          pass: null,
-          fail: null,
-          issues: null,
-          breakdown: 'Planned - endpoint not wired yet',
+          statusMeta: citationHasData
+            ? getImplStatusMeta('done')
+            : getTicketStatusByTitle('Add citation consistency monitor (core directories and NAP drift)'),
+          score: citationAverageScore,
+          urls: citationEntries,
+          pass: citationPass,
+          fail: citationDrift,
+          issues: citationAlerts,
+          breakdown: citationHasData
+            ? `drift ${citationDrift ?? 0}/${citationEntries ?? 0} | alerts ${citationAlerts ?? 0} | avg ${citationAverageScore ?? 0}%`
+            : 'No citation monitor run yet',
           tierScope: 'all',
-          runTs: 0
+          runTs: citationRunTs || 0
         },
         {
           priority: 'P2',
@@ -25623,12 +25661,17 @@
 
       const cachedQaPayload = loadImplementationAuditCacheAnyAge(IMPL_AUDIT_CACHE_KEYS.qa) || loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.qa);
       await fetchAndRenderSchemaQaGateStatus(implQaGateRunState.mode || 'sample', cachedQaPayload || null);
+      const cachedCitationPayload = loadImplementationAuditCacheAnyAge(IMPL_AUDIT_CACHE_KEYS.citation) || loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.citation);
+      if (cachedCitationPayload) {
+        implLatestAuditPayloads.citation = cachedCitationPayload;
+      }
       const cachedMentionsPayload = loadImplementationAuditCacheAnyAge(IMPL_AUDIT_CACHE_KEYS.mentions) || loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.mentions);
       if (cachedMentionsPayload) {
         implLatestAuditPayloads.mentions = cachedMentionsPayload;
       }
 
       renderImplementationPriorityMatrix();
+      await fetchAndCacheCitationSummary();
       await fetchAndCacheMentionsSummary();
       renderImplementationPriorityMatrix();
 

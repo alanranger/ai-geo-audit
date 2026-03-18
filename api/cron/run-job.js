@@ -7,7 +7,8 @@ const JOB_ENDPOINTS = {
   ranking_ai: '/api/cron/keyword-ranking-ai',
   global_run: '/api/cron/global-run',
   gsc_cleanup: '/api/cron/gsc-data-cleanup',
-  mentions_baseline: '/api/cron/daily-mentions-baseline'
+  mentions_baseline: '/api/cron/daily-mentions-baseline',
+  citation_consistency: '/api/cron/daily-citation-consistency'
 };
 
 const sendJson = (res, status, body) => {
