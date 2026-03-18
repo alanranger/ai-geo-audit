@@ -92,7 +92,7 @@ function normalizeSegmentationSourceUrl(rawValue) {
   try {
     const parsed = new URL(raw);
     const pathname = String(parsed.pathname || '/').replaceAll(/\/{2,}/g, '/');
-    const normalizedPath = pathname.length > 1 ? pathname.replaceAll(/\/+$/, '') : '/';
+    const normalizedPath = pathname.length > 1 ? pathname.replace(/\/+$/, '') : '/';
     return `${parsed.origin}${normalizedPath}`;
   } catch {
     return '';
@@ -103,7 +103,7 @@ export function toTierUrlKey(url) {
   try {
     const parsed = new URL(String(url || ''));
     const pathname = String(parsed.pathname || '/').replaceAll(/\/{2,}/g, '/');
-    const normalizedPath = pathname.length > 1 ? pathname.replaceAll(/\/+$/, '') : '/';
+    const normalizedPath = pathname.length > 1 ? pathname.replace(/\/+$/, '') : '/';
     return normalizedPath.toLowerCase();
   } catch {
     return '';
@@ -114,9 +114,9 @@ function setLookupWithAliases(lookup, key, tier) {
   if (!(lookup instanceof Map) || !key || !tier) return;
   lookup.set(key, tier);
   if (/\/home$/i.test(key)) {
-    lookup.set(key.replaceAll(/\/home$/i, '/'), tier);
+    lookup.set(key.replace(/\/home$/i, '/'), tier);
   } else if (/\/$/i.test(key)) {
-    lookup.set(key.replaceAll(/\/$/i, '/home'), tier);
+    lookup.set(key.replace(/\/$/i, '/home'), tier);
   }
 }
 

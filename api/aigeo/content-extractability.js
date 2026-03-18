@@ -78,7 +78,7 @@ function normalizeSourceUrl(raw) {
   try {
     const parsed = new URL(value);
     const pathname = String(parsed.pathname || '/').replaceAll(/\/{2,}/g, '/');
-    const normalizedPath = pathname.length > 1 ? pathname.replaceAll(/\/+$/, '') : '/';
+    const normalizedPath = pathname.length > 1 ? pathname.replace(/\/+$/, '') : '/';
     return `${parsed.origin}${normalizedPath}`;
   } catch {
     return '';
@@ -89,7 +89,7 @@ function toTierUrlKey(url) {
   try {
     const parsed = new URL(String(url || ''));
     const pathname = String(parsed.pathname || '/').replaceAll(/\/{2,}/g, '/');
-    const normalizedPath = pathname.length > 1 ? pathname.replaceAll(/\/+$/, '') : '/';
+    const normalizedPath = pathname.length > 1 ? pathname.replace(/\/+$/, '') : '/';
     return normalizedPath.toLowerCase();
   } catch {
     return '';
