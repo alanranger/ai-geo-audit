@@ -66,6 +66,11 @@ const resolveBaseUrl = (req) => {
 };
 
 const normalizePhone = (value) => String(value || '').replace(/\D+/g, '');
+const resolveDirectorySeedMapRaw = (req) => {
+  const fromQuery = String(req.query.directorySeedMap || req.query.directorySeedUrls || '').trim();
+  if (fromQuery) return fromQuery;
+  return String(process.env.CITATION_DIRECTORY_SEED_URLS || '').trim();
+};
 
 const canonicalNapFromEnv = () => ({
   name: String(process.env.CITATION_CANONICAL_NAME || process.env.BUSINESS_NAME || 'Alan Ranger Photography'),
@@ -163,6 +168,7 @@ export default async function handler(req, res) {
     const propertyUrl = normalizePropertyUrl(req.query.propertyUrl || process.env.CRON_PROPERTY_URL || 'https://www.alanranger.com');
     const persist = coerceBoolean(req.query.persist, true);
     const perDomainLimit = Number(req.query.perDomainLimit || 2);
+    const directorySeedMapRaw = resolveDirectorySeedMapRaw(req);
     const baseUrl = resolveBaseUrl(req);
 
     const envCanonical = canonicalNapFromEnv();
@@ -173,6 +179,7 @@ export default async function handler(req, res) {
     const rawSummary = await collectCitationConsistencyRows({
       canonicalNap,
       domainsRaw: process.env.CITATION_CORE_DIRECTORY_DOMAINS || '',
+      directorySeedMapRaw,
       perDomainLimit
     });
     const rows = sanitizeCitationRows(rawSummary.rows);
