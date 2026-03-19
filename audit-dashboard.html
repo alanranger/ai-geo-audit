@@ -8220,6 +8220,19 @@
           </div>
         </div>
       </div>
+      <div id="traditional-seo-eval-progress-modal" class="impl-progress-modal-backdrop" aria-hidden="true" style="z-index:10002;">
+        <div class="impl-progress-modal" role="status" aria-live="polite">
+          <h4 id="traditional-seo-eval-progress-title" class="impl-progress-modal-title">Running Traditional SEO…</h4>
+          <p id="traditional-seo-eval-progress-subtitle" class="impl-progress-modal-subtitle">Please wait.</p>
+          <div class="impl-progress-modal-track">
+            <div id="traditional-seo-eval-progress-fill" class="impl-progress-modal-fill"></div>
+          </div>
+          <div class="impl-progress-modal-meta">
+            <span id="traditional-seo-eval-progress-percent">5%</span>
+            <span id="traditional-seo-eval-progress-elapsed">Elapsed: 0s</span>
+          </div>
+        </div>
+      </div>
 
       <!-- Local & Reviews Panel -->
       <section class="aigeo-panel" data-panel="local">
@@ -70058,6 +70071,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       ruleOverridesProperty: ''
     };
 
+    const TRADITIONAL_SEO_EVAL_PROGRESS = {
+      timer: null,
+      startedAt: 0,
+      displayPct: 5,
+      floorPct: 5
+    };
+
     const TRADITIONAL_SEO_SEGMENTATION_SOURCES = [
       'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/page%20segmentation%20by%20tier.csv',
       'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/page%20segmentation%20by%20tier.csv'
@@ -70399,7 +70419,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
     }
 
-    async function traditionalSeoEnsureExtractabilityForUrls(urls, propertyUrl) {
+    async function traditionalSeoEnsureExtractabilityForUrls(urls, propertyUrl, onProgress) {
       const prop = String(propertyUrl || traditionalSeoPropertyUrl() || '').trim();
       const key = 'impl_content_extractability_last_payload_v1';
       let cache = typeof loadImplementationAuditCacheAnyAge === 'function'
@@ -70422,10 +70442,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (!have.has(k)) need.push(raw);
       });
       if (!need.length) return;
+      if (typeof onProgress === 'function') onProgress({ done: 0, total: need.length });
       const chunkSize = 25;
       for (let i = 0; i < need.length; i += chunkSize) {
         const chunk = need.slice(i, i + chunkSize);
         const done = Math.min(i + chunk.length, need.length);
+        if (typeof onProgress === 'function') onProgress({ done, total: need.length });
         if (typeof window.showStatus === 'function') {
           if (i === 0 || done === need.length || (done % 100 === 0 && done > 0)) {
             window.showStatus(`Traditional SEO: fetching extractability ${done}/${need.length} missing URLs…`, 'info');
@@ -71768,6 +71790,94 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       renderTraditionalSeoDrilldownTiles(rows);
     }
 
+    function traditionalSeoEvalProgressClearTimer() {
+      if (TRADITIONAL_SEO_EVAL_PROGRESS.timer) {
+        clearInterval(TRADITIONAL_SEO_EVAL_PROGRESS.timer);
+        TRADITIONAL_SEO_EVAL_PROGRESS.timer = null;
+      }
+    }
+
+    function traditionalSeoEvalProgressDom() {
+      return {
+        modal: document.getElementById('traditional-seo-eval-progress-modal'),
+        title: document.getElementById('traditional-seo-eval-progress-title'),
+        subtitle: document.getElementById('traditional-seo-eval-progress-subtitle'),
+        fill: document.getElementById('traditional-seo-eval-progress-fill'),
+        pct: document.getElementById('traditional-seo-eval-progress-percent'),
+        elapsed: document.getElementById('traditional-seo-eval-progress-elapsed')
+      };
+    }
+
+    function traditionalSeoEvalProgressPaint() {
+      const { fill, pct, elapsed } = traditionalSeoEvalProgressDom();
+      const p = Math.round(TRADITIONAL_SEO_EVAL_PROGRESS.displayPct);
+      if (fill) fill.style.width = `${p}%`;
+      if (pct) pct.textContent = `${p}%`;
+      if (elapsed && TRADITIONAL_SEO_EVAL_PROGRESS.startedAt) {
+        const s = Math.max(0, Math.floor((Date.now() - TRADITIONAL_SEO_EVAL_PROGRESS.startedAt) / 1000));
+        elapsed.textContent = `Elapsed: ${s}s`;
+      }
+    }
+
+    function traditionalSeoEvalProgressOpen(refreshAudit) {
+      const { modal, title, subtitle } = traditionalSeoEvalProgressDom();
+      if (!modal || !title || !subtitle) return;
+      traditionalSeoEvalProgressClearTimer();
+      TRADITIONAL_SEO_EVAL_PROGRESS.startedAt = Date.now();
+      TRADITIONAL_SEO_EVAL_PROGRESS.displayPct = 6;
+      TRADITIONAL_SEO_EVAL_PROGRESS.floorPct = 6;
+      title.textContent = refreshAudit
+        ? 'Traditional SEO (after full audit refresh)'
+        : 'Running Traditional SEO (score only)';
+      subtitle.textContent = 'Starting…';
+      traditionalSeoEvalProgressPaint();
+      modal.classList.add('is-open');
+      modal.setAttribute('aria-hidden', 'false');
+      TRADITIONAL_SEO_EVAL_PROGRESS.timer = setInterval(() => {
+        TRADITIONAL_SEO_EVAL_PROGRESS.displayPct = Math.min(
+          92,
+          Math.max(TRADITIONAL_SEO_EVAL_PROGRESS.displayPct + 1.2, TRADITIONAL_SEO_EVAL_PROGRESS.floorPct)
+        );
+        traditionalSeoEvalProgressPaint();
+      }, 400);
+    }
+
+    function traditionalSeoEvalProgressStage(subtitle, floorPct) {
+      const { subtitle: subEl } = traditionalSeoEvalProgressDom();
+      if (subEl && subtitle) subEl.textContent = subtitle;
+      const fp = traditionalSeoToNum(floorPct, TRADITIONAL_SEO_EVAL_PROGRESS.floorPct);
+      TRADITIONAL_SEO_EVAL_PROGRESS.floorPct = Math.max(
+        TRADITIONAL_SEO_EVAL_PROGRESS.floorPct,
+        Math.min(91, fp)
+      );
+      traditionalSeoEvalProgressPaint();
+    }
+
+    function traditionalSeoEvalProgressExtract(done, total) {
+      const n = Math.max(0, traditionalSeoToNum(done, 0));
+      const t = Math.max(1, traditionalSeoToNum(total, 1));
+      const slice = 28 + Math.floor((50 * n) / t);
+      traditionalSeoEvalProgressStage(`Extractability: ${n}/${t} URLs refreshed`, Math.min(85, slice));
+    }
+
+    function traditionalSeoEvalProgressClose(success) {
+      const { modal, fill, pct } = traditionalSeoEvalProgressDom();
+      traditionalSeoEvalProgressClearTimer();
+      TRADITIONAL_SEO_EVAL_PROGRESS.displayPct = success
+        ? 100
+        : Math.max(TRADITIONAL_SEO_EVAL_PROGRESS.displayPct, 95);
+      TRADITIONAL_SEO_EVAL_PROGRESS.floorPct = TRADITIONAL_SEO_EVAL_PROGRESS.displayPct;
+      const w = Math.round(TRADITIONAL_SEO_EVAL_PROGRESS.displayPct);
+      if (fill) fill.style.width = `${w}%`;
+      if (pct) pct.textContent = `${w}%`;
+      traditionalSeoEvalProgressPaint();
+      setTimeout(() => {
+        if (!modal) return;
+        modal.classList.remove('is-open');
+        modal.setAttribute('aria-hidden', 'true');
+      }, success ? 220 : 380);
+    }
+
     async function runTraditionalSeoEvaluation(options = {}) {
       const refreshAudit = options?.refreshAudit === true;
       const runBtn = document.getElementById('traditional-seo-run-audit-btn');
@@ -71782,15 +71892,22 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           await new Promise((resolve) => setTimeout(resolve, 1500));
         }
 
+        traditionalSeoEvalProgressOpen(refreshAudit);
+        traditionalSeoEvalProgressStage('Loading saved audit data…', 10);
         const audit = await traditionalSeoLoadAuditData(true);
         if (!audit) throw new Error('No audit data available. Run a full audit first.');
         const propertyUrl = traditionalSeoPropertyUrl();
+        traditionalSeoEvalProgressStage('Collecting URLs and GSC metrics…', 18);
         const rawUrls = await traditionalSeoCollectUrls(audit, propertyUrl);
         // Keep full 06-site-urls list (e.g. 505). Utility/login rows still pass indexation rules via rule logic.
         const urls = Array.isArray(rawUrls) ? rawUrls.slice() : [];
         const metricLookup = traditionalSeoBuildMetricsLookup(audit, propertyUrl);
         const resolveTier = await traditionalSeoBuildTierResolver(audit);
-        await traditionalSeoEnsureExtractabilityForUrls(urls, propertyUrl);
+        traditionalSeoEvalProgressStage('Checking extractability (fetching any missing URLs)…', 24);
+        await traditionalSeoEnsureExtractabilityForUrls(urls, propertyUrl, (ev) => {
+          if (ev && ev.total) traditionalSeoEvalProgressExtract(ev.done, ev.total);
+        });
+        traditionalSeoEvalProgressStage('Building signals and loading overrides…', 86);
         const implPayloads = traditionalSeoLoadImplementationPayloads();
         const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
         TRADITIONAL_SEO_STATE.lastSignalMaps = signalMaps;
@@ -71799,6 +71916,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const sourceParity = await traditionalSeoComputeSourceParity(propertyUrl);
         TRADITIONAL_SEO_STATE.sourceParity = sourceParity;
         renderTraditionalSeoSourceParity(sourceParity);
+        traditionalSeoEvalProgressStage('Scoring rules and rendering results…', 90);
         const rules = collectTraditionalSeoRulesFromTable().filter((rule) => rule.enabled !== false);
         const techFoundation = traditionalSeoReadTechFoundation(implPayloads.tech);
         const context = {
@@ -71885,8 +72003,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         renderTraditionalSeoScore(evalSummary, traditionalSeoComputeScoreDelta(evalSummary));
         traditionalSeoPopulateRuleFilter(updatedRules);
         renderTraditionalSeoResultsTable();
+        traditionalSeoEvalProgressClose(true);
         if (typeof window.showStatus === 'function') window.showStatus('Traditional SEO evaluation complete.', 'success');
       } catch (err) {
+        traditionalSeoEvalProgressClose(false);
         if (typeof window.showStatus === 'function') {
           window.showStatus(`Traditional SEO audit failed: ${err?.message || err}`, 'error');
         }
