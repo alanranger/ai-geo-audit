@@ -58,6 +58,10 @@ const pickPreferredDirectoryRow = (current, candidate) => {
   const candidateGeneric = isGenericFallbackRow(candidate);
   if (currentGeneric !== candidateGeneric) return candidateGeneric ? current : candidate;
 
+  const currentSeenTs = toTimestamp(current?.last_seen_at);
+  const candidateSeenTs = toTimestamp(candidate?.last_seen_at);
+  if (currentSeenTs !== candidateSeenTs) return candidateSeenTs > currentSeenTs ? candidate : current;
+
   const currentScore = Number(current?.consistency_score || 0);
   const candidateScore = Number(candidate?.consistency_score || 0);
   if (currentScore !== candidateScore) return candidateScore > currentScore ? candidate : current;
@@ -66,7 +70,7 @@ const pickPreferredDirectoryRow = (current, candidate) => {
   const candidateSignals = Array.isArray(candidate?.matched_signals) ? candidate.matched_signals.length : 0;
   if (currentSignals !== candidateSignals) return candidateSignals > currentSignals ? candidate : current;
 
-  return toTimestamp(candidate?.last_seen_at) > toTimestamp(current?.last_seen_at) ? candidate : current;
+  return current;
 };
 
 const collapseCitationRowsByDirectory = (rows) => {
