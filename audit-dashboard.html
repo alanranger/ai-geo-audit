@@ -5909,6 +5909,9 @@
             <div style="margin-top: 0.75rem; font-size: 0.8rem; color: var(--dark-text-muted); text-align: center;">
               Last audit run: <span id="traditional-seo-last-run">—</span>
             </div>
+            <div id="traditional-seo-source-parity" style="margin-top:0.35rem; font-size:0.76rem; color:var(--dark-text-muted); text-align:center;">
+              URL source parity: checking...
+            </div>
           </div>
           <div class="card" style="display: flex; flex-direction: column; justify-content: center;">
             <div style="font-size: 0.85rem; color: var(--dark-text-muted); margin-bottom: 0.35rem;">Rules Enabled</div>
@@ -69769,6 +69772,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       previousSnapshot: null,
       evaluationRows: [],
       lastEvaluationAt: null,
+      sourceParity: null,
       filters: {
         tier: 'all',
         rule: 'all',
@@ -69781,6 +69785,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         direction: 'asc'
       }
     };
+
+    const TRADITIONAL_SEO_SEGMENTATION_SOURCES = [
+      'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/page%20segmentation%20by%20tier.csv',
+      'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/page%20segmentation%20by%20tier.csv'
+    ];
 
     function traditionalSeoApiPath(path) {
       if (typeof window.apiUrl === 'function') return window.apiUrl(path);
@@ -69896,6 +69905,107 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return '';
     }
 
+    function traditionalSeoToComparableUrl(rawUrl, propertyUrl = '') {
+      const normalized = traditionalSeoNormalizeUrl(rawUrl, propertyUrl);
+      if (!normalized || !URL.canParse(normalized)) return '';
+      try {
+        const parsed = new URL(normalized);
+        const cleanPath = String(parsed.pathname || '/').replace(/\/+$/, '') || '/';
+        return `${parsed.protocol}//${parsed.hostname.toLowerCase()}${cleanPath}`;
+      } catch (err) {
+        return '';
+      }
+    }
+
+    function traditionalSeoExtractUrlsFromCsvText(csvText, propertyUrl = '') {
+      const out = new Set();
+      const lines = String(csvText || '').split(/\r?\n/);
+      const urlRe = /https?:\/\/[^,\s"]+/gi;
+      lines.forEach((line) => {
+        const matches = String(line || '').match(urlRe) || [];
+        matches.forEach((match) => {
+          const key = traditionalSeoToComparableUrl(match, propertyUrl);
+          if (key) out.add(key);
+        });
+      });
+      return out;
+    }
+
+    async function traditionalSeoFetchSegmentationCsvText() {
+      const cacheBuster = Date.now();
+      for (const sourceUrl of TRADITIONAL_SEO_SEGMENTATION_SOURCES) {
+        try {
+          const separator = sourceUrl.includes('?') ? '&' : '?';
+          const response = await fetch(`${sourceUrl}${separator}cb=${encodeURIComponent(cacheBuster)}`, { cache: 'no-store' });
+          if (!response.ok) continue;
+          const text = await response.text();
+          if (text && text.trim()) return text;
+        } catch (err) {
+          // Try next source.
+        }
+      }
+      return '';
+    }
+
+    async function traditionalSeoComputeSourceParity(propertyUrl = '') {
+      const parity = {
+        ready: false,
+        sourceCount: 0,
+        segmentationCount: 0,
+        overlap: 0,
+        onlyInSource: [],
+        onlyInSegmentation: [],
+        error: null
+      };
+      try {
+        const rawSiteUrls = typeof fetchAndParseSiteUrlsCsv === 'function'
+          ? await fetchAndParseSiteUrlsCsv()
+          : [];
+        const sourceSet = new Set(
+          (Array.isArray(rawSiteUrls) ? rawSiteUrls : [])
+            .map((url) => traditionalSeoToComparableUrl(url, propertyUrl))
+            .filter(Boolean)
+        );
+        const segmentationCsvText = await traditionalSeoFetchSegmentationCsvText();
+        const segmentationSet = traditionalSeoExtractUrlsFromCsvText(segmentationCsvText, propertyUrl);
+        const sourceList = [...sourceSet];
+        const segmentationList = [...segmentationSet];
+        const overlap = sourceList.filter((url) => segmentationSet.has(url));
+        const onlyInSource = sourceList.filter((url) => !segmentationSet.has(url));
+        const onlyInSegmentation = segmentationList.filter((url) => !sourceSet.has(url));
+
+        parity.ready = true;
+        parity.sourceCount = sourceSet.size;
+        parity.segmentationCount = segmentationSet.size;
+        parity.overlap = overlap.length;
+        parity.onlyInSource = onlyInSource.slice(0, 6);
+        parity.onlyInSegmentation = onlyInSegmentation.slice(0, 6);
+        return parity;
+      } catch (err) {
+        parity.error = String(err?.message || err || 'Unknown error');
+        return parity;
+      }
+    }
+
+    function renderTraditionalSeoSourceParity(parity) {
+      const target = document.getElementById('traditional-seo-source-parity');
+      if (!target) return;
+      if (!parity) {
+        target.textContent = 'URL source parity: checking...';
+        return;
+      }
+      if (parity.error) {
+        target.textContent = `URL source parity: unavailable${parity?.error ? ` (${parity.error})` : ''}`;
+        return;
+      }
+      const mismatchCount = Number(parity?.onlyInSource?.length || 0) + Number(parity?.onlyInSegmentation?.length || 0);
+      if (mismatchCount === 0) {
+        target.textContent = `URL source parity: synced (${parity.sourceCount} = ${parity.segmentationCount})`;
+        return;
+      }
+      target.textContent = `URL source parity: mismatch (only in 06: ${parity.onlyInSource.length}, only in segmentation: ${parity.onlyInSegmentation.length})`;
+    }
+
     async function traditionalSeoLoadAuditData(preferFresh = false) {
       const propertyUrl = traditionalSeoPropertyUrl();
       if (preferFresh && propertyUrl && typeof window.fetchLatestAuditFromSupabase === 'function') {
@@ -69927,8 +70037,27 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
     }
 
-    function traditionalSeoCollectUrls(audit, propertyUrl = '') {
+    async function traditionalSeoCollectUrls(audit, propertyUrl = '') {
       const urls = new Set();
+      let usedAuthoritativeSource = false;
+
+      if (typeof fetchAndParseSiteUrlsCsv === 'function') {
+        try {
+          const siteUrls = await fetchAndParseSiteUrlsCsv();
+          (Array.isArray(siteUrls) ? siteUrls : []).forEach((url) => {
+            const normalized = traditionalSeoNormalizeUrl(url, propertyUrl);
+            if (normalized) urls.add(normalized);
+          });
+          usedAuthoritativeSource = urls.size > 0;
+        } catch (err) {
+          usedAuthoritativeSource = false;
+        }
+      }
+
+      if (usedAuthoritativeSource) {
+        return [...urls].slice(0, 1400);
+      }
+
       try {
         const rawManual = localStorage.getItem('manual_url_list');
         const manual = rawManual ? JSON.parse(rawManual) : [];
@@ -70317,11 +70446,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const audit = await traditionalSeoLoadAuditData(true);
         if (!audit) throw new Error('No audit data available. Run a full audit first.');
         const propertyUrl = traditionalSeoPropertyUrl();
-        const urls = traditionalSeoCollectUrls(audit, propertyUrl);
+        const urls = await traditionalSeoCollectUrls(audit, propertyUrl);
         const metricLookup = traditionalSeoBuildMetricsLookup(audit, propertyUrl);
         const resolveTier = await traditionalSeoBuildTierResolver(audit);
         const implPayloads = traditionalSeoLoadImplementationPayloads();
         const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
+        const sourceParity = await traditionalSeoComputeSourceParity(propertyUrl);
+        TRADITIONAL_SEO_STATE.sourceParity = sourceParity;
+        renderTraditionalSeoSourceParity(sourceParity);
         const rules = collectTraditionalSeoRulesFromTable().filter((rule) => rule.enabled !== false);
         const context = {
           techScore: traditionalSeoToNum(audit?.scores?.technicalBasics?.score ?? audit?.scores?.technical?.score, 70),
@@ -70567,6 +70699,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       traditionalSeoPopulateRuleFilter(TRADITIONAL_SEO_STATE.rules);
       traditionalSeoPopulateCategoryFilter(TRADITIONAL_SEO_STATE.rules);
       renderTraditionalSeoResultsTable();
+      if (TRADITIONAL_SEO_STATE.sourceParity) {
+        renderTraditionalSeoSourceParity(TRADITIONAL_SEO_STATE.sourceParity);
+      } else {
+        renderTraditionalSeoSourceParity(null);
+      }
 
       const lastRun = document.getElementById('traditional-seo-last-run');
       if (lastRun) {
@@ -70698,6 +70835,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     window.renderTraditionalSeoTab = async function renderTraditionalSeoTab(force = false) {
       if (TRADITIONAL_SEO_STATE.loading) return;
       if (!force && TRADITIONAL_SEO_STATE.rules.length > 0) {
+        renderTraditionalSeoSourceParity(TRADITIONAL_SEO_STATE.sourceParity);
         wireTraditionalSeoButtons();
         return;
       }
