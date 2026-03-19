@@ -2,6 +2,7 @@ import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
 import { logCronEvent } from '../../lib/cron/logCron.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
+const PINNED_CITATION_DOMAINS = 'trustpilot.com,yell.com,yelp.co.uk,yelp.com,bark.com,tripadvisor.com,facebook.com,linkedin.com';
 
 const sendJson = (res, status, body) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -99,7 +100,8 @@ export default async function handler(req, res) {
       });
     }
 
-    const citation = await fetchJson(`${baseUrl}/api/aigeo/citation-consistency?persist=1`, {
+    const citationUrl = `${baseUrl}/api/aigeo/citation-consistency?persist=1&domainsRaw=${encodeURIComponent(PINNED_CITATION_DOMAINS)}`;
+    const citation = await fetchJson(citationUrl, {
       method: 'GET',
       headers: cronSecret ? { 'x-cron-secret': cronSecret } : {}
     });
