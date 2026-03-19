@@ -5996,11 +5996,6 @@
           </div>
         </div>
 
-        <div class="card" style="margin-bottom: 1rem;">
-          <div style="font-weight: 700; margin-bottom: 0.65rem;">Score Trend (Latest vs Previous)</div>
-          <canvas id="traditional-seo-chart" width="1200" height="280" style="width: 100%; height: 280px;"></canvas>
-        </div>
-
         <div class="card traditional-seo-rules-card">
           <div style="display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; margin-bottom: 0.65rem; flex-wrap: wrap;">
             <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
@@ -6098,17 +6093,17 @@
           <div id="traditional-seo-url-health" class="traditional-seo-health-strip" aria-label="URL-level outcome summary"></div>
           <div id="traditional-seo-rule-summary-wrap" style="margin-bottom: 0.85rem;">
             <div style="font-weight: 600; font-size: 0.82rem; margin-bottom: 0.35rem; color: var(--dark-text-muted);">Per-rule URL outcomes (click a row to filter)</div>
-            <div class="traditional-seo-table-wrap" style="max-height: 220px; overflow: auto;">
+            <div class="traditional-seo-table-wrap">
               <table id="traditional-seo-rule-summary-table">
                 <thead>
                   <tr>
-                    <th>Rule</th>
-                    <th>Scope</th>
-                    <th style="text-align:right;">Pass</th>
-                    <th style="text-align:right;">Warn</th>
-                    <th style="text-align:right;">Fail</th>
-                    <th style="text-align:right;">Rows</th>
-                    <th>Worst</th>
+                    <th><button type="button" class="traditional-seo-sort-btn" data-sort="rule_name">Rule <span class="sort-ind">↕</span></button></th>
+                    <th><button type="button" class="traditional-seo-sort-btn" data-sort="scope">Scope <span class="sort-ind">↕</span></button></th>
+                    <th style="text-align:right;"><button type="button" class="traditional-seo-sort-btn" data-sort="pass">Pass <span class="sort-ind">↕</span></button></th>
+                    <th style="text-align:right;"><button type="button" class="traditional-seo-sort-btn" data-sort="warn">Warn <span class="sort-ind">↕</span></button></th>
+                    <th style="text-align:right;"><button type="button" class="traditional-seo-sort-btn" data-sort="fail">Fail <span class="sort-ind">↕</span></button></th>
+                    <th style="text-align:right;"><button type="button" class="traditional-seo-sort-btn" data-sort="total">Rows <span class="sort-ind">↕</span></button></th>
+                    <th><button type="button" class="traditional-seo-sort-btn" data-sort="worst">Worst <span class="sort-ind">↕</span></button></th>
                   </tr>
                 </thead>
                 <tbody id="traditional-seo-rule-summary-body">
@@ -6121,7 +6116,7 @@
             <table class="traditional-seo-table" id="traditional-seo-results-table">
               <thead>
                 <tr>
-                  <th style="width: 7%;">View</th>
+                  <th style="width: 7%;"><button type="button" class="traditional-seo-sort-btn" data-sort="url">View <span class="sort-ind">↕</span></button></th>
                   <th style="width: 8%;"><button type="button" class="traditional-seo-sort-btn" data-sort="page_score">Score <span class="sort-ind">↕</span></button></th>
                   <th style="width: 10%;"><button type="button" class="traditional-seo-sort-btn" data-sort="tier">Tier <span class="sort-ind">↕</span></button></th>
                   <th style="width: 19%;"><button type="button" class="traditional-seo-sort-btn" data-sort="rule_name">Rule <span class="sort-ind">↕</span></button></th>
@@ -69999,6 +69994,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       sort: {
         key: 'status',
         direction: 'asc'
+      },
+      ruleSummarySort: {
+        key: 'rule_name',
+        direction: 'asc'
       }
     };
 
@@ -71034,6 +71033,20 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       });
     }
 
+    function updateTraditionalSeoRuleSummarySortHeaderState() {
+      const headers = Array.from(document.querySelectorAll('#traditional-seo-rule-summary-table thead .traditional-seo-sort-btn'));
+      const sortKey = String(TRADITIONAL_SEO_STATE.ruleSummarySort?.key || 'rule_name');
+      const sortDirection = String(TRADITIONAL_SEO_STATE.ruleSummarySort?.direction || 'asc');
+      headers.forEach((btn) => {
+        const isActive = String(btn?.dataset?.sort || '') === sortKey;
+        const ind = btn.querySelector('.sort-ind');
+        if (ind) {
+          if (!isActive) ind.textContent = '↕';
+          else ind.textContent = sortDirection === 'asc' ? '↑' : '↓';
+        }
+      });
+    }
+
     function traditionalSeoRenderUrlHealthStrip(rows) {
       const target = document.getElementById('traditional-seo-url-health');
       if (!target) return;
@@ -71073,6 +71086,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const rowList = Array.isArray(rows) ? rows : [];
       if (!list.length || !rowList.length) {
         body.innerHTML = '<tr><td colspan="7" style="color: var(--dark-text-muted);">Run the audit to see aggregated counts.</td></tr>';
+        updateTraditionalSeoRuleSummarySortHeaderState();
         return;
       }
       const counts = new Map();
@@ -71086,15 +71100,38 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         else if (s === 'warn') b.warn += 1;
         else b.fail += 1;
       });
-      body.innerHTML = list.map((rule) => {
+      const worstRank = { fail: 0, warn: 1, pass: 2 };
+      const sortKey = String(TRADITIONAL_SEO_STATE.ruleSummarySort?.key || 'rule_name');
+      const sortDir = String(TRADITIONAL_SEO_STATE.ruleSummarySort?.direction || 'asc');
+      const built = list.map((rule) => {
         const rk = String(rule.rule_key || '');
         const c = counts.get(rk) || { pass: 0, warn: 0, fail: 0, total: 0 };
         const worst = c.fail > 0 ? 'fail' : (c.warn > 0 ? 'warn' : 'pass');
         const scope = String(rule.scope || 'page').toLowerCase();
+        const name = String(rule.rule_name || rk);
+        return { rule, rk, c, worst, scope, name };
+      });
+      built.sort((a, b) => {
+        let diff = 0;
+        if (sortKey === 'pass' || sortKey === 'warn' || sortKey === 'fail') {
+          diff = traditionalSeoToNum(a.c[sortKey], 0) - traditionalSeoToNum(b.c[sortKey], 0);
+        } else if (sortKey === 'total') {
+          diff = traditionalSeoToNum(a.c.total, 0) - traditionalSeoToNum(b.c.total, 0);
+        } else if (sortKey === 'worst') {
+          diff = (worstRank[a.worst] ?? 9) - (worstRank[b.worst] ?? 9);
+        } else if (sortKey === 'scope') {
+          diff = a.scope.localeCompare(b.scope);
+        } else {
+          diff = a.name.localeCompare(b.name);
+        }
+        if (diff === 0) diff = a.rk.localeCompare(b.rk);
+        return sortDir === 'desc' ? -diff : diff;
+      });
+      body.innerHTML = built.map(({ rule, rk, c, worst, scope, name }) => {
         const keyAttr = traditionalSeoEscapeAttr(rk);
         return `
           <tr data-rule-key="${keyAttr}">
-            <td>${escapeHtml(String(rule.rule_name || rk))}</td>
+            <td>${escapeHtml(name)}</td>
             <td>${escapeHtml(scope)}</td>
             <td style="text-align:right;">${c.pass}</td>
             <td style="text-align:right;">${c.warn}</td>
@@ -71103,6 +71140,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             <td>${traditionalSeoStatusPill(worst)}</td>
           </tr>`;
       }).join('');
+      updateTraditionalSeoRuleSummarySortHeaderState();
     }
 
     function renderTraditionalSeoDrilldownTiles(rows) {
@@ -71316,7 +71354,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           body.innerHTML = '<tr><td colspan="8" style="color: var(--dark-text-muted);">No rows match current filters.</td></tr>';
         } else {
           const scoreMap = TRADITIONAL_SEO_STATE.pageScoreByUrl instanceof Map ? TRADITIONAL_SEO_STATE.pageScoreByUrl : null;
-          body.innerHTML = filtered.slice(0, 700).map((row) => {
+          body.innerHTML = filtered.map((row) => {
             const tierLabel = escapeHtml(traditionalSeoTierCellLabel(row.tier, countMap));
             const urlRaw = String(row.url || '');
             const isSitewide = String(row.tier || '').toLowerCase() === 'sitewide';
@@ -71503,52 +71541,6 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
     }
 
-    function renderTraditionalSeoTrend(latest, previous) {
-      const canvas = document.getElementById('traditional-seo-chart');
-      if (!canvas || typeof canvas.getContext !== 'function') return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      const width = canvas.width || 1200;
-      const height = canvas.height || 280;
-      ctx.clearRect(0, 0, width, height);
-
-      const bg = ctx.createLinearGradient(0, 0, width, 0);
-      bg.addColorStop(0, 'rgba(30,41,59,0.5)');
-      bg.addColorStop(1, 'rgba(15,23,42,0.2)');
-      ctx.fillStyle = bg;
-      ctx.fillRect(0, 0, width, height);
-
-      const values = [
-        { label: 'Previous', score: traditionalSeoToNum(previous?.score, 0), color: '#64748b' },
-        { label: 'Latest', score: traditionalSeoToNum(latest?.score, 0), color: '#f59e0b' }
-      ];
-      const latestRag = traditionalSeoRagFromScore(values[1].score);
-      values[1].color = latestRag === 'green' ? '#10b981' : latestRag === 'amber' ? '#f59e0b' : '#ef4444';
-      const barWidth = 180;
-      const maxBarHeight = 190;
-      const startX = Math.round(width * 0.25);
-      const baselineY = 235;
-
-      values.forEach((item, idx) => {
-        const x = startX + (idx * 320);
-        const barH = Math.round((Math.max(0, Math.min(100, item.score)) / 100) * maxBarHeight);
-        ctx.fillStyle = item.color;
-        ctx.fillRect(x, baselineY - barH, barWidth, barH);
-        ctx.fillStyle = '#e2e8f0';
-        ctx.font = '700 16px sans-serif';
-        ctx.fillText(`${item.score}/100`, x + 48, baselineY - barH - 14);
-        ctx.font = '600 14px sans-serif';
-        ctx.fillText(item.label, x + 58, baselineY + 24);
-      });
-
-      ctx.strokeStyle = 'rgba(148,163,184,0.35)';
-      ctx.beginPath();
-      ctx.moveTo(110, baselineY);
-      ctx.lineTo(width - 100, baselineY);
-      ctx.stroke();
-    }
-
     function traditionalSeoRuleRowHtml(rule, index) {
       const id = String(rule?.rule_key || `rule_${index}`);
       const category = String(rule?.category || 'general');
@@ -71680,7 +71672,6 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
       renderTraditionalSeoRules(TRADITIONAL_SEO_STATE.rules);
       renderTraditionalSeoScore(TRADITIONAL_SEO_STATE.latestSummary, delta);
-      renderTraditionalSeoTrend({ score: latestScore }, { score: prevScore });
       traditionalSeoPopulateRuleFilter(TRADITIONAL_SEO_STATE.rules);
       traditionalSeoPopulateCategoryFilter(TRADITIONAL_SEO_STATE.rules);
       renderTraditionalSeoResultsTable();
@@ -71837,7 +71828,24 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (ruleSummaryTable && !ruleSummaryTable.dataset.wired) {
         ruleSummaryTable.dataset.wired = '1';
         ruleSummaryTable.addEventListener('click', (event) => {
-          const tr = event.target instanceof Element ? event.target.closest('tr[data-rule-key]') : null;
+          const sortBtn = event.target instanceof Element ? event.target.closest('thead .traditional-seo-sort-btn') : null;
+          if (sortBtn) {
+            const nextKey = String(sortBtn.dataset.sort || '');
+            if (!nextKey) return;
+            if (!TRADITIONAL_SEO_STATE.ruleSummarySort) {
+              TRADITIONAL_SEO_STATE.ruleSummarySort = { key: 'rule_name', direction: 'asc' };
+            }
+            if (TRADITIONAL_SEO_STATE.ruleSummarySort.key === nextKey) {
+              TRADITIONAL_SEO_STATE.ruleSummarySort.direction = TRADITIONAL_SEO_STATE.ruleSummarySort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+              TRADITIONAL_SEO_STATE.ruleSummarySort.key = nextKey;
+              const numKeys = ['pass', 'warn', 'fail', 'total', 'worst'];
+              TRADITIONAL_SEO_STATE.ruleSummarySort.direction = numKeys.includes(nextKey) ? 'desc' : 'asc';
+            }
+            renderTraditionalSeoResultsTable();
+            return;
+          }
+          const tr = event.target instanceof Element ? event.target.closest('tbody tr[data-rule-key]') : null;
           if (!tr) return;
           const rk = String(tr.getAttribute('data-rule-key') || '').trim();
           if (!rk) return;
