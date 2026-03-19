@@ -2,12 +2,13 @@
  * Schema Audit API
  * 
  * CSV-based schema coverage scanner.
- * Reads URLs from page segmentation by tier CSV and crawls each for JSON-LD schema markup.
+ * Prefers URLs from 06-site-urls.csv (GitHub); falls back to page segmentation by tier CSV.
  * 
  * Returns comprehensive schema inventory, coverage metrics, and rich result eligibility.
  */
 
 import { safeJsonParse } from './aigeo/utils.js';
+import { fetchCanonicalSiteUrlList } from './aigeo/canonical-site-urls.js';
 import {
   fetchTierSegmentationEntries,
   normalizeTierInput as normalizeSharedTierInput,
@@ -1056,37 +1057,6 @@ async function checkInheritedSchema(url, parentCollectionUrl) {
   }
 }
 
-/**
- * Parse CSV and extract URLs from column A (skip header)
- */
-async function parseCsvUrls(options = {}) {
-  const entries = await fetchTierSegmentationEntries(options);
-  if (!Array.isArray(entries) || entries.length === 0) {
-    throw new Error("Unable to load page segmentation by tier CSV from configured sources.");
-  }
-  const urls = urlsFromTierEntries(entries);
-  console.log(`✓ Segmentation CSV loaded, URL count: ${urls.length}`);
-  return urls;
-}
-
-/**
- * Delay helper function
- */
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function parsePositiveInt(value) {
-  const parsed = Number.parseInt(String(value ?? '').trim(), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
-function parseBoolean(value) {
-  if (typeof value === 'boolean') return value;
-  const normalized = String(value ?? '').trim().toLowerCase();
-  return normalized === '1' || normalized === 'true' || normalized === 'yes';
-}
-
 function normalizeUrlForComparison(url) {
   if (!url || typeof url !== 'string') return '';
   try {
@@ -1129,6 +1099,42 @@ function ensureRootUrlIncluded(urls) {
   const normalizedSet = new Set(urls.map((url) => normalizeUrlForComparison(url)));
   if (normalizedSet.has(normalizeUrlForComparison(rootUrl))) return urls;
   return [rootUrl, ...urls];
+}
+
+/**
+ * Resolve crawl URLs: prefer 06-site-urls.csv; else tier segmentation CSV.
+ */
+async function parseCsvUrls(options = {}) {
+  const siteUrls = await fetchCanonicalSiteUrlList(options);
+  if (siteUrls.length > 0) {
+    console.log(`✓ 06-site-urls.csv: ${siteUrls.length} URLs (tiers still from segmentation lookup)`);
+    return { urls: siteUrls, listKind: 'site_urls_06' };
+  }
+  const entries = await fetchTierSegmentationEntries(options);
+  if (!Array.isArray(entries) || entries.length === 0) {
+    throw new Error("Unable to load page segmentation by tier CSV from configured sources.");
+  }
+  const urls = urlsFromTierEntries(entries);
+  console.log(`✓ Segmentation CSV loaded, URL count: ${urls.length}`);
+  return { urls, listKind: 'tier_segmentation' };
+}
+
+/**
+ * Delay helper function
+ */
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function parsePositiveInt(value) {
+  const parsed = Number.parseInt(String(value ?? '').trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes';
 }
 
 function selectUrlsForMode(urls, mode, limit, sampleSize) {
@@ -1388,6 +1394,7 @@ export default async function handler(req, res) {
 
     // Check if manual URL list is provided in request body
     let urls = [];
+    let crawlListKind = 'tier_segmentation';
     let urlSource = 'github';
     let body = {};
     let bodyMode = null;
@@ -1426,23 +1433,28 @@ export default async function handler(req, res) {
         // Use manual URL list from request
         urls = body.urls.filter(url => url && typeof url === 'string' && url.startsWith('http'));
         urlSource = 'manual';
+        crawlListKind = 'manual';
         console.log(`📄 Using manual URL list: ${urls.length} URLs provided`);
       } else {
         // POST but no URLs provided, fall back to CSV
-        urls = await parseCsvUrls({
+        const parsed = await parseCsvUrls({
           forceRefresh: queryRefreshTierSource || bodyRefreshTierSource,
           snapshotKey: queryTierSnapshotKey || bodyTierSnapshotKey,
           cacheTtlMs: queryTierCacheTtlMs || bodyTierCacheTtlMs
         });
+        urls = parsed.urls;
+        crawlListKind = parsed.listKind;
         urlSource = 'csv';
       }
     } else {
       // GET request - parse CSV and get URLs from GitHub/hosted CSV
-      urls = await parseCsvUrls({
+      const parsed = await parseCsvUrls({
         forceRefresh: queryRefreshTierSource,
         snapshotKey: queryTierSnapshotKey,
         cacheTtlMs: queryTierCacheTtlMs
       });
+      urls = parsed.urls;
+      crawlListKind = parsed.listKind;
       urlSource = 'csv';
     }
 
@@ -1465,7 +1477,9 @@ export default async function handler(req, res) {
     });
     const qaTierLookupLoaded = qaTierLookup instanceof Map && qaTierLookup.size > 0;
 
-    urls = ensureRootUrlIncluded(urls);
+    if (crawlListKind !== 'site_urls_06') {
+      urls = ensureRootUrlIncluded(urls);
+    }
     const inputUrlCount = urls.length;
     if (runServiceOnly) {
       urls = urls.filter((url) => isServiceIntentUrl(url));
@@ -1504,7 +1518,8 @@ export default async function handler(req, res) {
             inputUrlCount,
             candidateUrlCount,
             qaTierLookupLoaded,
-            sourceTierCounts
+            sourceTierCounts,
+            crawlListKind
           }
         }
       });
@@ -1992,7 +2007,8 @@ export default async function handler(req, res) {
           inputUrlCount,
           candidateUrlCount,
           qaTierLookupLoaded,
-          sourceTierCounts
+          sourceTierCounts,
+          crawlListKind
         },
         diagnostic: diagnosticInfo
       }

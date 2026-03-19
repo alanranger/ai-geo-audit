@@ -1,10 +1,12 @@
 import { safeJsonParse } from './utils.js';
+import { fetchCanonicalSiteUrlList } from './canonical-site-urls.js';
 import {
   fetchTierSegmentationEntries,
   normalizeTierInput as normalizeSharedTierInput,
   getTierForUrlFromLookup,
   filterTierEntriesByTier,
-  countTierEntries
+  countTierEntries,
+  buildTierLookupFromEntries
 } from './tier-segmentation.js';
 
 const TIER_SEGMENTATION_SOURCES = [
@@ -12,7 +14,6 @@ const TIER_SEGMENTATION_SOURCES = [
   'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/page%20segmentation%20by%20tier.csv'
 ];
 const DEFAULT_SITE_ORIGIN = 'https://www.alanranger.com';
-const TIER_VALUES = new Set(['all', 'landing', 'product', 'event', 'blog', 'academy', 'unmapped']);
 const MEMBER_UTILITY_PATH_PATTERNS = [
   /^\/academy\/login(?:\/|$)/i,
   /^\/academy\/trial-expired(?:\/|$)/i,
@@ -124,28 +125,6 @@ function normalizeSourceUrl(raw) {
   } catch {
     return '';
   }
-}
-
-function toTierUrlKey(url) {
-  try {
-    const parsed = new URL(String(url || ''));
-    const pathname = String(parsed.pathname || '/').replaceAll(/\/{2,}/g, '/');
-    const normalizedPath = pathname.length > 1 ? pathname.replace(/\/+$/, '') : '/';
-    return normalizedPath.toLowerCase();
-  } catch {
-    return '';
-  }
-}
-
-function buildTierLookup(entries = []) {
-  const lookup = new Map();
-  entries.forEach((entry) => {
-    const key = toTierUrlKey(entry?.url || '');
-    const tier = String(entry?.tier || '').toLowerCase();
-    if (!key || !TIER_VALUES.has(tier) || tier === 'all') return;
-    if (!lookup.has(key)) lookup.set(key, tier);
-  });
-  return lookup;
 }
 
 function getTierForUrl(url, tierLookup = null) {
@@ -657,6 +636,35 @@ async function checkUrlWithPacing(url, semaphore, delayAfterMs = 0, tierLookup =
   }
 }
 
+function filterUrlListByTier(urls, tier, tierLookup) {
+  const normalizedTier = normalizeSharedTierInput(tier, 'all');
+  const safe = Array.isArray(urls) ? urls : [];
+  if (normalizedTier === 'all') return safe;
+  return safe.filter((u) => (
+    normalizeSharedTierInput(getTierForUrlFromLookup(u, tierLookup), 'unmapped') === normalizedTier
+  ));
+}
+
+function countTierForUrlList(urls, tierLookup) {
+  const counts = {
+    all: 0,
+    landing: 0,
+    product: 0,
+    event: 0,
+    blog: 0,
+    academy: 0,
+    unmapped: 0
+  };
+  const safe = Array.isArray(urls) ? urls : [];
+  counts.all = safe.length;
+  safe.forEach((u) => {
+    const t = normalizeSharedTierInput(getTierForUrlFromLookup(u, tierLookup), 'unmapped');
+    if (Object.hasOwn(counts, t)) counts[t] += 1;
+    else counts.unmapped += 1;
+  });
+  return counts;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -672,10 +680,26 @@ export default async function handler(req, res) {
   }
 
   try {
+    let body = {};
+    if (req.method === 'POST') {
+      try {
+        if (typeof req.body === 'string') body = JSON.parse(req.body);
+        else if (req.body && typeof req.body === 'object') body = req.body;
+      } catch {
+        body = {};
+      }
+    }
+    const bodyUrls = Array.isArray(body.urls)
+      ? body.urls.map((u) => String(u || '').trim()).filter((u) => /^https?:\/\//i.test(u))
+      : [];
+    const explicitUrls = bodyUrls.slice(0, 25);
+
     const query = req.query || {};
-    const mode = String(query.mode || 'sample').toLowerCase() === 'full' ? 'full' : 'sample';
-    const limit = parsePositiveInt(query.limit);
-    const tier = normalizeTierInput(query.tier);
+    const modeFromBody = String(body.mode || '').toLowerCase() === 'full' ? 'full' : '';
+    const modeFromQuery = String(query.mode || 'sample').toLowerCase() === 'full' ? 'full' : 'sample';
+    const mode = explicitUrls.length > 0 ? 'full' : (modeFromBody || modeFromQuery);
+    const limit = parsePositiveInt(query.limit ?? body.limit);
+    const tier = normalizeTierInput(query.tier ?? body.tier);
     const countsOnly = parseBoolean(query.countsOnly);
     const refreshTierSource = parseBoolean(query.refreshTierSource);
     const tierSnapshotKey = String(query.tierSnapshotKey || '').trim();
@@ -685,11 +709,20 @@ export default async function handler(req, res) {
       snapshotKey: tierSnapshotKey,
       cacheTtlMs: tierCacheTtlMs
     });
-    const tierLookup = buildTierLookup(tierEntries);
-    const urls = tierEntries.map((entry) => entry.url);
-    const sourceTierCounts = countUrlsByTier(tierEntries);
-    const tierScopedUrls = filterUrlsByTier(tierEntries, tier);
-    const selectedUrls = selectUrlsForMode(tierScopedUrls, mode, limit);
+    const tierLookup = buildTierLookupFromEntries(tierEntries);
+    const canonicalUrls = await fetchCanonicalSiteUrlList({ forceRefresh: refreshTierSource });
+    const urls = canonicalUrls.length > 0 ? canonicalUrls : tierEntries.map((entry) => entry.url);
+    const usedCanonical06 = canonicalUrls.length > 0;
+    const sourceTierCounts = usedCanonical06
+      ? countTierForUrlList(urls, tierLookup)
+      : countUrlsByTier(tierEntries);
+    const tierScopedUrls = usedCanonical06
+      ? filterUrlListByTier(urls, tier, tierLookup)
+      : filterUrlsByTier(tierEntries, tier);
+    let selectedUrls = selectUrlsForMode(tierScopedUrls, mode, limit);
+    if (explicitUrls.length > 0) {
+      selectedUrls = explicitUrls;
+    }
     if (countsOnly) {
       return res.status(200).json({
         status: 'ok',
@@ -767,6 +800,8 @@ export default async function handler(req, res) {
       hasLastUpdated: includedRows.filter((row) => row.hasLastUpdated).length
     };
 
+    const rowsPayload = explicitUrls.length > 0 ? results : includedRows;
+
     return res.status(200).json({
       status: 'ok',
       source: 'content-extractability',
@@ -786,7 +821,7 @@ export default async function handler(req, res) {
           pageTier: row.pageTier,
           exclusionReason: row.exclusionReason || ''
         })),
-        rows: includedRows
+        rows: rowsPayload
       },
       meta: {
         generatedAt: new Date().toISOString(),
@@ -797,7 +832,8 @@ export default async function handler(req, res) {
           candidateUrlCount: tierScopedUrls.length,
           selectedUrlCount: selectedUrls.length,
           excludedByPolicyCount: excludedRows.length,
-          limit: limit || null
+          limit: limit || null,
+          targetedUrls: explicitUrls.length > 0
         }
       }
     });
