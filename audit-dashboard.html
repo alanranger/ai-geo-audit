@@ -69881,19 +69881,41 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         .replace(/>/g, '&gt;');
     }
 
+    /** Match content-extractability MEMBER_UTILITY_PATH_PATTERNS + common paywall paths (not scored in implementation audits). */
+    function traditionalSeoShouldExcludeUrlFromTraditionalAudit(url) {
+      let path = '';
+      try {
+        path = String(new URL(String(url || '')).pathname || '/').toLowerCase();
+      } catch (err) {
+        return false;
+      }
+      const utilityRes = [
+        /^\/academy\/login(?:\/|$)/i,
+        /^\/academy\/trial-expired(?:\/|$)/i,
+        /^\/academy\/robo-ranger(?:\/|$)/i,
+        /\/wp-admin(?:\/|$)/i,
+        /\/checkout(?:\/|$)/i,
+        /\/cart(?:\/|$)/i,
+        /\/account(?:\/|$)/i,
+        /\/members?(?:\/|$)/i
+      ];
+      if (utilityRes.some((re) => re.test(path))) return true;
+      return false;
+    }
+
     const TRADITIONAL_SEO_BASELINE_RULES = [
       { rule_key: 'title_tag_present', rule_name: 'Title tag present', description: 'Page has a non-empty title tag and sensible length.', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.5, sort_order: 10 },
       { rule_key: 'meta_description_present', rule_name: 'Meta description present', description: 'Page has a meta description and it is not too short.', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 20 },
       { rule_key: 'single_h1', rule_name: 'Single H1 per page', description: 'Page presents a clear primary heading signal.', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 30 },
       { rule_key: 'canonical_self_or_valid', rule_name: 'Canonical is valid', description: 'Canonical/URL identity checks are valid and stable.', category: 'technical', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 40 },
-      { rule_key: 'indexable_status', rule_name: 'Indexable status', description: 'Page is indexable for intended public pages.', category: 'indexation', severity: 'critical', scope: 'page', current_status: 'pass', enabled: true, weight: 2.0, sort_order: 50 },
+      { rule_key: 'indexable_status', rule_name: 'Indexable status', description: 'Public pages should be indexable (uses technical indexability payload; member/login utility URLs are excluded from this audit list).', category: 'indexation', severity: 'critical', scope: 'page', current_status: 'pass', enabled: true, weight: 2.0, sort_order: 50 },
       { rule_key: 'https_enforced', rule_name: 'HTTPS enforced', description: 'Page URL resolves under HTTPS.', category: 'technical', severity: 'high', scope: 'sitewide', current_status: 'pass', enabled: true, weight: 1.6, sort_order: 60 },
       { rule_key: 'sitemap_declared', rule_name: 'XML sitemap declared', description: 'Sitemap is declared and reachable from robots data.', category: 'crawlability', severity: 'medium', scope: 'sitewide', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 70 },
       { rule_key: 'robots_fetchable', rule_name: 'robots.txt fetchable', description: 'robots.txt is available and readable.', category: 'crawlability', severity: 'medium', scope: 'sitewide', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 80 },
       { rule_key: 'schema_present_core', rule_name: 'Core schema present', description: 'Core schema types exist (Organization, WebSite, WebPage, BreadcrumbList).', category: 'schema', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.7, sort_order: 90 },
-      { rule_key: 'internal_links_minimum', rule_name: 'Minimum internal links', description: 'URL should have enough internal architecture support.', category: 'architecture', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 100 },
-      { rule_key: 'thin_content_guardrail', rule_name: 'Thin content guardrail', description: 'Content usefulness/coverage signals meet baseline quality.', category: 'content', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.5, sort_order: 110 },
-      { rule_key: 'image_alt_coverage', rule_name: 'Image alt coverage', description: 'Image-heavy URLs have adequate alt text intent coverage.', category: 'content', severity: 'low', scope: 'page', current_status: 'pass', enabled: true, weight: 0.8, sort_order: 120 }
+      { rule_key: 'internal_links_minimum', rule_name: 'Minimum internal links', description: 'Flags unmapped tier or very low visibility; no GSC data alone does not fail.', category: 'architecture', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 100 },
+      { rule_key: 'thin_content_guardrail', rule_name: 'Thin content guardrail', description: 'Aligned with Content Extractability audit: uses its pass/score; excluded/noindex rows count as pass.', category: 'content', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.5, sort_order: 110 },
+      { rule_key: 'image_alt_coverage', rule_name: 'Image alt coverage', description: 'Portfolio/gallery/print paths are checked; other URLs pass unless you add image signals later.', category: 'content', severity: 'low', scope: 'page', current_status: 'pass', enabled: true, weight: 0.8, sort_order: 120 }
     ];
 
     function traditionalSeoApiPath(path) {
@@ -70118,6 +70140,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         parity.sourceCount = sourceSet.size;
         parity.segmentationCount = segmentationSet.size;
         parity.overlap = overlap.length;
+        parity.onlyInSourceCount = onlyInSource.length;
+        parity.onlyInSegmentationCount = onlyInSegmentation.length;
         parity.onlyInSource = onlyInSource.slice(0, 6);
         parity.onlyInSegmentation = onlyInSegmentation.slice(0, 6);
         return parity;
@@ -70141,17 +70165,22 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (panel) panel.textContent = target.textContent;
         return;
       }
-      const mismatchCount = Number(parity?.onlyInSource?.length || 0) + Number(parity?.onlyInSegmentation?.length || 0);
+      const missA = Number(parity?.onlyInSourceCount);
+      const missB = Number(parity?.onlyInSegmentationCount);
+      const mismatchCount = (Number.isFinite(missA) ? missA : (parity?.onlyInSource || []).length)
+        + (Number.isFinite(missB) ? missB : (parity?.onlyInSegmentation || []).length);
       if (mismatchCount === 0) {
         target.textContent = `URL source parity: synced (${parity.sourceCount} = ${parity.segmentationCount})`;
         if (panel) panel.textContent = `Synced: 06-site-urls.csv (${parity.sourceCount}) matches segmentation CSV (${parity.segmentationCount}).`;
         return;
       }
-      target.textContent = `URL source parity: mismatch (only in 06: ${parity.onlyInSource.length}, only in segmentation: ${parity.onlyInSegmentation.length})`;
+      const cntA = Number.isFinite(missA) ? missA : (parity?.onlyInSource || []).length;
+      const cntB = Number.isFinite(missB) ? missB : (parity?.onlyInSegmentation || []).length;
+      target.textContent = `URL source parity: mismatch (only in 06: ${cntA}, only in segmentation: ${cntB})`;
       if (panel) {
         const sampleA = (parity.onlyInSource || []).slice(0, 2).join(' | ') || 'none';
         const sampleB = (parity.onlyInSegmentation || []).slice(0, 2).join(' | ') || 'none';
-        panel.textContent = `Mismatch: only in 06-site-urls.csv=${parity.onlyInSource.length}, only in segmentation=${parity.onlyInSegmentation.length}. Samples -> 06: ${sampleA} ; segmentation: ${sampleB}`;
+        panel.textContent = `Mismatch: only in 06-site-urls.csv=${cntA}, only in segmentation=${cntB}. Samples → 06: ${sampleA} · segmentation: ${sampleB}`;
       }
     }
 
@@ -70383,8 +70412,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         : [];
 
       if (key === 'indexable_status') {
+        if (traditionalSeoShouldExcludeUrlFromTraditionalAudit(url)) return 'pass';
         if (techSignal) return techSignal.pass === true ? 'pass' : 'fail';
-        if (/\/(login|member|members|account|checkout|cart|wp-admin)/.test(path)) return 'fail';
         if (path.includes('/thank-you')) return 'warn';
         return 'pass';
       }
@@ -70412,22 +70441,20 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
       if (key === 'thin_content_guardrail') {
         if (extractSignal) {
-          let passSignals = 0;
-          if (extractSignal.hasTldr) passSignals += 1;
-          if (extractSignal.hasDirectAnswer) passSignals += 1;
-          if (extractSignal.hasFaq) passSignals += 1;
-          if (extractSignal.hasLastUpdated) passSignals += 1;
-          if (passSignals <= 1) return 'fail';
-          if (passSignals <= 2) return 'warn';
-          return 'pass';
+          if (extractSignal.excludedFromAudit === true) return 'pass';
+          if (extractSignal.requestOk === false) return 'warn';
+          if (extractSignal.pass === true) return 'pass';
+          const exScore = traditionalSeoToNum(extractSignal.score, 0);
+          if (exScore >= 50) return 'warn';
+          return 'fail';
         }
-        if (impressions >= 50 && clicks === 0) return 'fail';
-        if (impressions < 8) return 'warn';
+        if (impressions >= 50 && clicks === 0) return 'warn';
+        if (impressions > 0 && impressions < 8) return 'warn';
         return 'pass';
       }
       if (key === 'internal_links_minimum') {
         if (tier === 'unmapped') return 'warn';
-        if (impressions === 0 && clicks === 0) return 'warn';
+        if (impressions === 0 && clicks === 0) return 'pass';
         return 'pass';
       }
       if (key === 'canonical_self_or_valid') {
@@ -70445,13 +70472,17 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           return schemaSignal.metaDescription.length < 70 ? 'warn' : 'pass';
         }
         if (key === 'single_h1' && extractSignal) {
+          if (extractSignal.excludedFromAudit === true) return 'pass';
           if (!extractSignal.hasDirectAnswer && !extractSignal.hasTldr) return 'warn';
           return 'pass';
         }
         if (path.length > 110) return 'warn';
         return 'pass';
       }
-      if (key === 'image_alt_coverage') return /\/(portfolio|gallery|print)/.test(path) ? 'pass' : 'warn';
+      if (key === 'image_alt_coverage') {
+        if (!/\/(portfolio|gallery|print)/.test(path)) return 'pass';
+        return 'warn';
+      }
       return String(rule?.current_status || 'warn').toLowerCase();
     }
 
@@ -70607,7 +70638,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const audit = await traditionalSeoLoadAuditData(true);
         if (!audit) throw new Error('No audit data available. Run a full audit first.');
         const propertyUrl = traditionalSeoPropertyUrl();
-        const urls = await traditionalSeoCollectUrls(audit, propertyUrl);
+        const rawUrls = await traditionalSeoCollectUrls(audit, propertyUrl);
+        const urls = rawUrls.filter((u) => !traditionalSeoShouldExcludeUrlFromTraditionalAudit(u));
         const metricLookup = traditionalSeoBuildMetricsLookup(audit, propertyUrl);
         const resolveTier = await traditionalSeoBuildTierResolver(audit);
         const implPayloads = traditionalSeoLoadImplementationPayloads();
