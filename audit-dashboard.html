@@ -70022,9 +70022,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     const TRADITIONAL_SEO_BASELINE_RULES = [
       { rule_key: 'title_tag_present', rule_name: 'Title length (50–60 chars)', description: 'Best practice: page title between 50 and 60 characters (spaces and punctuation count). Uses schema audit title when available.', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.5, sort_order: 10 },
-      { rule_key: 'meta_description_present', rule_name: 'Meta description length (150–160 chars)', description: 'Best practice: meta description between 150 and 160 characters (spaces and punctuation count).', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 20 },
+      { rule_key: 'meta_description_present', rule_name: 'Meta description length (150–160 chars)', description: 'Length 150–160 characters. Uses schema audit meta when present; otherwise meta parsed from Extractability HTML (incl. content-before-name tags).', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 20 },
       { rule_key: 'single_h1', rule_name: 'Exactly one H1', description: 'Fail if zero or more than one H1 (parsed from Content Extractability HTML).', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 30 },
-      { rule_key: 'h1_length_best_practice', rule_name: 'H1 length (50–60 chars)', description: 'When a single H1 exists, its visible text should be 50–60 characters.', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 35 },
+      { rule_key: 'h1_length_best_practice', rule_name: 'H1 length (50–60 chars)', description: 'Uses the longest H1 text on the page (avoids hidden/short first H1 in HTML). Target 50–60 characters.', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 35 },
       { rule_key: 'canonical_self_or_valid', rule_name: 'Canonical is valid', description: 'Canonical/URL identity checks from Schema QA gate when present.', category: 'technical', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 40 },
       { rule_key: 'url_slug_word_count', rule_name: 'URL slug word count (3–5)', description: 'Final path segment (after splitting on -/_) should be 3–5 words. Homepage root passes.', category: 'technical', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 45 },
       { rule_key: 'indexable_status', rule_name: 'Indexable status', description: 'Technical indexability (HTTP + noindex). Utility/login URLs excluded from this list.', category: 'indexation', severity: 'critical', scope: 'page', current_status: 'pass', enabled: true, weight: 2.0, sort_order: 50 },
@@ -70690,8 +70690,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         return 'fail';
       }
       if (key === 'meta_description_present') {
-        if (!schemaSignal || !schemaSignal.metaDescription) return 'warn';
-        const len = String(schemaSignal.metaDescription).length;
+        const metaFromSchema = schemaSignal?.metaDescription ? String(schemaSignal.metaDescription).trim() : '';
+        const metaFromExtract = extractSignal?.seoMetaDescription ? String(extractSignal.seoMetaDescription).trim() : '';
+        const metaText = metaFromSchema || metaFromExtract;
+        if (!metaText) return 'warn';
+        const len = metaText.length;
         if (len >= 150 && len <= 160) return 'pass';
         return 'fail';
       }
@@ -70707,8 +70710,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (extractSignal?.excludedFromAudit === true) return 'pass';
         if (!extractSignal || extractSignal.requestOk === false) return 'warn';
         const c = traditionalSeoToNum(extractSignal.seoH1Count, -1);
-        if (c !== 1) return 'fail';
-        const hlen = traditionalSeoToNum(extractSignal.seoFirstH1Length, 0);
+        if (c <= 0) return 'fail';
+        const longest = traditionalSeoToNum(extractSignal.seoLongestH1Length, 0);
+        const firstLen = traditionalSeoToNum(extractSignal.seoFirstH1Length, 0);
+        const hlen = Math.max(longest, firstLen);
         if (hlen >= 50 && hlen <= 60) return 'pass';
         return 'fail';
       }

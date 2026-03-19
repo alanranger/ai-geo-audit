@@ -407,19 +407,41 @@ function plainTextFromHtmlFragment(fragment = '') {
     .trim();
 }
 
+/** Meta description: support name= before content= OR content= before name= (common on Squarespace). */
+function extractMetaDescriptionFromHtml(html = '') {
+  const source = String(html || '');
+  let m = source.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/is);
+  if (m?.[1]) return String(m[1]).trim();
+  m = source.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']description["']/is);
+  if (m?.[1]) return String(m[1]).trim();
+  m = source.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/is);
+  if (m?.[1]) return String(m[1]).trim();
+  m = source.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:description["']/is);
+  return m?.[1] ? String(m[1]).trim() : '';
+}
+
 /** Counts used by Traditional SEO dashboard (H1, images, outbound links). */
 function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
   const out = {
     h1Count: 0,
     firstH1PlainLength: 0,
+    longestH1PlainLength: 0,
+    metaDescription: '',
     imgTotal: 0,
     imgMissingAlt: 0,
     extOutboundCount: 0,
     extMissingTargetBlank: 0
   };
   const source = String(html || '');
+  out.metaDescription = extractMetaDescriptionFromHtml(source);
   const h1Matches = [...source.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)];
   out.h1Count = h1Matches.length;
+  let longest = 0;
+  h1Matches.forEach((match) => {
+    const len = plainTextFromHtmlFragment(match[1]).length;
+    if (len > longest) longest = len;
+  });
+  out.longestH1PlainLength = longest;
   if (h1Matches[0]) out.firstH1PlainLength = plainTextFromHtmlFragment(h1Matches[0][1]).length;
 
   const imgMatches = [...source.matchAll(/<img\b[^>]*>/gi)];
@@ -462,6 +484,8 @@ async function checkUrl(url, tierLookup = null) {
   const seoNone = {
     seoH1Count: 0,
     seoFirstH1Length: 0,
+    seoLongestH1Length: 0,
+    seoMetaDescription: '',
     seoImgTotal: 0,
     seoImgMissingAlt: 0,
     seoExtOutbound: 0,
@@ -562,6 +586,8 @@ async function checkUrl(url, tierLookup = null) {
       exclusionReason: '',
       seoH1Count: seo.h1Count,
       seoFirstH1Length: seo.firstH1PlainLength,
+      seoLongestH1Length: seo.longestH1PlainLength,
+      seoMetaDescription: seo.metaDescription || '',
       seoImgTotal: seo.imgTotal,
       seoImgMissingAlt: seo.imgMissingAlt,
       seoExtOutbound: seo.extOutboundCount,

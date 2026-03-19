@@ -411,18 +411,18 @@ function extractTitle(htmlString) {
  * Extract meta description from HTML
  */
 function extractMetaDescription(htmlString) {
-  // Try standard meta description tag
-  const metaDescMatch = htmlString.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/is);
-  if (metaDescMatch && metaDescMatch[1]) {
-    return metaDescMatch[1].trim();
-  }
-  
-  // Try og:description meta tag
-  const ogDescMatch = htmlString.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/is);
-  if (ogDescMatch && ogDescMatch[1]) {
-    return ogDescMatch[1].trim();
-  }
-  
+  const html = String(htmlString || '');
+  // Standard order: name= then content=
+  let metaDescMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/is);
+  if (metaDescMatch?.[1]) return String(metaDescMatch[1]).trim();
+  // Squarespace / CMS: content= before name= on same tag
+  metaDescMatch = html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']description["']/is);
+  if (metaDescMatch?.[1]) return String(metaDescMatch[1]).trim();
+  // Open Graph
+  let ogDescMatch = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/is);
+  if (ogDescMatch?.[1]) return String(ogDescMatch[1]).trim();
+  ogDescMatch = html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:description["']/is);
+  if (ogDescMatch?.[1]) return String(ogDescMatch[1]).trim();
   return null;
 }
 
