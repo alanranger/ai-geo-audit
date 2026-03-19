@@ -23848,6 +23848,19 @@
         }
         output[result.key] = body;
       }
+      const softCalls = [
+        fetch(apiUrl('/api/aigeo/citation-consistency?persist=1')).then(async (r) => ({ key: 'citationRun', ok: r.ok, status: r.status, payload: await r.json() })),
+        fetch(apiUrl('/api/aigeo/mentions-ingestion?persist=1&maxKeywords=30&perQueryLimit=3')).then(async (r) => ({ key: 'mentionsRun', ok: r.ok, status: r.status, payload: await r.json() })),
+        fetch(apiUrl('/api/aigeo/citation-consistency-summary?days=30')).then(async (r) => ({ key: 'citationSummary', ok: r.ok, status: r.status, payload: await r.json() })),
+        fetch(apiUrl('/api/aigeo/mentions-summary?days=30')).then(async (r) => ({ key: 'mentionsSummary', ok: r.ok, status: r.status, payload: await r.json() }))
+      ];
+      const softResults = await Promise.all(softCalls);
+      for (const soft of softResults) {
+        const body = soft?.payload;
+        if (!soft?.ok || body?.status !== 'ok') continue;
+        if (soft.key === 'citationSummary') output.citationSummary = body;
+        if (soft.key === 'mentionsSummary') output.mentionsSummary = body;
+      }
       return output;
     }
 
@@ -23917,6 +23930,16 @@
           implLatestAuditPayloads.extractability = payloads.extractability;
           await fetchAndRenderContentExtractabilityStatus('full', payloads.extractability);
           updateImplGlobalProgress(96, 'Rendered content extractability results.');
+        }
+        if (payloads.citationSummary) {
+          saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.citation, payloads.citationSummary);
+          implLatestAuditPayloads.citation = payloads.citationSummary;
+          updateImplGlobalProgress(98, 'Updated citation consistency monitor summary.');
+        }
+        if (payloads.mentionsSummary) {
+          saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.mentions, payloads.mentionsSummary);
+          implLatestAuditPayloads.mentions = payloads.mentionsSummary;
+          updateImplGlobalProgress(99, 'Updated social mentions ingestion summary.');
         }
       } catch (error) {
         const msg = escapeHtml(error?.message || 'Unknown global audit failure');
