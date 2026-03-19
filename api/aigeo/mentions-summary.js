@@ -96,6 +96,7 @@ export default async function handler(req, res) {
     const { data: mentionRows, error: mentionsError } = await supabase
       .from('mentions_baseline_entries')
       .select('platform,source_url,title,snippet,published_at,last_seen_at,mention_score,alert_level,is_brand_mention,matched_keywords')
+      .eq('is_brand_mention', true)
       .gte('last_seen_at', cutoffIso)
       .order('mention_score', { ascending: false })
       .limit(500);
