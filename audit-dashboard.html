@@ -1936,6 +1936,41 @@
       letter-spacing: 0.05em;
       font-weight: 800;
     }
+    section[data-panel="traditional-seo"] .traditional-seo-health-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin: 0.5rem 0 0.75rem;
+    }
+    section[data-panel="traditional-seo"] .traditional-seo-health-chip {
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      border-radius: 8px;
+      padding: 0.35rem 0.65rem;
+      font-size: 0.78rem;
+      background: rgba(15, 23, 42, 0.55);
+      color: var(--dark-text-muted);
+    }
+    section[data-panel="traditional-seo"] .traditional-seo-health-chip strong {
+      color: #e2e8f0;
+      font-weight: 700;
+    }
+    section[data-panel="traditional-seo"] #traditional-seo-rule-summary-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+    }
+    section[data-panel="traditional-seo"] #traditional-seo-rule-summary-table th,
+    section[data-panel="traditional-seo"] #traditional-seo-rule-summary-table td {
+      border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+      padding: 0.35rem 0.45rem;
+      text-align: left;
+    }
+    section[data-panel="traditional-seo"] #traditional-seo-rule-summary-table tbody tr[data-rule-key] {
+      cursor: pointer;
+    }
+    section[data-panel="traditional-seo"] #traditional-seo-rule-summary-table tbody tr[data-rule-key]:hover {
+      background: rgba(30, 41, 59, 0.45);
+    }
 
     section[data-panel="traditional-seo"] .traditional-seo-sort-btn {
       all: unset;
@@ -6035,6 +6070,28 @@
           <div style="display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; margin-bottom: 0.65rem; flex-wrap: wrap;">
             <div style="font-weight: 700;">Traditional SEO Audit Results (By Tier + Rule)</div>
             <div id="traditional-seo-results-meta" style="font-size: 0.8rem; color: var(--dark-text-muted);">No evaluation run yet.</div>
+          </div>
+          <div id="traditional-seo-url-health" class="traditional-seo-health-strip" aria-label="URL-level outcome summary"></div>
+          <div id="traditional-seo-rule-summary-wrap" style="margin-bottom: 0.85rem;">
+            <div style="font-weight: 600; font-size: 0.82rem; margin-bottom: 0.35rem; color: var(--dark-text-muted);">Per-rule URL outcomes (click a row to filter)</div>
+            <div class="traditional-seo-table-wrap" style="max-height: 220px; overflow: auto;">
+              <table id="traditional-seo-rule-summary-table">
+                <thead>
+                  <tr>
+                    <th>Rule</th>
+                    <th>Scope</th>
+                    <th style="text-align:right;">Pass</th>
+                    <th style="text-align:right;">Warn</th>
+                    <th style="text-align:right;">Fail</th>
+                    <th style="text-align:right;">Rows</th>
+                    <th>Worst</th>
+                  </tr>
+                </thead>
+                <tbody id="traditional-seo-rule-summary-body">
+                  <tr><td colspan="7" style="color: var(--dark-text-muted);">Run the audit to see aggregated counts.</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
           <div class="traditional-seo-table-wrap">
             <table class="traditional-seo-table" id="traditional-seo-results-table">
@@ -69816,6 +69873,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     const TRADITIONAL_SEO_TIER_FILTER_DEFS = [
       { value: 'all', label: 'All tiers' },
+      { value: 'sitewide', label: 'Site-wide' },
       { value: 'landing', label: 'Tier A Landing' },
       { value: 'product', label: 'Tier B Product' },
       { value: 'event', label: 'Tier C Event' },
@@ -69826,12 +69884,17 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     function traditionalSeoComputeTierUrlCountsMap(rows) {
       const urlToTier = new Map();
+      let sitewideRows = 0;
       (Array.isArray(rows) ? rows : []).forEach((row) => {
+        if (String(row?.tier || '').toLowerCase() === 'sitewide') {
+          sitewideRows += 1;
+          return;
+        }
         const url = String(row?.url || '').trim();
         if (!url) return;
         if (!urlToTier.has(url)) urlToTier.set(url, String(row?.tier || 'unmapped'));
       });
-      const map = { _totalUnique: urlToTier.size };
+      const map = { _totalUnique: urlToTier.size, _sitewideRows: sitewideRows };
       urlToTier.forEach((tier) => {
         const t = String(tier || 'unmapped');
         map[t] = (map[t] || 0) + 1;
@@ -69846,7 +69909,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const m = countMap && typeof countMap === 'object' ? countMap : {};
       const total = Number(m._totalUnique) || 0;
       const optionsHtml = TRADITIONAL_SEO_TIER_FILTER_DEFS.map((def) => {
-        const n = def.value === 'all' ? total : (Number(m[def.value]) || 0);
+        let n = def.value === 'all' ? total : (Number(m[def.value]) || 0);
+        if (def.value === 'sitewide') n = Number(m._sitewideRows) || 0;
         return `<option value="${def.value}">${def.label} (${n})</option>`;
       }).join('');
       select.innerHTML = optionsHtml;
@@ -69856,6 +69920,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     function traditionalSeoTierCellLabel(tier, countMap) {
       const t = String(tier || 'unmapped');
+      if (t === 'sitewide') return 'Site-wide';
       const m = countMap && typeof countMap === 'object' ? countMap : {};
       const n = Number(m[t]) || 0;
       return `${t} (${n})`;
@@ -70315,6 +70380,26 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       };
     }
 
+    /** Normalize cached technical-foundation API body (or bare `data`) for Traditional SEO + signal maps. */
+    function traditionalSeoReadTechFoundation(techPayload) {
+      if (!techPayload || typeof techPayload !== 'object') {
+        return { data: null, robots: null, sitemap: null };
+      }
+      const status = String(techPayload.status || '').toLowerCase();
+      if (status === 'error') return { data: null, robots: null, sitemap: null };
+      let data = null;
+      if (techPayload.data && (techPayload.data.robots || techPayload.data.sitemap || techPayload.data.indexability)) {
+        data = techPayload.data;
+      } else if (techPayload.robots || techPayload.sitemap || techPayload.indexability) {
+        data = techPayload;
+      }
+      return {
+        data,
+        robots: data?.robots || null,
+        sitemap: data?.sitemap || null
+      };
+    }
+
     function traditionalSeoBuildSignalMaps(audit, payloads, propertyUrl = '') {
       const maps = {
         schemaPage: new Map(),
@@ -70335,8 +70420,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         });
       });
 
-      const techRows = Array.isArray(payloads?.tech?.data?.indexability?.results)
-        ? payloads.tech.data.indexability.results
+      const techFoundation = traditionalSeoReadTechFoundation(payloads?.tech);
+      const techRows = Array.isArray(techFoundation?.data?.indexability?.results)
+        ? techFoundation.data.indexability.results
         : [];
       techRows.forEach((row) => {
         const key = toKey(row?.url);
@@ -70417,12 +70503,37 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (path.includes('/thank-you')) return 'warn';
         return 'pass';
       }
-      if (key === 'https_enforced') return String(url).startsWith('https://') ? 'pass' : 'fail';
+      if (key === 'https_enforced') {
+        if (String(tier || '').toLowerCase() === 'sitewide') {
+          const pu = String(context?.propertyUrl || '').trim();
+          if (pu) {
+            try {
+              const raw = /^https?:\/\//i.test(pu) ? pu : `https://${pu}`;
+              const proto = new URL(raw).protocol;
+              if (proto === 'https:') return 'pass';
+              if (proto === 'http:') return 'fail';
+            } catch (err) {
+              // fall through to URL sample
+            }
+          }
+          const list = Array.isArray(context?.evaluatedUrls) ? context.evaluatedUrls : [];
+          if (!list.length) return 'warn';
+          return list.every((u) => String(u).startsWith('https://')) ? 'pass' : 'fail';
+        }
+        return String(url).startsWith('https://') ? 'pass' : 'fail';
+      }
       if (key === 'sitemap_declared' || key === 'robots_fetchable') {
-        const sitewideSignal = key === 'sitemap_declared'
-          ? context?.payloads?.tech?.data?.sitemap?.pass
-          : context?.payloads?.tech?.data?.robots?.pass;
-        if (typeof sitewideSignal === 'boolean') return sitewideSignal ? 'pass' : 'fail';
+        const tf = context?.techFoundation || traditionalSeoReadTechFoundation(context?.payloads?.tech);
+        if (key === 'sitemap_declared') {
+          const sm = tf?.sitemap;
+          if (sm && typeof sm.pass === 'boolean') return sm.pass ? 'pass' : 'fail';
+          if (tf?.data && !sm) return 'warn';
+        }
+        if (key === 'robots_fetchable') {
+          const rb = tf?.robots;
+          if (rb && typeof rb.exists === 'boolean') return rb.exists ? 'pass' : 'fail';
+          if (tf?.data && !rb) return 'warn';
+        }
         if (techScore >= 75) return 'pass';
         if (techScore >= 45) return 'warn';
         return 'fail';
@@ -70534,6 +70645,77 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       });
     }
 
+    function traditionalSeoRenderUrlHealthStrip(rows) {
+      const target = document.getElementById('traditional-seo-url-health');
+      if (!target) return;
+      const pageRows = (Array.isArray(rows) ? rows : []).filter((r) => String(r?.tier || '').toLowerCase() !== 'sitewide');
+      const rankByUrl = new Map();
+      pageRows.forEach((row) => {
+        const u = String(row?.url || '').trim();
+        if (!u) return;
+        const st = String(row?.status || 'fail').toLowerCase();
+        const rank = st === 'fail' ? 0 : st === 'warn' ? 1 : 2;
+        const prev = rankByUrl.get(u);
+        if (prev === undefined || rank < prev) rankByUrl.set(u, rank);
+      });
+      let failU = 0;
+      let warnU = 0;
+      let passU = 0;
+      rankByUrl.forEach((rank) => {
+        if (rank === 0) failU += 1;
+        else if (rank === 1) warnU += 1;
+        else passU += 1;
+      });
+      const totalU = rankByUrl.size;
+      const sw = (Array.isArray(rows) ? rows : []).filter((r) => String(r?.tier || '').toLowerCase() === 'sitewide').length;
+      target.innerHTML = [
+        `<span class="traditional-seo-health-chip">Page URLs: <strong>${totalU}</strong></span>`,
+        `<span class="traditional-seo-health-chip">URLs w/ any <strong>fail</strong>: <strong>${failU}</strong></span>`,
+        `<span class="traditional-seo-health-chip">URLs worst <strong>warn</strong> (no fail): <strong>${warnU}</strong></span>`,
+        `<span class="traditional-seo-health-chip">URLs all <strong>pass</strong>: <strong>${passU}</strong></span>`,
+        `<span class="traditional-seo-health-chip">Site-wide rows: <strong>${sw}</strong></span>`
+      ].join('');
+    }
+
+    function traditionalSeoRenderRuleSummaryTable(rows, rules) {
+      const body = document.getElementById('traditional-seo-rule-summary-body');
+      if (!body) return;
+      const list = Array.isArray(rules) ? rules : [];
+      const rowList = Array.isArray(rows) ? rows : [];
+      if (!list.length || !rowList.length) {
+        body.innerHTML = '<tr><td colspan="7" style="color: var(--dark-text-muted);">Run the audit to see aggregated counts.</td></tr>';
+        return;
+      }
+      const counts = new Map();
+      rowList.forEach((row) => {
+        const k = String(row.rule_key || '');
+        if (!counts.has(k)) counts.set(k, { pass: 0, warn: 0, fail: 0, total: 0 });
+        const b = counts.get(k);
+        const s = String(row.status || 'fail').toLowerCase();
+        b.total += 1;
+        if (s === 'pass') b.pass += 1;
+        else if (s === 'warn') b.warn += 1;
+        else b.fail += 1;
+      });
+      body.innerHTML = list.map((rule) => {
+        const rk = String(rule.rule_key || '');
+        const c = counts.get(rk) || { pass: 0, warn: 0, fail: 0, total: 0 };
+        const worst = c.fail > 0 ? 'fail' : (c.warn > 0 ? 'warn' : 'pass');
+        const scope = String(rule.scope || 'page').toLowerCase();
+        const keyAttr = traditionalSeoEscapeAttr(rk);
+        return `
+          <tr data-rule-key="${keyAttr}">
+            <td>${escapeHtml(String(rule.rule_name || rk))}</td>
+            <td>${escapeHtml(scope)}</td>
+            <td style="text-align:right;">${c.pass}</td>
+            <td style="text-align:right;">${c.warn}</td>
+            <td style="text-align:right;">${c.fail}</td>
+            <td style="text-align:right;">${c.total}</td>
+            <td>${traditionalSeoStatusPill(worst)}</td>
+          </tr>`;
+      }).join('');
+    }
+
     function renderTraditionalSeoDrilldownTiles(rows) {
       const target = document.getElementById('traditional-seo-drilldown-tiles');
       if (!target) return;
@@ -70559,8 +70741,6 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       traditionalSeoPopulateTierFilter(TRADITIONAL_SEO_STATE.tierUrlCountsMap);
       const body = document.getElementById('traditional-seo-results-body');
       const meta = document.getElementById('traditional-seo-results-meta');
-      if (!body) return;
-
       const countMap = TRADITIONAL_SEO_STATE.tierUrlCountsMap || {};
       const f = TRADITIONAL_SEO_STATE.filters || {};
       const filtered = rows.filter((row) => {
@@ -70590,18 +70770,24 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         return sortDirection === 'desc' ? (diff * -1) : diff;
       });
 
-      if (!filtered.length) {
-        body.innerHTML = '<tr><td colspan="6" style="color: var(--dark-text-muted);">No rows match current filters.</td></tr>';
-      } else {
-        body.innerHTML = filtered.slice(0, 700).map((row) => {
-          const tierLabel = escapeHtml(traditionalSeoTierCellLabel(row.tier, countMap));
-          const urlRaw = String(row.url || '');
-          const href = traditionalSeoSafeExternalHref(urlRaw);
-          const urlInner = escapeHtml(urlRaw);
-          const urlCell = href
-            ? `<a class="traditional-seo-url-link" href="${traditionalSeoEscapeAttr(href)}" target="_blank" rel="noopener noreferrer">${urlInner}</a>`
-            : urlInner;
-          return `
+      traditionalSeoRenderUrlHealthStrip(rows);
+      const summaryRules = (TRADITIONAL_SEO_STATE.rules || []).filter((r) => r.enabled !== false);
+      traditionalSeoRenderRuleSummaryTable(rows, summaryRules.length ? summaryRules : (TRADITIONAL_SEO_STATE.rules || []));
+
+      if (body) {
+        if (!filtered.length) {
+          body.innerHTML = '<tr><td colspan="6" style="color: var(--dark-text-muted);">No rows match current filters.</td></tr>';
+        } else {
+          body.innerHTML = filtered.slice(0, 700).map((row) => {
+            const tierLabel = escapeHtml(traditionalSeoTierCellLabel(row.tier, countMap));
+            const urlRaw = String(row.url || '');
+            const isSitewide = String(row.tier || '').toLowerCase() === 'sitewide';
+            const href = isSitewide ? '' : traditionalSeoSafeExternalHref(urlRaw);
+            const urlInner = escapeHtml(urlRaw);
+            const urlCell = href
+              ? `<a class="traditional-seo-url-link" href="${traditionalSeoEscapeAttr(href)}" target="_blank" rel="noopener noreferrer">${urlInner}</a>`
+              : urlInner;
+            return `
           <tr>
             <td>${tierLabel}</td>
             <td>${escapeHtml(String(row.rule_name || row.rule_key || 'rule'))}</td>
@@ -70611,7 +70797,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             <td>${Math.round(traditionalSeoToNum(row.impressions, 0))}</td>
           </tr>
         `;
-        }).join('');
+          }).join('');
+        }
       }
 
       if (meta) {
@@ -70648,18 +70835,24 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         TRADITIONAL_SEO_STATE.sourceParity = sourceParity;
         renderTraditionalSeoSourceParity(sourceParity);
         const rules = collectTraditionalSeoRulesFromTable().filter((rule) => rule.enabled !== false);
+        const techFoundation = traditionalSeoReadTechFoundation(implPayloads.tech);
         const context = {
           techScore: traditionalSeoToNum(audit?.scores?.technicalBasics?.score ?? audit?.scores?.technical?.score, 70),
           schemaScore: traditionalSeoToNum(audit?.scores?.contentSchema?.score ?? audit?.scores?.schemaScore, 70),
           payloads: implPayloads,
+          techFoundation,
+          propertyUrl,
+          evaluatedUrls: urls,
           signalMaps
         };
 
         const rows = [];
+        const pageRules = rules.filter((r) => String(r.scope || 'page').toLowerCase() !== 'sitewide');
+        const siteRules = rules.filter((r) => String(r.scope || 'page').toLowerCase() === 'sitewide');
         urls.forEach((url) => {
           const tier = String(resolveTier(url) || 'unmapped');
           const metric = metricLookup.get(url) || { clicks: 0, impressions: 0 };
-          rules.forEach((rule) => {
+          pageRules.forEach((rule) => {
             const status = traditionalSeoRuleStatusForUrl(rule, url, tier, metric, context);
             rows.push({
               rule_key: rule.rule_key,
@@ -70671,6 +70864,23 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               clicks: metric.clicks || 0,
               impressions: metric.impressions || 0
             });
+          });
+        });
+
+        const siteRowUrl = traditionalSeoNormalizeUrl(propertyUrl, propertyUrl)
+          || (urls.length ? String(urls[0]) : 'Site-wide (set property URL)');
+        const siteMetric = { clicks: 0, impressions: 0 };
+        siteRules.forEach((rule) => {
+          const status = traditionalSeoRuleStatusForUrl(rule, siteRowUrl, 'sitewide', siteMetric, context);
+          rows.push({
+            rule_key: rule.rule_key,
+            rule_name: rule.rule_name,
+            rule_category: String(rule.category || 'general').toLowerCase(),
+            url: siteRowUrl,
+            tier: 'sitewide',
+            status,
+            clicks: 0,
+            impressions: 0
           });
         });
 
@@ -71039,6 +71249,19 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (drillWrap && !drillWrap.dataset.wired) {
         drillWrap.dataset.wired = '1';
         drillWrap.addEventListener('click', onStatusDrill);
+      }
+      const ruleSummaryTable = document.getElementById('traditional-seo-rule-summary-table');
+      if (ruleSummaryTable && !ruleSummaryTable.dataset.wired) {
+        ruleSummaryTable.dataset.wired = '1';
+        ruleSummaryTable.addEventListener('click', (event) => {
+          const tr = event.target instanceof Element ? event.target.closest('tr[data-rule-key]') : null;
+          if (!tr) return;
+          const rk = String(tr.getAttribute('data-rule-key') || '').trim();
+          if (!rk) return;
+          TRADITIONAL_SEO_STATE.filters.rule = rk;
+          if (ruleFilter) ruleFilter.value = rk;
+          renderTraditionalSeoResultsTable();
+        });
       }
     }
 
