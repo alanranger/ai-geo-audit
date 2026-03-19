@@ -400,7 +400,73 @@ function evaluateExtractability(html, jsonLdBlocks = [], pageUrl = '') {
   };
 }
 
+function plainTextFromHtmlFragment(fragment = '') {
+  return String(fragment || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Counts used by Traditional SEO dashboard (H1, images, outbound links). */
+function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
+  const out = {
+    h1Count: 0,
+    firstH1PlainLength: 0,
+    imgTotal: 0,
+    imgMissingAlt: 0,
+    extOutboundCount: 0,
+    extMissingTargetBlank: 0
+  };
+  const source = String(html || '');
+  const h1Matches = [...source.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)];
+  out.h1Count = h1Matches.length;
+  if (h1Matches[0]) out.firstH1PlainLength = plainTextFromHtmlFragment(h1Matches[0][1]).length;
+
+  const imgMatches = [...source.matchAll(/<img\b[^>]*>/gi)];
+  imgMatches.forEach((match) => {
+    const tag = match[0];
+    out.imgTotal += 1;
+    const altMatch = /\balt\s*=\s*["']([^"']*)["']/i.exec(tag);
+    const altVal = altMatch ? String(altMatch[1]).trim() : '';
+    if (!altVal) out.imgMissingAlt += 1;
+  });
+
+  let pageHost = '';
+  try {
+    pageHost = new URL(String(pageUrl || '').trim()).hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    pageHost = '';
+  }
+  const anchorMatches = [...source.matchAll(/<a\b([^>]*)>/gi)];
+  anchorMatches.forEach((match) => {
+    const inner = match[1] || '';
+    const hrefMatch = /\bhref\s*=\s*["']([^"']+)["']/i.exec(inner);
+    if (!hrefMatch) return;
+    const rawHref = String(hrefMatch[1] || '').trim();
+    if (!rawHref || rawHref.startsWith('#') || /^javascript:/i.test(rawHref)) return;
+    let absUrl;
+    try {
+      absUrl = new URL(rawHref, pageUrl);
+    } catch {
+      return;
+    }
+    const host = absUrl.hostname.replace(/^www\./i, '').toLowerCase();
+    if (!host || !pageHost || host === pageHost) return;
+    out.extOutboundCount += 1;
+    if (!/\btarget\s*=\s*["']?_blank["']?/i.test(inner)) out.extMissingTargetBlank += 1;
+  });
+  return out;
+}
+
 async function checkUrl(url, tierLookup = null) {
+  const seoNone = {
+    seoH1Count: 0,
+    seoFirstH1Length: 0,
+    seoImgTotal: 0,
+    seoImgMissingAlt: 0,
+    seoExtOutbound: 0,
+    seoExtMissingTargetBlank: 0
+  };
   const pageTier = getTierForUrl(url, tierLookup);
   const preflightExclusionReason = getPreflightExclusionReason(url);
   if (preflightExclusionReason) {
@@ -418,7 +484,8 @@ async function checkUrl(url, tierLookup = null) {
       hasLastUpdated: false,
       issues: [],
       excludedFromAudit: true,
-      exclusionReason: preflightExclusionReason
+      exclusionReason: preflightExclusionReason,
+      ...seoNone
     };
   }
   try {
@@ -445,7 +512,8 @@ async function checkUrl(url, tierLookup = null) {
         hasDirectAnswer: false,
         hasFaq: false,
         hasLastUpdated: false,
-        issues: [`HTTP ${response.status}: ${response.statusText}`]
+        issues: [`HTTP ${response.status}: ${response.statusText}`],
+        ...seoNone
       };
     }
     const html = await response.text();
@@ -467,13 +535,15 @@ async function checkUrl(url, tierLookup = null) {
         excludedFromAudit: true,
         exclusionReason: 'Meta/X-Robots noindex page (excluded from actionable extractability scope)',
         xRobotsTag: noindexSignals.xRobotsTag || '',
-        metaRobots: noindexSignals.metaRobots || ''
+        metaRobots: noindexSignals.metaRobots || '',
+        ...seoNone
       };
     }
     const htmlForChecks = await enrichHtmlWithSnippetLoaderContent(url, html);
     const jsonLdBlocks = findJsonLdBlocks(htmlForChecks);
     const result = evaluateExtractability(htmlForChecks, jsonLdBlocks, url);
     const plainText = stripHtmlToText(htmlForChecks);
+    const seo = analyzeTraditionalSeoHtmlSignals(htmlForChecks, url);
     return {
       url,
       pageTier,
@@ -489,7 +559,13 @@ async function checkUrl(url, tierLookup = null) {
       issues: result.issues || [],
       textLength: plainText.length,
       excludedFromAudit: false,
-      exclusionReason: ''
+      exclusionReason: '',
+      seoH1Count: seo.h1Count,
+      seoFirstH1Length: seo.firstH1PlainLength,
+      seoImgTotal: seo.imgTotal,
+      seoImgMissingAlt: seo.imgMissingAlt,
+      seoExtOutbound: seo.extOutboundCount,
+      seoExtMissingTargetBlank: seo.extMissingTargetBlank
     };
   } catch (error) {
     return {
@@ -506,7 +582,8 @@ async function checkUrl(url, tierLookup = null) {
       hasLastUpdated: false,
       issues: [error?.message || 'Request failed'],
       excludedFromAudit: false,
-      exclusionReason: ''
+      exclusionReason: '',
+      ...seoNone
     };
   }
 }
