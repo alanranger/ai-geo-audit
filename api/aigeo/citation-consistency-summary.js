@@ -40,6 +40,50 @@ const sanitizeCitationRows = (rows) => {
   return output;
 };
 
+const isGenericFallbackRow = (row) => {
+  const domain = String(row?.directory_domain || '').toLowerCase().trim();
+  const source = String(row?.source_url || '').trim().toLowerCase();
+  const fetchError = String(row?.fetch_error || '').toLowerCase();
+  const canonicalFallback = domain ? `https://${domain}/` : '';
+  return source === canonicalFallback || fetchError.includes('no indexed listing candidate found');
+};
+
+const toTimestamp = (value) => {
+  const ts = Date.parse(String(value || ''));
+  return Number.isFinite(ts) ? ts : 0;
+};
+
+const pickPreferredDirectoryRow = (current, candidate) => {
+  const currentGeneric = isGenericFallbackRow(current);
+  const candidateGeneric = isGenericFallbackRow(candidate);
+  if (currentGeneric !== candidateGeneric) return candidateGeneric ? current : candidate;
+
+  const currentScore = Number(current?.consistency_score || 0);
+  const candidateScore = Number(candidate?.consistency_score || 0);
+  if (currentScore !== candidateScore) return candidateScore > currentScore ? candidate : current;
+
+  const currentSignals = Array.isArray(current?.matched_signals) ? current.matched_signals.length : 0;
+  const candidateSignals = Array.isArray(candidate?.matched_signals) ? candidate.matched_signals.length : 0;
+  if (currentSignals !== candidateSignals) return candidateSignals > currentSignals ? candidate : current;
+
+  return toTimestamp(candidate?.last_seen_at) > toTimestamp(current?.last_seen_at) ? candidate : current;
+};
+
+const collapseCitationRowsByDirectory = (rows) => {
+  const byDirectory = new Map();
+  for (const row of rows || []) {
+    const key = String(row?.directory_domain || '').toLowerCase().trim();
+    if (!key) continue;
+    const existing = byDirectory.get(key);
+    if (!existing) {
+      byDirectory.set(key, row);
+      continue;
+    }
+    byDirectory.set(key, pickPreferredDirectoryRow(existing, row));
+  }
+  return [...byDirectory.values()];
+};
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return sendJson(res, 200, { status: 'ok' });
   if (req.method !== 'GET') {
@@ -103,10 +147,11 @@ export default async function handler(req, res) {
     }
 
     const rows = sanitizeCitationRows(Array.isArray(entryRows) ? entryRows : []);
-    const driftRows = rows.filter((row) => String(row.status || '').toLowerCase() !== 'pass');
-    const alertsCount = rows.filter((row) => ['alert', 'critical'].includes(String(row.alert_level || '').toLowerCase())).length;
-    const averageScore = rows.length
-      ? Math.round(rows.reduce((sum, row) => sum + Number(row.consistency_score || 0), 0) / rows.length)
+    const collapsedRows = collapseCitationRowsByDirectory(rows);
+    const driftRows = collapsedRows.filter((row) => String(row.status || '').toLowerCase() !== 'pass');
+    const alertsCount = collapsedRows.filter((row) => ['alert', 'critical'].includes(String(row.alert_level || '').toLowerCase())).length;
+    const averageScore = collapsedRows.length
+      ? Math.round(collapsedRows.reduce((sum, row) => sum + Number(row.consistency_score || 0), 0) / collapsedRows.length)
       : 0;
 
     return sendJson(res, 200, {
@@ -115,7 +160,7 @@ export default async function handler(req, res) {
         latestRun,
         stats: {
           windowDays: days,
-          entriesChecked: rows.length,
+          entriesChecked: collapsedRows.length,
           driftCount: driftRows.length,
           alerts: alertsCount,
           averageScore
