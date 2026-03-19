@@ -8083,18 +8083,23 @@
             </div>
           </div>
           <p id="traditional-seo-page-modal-hint" style="margin:0.6rem 0 0.5rem;font-size:0.76rem;color:#94a3b8;"></p>
+          <div style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;margin-top:0.35rem;">
+            <button type="button" class="btn" id="traditional-seo-modal-save-bypasses" style="padding:0.4rem 0.75rem;font-size:0.8rem;">Save admin bypasses for this URL</button>
+            <span id="traditional-seo-modal-bypass-hint" style="font-size:0.72rem;color:#94a3b8;">Check “Bypass rule” to force pass on future audits; save to persist in Supabase.</span>
+          </div>
           <div class="traditional-seo-table-wrap" style="max-height:min(62vh,640px);overflow:auto;margin-top:0.5rem;border-radius:8px;border:1px solid rgba(148,163,184,0.2);">
             <table class="traditional-seo-table" style="margin:0;" id="traditional-seo-page-modal-table">
               <thead>
                 <tr>
-                  <th style="width:28%;">Rule</th>
-                  <th style="width:14%;">Factor</th>
-                  <th style="width:12%;">Status</th>
+                  <th style="width:24%;">Rule</th>
+                  <th style="width:12%;">Factor</th>
+                  <th style="width:11%;">Status</th>
+                  <th style="width:15%;">Bypass rule</th>
                   <th>Note</th>
                 </tr>
               </thead>
               <tbody id="traditional-seo-page-modal-body">
-                <tr><td colspan="4" style="color:#94a3b8;">No data.</td></tr>
+                <tr><td colspan="5" style="color:#94a3b8;">No data.</td></tr>
               </tbody>
             </table>
           </div>
@@ -69998,7 +70003,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       ruleSummarySort: {
         key: 'rule_name',
         direction: 'asc'
-      }
+      },
+      ruleBypassByPage: null,
+      ruleOverridesProperty: ''
     };
 
     const TRADITIONAL_SEO_SEGMENTATION_SOURCES = [
@@ -70466,6 +70473,104 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return traditionalSeoToComparableUrl(rawUrl, propertyUrl)
         || traditionalSeoNormalizeUrl(rawUrl, propertyUrl)
         || String(rawUrl || '').trim();
+    }
+
+    function traditionalSeoOverridePageKey(pageUrl) {
+      const prop = String(TRADITIONAL_SEO_STATE.lastPropertyUrl || traditionalSeoPropertyUrl() || '').trim();
+      return traditionalSeoToComparableUrl(pageUrl, prop) || traditionalSeoNormalizeUrl(pageUrl, prop) || String(pageUrl || '').trim();
+    }
+
+    function traditionalSeoHasRuleBypass(pageUrl, ruleKey) {
+      const map = TRADITIONAL_SEO_STATE.ruleBypassByPage;
+      if (!map || typeof map.get !== 'function') return false;
+      const pk = traditionalSeoOverridePageKey(pageUrl);
+      return map.get(pk)?.has(String(ruleKey || '').trim()) === true;
+    }
+
+    function traditionalSeoApplyBypassMapFromRows(overrideRows) {
+      const prop = String(traditionalSeoPropertyUrl() || '').trim();
+      const map = new Map();
+      (Array.isArray(overrideRows) ? overrideRows : []).forEach((o) => {
+        const pk = traditionalSeoToComparableUrl(o.page_url, prop) || String(o.page_url || '').trim();
+        const rk = String(o.rule_key || '').trim();
+        if (!pk || !rk) return;
+        if (!map.has(pk)) map.set(pk, new Set());
+        map.get(pk).add(rk);
+      });
+      TRADITIONAL_SEO_STATE.ruleBypassByPage = map;
+      TRADITIONAL_SEO_STATE.ruleOverridesProperty = prop;
+    }
+
+    async function traditionalSeoEnsureRuleOverridesLoaded() {
+      const prop = String(traditionalSeoPropertyUrl() || '').trim();
+      if (TRADITIONAL_SEO_STATE.ruleOverridesProperty === prop && TRADITIONAL_SEO_STATE.ruleBypassByPage instanceof Map) return;
+      const params = new URLSearchParams();
+      if (prop) params.set('propertyUrl', prop);
+      const url = traditionalSeoApiPath(`/api/aigeo/traditional-seo-rule-overrides?${params.toString()}`);
+      const res = await fetch(url, { cache: 'no-store' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || String(json?.status || '').toLowerCase() !== 'ok') {
+        TRADITIONAL_SEO_STATE.ruleBypassByPage = new Map();
+        TRADITIONAL_SEO_STATE.ruleOverridesProperty = prop;
+        return;
+      }
+      traditionalSeoApplyBypassMapFromRows(json.overrides);
+    }
+
+    async function traditionalSeoSavePageBypasses(pageUrl, bypassRuleKeys) {
+      const propertyUrl = String(traditionalSeoPropertyUrl() || '').trim();
+      const pageKey = traditionalSeoOverridePageKey(pageUrl);
+      const res = await fetch(traditionalSeoApiPath('/api/aigeo/traditional-seo-rule-overrides'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ propertyUrl, pageUrl: pageKey, bypassRuleKeys })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || String(json?.status || '').toLowerCase() !== 'ok') {
+        throw new Error(json?.message || `HTTP ${res.status}`);
+      }
+      traditionalSeoApplyBypassMapFromRows(json.overrides);
+    }
+
+    function traditionalSeoReapplyBypassesToAllRows() {
+      const rows = TRADITIONAL_SEO_STATE.evaluationRows;
+      if (!Array.isArray(rows)) return;
+      rows.forEach((row) => {
+        const raw = row.raw_status != null ? row.raw_status : row.status;
+        row.raw_status = raw;
+        if (String(row?.tier || '').toLowerCase() === 'sitewide') {
+          row.status = raw;
+          row.bypassed = false;
+          return;
+        }
+        const bypass = traditionalSeoHasRuleBypass(row.url, row.rule_key);
+        row.status = bypass ? 'pass' : raw;
+        row.bypassed = bypass && String(raw || '').toLowerCase() !== 'pass';
+      });
+      const hitsByUrl = new Map();
+      rows.forEach((row) => {
+        if (String(row?.tier || '').toLowerCase() === 'sitewide') return;
+        const u = String(row?.url || '');
+        if (!u) return;
+        if (!hitsByUrl.has(u)) hitsByUrl.set(u, []);
+        hitsByUrl.get(u).push(row);
+      });
+      const pageScoreByUrl = new Map();
+      hitsByUrl.forEach((pageHits, u) => {
+        pageScoreByUrl.set(u, traditionalSeoPageScoreDetailFromHits(pageHits).score);
+      });
+      TRADITIONAL_SEO_STATE.pageScoreByUrl = pageScoreByUrl;
+    }
+
+    function traditionalSeoRefreshRulesSummaryFromEvaluationRows() {
+      const nextRules = (TRADITIONAL_SEO_STATE.rules || []).map((rule) => ({
+        ...rule,
+        current_status: traditionalSeoAggregateRuleStatus(TRADITIONAL_SEO_STATE.evaluationRows, rule.rule_key)
+      }));
+      TRADITIONAL_SEO_STATE.rules = nextRules;
+      renderTraditionalSeoRules(nextRules);
+      const evalSummary = computeTraditionalSeoSummary(nextRules);
+      renderTraditionalSeoScore(evalSummary, traditionalSeoComputeScoreDelta(evalSummary));
     }
 
     function traditionalSeoSignalMapGet(map, rawUrl, propertyUrl = '') {
@@ -71312,24 +71417,34 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         urlEl.textContent = target || '—';
       }
       if (hintEl) {
-        hintEl.textContent = 'Score uses the same rule weights as the dashboard summary (pass=1, warn=0.5, fail=0). “Warn” rows are often guardrails; fails are priority fixes.';
+        hintEl.textContent = 'Score uses the same rule weights as the dashboard summary (pass=1, warn=0.5, fail=0). Admin bypasses force pass per URL and persist after save.';
       }
       if (!hits.length) {
         if (ringEl) ringEl.style.background = traditionalSeoDonutBackground(0, 0, 0);
         if (centerEl) centerEl.textContent = '—';
         if (bigEl) bigEl.textContent = '—';
-        bodyEl.innerHTML = '<tr><td colspan="4" style="color:#94a3b8;">No stored results for this URL — run Traditional SEO Audit.</td></tr>';
+        bodyEl.innerHTML = '<tr><td colspan="5" style="color:#94a3b8;">No stored results for this URL — run Traditional SEO Audit.</td></tr>';
       } else {
         bodyEl.innerHTML = hits.map((row) => {
           const rk = String(row.rule_key || '');
           const rule = meta.get(rk) || {};
           const note = traditionalSeoModalNoteForRule(row, rule, target);
+          const isWide = String(row?.tier || '').toLowerCase() === 'sitewide';
+          const bypassChecked = traditionalSeoHasRuleBypass(target, rk);
+          const bypassCell = isWide
+            ? '<td style="color:#64748b;font-size:0.72rem;">—</td>'
+            : `<td><label style="font-size:0.72rem;color:#cbd5e1;display:flex;align-items:center;gap:0.35rem;cursor:pointer;">
+              <input type="checkbox" class="traditional-seo-bypass-cb" data-rule-key="${traditionalSeoEscapeAttr(rk)}" ${bypassChecked ? 'checked' : ''}>
+              <span>Bypass</span>
+            </label></td>`;
+          const notePrefix = row.bypassed ? 'Admin bypass active (raw was not pass). ' : '';
           return `
             <tr>
               <td>${escapeHtml(String(row.rule_name || rk))}</td>
               <td>${escapeHtml(String(row.rule_category || rule.category || 'general'))}</td>
               <td>${traditionalSeoStatusPill(row.status)}</td>
-              <td style="font-size:0.76rem;color:#94a3b8;">${escapeHtml(note)}</td>
+              ${bypassCell}
+              <td style="font-size:0.76rem;color:#94a3b8;">${escapeHtml(notePrefix)}${escapeHtml(note)}</td>
             </tr>`;
         }).join('');
       }
@@ -71341,6 +71456,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const backdrop = document.getElementById('traditional-seo-page-modal');
       const closeBtn = document.getElementById('traditional-seo-page-modal-close');
       const reauditBtn = document.getElementById('traditional-seo-page-modal-reaudit');
+      const saveBypassBtn = document.getElementById('traditional-seo-modal-save-bypasses');
       if (backdrop && !backdrop.dataset.wired) {
         backdrop.dataset.wired = '1';
         backdrop.addEventListener('click', (e) => {
@@ -71355,6 +71471,33 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         reauditBtn.dataset.wired = '1';
         reauditBtn.addEventListener('click', () => {
           Promise.resolve(traditionalSeoReauditModalPage()).catch(() => {});
+        });
+      }
+      if (saveBypassBtn && !saveBypassBtn.dataset.wired) {
+        saveBypassBtn.dataset.wired = '1';
+        saveBypassBtn.addEventListener('click', () => {
+          const pageUrl = String(TRADITIONAL_SEO_STATE.modalPageUrl || '').trim();
+          if (!pageUrl) return;
+          const keys = Array.from(document.querySelectorAll('#traditional-seo-page-modal-body .traditional-seo-bypass-cb:checked'))
+            .map((el) => String(el.getAttribute('data-rule-key') || '').trim())
+            .filter(Boolean);
+          saveBypassBtn.disabled = true;
+          Promise.resolve(traditionalSeoSavePageBypasses(pageUrl, keys))
+            .then(() => {
+              traditionalSeoReapplyBypassesToAllRows();
+              traditionalSeoRefreshRulesSummaryFromEvaluationRows();
+              renderTraditionalSeoResultsTable();
+              traditionalSeoOpenPageModal(pageUrl);
+              if (typeof window.showStatus === 'function') window.showStatus('Admin bypasses saved for this URL.', 'success');
+            })
+            .catch((err) => {
+              if (typeof window.showStatus === 'function') {
+                window.showStatus(`Save bypasses failed: ${err?.message || err}`, 'error');
+              }
+            })
+            .finally(() => {
+              saveBypassBtn.disabled = false;
+            });
         });
       }
     }
@@ -71475,6 +71618,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
         TRADITIONAL_SEO_STATE.lastSignalMaps = signalMaps;
         TRADITIONAL_SEO_STATE.lastPropertyUrl = propertyUrl;
+        await traditionalSeoEnsureRuleOverridesLoaded();
         const sourceParity = await traditionalSeoComputeSourceParity(propertyUrl);
         TRADITIONAL_SEO_STATE.sourceParity = sourceParity;
         renderTraditionalSeoSourceParity(sourceParity);
@@ -71498,7 +71642,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           const norm = traditionalSeoNormalizeUrl(url, propertyUrl) || url;
           const metric = metricLookup.get(url) || metricLookup.get(norm) || { clicks: 0, impressions: 0 };
           pageRules.forEach((rule) => {
-            const status = traditionalSeoRuleStatusForUrl(rule, url, tier, metric, context);
+            const rawStatus = traditionalSeoRuleStatusForUrl(rule, url, tier, metric, context);
+            const bypass = traditionalSeoHasRuleBypass(url, rule.rule_key);
+            const status = bypass ? 'pass' : rawStatus;
             rows.push({
               rule_key: rule.rule_key,
               rule_name: rule.rule_name,
@@ -71506,6 +71652,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               url,
               tier,
               status,
+              raw_status: rawStatus,
+              bypassed: bypass && String(rawStatus || '').toLowerCase() !== 'pass',
               rule_weight: Math.max(0, traditionalSeoToNum(rule.weight, 1)),
               clicks: metric.clicks || 0,
               impressions: metric.impressions || 0
@@ -71517,14 +71665,16 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           || (urls.length ? String(urls[0]) : 'Site-wide (set property URL)');
         const siteMetric = { clicks: 0, impressions: 0 };
         siteRules.forEach((rule) => {
-          const status = traditionalSeoRuleStatusForUrl(rule, siteRowUrl, 'sitewide', siteMetric, context);
+          const rawStatus = traditionalSeoRuleStatusForUrl(rule, siteRowUrl, 'sitewide', siteMetric, context);
           rows.push({
             rule_key: rule.rule_key,
             rule_name: rule.rule_name,
             rule_category: String(rule.category || 'general').toLowerCase(),
             url: siteRowUrl,
             tier: 'sitewide',
-            status,
+            status: rawStatus,
+            raw_status: rawStatus,
+            bypassed: false,
             rule_weight: Math.max(0, traditionalSeoToNum(rule.weight, 1)),
             clicks: 0,
             impressions: 0
@@ -71933,12 +72083,22 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
         renderTraditionalSeoSourceParity(TRADITIONAL_SEO_STATE.sourceParity);
         wireTraditionalSeoButtons();
+        void traditionalSeoEnsureRuleOverridesLoaded()
+          .then(() => {
+            if (Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) && TRADITIONAL_SEO_STATE.evaluationRows.length) {
+              traditionalSeoReapplyBypassesToAllRows();
+              traditionalSeoRefreshRulesSummaryFromEvaluationRows();
+              renderTraditionalSeoResultsTable();
+            }
+          })
+          .catch(() => {});
         return;
       }
       TRADITIONAL_SEO_STATE.loading = true;
       try {
         const payload = await fetchTraditionalSeoRules();
         applyTraditionalSeoPayload(payload || {});
+        await traditionalSeoEnsureRuleOverridesLoaded();
         if (!TRADITIONAL_SEO_STATE.sourceParity) {
           TRADITIONAL_SEO_STATE.sourceParity = await traditionalSeoComputeSourceParity(traditionalSeoPropertyUrl());
           renderTraditionalSeoSourceParity(TRADITIONAL_SEO_STATE.sourceParity);
