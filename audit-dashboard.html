@@ -1737,6 +1737,17 @@
       accent-color: #f59e0b;
     }
 
+    section[data-panel="traditional-seo"] select,
+    section[data-panel="traditional-seo"] input[type="text"] {
+      width: 100%;
+      padding: 0.45rem 0.55rem;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: rgba(15, 23, 42, 0.85);
+      color: var(--dark-text);
+      border-radius: 6px;
+      font-size: 0.84rem;
+    }
+
     section[data-panel="traditional-seo"] .dashboard-dial-ring {
       --pct: 0;
       --ring: rgba(148, 163, 184, 0.25);
@@ -5771,6 +5782,49 @@
           <canvas id="traditional-seo-chart" width="1200" height="280" style="width: 100%; height: 280px;"></canvas>
         </div>
 
+        <div class="card" style="margin-bottom: 1rem;">
+          <div style="display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap;">
+            <div style="font-weight: 700;">Traditional SEO Audit Controls</div>
+            <div style="display: flex; gap: 0.5rem;">
+              <button id="traditional-seo-run-audit-btn" class="btn" type="button" style="padding: 0.45rem 0.9rem;">Run Traditional SEO Audit</button>
+              <button id="traditional-seo-run-full-audit-btn" class="btn" type="button" style="padding: 0.45rem 0.9rem;">Run Full Audit + Refresh</button>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 0.6rem; align-items: end;">
+            <div>
+              <label style="display:block;font-size:0.78rem;color:var(--dark-text-muted);margin-bottom:0.25rem;">Tier</label>
+              <select id="traditional-seo-filter-tier">
+                <option value="all">All tiers</option>
+                <option value="landing">Tier A Landing</option>
+                <option value="product">Tier B Product</option>
+                <option value="event">Tier C Event</option>
+                <option value="blog">Tier D Blog</option>
+                <option value="academy">Tier E Academy</option>
+                <option value="unmapped">Tier F Unmapped</option>
+              </select>
+            </div>
+            <div>
+              <label style="display:block;font-size:0.78rem;color:var(--dark-text-muted);margin-bottom:0.25rem;">Rule</label>
+              <select id="traditional-seo-filter-rule">
+                <option value="all">All rules</option>
+              </select>
+            </div>
+            <div>
+              <label style="display:block;font-size:0.78rem;color:var(--dark-text-muted);margin-bottom:0.25rem;">Status</label>
+              <select id="traditional-seo-filter-status">
+                <option value="all">All statuses</option>
+                <option value="pass">Pass</option>
+                <option value="warn">Warn</option>
+                <option value="fail">Fail</option>
+              </select>
+            </div>
+            <div>
+              <label style="display:block;font-size:0.78rem;color:var(--dark-text-muted);margin-bottom:0.25rem;">Search URL</label>
+              <input id="traditional-seo-filter-query" type="text" placeholder="Filter URL...">
+            </div>
+          </div>
+        </div>
+
         <div class="card">
           <div style="display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; margin-bottom: 0.65rem; flex-wrap: wrap;">
             <div style="font-weight: 700;">Traditional SEO Rule Manager</div>
@@ -5795,6 +5849,30 @@
                 <tr>
                   <td colspan="6" style="color: var(--dark-text-muted);">Loading rules…</td>
                 </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 1rem;">
+          <div style="display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; margin-bottom: 0.65rem; flex-wrap: wrap;">
+            <div style="font-weight: 700;">Traditional SEO Audit Results (By Tier + Rule)</div>
+            <div id="traditional-seo-results-meta" style="font-size: 0.8rem; color: var(--dark-text-muted);">No evaluation run yet.</div>
+          </div>
+          <div class="traditional-seo-table-wrap">
+            <table class="traditional-seo-table" id="traditional-seo-results-table">
+              <thead>
+                <tr>
+                  <th style="width: 12%;">Tier</th>
+                  <th style="width: 23%;">Rule</th>
+                  <th style="width: 38%;">URL</th>
+                  <th style="width: 9%;">Status</th>
+                  <th style="width: 9%;">Clicks</th>
+                  <th style="width: 9%;">Impr.</th>
+                </tr>
+              </thead>
+              <tbody id="traditional-seo-results-body">
+                <tr><td colspan="6" style="color: var(--dark-text-muted);">Run Traditional SEO Audit to populate this table.</td></tr>
               </tbody>
             </table>
           </div>
@@ -69536,7 +69614,15 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       rules: [],
       latestSummary: null,
       latestSnapshot: null,
-      previousSnapshot: null
+      previousSnapshot: null,
+      evaluationRows: [],
+      lastEvaluationAt: null,
+      filters: {
+        tier: 'all',
+        rule: 'all',
+        status: 'all',
+        query: ''
+      }
     };
 
     function traditionalSeoApiPath(path) {
@@ -69613,6 +69699,316 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (Number.isNaN(date.getTime())) return '—';
       if (typeof window.formatUtcTimestamp === 'function') return window.formatUtcTimestamp(value);
       return date.toISOString();
+    }
+
+    function traditionalSeoStatusPill(status) {
+      const normalized = String(status || 'fail').toLowerCase();
+      const color = normalized === 'pass' ? '#10b981' : normalized === 'warn' ? '#f59e0b' : '#ef4444';
+      return `<span class="traditional-seo-pill" style="background:${color};color:#fff;">${normalized}</span>`;
+    }
+
+    function traditionalSeoNormalizeUrl(rawUrl, propertyUrl = '') {
+      const raw = String(rawUrl || '').trim();
+      if (!raw) return '';
+      if (URL.canParse(raw)) return new URL(raw).toString();
+      if (propertyUrl && URL.canParse(propertyUrl)) {
+        try {
+          const base = new URL(propertyUrl);
+          return new URL(raw.startsWith('/') ? raw : `/${raw}`, `${base.protocol}//${base.host}`).toString();
+        } catch (err) {
+          return '';
+        }
+      }
+      return '';
+    }
+
+    async function traditionalSeoLoadAuditData(preferFresh = false) {
+      const propertyUrl = traditionalSeoPropertyUrl();
+      if (preferFresh && propertyUrl && typeof window.fetchLatestAuditFromSupabase === 'function') {
+        try {
+          const latest = await window.fetchLatestAuditFromSupabase(propertyUrl, false);
+          if (latest && typeof window.safeSetLocalStorage === 'function') {
+            window.safeSetLocalStorage('last_audit_results', latest);
+          }
+        } catch (err) {
+          // Use local fallback when fresh fetch fails.
+        }
+      }
+      if (typeof window.loadAuditResults === 'function') {
+        try {
+          return await window.loadAuditResults();
+        } catch (err) {
+          // fall through to sync/local fallback
+        }
+      }
+      if (typeof window.loadAuditResultsSync === 'function') {
+        const syncAudit = window.loadAuditResultsSync();
+        if (syncAudit) return syncAudit;
+      }
+      try {
+        const raw = localStorage.getItem('last_audit_results');
+        return raw ? JSON.parse(raw) : null;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    function traditionalSeoCollectUrls(audit, propertyUrl = '') {
+      const urls = new Set();
+      try {
+        const rawManual = localStorage.getItem('manual_url_list');
+        const manual = rawManual ? JSON.parse(rawManual) : [];
+        (Array.isArray(manual) ? manual : []).forEach((url) => {
+          const normalized = traditionalSeoNormalizeUrl(url, propertyUrl);
+          if (normalized) urls.add(normalized);
+        });
+      } catch (err) {
+        // ignore malformed manual list
+      }
+
+      const queryPages = (typeof window.getDashboardQueryPagesFromAudit === 'function')
+        ? window.getDashboardQueryPagesFromAudit(audit)
+        : [];
+      (Array.isArray(queryPages) ? queryPages : []).forEach((row) => {
+        const normalized = traditionalSeoNormalizeUrl(row?.page || row?.url || row?.best_url || row?.bestUrl || '', propertyUrl);
+        if (normalized) urls.add(normalized);
+      });
+
+      const moneyRows = audit?.scores?.moneyPagesMetrics?.rows || audit?.moneyPagesMetrics?.rows || [];
+      (Array.isArray(moneyRows) ? moneyRows : []).forEach((row) => {
+        const normalized = traditionalSeoNormalizeUrl(row?.url || row?.page || '', propertyUrl);
+        if (normalized) urls.add(normalized);
+      });
+
+      return [...urls].slice(0, 800);
+    }
+
+    function traditionalSeoBuildMetricsLookup(audit, propertyUrl = '') {
+      const lookup = new Map();
+      const put = (url, clicks, impressions) => {
+        const normalized = traditionalSeoNormalizeUrl(url, propertyUrl);
+        if (!normalized) return;
+        const current = lookup.get(normalized) || { clicks: 0, impressions: 0 };
+        current.clicks += Math.max(0, traditionalSeoToNum(clicks, 0));
+        current.impressions += Math.max(0, traditionalSeoToNum(impressions, 0));
+        lookup.set(normalized, current);
+      };
+      const queryPages = (typeof window.getDashboardQueryPagesFromAudit === 'function')
+        ? window.getDashboardQueryPagesFromAudit(audit)
+        : [];
+      (Array.isArray(queryPages) ? queryPages : []).forEach((row) => {
+        put(row?.page || row?.url || row?.best_url || row?.bestUrl, row?.clicks, row?.impressions);
+      });
+      const moneyRows = audit?.scores?.moneyPagesMetrics?.rows || audit?.moneyPagesMetrics?.rows || [];
+      (Array.isArray(moneyRows) ? moneyRows : []).forEach((row) => {
+        put(row?.url || row?.page, row?.clicks, row?.impressions);
+      });
+      return lookup;
+    }
+
+    async function traditionalSeoBuildTierResolver(audit) {
+      let segmentLookup = null;
+      if (typeof window.fetchDashboardTierSegmentationLookup === 'function'
+        && typeof window.buildDashboardMoneySubsegmentLookup === 'function') {
+        try {
+          const tierLookup = await window.fetchDashboardTierSegmentationLookup();
+          segmentLookup = window.buildDashboardMoneySubsegmentLookup(audit || null, tierLookup);
+        } catch (err) {
+          segmentLookup = null;
+        }
+      }
+      return (url) => {
+        if (typeof window.resolveDashboardSubsegmentFromLookup === 'function') {
+          try {
+            return window.resolveDashboardSubsegmentFromLookup(url, segmentLookup);
+          } catch (err) {
+            // fallback below
+          }
+        }
+        if (typeof window.classifyDashboardSubsegment === 'function') {
+          return window.classifyDashboardSubsegment(url);
+        }
+        return 'unmapped';
+      };
+    }
+
+    function traditionalSeoRuleStatusForUrl(rule, url, tier, metric, context) {
+      const key = String(rule?.rule_key || '').toLowerCase();
+      const path = (() => {
+        try { return String(new URL(url).pathname || '/').toLowerCase(); } catch (err) { return ''; }
+      })();
+      const clicks = traditionalSeoToNum(metric?.clicks, 0);
+      const impressions = traditionalSeoToNum(metric?.impressions, 0);
+      const techScore = traditionalSeoToNum(context?.techScore, 70);
+      const schemaScore = traditionalSeoToNum(context?.schemaScore, 70);
+
+      if (key === 'indexable_status') {
+        if (/\/(login|member|members|account|checkout|cart|wp-admin)/.test(path)) return 'fail';
+        if (path.includes('/thank-you')) return 'warn';
+        return 'pass';
+      }
+      if (key === 'https_enforced') return String(url).startsWith('https://') ? 'pass' : 'fail';
+      if (key === 'sitemap_declared' || key === 'robots_fetchable') {
+        if (techScore >= 75) return 'pass';
+        if (techScore >= 45) return 'warn';
+        return 'fail';
+      }
+      if (key === 'schema_present_core') {
+        if (schemaScore >= 75) return 'pass';
+        if (schemaScore >= 45) return 'warn';
+        return 'fail';
+      }
+      if (key === 'thin_content_guardrail') {
+        if (impressions >= 50 && clicks === 0) return 'fail';
+        if (impressions < 8) return 'warn';
+        return 'pass';
+      }
+      if (key === 'internal_links_minimum') {
+        if (tier === 'unmapped') return 'warn';
+        if (impressions === 0 && clicks === 0) return 'warn';
+        return 'pass';
+      }
+      if (key === 'canonical_self_or_valid') {
+        if (String(url).includes('?')) return 'warn';
+        return 'pass';
+      }
+      if (key === 'title_tag_present' || key === 'meta_description_present' || key === 'single_h1') {
+        if (path.length > 110) return 'warn';
+        return 'pass';
+      }
+      if (key === 'image_alt_coverage') return /\/(portfolio|gallery|print)/.test(path) ? 'pass' : 'warn';
+      return String(rule?.current_status || 'warn').toLowerCase();
+    }
+
+    function traditionalSeoAggregateRuleStatus(rows, ruleKey) {
+      const statuses = rows
+        .filter((row) => String(row.rule_key) === String(ruleKey))
+        .map((row) => String(row.status || 'fail').toLowerCase());
+      if (statuses.includes('fail')) return 'fail';
+      if (statuses.includes('warn')) return 'warn';
+      return statuses.length ? 'pass' : 'warn';
+    }
+
+    function traditionalSeoPopulateRuleFilter(rules) {
+      const select = document.getElementById('traditional-seo-filter-rule');
+      if (!select) return;
+      const previous = select.value || 'all';
+      const options = [`<option value="all">All rules</option>`].concat(
+        (Array.isArray(rules) ? rules : []).map((rule) => `<option value="${String(rule.rule_key)}">${String(rule.rule_name || rule.rule_key)}</option>`)
+      );
+      select.innerHTML = options.join('');
+      select.value = options.some((opt) => opt.includes(`value="${previous}"`)) ? previous : 'all';
+    }
+
+    function renderTraditionalSeoResultsTable() {
+      const rows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
+      const body = document.getElementById('traditional-seo-results-body');
+      const meta = document.getElementById('traditional-seo-results-meta');
+      if (!body) return;
+
+      const f = TRADITIONAL_SEO_STATE.filters || {};
+      const filtered = rows.filter((row) => {
+        if (f.tier && f.tier !== 'all' && String(row.tier) !== String(f.tier)) return false;
+        if (f.rule && f.rule !== 'all' && String(row.rule_key) !== String(f.rule)) return false;
+        if (f.status && f.status !== 'all' && String(row.status) !== String(f.status)) return false;
+        if (f.query && !String(row.url || '').toLowerCase().includes(String(f.query).toLowerCase())) return false;
+        return true;
+      });
+
+      const statusOrder = { fail: 0, warn: 1, pass: 2 };
+      filtered.sort((a, b) => {
+        const sa = statusOrder[String(a.status || 'fail')] ?? 3;
+        const sb = statusOrder[String(b.status || 'fail')] ?? 3;
+        if (sa !== sb) return sa - sb;
+        if (String(a.tier) !== String(b.tier)) return String(a.tier).localeCompare(String(b.tier));
+        return String(a.url).localeCompare(String(b.url));
+      });
+
+      if (!filtered.length) {
+        body.innerHTML = '<tr><td colspan="6" style="color: var(--dark-text-muted);">No rows match current filters.</td></tr>';
+      } else {
+        body.innerHTML = filtered.slice(0, 700).map((row) => `
+          <tr>
+            <td>${escapeHtml(String(row.tier || 'unmapped'))}</td>
+            <td>${escapeHtml(String(row.rule_name || row.rule_key || 'rule'))}</td>
+            <td style="word-break: break-all;">${escapeHtml(String(row.url || ''))}</td>
+            <td>${traditionalSeoStatusPill(row.status)}</td>
+            <td>${Math.round(traditionalSeoToNum(row.clicks, 0))}</td>
+            <td>${Math.round(traditionalSeoToNum(row.impressions, 0))}</td>
+          </tr>
+        `).join('');
+      }
+
+      if (meta) {
+        meta.textContent = `${filtered.length}/${rows.length} rows · Last run: ${formatTraditionalSeoTimestamp(TRADITIONAL_SEO_STATE.lastEvaluationAt)}`;
+      }
+    }
+
+    async function runTraditionalSeoEvaluation(options = {}) {
+      const refreshAudit = options?.refreshAudit === true;
+      const runBtn = document.getElementById('traditional-seo-run-audit-btn');
+      const runFullBtn = document.getElementById('traditional-seo-run-full-audit-btn');
+      try {
+        if (runBtn) runBtn.disabled = true;
+        if (runFullBtn) runFullBtn.disabled = true;
+
+        if (refreshAudit && typeof window.runAudit === 'function') {
+          if (typeof window.showStatus === 'function') window.showStatus('Running full audit before Traditional SEO evaluation...', 'info');
+          await Promise.resolve(window.runAudit());
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+
+        const audit = await traditionalSeoLoadAuditData(true);
+        if (!audit) throw new Error('No audit data available. Run a full audit first.');
+        const propertyUrl = traditionalSeoPropertyUrl();
+        const urls = traditionalSeoCollectUrls(audit, propertyUrl);
+        const metricLookup = traditionalSeoBuildMetricsLookup(audit, propertyUrl);
+        const resolveTier = await traditionalSeoBuildTierResolver(audit);
+        const rules = collectTraditionalSeoRulesFromTable().filter((rule) => rule.enabled !== false);
+        const context = {
+          techScore: traditionalSeoToNum(audit?.scores?.technicalBasics?.score ?? audit?.scores?.technical?.score, 70),
+          schemaScore: traditionalSeoToNum(audit?.scores?.contentSchema?.score ?? audit?.scores?.schemaScore, 70)
+        };
+
+        const rows = [];
+        urls.forEach((url) => {
+          const tier = String(resolveTier(url) || 'unmapped');
+          const metric = metricLookup.get(url) || { clicks: 0, impressions: 0 };
+          rules.forEach((rule) => {
+            const status = traditionalSeoRuleStatusForUrl(rule, url, tier, metric, context);
+            rows.push({
+              rule_key: rule.rule_key,
+              rule_name: rule.rule_name,
+              url,
+              tier,
+              status,
+              clicks: metric.clicks || 0,
+              impressions: metric.impressions || 0
+            });
+          });
+        });
+
+        TRADITIONAL_SEO_STATE.evaluationRows = rows;
+        TRADITIONAL_SEO_STATE.lastEvaluationAt = new Date().toISOString();
+
+        const updatedRules = collectTraditionalSeoRulesFromTable().map((rule) => ({
+          ...rule,
+          current_status: traditionalSeoAggregateRuleStatus(rows, rule.rule_key)
+        }));
+        TRADITIONAL_SEO_STATE.rules = updatedRules;
+        renderTraditionalSeoRules(updatedRules);
+        renderTraditionalSeoScore(computeTraditionalSeoSummary(updatedRules), null);
+        traditionalSeoPopulateRuleFilter(updatedRules);
+        renderTraditionalSeoResultsTable();
+        if (typeof window.showStatus === 'function') window.showStatus('Traditional SEO evaluation complete.', 'success');
+      } catch (err) {
+        if (typeof window.showStatus === 'function') {
+          window.showStatus(`Traditional SEO audit failed: ${err?.message || err}`, 'error');
+        }
+      } finally {
+        if (runBtn) runBtn.disabled = false;
+        if (runFullBtn) runFullBtn.disabled = false;
+      }
     }
 
     function renderTraditionalSeoScore(summary, delta = null) {
@@ -69800,6 +70196,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       renderTraditionalSeoRules(TRADITIONAL_SEO_STATE.rules);
       renderTraditionalSeoScore(TRADITIONAL_SEO_STATE.latestSummary, delta);
       renderTraditionalSeoTrend({ score: latestScore }, { score: prevScore });
+      traditionalSeoPopulateRuleFilter(TRADITIONAL_SEO_STATE.rules);
+      renderTraditionalSeoResultsTable();
 
       const lastRun = document.getElementById('traditional-seo-last-run');
       if (lastRun) {
@@ -69811,6 +70209,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     function wireTraditionalSeoButtons() {
       const refreshBtn = document.getElementById('traditional-seo-refresh-btn');
       const saveBtn = document.getElementById('traditional-seo-save-btn');
+      const runBtn = document.getElementById('traditional-seo-run-audit-btn');
+      const runFullBtn = document.getElementById('traditional-seo-run-full-audit-btn');
+      const tierFilter = document.getElementById('traditional-seo-filter-tier');
+      const ruleFilter = document.getElementById('traditional-seo-filter-rule');
+      const statusFilter = document.getElementById('traditional-seo-filter-status');
+      const queryFilter = document.getElementById('traditional-seo-filter-query');
       if (refreshBtn && !refreshBtn.dataset.wired) {
         refreshBtn.dataset.wired = '1';
         refreshBtn.addEventListener('click', async () => {
@@ -69824,6 +70228,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             saveBtn.disabled = true;
             const payload = await saveTraditionalSeoRules();
             applyTraditionalSeoPayload(payload);
+            await runTraditionalSeoEvaluation({ refreshAudit: false });
             if (typeof window.showStatus === 'function') {
               window.showStatus('Traditional SEO rules saved and rescored.', 'success');
             }
@@ -69834,6 +70239,46 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           } finally {
             saveBtn.disabled = false;
           }
+        });
+      }
+      if (runBtn && !runBtn.dataset.wired) {
+        runBtn.dataset.wired = '1';
+        runBtn.addEventListener('click', async () => {
+          await runTraditionalSeoEvaluation({ refreshAudit: false });
+        });
+      }
+      if (runFullBtn && !runFullBtn.dataset.wired) {
+        runFullBtn.dataset.wired = '1';
+        runFullBtn.addEventListener('click', async () => {
+          await runTraditionalSeoEvaluation({ refreshAudit: true });
+        });
+      }
+      if (tierFilter && !tierFilter.dataset.wired) {
+        tierFilter.dataset.wired = '1';
+        tierFilter.addEventListener('change', () => {
+          TRADITIONAL_SEO_STATE.filters.tier = tierFilter.value || 'all';
+          renderTraditionalSeoResultsTable();
+        });
+      }
+      if (ruleFilter && !ruleFilter.dataset.wired) {
+        ruleFilter.dataset.wired = '1';
+        ruleFilter.addEventListener('change', () => {
+          TRADITIONAL_SEO_STATE.filters.rule = ruleFilter.value || 'all';
+          renderTraditionalSeoResultsTable();
+        });
+      }
+      if (statusFilter && !statusFilter.dataset.wired) {
+        statusFilter.dataset.wired = '1';
+        statusFilter.addEventListener('change', () => {
+          TRADITIONAL_SEO_STATE.filters.status = statusFilter.value || 'all';
+          renderTraditionalSeoResultsTable();
+        });
+      }
+      if (queryFilter && !queryFilter.dataset.wired) {
+        queryFilter.dataset.wired = '1';
+        queryFilter.addEventListener('input', () => {
+          TRADITIONAL_SEO_STATE.filters.query = queryFilter.value || '';
+          renderTraditionalSeoResultsTable();
         });
       }
     }
@@ -69848,6 +70293,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       try {
         const payload = await fetchTraditionalSeoRules();
         applyTraditionalSeoPayload(payload || {});
+        if (force || !Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) || TRADITIONAL_SEO_STATE.evaluationRows.length === 0) {
+          await runTraditionalSeoEvaluation({ refreshAudit: false });
+        }
       } catch (err) {
         const body = document.getElementById('traditional-seo-rules-body');
         if (body) {
