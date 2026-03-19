@@ -70142,6 +70142,57 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return Number.isFinite(parsed) ? parsed : fallback;
     }
 
+    const TRADITIONAL_SEO_BASELINE_LS_KEY = 'gaio_traditional_seo_baseline_v1';
+
+    function traditionalSeoReadBaselineFromStorage() {
+      try {
+        const raw = localStorage.getItem(TRADITIONAL_SEO_BASELINE_LS_KEY);
+        if (!raw) return null;
+        const o = JSON.parse(raw);
+        const prop = String(traditionalSeoPropertyUrl() || '').trim();
+        const storedProp = String(o?.propertyUrl || '').trim();
+        if (prop && storedProp && storedProp !== prop) return null;
+        const score = traditionalSeoToNum(o?.score, NaN);
+        if (!Number.isFinite(score)) return null;
+        return { score, created_at: o?.created_at || null };
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function traditionalSeoWriteBaselineToStorage(snapshotLike) {
+      try {
+        if (!snapshotLike) return;
+        const score = traditionalSeoToNum(snapshotLike.score, NaN);
+        if (!Number.isFinite(score)) return;
+        const payload = {
+          propertyUrl: String(traditionalSeoPropertyUrl() || '').trim(),
+          score,
+          created_at: snapshotLike.created_at || new Date().toISOString()
+        };
+        localStorage.setItem(TRADITIONAL_SEO_BASELINE_LS_KEY, JSON.stringify(payload));
+      } catch (e) {}
+    }
+
+    function traditionalSeoBaselineSnapshotForDelta() {
+      const snap = TRADITIONAL_SEO_STATE.latestSnapshot;
+      if (snap != null && Number.isFinite(traditionalSeoToNum(snap.score, NaN))) return snap;
+      const cached = traditionalSeoReadBaselineFromStorage();
+      if (cached) return { score: cached.score, created_at: cached.created_at };
+      const prev = TRADITIONAL_SEO_STATE.previousSnapshot;
+      if (prev != null && Number.isFinite(traditionalSeoToNum(prev.score, NaN))) return prev;
+      return null;
+    }
+
+    function traditionalSeoComputeScoreDelta(summary) {
+      const current = traditionalSeoToNum(summary?.score, 0);
+      const baseRow = traditionalSeoBaselineSnapshotForDelta();
+      if (!baseRow) return null;
+      const base = traditionalSeoToNum(baseRow.score, NaN);
+      if (!Number.isFinite(base)) return null;
+      return current - base;
+    }
+
     function traditionalSeoScorePoints(status) {
       const normalized = String(status || '').toLowerCase();
       if (normalized === 'pass') return 1;
@@ -71496,7 +71547,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }));
         TRADITIONAL_SEO_STATE.rules = updatedRules;
         renderTraditionalSeoRules(updatedRules);
-        renderTraditionalSeoScore(computeTraditionalSeoSummary(updatedRules), null);
+        const evalSummary = computeTraditionalSeoSummary(updatedRules);
+        renderTraditionalSeoScore(evalSummary, traditionalSeoComputeScoreDelta(evalSummary));
         traditionalSeoPopulateRuleFilter(updatedRules);
         renderTraditionalSeoResultsTable();
         if (typeof window.showStatus === 'function') window.showStatus('Traditional SEO evaluation complete.', 'success');
@@ -71632,7 +71684,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         el.addEventListener('change', () => {
           const tableRules = collectTraditionalSeoRulesFromTable();
           const summary = computeTraditionalSeoSummary(tableRules);
-          renderTraditionalSeoScore(summary, null);
+          renderTraditionalSeoScore(summary, traditionalSeoComputeScoreDelta(summary));
         });
       });
     }
@@ -71663,12 +71715,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       TRADITIONAL_SEO_STATE.latestSummary = computeTraditionalSeoSummary(TRADITIONAL_SEO_STATE.rules);
       TRADITIONAL_SEO_STATE.latestSnapshot = payload?.latestSnapshot || null;
       TRADITIONAL_SEO_STATE.previousSnapshot = payload?.previousSnapshot || null;
+      if (TRADITIONAL_SEO_STATE.latestSnapshot) {
+        traditionalSeoWriteBaselineToStorage(TRADITIONAL_SEO_STATE.latestSnapshot);
+      }
 
-      const latestScore = traditionalSeoToNum(TRADITIONAL_SEO_STATE.latestSummary?.score, 0);
-      const prevScore = TRADITIONAL_SEO_STATE.previousSnapshot
-        ? traditionalSeoToNum(TRADITIONAL_SEO_STATE.previousSnapshot?.score, 0)
-        : null;
-      const delta = typeof prevScore === 'number' ? (latestScore - prevScore) : null;
+      const delta = traditionalSeoComputeScoreDelta(TRADITIONAL_SEO_STATE.latestSummary);
 
       renderTraditionalSeoRules(TRADITIONAL_SEO_STATE.rules);
       renderTraditionalSeoScore(TRADITIONAL_SEO_STATE.latestSummary, delta);
