@@ -22748,6 +22748,28 @@
       citation: 'impl_citation_consistency_last_payload_v1',
       mentions: 'impl_mentions_baseline_last_payload_v1'
     };
+    const IMPL_CACHE_TO_SNAPSHOT_KEY = {
+      [IMPL_AUDIT_CACHE_KEYS.tech]: 'tech',
+      [IMPL_AUDIT_CACHE_KEYS.local]: 'local',
+      [IMPL_AUDIT_CACHE_KEYS.service]: 'service',
+      [IMPL_AUDIT_CACHE_KEYS.qa]: 'qa',
+      [IMPL_AUDIT_CACHE_KEYS.extractability]: 'extractability',
+      [IMPL_AUDIT_CACHE_KEYS.citation]: 'citation',
+      [IMPL_AUDIT_CACHE_KEYS.mentions]: 'mentions'
+    };
+    const IMPL_SNAPSHOT_TO_CACHE_KEY = Object.entries(IMPL_CACHE_TO_SNAPSHOT_KEY).reduce((acc, [cacheKey, snapshotKey]) => {
+      acc[snapshotKey] = cacheKey;
+      return acc;
+    }, {});
+
+    function getImplementationPropertyUrl() {
+      return (
+        (document.getElementById('propertyUrl')?.value || '').trim() ||
+        (localStorage.getItem('gsc_property_url') || '').trim() ||
+        (localStorage.getItem('last_property_url') || '').trim() ||
+        'https://www.alanranger.com'
+      );
+    }
 
     function compactImplementationCacheValue(value, depth = 0) {
       if (depth > 6) return null;
@@ -22767,7 +22789,28 @@
       return value;
     }
 
-    function saveImplementationAuditCache(key, payload) {
+    async function saveImplementationSnapshotToSupabase(cacheKey, payload) {
+      try {
+        const snapshotKey = IMPL_CACHE_TO_SNAPSHOT_KEY[cacheKey];
+        if (!snapshotKey || !payload || typeof payload !== 'object') return;
+        const propertyUrl = getImplementationPropertyUrl();
+        const mode = inferCachedAuditMode(payload, 'full');
+        await fetch(apiUrl('/api/aigeo/impl-snapshots'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            propertyUrl,
+            snapshotKey,
+            mode,
+            payload
+          })
+        });
+      } catch (err) {
+        // Non-blocking snapshot sync.
+      }
+    }
+
+    function saveImplementationAuditCache(key, payload, options = {}) {
       try {
         if (!key || !payload) return;
         localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), payload }));
@@ -22781,6 +22824,9 @@
         } catch (innerErr) {
           // Non-blocking cache write.
         }
+      }
+      if (options?.syncRemote !== false) {
+        Promise.resolve().then(() => saveImplementationSnapshotToSupabase(key, payload));
       }
     }
 
@@ -22863,6 +22909,40 @@
       const target = document.getElementById(targetId);
       if (!target) return;
       target.innerHTML = `<p class="card-subtitle">No cached ${escapeHtml(label)} payload found yet. Run the whole-site audit once to persist it for reloads.</p>`;
+    }
+
+    async function fetchImplementationSnapshotsFromSupabase(propertyUrl) {
+      try {
+        const params = new URLSearchParams({ propertyUrl: String(propertyUrl || '') });
+        const response = await fetch(apiUrl(`/api/aigeo/impl-snapshots?${params.toString()}`));
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || payload?.status !== 'ok') return null;
+        return payload?.data?.snapshots || null;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    function choosePreferredSupabaseSnapshot(snapshotModes) {
+      if (!snapshotModes || typeof snapshotModes !== 'object') return null;
+      if (snapshotModes.full?.payload && typeof snapshotModes.full.payload === 'object') {
+        return snapshotModes.full.payload;
+      }
+      if (snapshotModes.sample?.payload && typeof snapshotModes.sample.payload === 'object') {
+        return snapshotModes.sample.payload;
+      }
+      return null;
+    }
+
+    function hydrateImplementationCachesFromSupabase(snapshotMap) {
+      if (!snapshotMap || typeof snapshotMap !== 'object') return;
+      Object.entries(snapshotMap).forEach(([snapshotKey, snapshotModes]) => {
+        const cacheKey = IMPL_SNAPSHOT_TO_CACHE_KEY[String(snapshotKey || '').trim().toLowerCase()];
+        if (!cacheKey) return;
+        const preferredPayload = choosePreferredSupabaseSnapshot(snapshotModes);
+        if (!preferredPayload) return;
+        saveImplementationAuditCache(cacheKey, preferredPayload, { syncRemote: false });
+      });
     }
 
     const implExtractabilityRunState = {
@@ -25897,6 +25977,10 @@
       const initialSelectorCounts = getCanonicalTierCountsForSelectors();
       applyQaTierCountsToSelect('impl-qa-tier-select', initialSelectorCounts);
       applyQaTierCountsToSelect('impl-extract-tier-select', initialSelectorCounts);
+      const supabaseSnapshots = await fetchImplementationSnapshotsFromSupabase(getImplementationPropertyUrl());
+      if (supabaseSnapshots) {
+        hydrateImplementationCachesFromSupabase(supabaseSnapshots);
+      }
       try {
         const preloadTierCounts = await preloadImplQaTierSourceCounts();
         applyQaTierCountsToSelect('impl-qa-tier-select', preloadTierCounts);
