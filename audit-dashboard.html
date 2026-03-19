@@ -69963,6 +69963,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       lastEvaluationAt: null,
       sourceParity: null,
       tierUrlCountsMap: null,
+      lastSignalMaps: null,
+      lastPropertyUrl: '',
       filters: {
         tier: 'all',
         rule: 'all',
@@ -70379,6 +70381,28 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
     }
 
+    /** One key for schema / extract / QA maps (avoids trailing-slash vs CSV mismatches). */
+    function traditionalSeoSignalMapKey(rawUrl, propertyUrl = '') {
+      return traditionalSeoToComparableUrl(rawUrl, propertyUrl)
+        || traditionalSeoNormalizeUrl(rawUrl, propertyUrl)
+        || String(rawUrl || '').trim();
+    }
+
+    function traditionalSeoSignalMapGet(map, rawUrl, propertyUrl = '') {
+      if (!map || typeof map.get !== 'function') return null;
+      const primary = traditionalSeoSignalMapKey(rawUrl, propertyUrl);
+      if (primary) {
+        const hit = map.get(primary);
+        if (hit) return hit;
+      }
+      const legacy = traditionalSeoNormalizeUrl(rawUrl, propertyUrl);
+      if (legacy && legacy !== primary) {
+        const hit2 = map.get(legacy);
+        if (hit2) return hit2;
+      }
+      return null;
+    }
+
     function traditionalSeoExtractUrlsFromCsvText(csvText, propertyUrl = '') {
       const out = new Set();
       const lines = String(csvText || '').split(/\r?\n/);
@@ -70644,7 +70668,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         localBusiness: new Map(),
         serviceSchema: new Map()
       };
-      const toKey = (value) => traditionalSeoNormalizeUrl(value, propertyUrl);
+      const toKey = (value) => traditionalSeoSignalMapKey(value, propertyUrl);
 
       const schemaPages = Array.isArray(audit?.schemaAudit?.data?.pages) ? audit.schemaAudit.data.pages : [];
       schemaPages.forEach((page) => {
@@ -70746,7 +70770,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     function traditionalSeoRuleStatusForUrl(rule, url, tier, metric, context) {
       const key = String(rule?.rule_key || '').toLowerCase();
       const propertyUrl = String(context?.propertyUrl || '').trim();
-      const lookupKey = traditionalSeoNormalizeUrl(url, propertyUrl) || String(url || '').trim();
+      const lookupKey = traditionalSeoSignalMapKey(url, propertyUrl) || String(url || '').trim();
       const path = (() => {
         try { return String(new URL(lookupKey).pathname || '/').toLowerCase(); } catch (err) {
           try { return String(new URL(url).pathname || '/').toLowerCase(); } catch (e2) { return ''; }
@@ -70757,10 +70781,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const techScore = traditionalSeoToNum(context?.techScore, 70);
       const schemaScore = traditionalSeoToNum(context?.schemaScore, 70);
       const maps = context?.signalMaps || {};
-      const schemaSignal = maps?.schemaPage?.get?.(lookupKey) || null;
-      const techSignal = maps?.techIndexability?.get?.(lookupKey) || null;
-      const extractSignal = maps?.extractability?.get?.(lookupKey) || null;
-      const qaSignal = maps?.qaGate?.get?.(lookupKey) || null;
+      const schemaSignal = traditionalSeoSignalMapGet(maps.schemaPage, url, propertyUrl);
+      const techSignal = traditionalSeoSignalMapGet(maps.techIndexability, url, propertyUrl);
+      const extractSignal = traditionalSeoSignalMapGet(maps.extractability, url, propertyUrl);
+      const qaSignal = traditionalSeoSignalMapGet(maps.qaGate, url, propertyUrl);
       const qaIssues = Array.isArray(qaSignal?.issues) ? qaSignal.issues : [];
       const qaIssueText = qaIssues.map((issue) => `${issue?.code || ''} ${issue?.detail || ''}`.toLowerCase()).join(' | ');
       const schemaTypes = Array.isArray(schemaSignal?.schemaTypes)
@@ -70903,13 +70927,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
       if (key === 'service_schema_product_page') {
         if (String(tier || '').toLowerCase() !== 'product') return 'pass';
-        const svc = maps?.serviceSchema?.get?.(lookupKey);
+        const svc = traditionalSeoSignalMapGet(maps.serviceSchema, url, propertyUrl);
         if (!svc) return 'warn';
         if (svc.rateLimited) return 'warn';
         return svc.hasService ? 'pass' : 'fail';
       }
       if (key === 'localbusiness_schema_page') {
-        const row = maps?.localBusiness?.get?.(lookupKey);
+        const row = traditionalSeoSignalMapGet(maps.localBusiness, url, propertyUrl);
         if (!row) return 'pass';
         if (row.rateLimited) return 'warn';
         return row.hasLocalBusiness ? 'pass' : 'fail';
@@ -71091,6 +71115,50 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       backdrop.setAttribute('aria-hidden', 'true');
     }
 
+    function traditionalSeoModalNoteForRule(row, rule, pageUrl) {
+      const rk = String(row?.rule_key || '');
+      const base = String(rule?.description || '').trim() || '—';
+      const prop = String(TRADITIONAL_SEO_STATE.lastPropertyUrl || '').trim() || traditionalSeoPropertyUrl();
+      const maps = TRADITIONAL_SEO_STATE.lastSignalMaps || {};
+      const ex = traditionalSeoSignalMapGet(maps.extractability, pageUrl, prop);
+      const sc = traditionalSeoSignalMapGet(maps.schemaPage, pageUrl, prop);
+      if (rk === 'meta_description_present') {
+        const metaFromSchema = sc?.metaDescription ? String(sc.metaDescription).trim() : '';
+        const metaFromExtract = ex?.seoMetaDescription ? String(ex.seoMetaDescription).trim() : '';
+        const metaText = metaFromSchema || metaFromExtract;
+        if (!metaText) return 'No meta description found (schema audit + Extractability HTML).';
+        const len = metaText.length;
+        const src = metaFromSchema ? 'schema audit' : 'Extractability HTML';
+        return `Length ${len} chars (target 150–160). Source: ${src}.`;
+      }
+      if (rk === 'single_h1' || rk === 'h1_length_best_practice') {
+        if (ex?.excludedFromAudit) return 'Page excluded from extractability scope.';
+        if (!ex || ex.requestOk === false) {
+          return 'Extractability row missing or fetch failed — run Re-audit page or full Extractability.';
+        }
+        const c = traditionalSeoToNum(ex.seoH1Count, -1);
+        const longest = traditionalSeoToNum(ex.seoLongestH1Length, 0);
+        if (rk === 'single_h1') return `H1 count in check HTML: ${c >= 0 ? c : 'unknown'}.`;
+        if (c <= 0) return 'No H1 found in check HTML.';
+        return `Longest H1 plain length: ${longest} (target 50–60).`;
+      }
+      if (rk === 'external_links_new_tab') {
+        if (!ex || ex.requestOk === false) return base;
+        const out = traditionalSeoToNum(ex.seoExtOutbound, -1);
+        const bad = traditionalSeoToNum(ex.seoExtMissingTargetBlank, 0);
+        if (out < 0) return base;
+        return `External links: ${out}; missing target=_blank: ${bad}.`;
+      }
+      if (rk === 'image_alt_coverage') {
+        if (!ex || ex.requestOk === false) return base;
+        const tot = traditionalSeoToNum(ex.seoImgTotal, -1);
+        const miss = traditionalSeoToNum(ex.seoImgMissingAlt, 0);
+        if (tot < 0) return base;
+        return `Images: ${tot}; missing alt: ${miss}.`;
+      }
+      return base;
+    }
+
     function traditionalSeoOpenPageModal(pageUrl) {
       const backdrop = document.getElementById('traditional-seo-page-modal');
       const urlEl = document.getElementById('traditional-seo-page-modal-url');
@@ -71135,7 +71203,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         bodyEl.innerHTML = hits.map((row) => {
           const rk = String(row.rule_key || '');
           const rule = meta.get(rk) || {};
-          const note = String(rule.description || '').trim() || '—';
+          const note = traditionalSeoModalNoteForRule(row, rule, target);
           return `
             <tr>
               <td>${escapeHtml(String(row.rule_name || rk))}</td>
@@ -71285,6 +71353,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const resolveTier = await traditionalSeoBuildTierResolver(audit);
         const implPayloads = traditionalSeoLoadImplementationPayloads();
         const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
+        TRADITIONAL_SEO_STATE.lastSignalMaps = signalMaps;
+        TRADITIONAL_SEO_STATE.lastPropertyUrl = propertyUrl;
         const sourceParity = await traditionalSeoComputeSourceParity(propertyUrl);
         TRADITIONAL_SEO_STATE.sourceParity = sourceParity;
         renderTraditionalSeoSourceParity(sourceParity);
