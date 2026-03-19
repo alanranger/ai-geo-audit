@@ -22749,12 +22749,38 @@
       mentions: 'impl_mentions_baseline_last_payload_v1'
     };
 
+    function compactImplementationCacheValue(value, depth = 0) {
+      if (depth > 6) return null;
+      if (Array.isArray(value)) {
+        return value.slice(0, 250).map((item) => compactImplementationCacheValue(item, depth + 1));
+      }
+      if (value && typeof value === 'object') {
+        const output = {};
+        Object.entries(value).forEach(([entryKey, entryValue]) => {
+          output[entryKey] = compactImplementationCacheValue(entryValue, depth + 1);
+        });
+        return output;
+      }
+      if (typeof value === 'string' && value.length > 2000) {
+        return `${value.slice(0, 2000)}...`;
+      }
+      return value;
+    }
+
     function saveImplementationAuditCache(key, payload) {
       try {
         if (!key || !payload) return;
         localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), payload }));
       } catch (err) {
-        // Non-blocking cache write.
+        try {
+          const compactedPayload = compactImplementationCacheValue(payload);
+          if (compactedPayload && typeof compactedPayload === 'object') {
+            compactedPayload.__cacheCompacted = true;
+          }
+          localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), payload: compactedPayload }));
+        } catch (innerErr) {
+          // Non-blocking cache write.
+        }
       }
     }
 
@@ -22819,6 +22845,24 @@
         : (cacheSavedAtTs > 0 ? cacheSavedAtTs : Date.now());
       const sourceLabel = usingCache ? 'cached snapshot' : 'fresh run';
       return `<div style="margin-top: 0.2rem; opacity: 0.9;">Last run: ${escapeHtml(formatImplAuditRunTimestamp(chosenTs))} (${sourceLabel})</div>`;
+    }
+
+    function inferCachedAuditMode(payload, fallback = 'full') {
+      const mode = String(
+        payload?.data?.mode
+        || payload?.meta?.selection?.mode
+        || payload?.meta?.selection?.schemaMode
+        || ''
+      ).toLowerCase();
+      if (mode === 'sample') return 'sample';
+      if (mode === 'full') return 'full';
+      return fallback;
+    }
+
+    function renderImplementationCacheMissingState(targetId, label) {
+      const target = document.getElementById(targetId);
+      if (!target) return;
+      target.innerHTML = `<p class="card-subtitle">No cached ${escapeHtml(label)} payload found yet. Run the whole-site audit once to persist it for reloads.</p>`;
     }
 
     const implExtractabilityRunState = {
@@ -23244,12 +23288,17 @@
         const stats = payload?.data?.stats || {};
         const latestRun = payload?.data?.latestRun || null;
         const alertsRows = Array.isArray(payload?.data?.alerts) ? payload.data.alerts : [];
+        const topMentionsRows = Array.isArray(payload?.data?.topMentions) ? payload.data.topMentions : [];
+        const tableRows = alertsRows.length ? alertsRows : topMentionsRows;
         const activeMentions = Number(stats.activeMentions || 0);
         const alerts = Number(stats.alerts || 0);
         const critical = Number(stats.critical || 0);
         const byPlatform = stats.byPlatform || {};
         const platformSummary = Object.entries(byPlatform).map(([key, value]) => `${key}: ${Number(value || 0)}`).join(' | ') || 'No mentions yet';
-        const emptyHtml = '<tr><td colspan="8" class="ranking-table-empty">No alert/critical mention rows in current window.</td></tr>';
+        const emptyHtml = '<tr><td colspan="8" class="ranking-table-empty">No mention rows in current window.</td></tr>';
+        const tableHint = alertsRows.length
+          ? 'Showing alert and critical rows.'
+          : 'No alerts in this window; showing top recent mentions.';
         target.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
             <div>
@@ -23268,6 +23317,7 @@
           <div style="margin-top:0.8rem; font-size:0.85rem; opacity:0.9;">
             Last run: ${latestRun?.run_started_at ? escapeHtml(formatImplPriorityMatrixStamp(Date.parse(String(latestRun.run_started_at)))) : 'Never'}.
           </div>
+          <div style="margin-top:0.25rem; font-size:0.85rem; opacity:0.9;">${escapeHtml(tableHint)}</div>
           <div style="margin-top: 0.85rem; overflow-x: auto;">
             <table class="ranking-table">
               <thead>
@@ -23283,7 +23333,7 @@
                 </tr>
               </thead>
               <tbody>
-                ${alertsRows.length ? alertsRows.map((row) => `
+                ${tableRows.length ? tableRows.map((row) => `
                   <tr>
                     <td>${escapeHtml(String(row.platform || 'unknown'))}</td>
                     <td style="text-align:left; max-width: 420px; word-break: break-word;">
@@ -25863,19 +25913,39 @@
       renderImplementationSummaryAndLanes();
 
       const cachedTechPayload = loadImplementationAuditCacheAnyAge(IMPL_AUDIT_CACHE_KEYS.tech) || loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.tech);
-      await fetchAndRenderTechnicalFoundationStatus(implTechFoundationRunState.mode || 'sample', cachedTechPayload || null);
+      if (cachedTechPayload) {
+        await fetchAndRenderTechnicalFoundationStatus(inferCachedAuditMode(cachedTechPayload, 'full'), cachedTechPayload);
+      } else {
+        renderImplementationCacheMissingState('impl-tech-foundation-status', 'technical foundation');
+      }
 
       const cachedLocalPayload = loadImplementationAuditCacheAnyAge(IMPL_AUDIT_CACHE_KEYS.local) || loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.local);
-      await fetchAndRenderLocalBusinessSchemaStatus(implLocalSchemaRunState.mode || 'sample', cachedLocalPayload || null);
+      if (cachedLocalPayload) {
+        await fetchAndRenderLocalBusinessSchemaStatus(inferCachedAuditMode(cachedLocalPayload, 'full'), cachedLocalPayload);
+      } else {
+        renderImplementationCacheMissingState('impl-local-schema-status', 'local schema');
+      }
 
       const cachedServicePayload = loadImplementationAuditCacheAnyAge(IMPL_AUDIT_CACHE_KEYS.service) || loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.service);
-      await fetchAndRenderServiceSchemaStatus(implServiceSchemaRunState.mode || 'sample', cachedServicePayload || null);
+      if (cachedServicePayload) {
+        await fetchAndRenderServiceSchemaStatus(inferCachedAuditMode(cachedServicePayload, 'full'), cachedServicePayload);
+      } else {
+        renderImplementationCacheMissingState('impl-service-schema-status', 'service schema');
+      }
 
       const cachedExtractabilityPayload = loadImplementationAuditCacheAnyAge(IMPL_AUDIT_CACHE_KEYS.extractability) || loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.extractability);
-      await fetchAndRenderContentExtractabilityStatus(implExtractabilityRunState.mode || 'sample', cachedExtractabilityPayload || null);
+      if (cachedExtractabilityPayload) {
+        await fetchAndRenderContentExtractabilityStatus(inferCachedAuditMode(cachedExtractabilityPayload, 'full'), cachedExtractabilityPayload);
+      } else {
+        renderImplementationCacheMissingState('impl-extractability-status', 'content extractability');
+      }
 
       const cachedQaPayload = loadImplementationAuditCacheAnyAge(IMPL_AUDIT_CACHE_KEYS.qa) || loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.qa);
-      await fetchAndRenderSchemaQaGateStatus(implQaGateRunState.mode || 'sample', cachedQaPayload || null);
+      if (cachedQaPayload) {
+        await fetchAndRenderSchemaQaGateStatus(inferCachedAuditMode(cachedQaPayload, 'full'), cachedQaPayload);
+      } else {
+        renderImplementationCacheMissingState('impl-schema-qa-gate-status', 'schema QA gate');
+      }
       const cachedCitationPayload = loadImplementationAuditCacheAnyAge(IMPL_AUDIT_CACHE_KEYS.citation) || loadImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.citation);
       if (cachedCitationPayload) {
         implLatestAuditPayloads.citation = cachedCitationPayload;

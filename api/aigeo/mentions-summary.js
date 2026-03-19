@@ -110,7 +110,8 @@ export default async function handler(req, res) {
           critical: critical.length,
           byPlatform
         },
-        alerts: alerts.slice(0, 25)
+        alerts: alerts.slice(0, 25),
+        topMentions: rows.slice(0, 25)
       },
       meta: { generatedAt: new Date().toISOString() }
     });
