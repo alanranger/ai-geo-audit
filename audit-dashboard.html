@@ -70284,56 +70284,63 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
     }
 
+    function traditionalSeoMergeExtractabilityCacheMutate(cache, propertyUrl, freshRows) {
+      const prop = String(propertyUrl || '').trim();
+      if (!Array.isArray(freshRows) || !freshRows.length) return cache;
+      if (!cache || typeof cache !== 'object' || String(cache.status || '').toLowerCase() !== 'ok') {
+        return {
+          status: 'ok',
+          source: 'content-extractability',
+          data: {
+            rows: freshRows.slice(),
+            mode: 'full',
+            tier: 'all',
+            pagesChecked: freshRows.length,
+            passPages: 0,
+            failPages: 0,
+            passRate: 0,
+            avgScore: 0,
+            counts: { hasTldr: 0, hasDirectAnswer: 0, hasFaq: 0, hasLastUpdated: 0 },
+            sourceTierCounts: {}
+          },
+          meta: { generatedAt: new Date().toISOString() }
+        };
+      }
+      const next = {
+        ...cache,
+        data: { ...(cache.data || {}) },
+        meta: { ...(cache.meta || {}) }
+      };
+      const rows = Array.isArray(next.data.rows) ? next.data.rows.slice() : [];
+      const idxByKey = new Map();
+      rows.forEach((r, i) => {
+        const k = traditionalSeoToComparableUrl(r?.url, prop) || String(r?.url || '').trim();
+        if (k) idxByKey.set(k, i);
+      });
+      freshRows.forEach((fresh) => {
+        const k = traditionalSeoToComparableUrl(fresh?.url, prop) || String(fresh?.url || '').trim();
+        if (!k) return;
+        if (!idxByKey.has(k)) {
+          idxByKey.set(k, rows.length);
+          rows.push(fresh);
+        } else {
+          rows[idxByKey.get(k)] = fresh;
+        }
+      });
+      next.data.rows = rows;
+      next.meta.generatedAt = new Date().toISOString();
+      return next;
+    }
+
     function traditionalSeoMergeExtractabilityRowsIntoCache(propertyUrl, freshRows) {
       const key = 'impl_content_extractability_last_payload_v1';
       try {
         if (!Array.isArray(freshRows) || !freshRows.length) return false;
         const prop = String(propertyUrl || '').trim();
-        const cache = typeof loadImplementationAuditCacheAnyAge === 'function'
+        const prev = typeof loadImplementationAuditCacheAnyAge === 'function'
           ? loadImplementationAuditCacheAnyAge(key)
           : null;
-        if (!cache || typeof cache !== 'object' || String(cache.status || '').toLowerCase() !== 'ok') {
-          const shell = {
-            status: 'ok',
-            source: 'content-extractability',
-            data: {
-              rows: freshRows.slice(),
-              mode: 'full',
-              tier: 'all',
-              pagesChecked: freshRows.length,
-              passPages: 0,
-              failPages: 0,
-              passRate: 0,
-              avgScore: 0,
-              counts: { hasTldr: 0, hasDirectAnswer: 0, hasFaq: 0, hasLastUpdated: 0 },
-              sourceTierCounts: {}
-            },
-            meta: { generatedAt: new Date().toISOString() }
-          };
-          if (typeof saveImplementationAuditCache === 'function') saveImplementationAuditCache(key, shell);
-          if (typeof implLatestAuditPayloads === 'object' && implLatestAuditPayloads) implLatestAuditPayloads.extractability = shell;
-          return true;
-        }
-        const rows = Array.isArray(cache.data?.rows) ? cache.data.rows.slice() : [];
-        const idxByKey = new Map();
-        rows.forEach((r, i) => {
-          const k = traditionalSeoToComparableUrl(r?.url, prop) || String(r?.url || '').trim();
-          if (k) idxByKey.set(k, i);
-        });
-        freshRows.forEach((fresh) => {
-          const k = traditionalSeoToComparableUrl(fresh?.url, prop) || String(fresh?.url || '').trim();
-          if (!k) return;
-          if (!idxByKey.has(k)) {
-            idxByKey.set(k, rows.length);
-            rows.push(fresh);
-          } else {
-            rows[idxByKey.get(k)] = fresh;
-          }
-        });
-        cache.data = cache.data || {};
-        cache.data.rows = rows;
-        cache.meta = cache.meta || {};
-        cache.meta.generatedAt = new Date().toISOString();
+        const cache = traditionalSeoMergeExtractabilityCacheMutate(prev, prop, freshRows);
         if (typeof saveImplementationAuditCache === 'function') saveImplementationAuditCache(key, cache);
         if (typeof implLatestAuditPayloads === 'object' && implLatestAuditPayloads) implLatestAuditPayloads.extractability = cache;
         return true;
@@ -70344,8 +70351,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     async function traditionalSeoEnsureExtractabilityForUrls(urls, propertyUrl) {
       const prop = String(propertyUrl || traditionalSeoPropertyUrl() || '').trim();
-      const payloads = traditionalSeoLoadImplementationPayloads();
-      const existing = Array.isArray(payloads?.extractability?.data?.rows) ? payloads.extractability.data.rows : [];
+      const key = 'impl_content_extractability_last_payload_v1';
+      let cache = typeof loadImplementationAuditCacheAnyAge === 'function'
+        ? loadImplementationAuditCacheAnyAge(key)
+        : null;
+      const existing = Array.isArray(cache?.data?.rows) ? cache.data.rows : [];
       const have = new Set();
       existing.forEach((r) => {
         const k = traditionalSeoToComparableUrl(r?.url, prop) || String(r?.url || '').trim();
@@ -70367,7 +70377,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const chunk = need.slice(i, i + chunkSize);
         const done = Math.min(i + chunk.length, need.length);
         if (typeof window.showStatus === 'function') {
-          window.showStatus(`Traditional SEO: fetching extractability ${done}/${need.length} missing URLs…`, 'info');
+          if (i === 0 || done === need.length || (done % 100 === 0 && done > 0)) {
+            window.showStatus(`Traditional SEO: fetching extractability ${done}/${need.length} missing URLs…`, 'info');
+          }
         }
         const res = await fetch(traditionalSeoApiPath('/api/aigeo/content-extractability'), {
           method: 'POST',
@@ -70379,11 +70391,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           throw new Error(payload?.message || `Extractability refresh failed (${res.status})`);
         }
         const freshRows = Array.isArray(payload?.data?.rows) ? payload.data.rows : [];
-        traditionalSeoMergeExtractabilityRowsIntoCache(prop, freshRows);
+        cache = traditionalSeoMergeExtractabilityCacheMutate(cache, prop, freshRows);
         freshRows.forEach((r) => {
           const rk = traditionalSeoToComparableUrl(r?.url, prop) || String(r?.url || '').trim();
           if (rk) have.add(rk);
         });
+      }
+      if (typeof implLatestAuditPayloads === 'object' && implLatestAuditPayloads) {
+        implLatestAuditPayloads.extractability = cache;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (typeof saveImplementationAuditCache === 'function' && cache) {
+        saveImplementationAuditCache(key, cache);
       }
     }
 
@@ -70918,9 +70937,16 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const keys = (typeof IMPL_AUDIT_CACHE_KEYS === 'object' && IMPL_AUDIT_CACHE_KEYS)
         ? IMPL_AUDIT_CACHE_KEYS
         : {};
+      const extKey = keys.extractability;
+      let extractability = null;
+      if (typeof implLatestAuditPayloads === 'object' && implLatestAuditPayloads?.extractability
+          && String(implLatestAuditPayloads.extractability.status || '').toLowerCase() === 'ok') {
+        extractability = implLatestAuditPayloads.extractability;
+      }
+      if (!extractability) extractability = traditionalSeoGetCachedPayload(extKey);
       return {
         tech: traditionalSeoGetCachedPayload(keys.tech),
-        extractability: traditionalSeoGetCachedPayload(keys.extractability),
+        extractability,
         qa: traditionalSeoGetCachedPayload(keys.qa),
         service: traditionalSeoGetCachedPayload(keys.service),
         local: traditionalSeoGetCachedPayload(keys.local)
