@@ -86,10 +86,12 @@ const buildParams = async (req) => {
   const source = req.method === 'POST'
     ? { ...(await parseBody(req)), ...querySource }
     : querySource;
+  const propertyUrl = String(source.propertyUrl || process.env.CRON_PROPERTY_URL || 'https://www.alanranger.com').trim();
   return {
     persist: coerceBoolean(source.persist, true),
     keywordLimit: Number(source.maxKeywords || source.keywordLimit || 30),
-    perQueryLimit: Number(source.perQueryLimit || 3)
+    perQueryLimit: Number(source.perQueryLimit || 3),
+    propertyUrl
   };
 };
 
@@ -209,7 +211,7 @@ export default async function handler(req, res) {
 
   try {
     const params = await buildParams(req);
-    const { persist, keywordLimit, perQueryLimit } = params;
+    const { persist, keywordLimit, perQueryLimit, propertyUrl } = params;
 
     const { keywords, source: keywordSource } = await loadMentionKeywords();
     if (!keywords.length) {
@@ -223,7 +225,8 @@ export default async function handler(req, res) {
     const { keywordsUsed, mentions } = await collectMentionCandidates({
       keywords,
       keywordLimit,
-      perQueryLimit
+      perQueryLimit,
+      propertyUrl
     });
     const sanitizedMentions = sanitizeMentionRows(mentions);
     const platformBreakdown = sanitizedMentions.reduce((acc, row) => {
