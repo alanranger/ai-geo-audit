@@ -412,7 +412,11 @@ function extractTitle(htmlString) {
  * Extract meta description from HTML
  */
 function extractMetaDescription(htmlString) {
-  const collapse = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+  const collapse = (s) => String(s || '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
   const html = String(htmlString || '');
   // Standard order: name= then content=
   let metaDescMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/is);

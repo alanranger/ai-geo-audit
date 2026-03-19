@@ -70182,7 +70182,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     const TRADITIONAL_SEO_BASELINE_RULES = [
       { rule_key: 'title_tag_present', rule_name: 'Title length (50–60 chars)', description: 'Best practice: page title between 50 and 60 characters (spaces and punctuation count). Uses schema audit title when available.', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.5, sort_order: 10 },
-      { rule_key: 'meta_description_present', rule_name: 'Meta description length (150–160 chars)', description: 'Pass only if meta length is 150–160 chars (whitespace/newlines collapsed). Warn if missing; fail if outside range. Uses the longer of schema-audit vs Extractability HTML.', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 20 },
+      { rule_key: 'meta_description_present', rule_name: 'Meta description length (150–160 chars)', description: 'Pass if live HTML meta description is 150–160 chars (whitespace normalized). If HTML meta missing, falls back to schema crawl text. Warn if both missing.', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 20 },
       { rule_key: 'single_h1', rule_name: 'Exactly one H1', description: 'Fail if zero or more than one H1 (parsed from Content Extractability HTML).', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 30 },
       { rule_key: 'h1_length_best_practice', rule_name: 'H1 length (50–60 chars)', description: 'Uses the longest H1 plain text on the page (and first H1 when needed). Target 50–60 characters (Extractability HTML).', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 35 },
       { rule_key: 'canonical_self_or_valid', rule_name: 'Canonical is valid', description: 'Canonical/URL identity checks from Schema QA gate when present.', category: 'technical', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 40 },
@@ -70219,9 +70219,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return Number.isFinite(parsed) ? parsed : fallback;
     }
 
-    /** Collapse whitespace/newlines so meta length matches editor “characters with spaces”. */
+    /** Collapse whitespace/newlines; strip ZWSP/BOM so length matches editors. */
     function traditionalSeoNormalizeSnippetText(value) {
-      return String(value || '').replace(/\s+/g, ' ').trim();
+      return String(value || '')
+        .replace(/\u00a0/g, ' ')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
     }
 
     /** Pre-SEO-field cache rows must be refreshed so H1/meta rules match a fresh Extractability run. */
@@ -71291,7 +71295,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const metaFromSchema = traditionalSeoNormalizeSnippetText(schemaSignal?.metaDescription || '');
         const metaFromExtract = traditionalSeoNormalizeSnippetText(extractSignal?.seoMetaDescription || '');
         if (!metaFromSchema && !metaFromExtract) return 'warn';
-        const len = Math.max(metaFromSchema.length, metaFromExtract.length);
+        // Prefer live HTML meta when present — schema crawl often carries longer/different copy than <meta name="description">.
+        const len = metaFromExtract ? metaFromExtract.length : metaFromSchema.length;
         if (len >= 150 && len <= 160) return 'pass';
         return 'fail';
       }
@@ -71560,9 +71565,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const metaFromSchema = traditionalSeoNormalizeSnippetText(sc?.metaDescription || '');
         const metaFromExtract = traditionalSeoNormalizeSnippetText(ex?.seoMetaDescription || '');
         if (!metaFromSchema && !metaFromExtract) return 'No meta description found (schema audit + Extractability HTML).';
-        const len = Math.max(metaFromSchema.length, metaFromExtract.length);
-        const src = metaFromExtract.length >= metaFromSchema.length && metaFromExtract ? 'Extractability HTML' : (metaFromSchema ? 'schema audit' : 'Extractability HTML');
-        return `Length ${len} chars (target 150–160; whitespace normalized; longer of schema vs HTML). Source: ${src}.`;
+        const usedExtract = Boolean(metaFromExtract);
+        const len = usedExtract ? metaFromExtract.length : metaFromSchema.length;
+        const src = usedExtract ? 'Extractability HTML (preferred)' : 'schema audit (no HTML meta in extract row)';
+        const alt = usedExtract && metaFromSchema && metaFromSchema !== metaFromExtract
+          ? ` Schema crawl text differs (${metaFromSchema.length} chars); rule uses HTML.`
+          : '';
+        return `Length ${len} chars (target 150–160; whitespace normalized). ${src}.${alt}`;
       }
       if (rk === 'single_h1' || rk === 'h1_length_best_practice') {
         if (ex?.excludedFromAudit) return 'Page excluded from extractability scope.';

@@ -380,27 +380,33 @@ function evaluateExtractability(html, jsonLdBlocks = [], pageUrl = '') {
 }
 
 function plainTextFromHtmlFragment(fragment = '') {
-  return String(fragment || '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return decodeBasicHtmlEntities(
+    String(fragment || '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 function normalizeSeoSnippetText(value) {
-  return String(value || '').replace(/\s+/g, ' ').trim();
+  return String(value || '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /** Meta description: support name= before content= OR content= before name= (common on Squarespace). */
 function extractMetaDescriptionFromHtml(html = '') {
   const source = String(html || '');
   let m = source.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/is);
-  if (m?.[1]) return normalizeSeoSnippetText(m[1]);
+  if (m?.[1]) return normalizeSeoSnippetText(decodeBasicHtmlEntities(m[1]));
   m = source.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']description["']/is);
-  if (m?.[1]) return normalizeSeoSnippetText(m[1]);
+  if (m?.[1]) return normalizeSeoSnippetText(decodeBasicHtmlEntities(m[1]));
   m = source.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/is);
-  if (m?.[1]) return normalizeSeoSnippetText(m[1]);
+  if (m?.[1]) return normalizeSeoSnippetText(decodeBasicHtmlEntities(m[1]));
   m = source.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:description["']/is);
-  return m?.[1] ? normalizeSeoSnippetText(m[1]) : '';
+  return m?.[1] ? normalizeSeoSnippetText(decodeBasicHtmlEntities(m[1])) : '';
 }
 
 /** Counts used by Traditional SEO dashboard (H1, images, outbound links). */
@@ -550,7 +556,19 @@ async function checkUrl(url, tierLookup = null) {
     const jsonLdBlocks = findJsonLdBlocks(htmlForChecks);
     const result = evaluateExtractability(htmlForChecks, jsonLdBlocks, url);
     const plainText = stripHtmlToText(htmlForChecks);
-    const seo = analyzeTraditionalSeoHtmlSignals(htmlForChecks, url);
+    const seoMain = analyzeTraditionalSeoHtmlSignals(html, url);
+    const seoMerged = analyzeTraditionalSeoHtmlSignals(htmlForChecks, url);
+    const useMainH1 = seoMain.h1Count > 0;
+    const seo = {
+      h1Count: useMainH1 ? seoMain.h1Count : seoMerged.h1Count,
+      firstH1PlainLength: useMainH1 ? seoMain.firstH1PlainLength : seoMerged.firstH1PlainLength,
+      longestH1PlainLength: useMainH1 ? seoMain.longestH1PlainLength : seoMerged.longestH1PlainLength,
+      metaDescription: seoMain.metaDescription || seoMerged.metaDescription || '',
+      imgTotal: seoMerged.imgTotal,
+      imgMissingAlt: seoMerged.imgMissingAlt,
+      extOutboundCount: seoMerged.extOutboundCount,
+      extMissingTargetBlank: seoMerged.extMissingTargetBlank
+    };
     return {
       url,
       pageTier,
