@@ -16,6 +16,30 @@ const sendJson = (res, status, body) => {
   res.status(status).send(JSON.stringify(body));
 };
 
+const extractHostname = (url) => {
+  const raw = String(url || '').trim();
+  if (!raw || !URL.canParse(raw)) return '';
+  return String(new URL(raw).hostname || '').toLowerCase();
+};
+
+const hostMatchesDomain = (host, domain) => {
+  const normalizedHost = String(host || '').toLowerCase().trim();
+  const normalizedDomain = String(domain || '').toLowerCase().trim();
+  if (!normalizedHost || !normalizedDomain) return false;
+  return normalizedHost === normalizedDomain || normalizedHost.endsWith(`.${normalizedDomain}`);
+};
+
+const sanitizeCitationRows = (rows) => {
+  const output = [];
+  for (const row of rows || []) {
+    const domain = String(row?.directory_domain || '').toLowerCase().trim();
+    const host = extractHostname(row?.source_url);
+    if (!hostMatchesDomain(host, domain)) continue;
+    output.push(row);
+  }
+  return output;
+};
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return sendJson(res, 200, { status: 'ok' });
   if (req.method !== 'GET') {
@@ -78,7 +102,7 @@ export default async function handler(req, res) {
       throw entriesError;
     }
 
-    const rows = Array.isArray(entryRows) ? entryRows : [];
+    const rows = sanitizeCitationRows(Array.isArray(entryRows) ? entryRows : []);
     const driftRows = rows.filter((row) => String(row.status || '').toLowerCase() !== 'pass');
     const alertsCount = rows.filter((row) => ['alert', 'critical'].includes(String(row.alert_level || '').toLowerCase())).length;
     const averageScore = rows.length

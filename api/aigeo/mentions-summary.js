@@ -16,6 +16,40 @@ const sendJson = (res, status, body) => {
   res.status(status).send(JSON.stringify(body));
 };
 
+const extractHostname = (url) => {
+  const raw = String(url || '').trim();
+  if (!raw || !URL.canParse(raw)) return '';
+  return String(new URL(raw).hostname || '').toLowerCase();
+};
+
+const hostMatchesDomain = (host, domain) => {
+  const normalizedHost = String(host || '').toLowerCase().trim();
+  const normalizedDomain = String(domain || '').toLowerCase().trim();
+  if (!normalizedHost || !normalizedDomain) return false;
+  return normalizedHost === normalizedDomain || normalizedHost.endsWith(`.${normalizedDomain}`);
+};
+
+const derivePlatformFromHost = (host) => {
+  if (hostMatchesDomain(host, 'reddit.com')) return 'reddit';
+  if (hostMatchesDomain(host, 'linkedin.com')) return 'linkedin';
+  if (String(host || '').toLowerCase() === 'youtu.be' || hostMatchesDomain(host, 'youtube.com')) return 'youtube';
+  return null;
+};
+
+const sanitizeMentionRows = (rows) => {
+  const output = [];
+  for (const row of rows || []) {
+    const host = extractHostname(row?.source_url);
+    const platform = derivePlatformFromHost(host);
+    if (!platform) continue;
+    output.push({
+      ...row,
+      platform
+    });
+  }
+  return output;
+};
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return sendJson(res, 200, { status: 'ok' });
   if (req.method !== 'GET') {
@@ -90,7 +124,7 @@ export default async function handler(req, res) {
       throw mentionsError;
     }
 
-    const rows = Array.isArray(mentionRows) ? mentionRows : [];
+    const rows = sanitizeMentionRows(Array.isArray(mentionRows) ? mentionRows : []);
     const byPlatform = rows.reduce((acc, row) => {
       const key = String(row.platform || 'unknown').toLowerCase();
       acc[key] = (acc[key] || 0) + 1;

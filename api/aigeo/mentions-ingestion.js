@@ -46,10 +46,46 @@ const normalizeUrlKey = (url) => {
   }
 };
 
+const extractHostname = (url) => {
+  const raw = String(url || '').trim();
+  if (!raw || !URL.canParse(raw)) return '';
+  return String(new URL(raw).hostname || '').toLowerCase();
+};
+
+const hostMatchesDomain = (host, domain) => {
+  const normalizedHost = String(host || '').toLowerCase().trim();
+  const normalizedDomain = String(domain || '').toLowerCase().trim();
+  if (!normalizedHost || !normalizedDomain) return false;
+  return normalizedHost === normalizedDomain || normalizedHost.endsWith(`.${normalizedDomain}`);
+};
+
+const derivePlatformFromHost = (host) => {
+  if (hostMatchesDomain(host, 'reddit.com')) return 'reddit';
+  if (hostMatchesDomain(host, 'linkedin.com')) return 'linkedin';
+  if (String(host || '').toLowerCase() === 'youtu.be' || hostMatchesDomain(host, 'youtube.com')) return 'youtube';
+  return null;
+};
+
+const sanitizeMentionRows = (rows) => {
+  const output = [];
+  for (const row of rows || []) {
+    const host = extractHostname(row?.source_url);
+    const platform = derivePlatformFromHost(host);
+    if (!platform) continue;
+    output.push({
+      ...row,
+      platform,
+      source_domain: host || row?.source_domain || null
+    });
+  }
+  return output;
+};
+
 const buildParams = async (req) => {
+  const querySource = req.query && typeof req.query === 'object' ? req.query : {};
   const source = req.method === 'POST'
-    ? { ...(await parseBody(req)), ...(req.query || {}) }
-    : (req.query || {});
+    ? { ...(await parseBody(req)), ...querySource }
+    : querySource;
   return {
     persist: coerceBoolean(source.persist, true),
     keywordLimit: Number(source.maxKeywords || source.keywordLimit || 30),
@@ -184,15 +220,20 @@ export default async function handler(req, res) {
       });
     }
 
-    const { keywordsUsed, mentions, platformBreakdown } = await collectMentionCandidates({
+    const { keywordsUsed, mentions } = await collectMentionCandidates({
       keywords,
       keywordLimit,
       perQueryLimit
     });
+    const sanitizedMentions = sanitizeMentionRows(mentions);
+    const platformBreakdown = sanitizedMentions.reduce((acc, row) => {
+      acc[row.platform] = (acc[row.platform] || 0) + 1;
+      return acc;
+    }, {});
 
-    const alertsCount = countAlerts(mentions);
+    const alertsCount = countAlerts(sanitizedMentions);
     const persistenceMeta = persist
-      ? await persistMentions({ mentions, keywords, keywordsUsed, keywordSource, alertsCount })
+      ? await persistMentions({ mentions: sanitizedMentions, keywords, keywordsUsed, keywordSource, alertsCount })
       : { runPersisted: false, runId: null, newMentions: 0, tableWarning: null };
 
     return sendJson(res, 200, {
@@ -204,11 +245,11 @@ export default async function handler(req, res) {
         keywordSource,
         keywordsTotal: keywords.length,
         keywordsUsed: keywordsUsed.length,
-        mentionsFound: mentions.length,
+        mentionsFound: sanitizedMentions.length,
         newMentions: persistenceMeta.newMentions,
         alertsCount,
         platformBreakdown,
-        topAlerts: buildTopAlerts(mentions),
+        topAlerts: buildTopAlerts(sanitizedMentions),
         tableWarning: persistenceMeta.tableWarning
       },
       meta: { generatedAt: new Date().toISOString() }

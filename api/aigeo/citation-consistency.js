@@ -17,6 +17,30 @@ const sendJson = (res, status, body) => {
   res.status(status).send(JSON.stringify(body));
 };
 
+const extractHostname = (url) => {
+  const raw = String(url || '').trim();
+  if (!raw || !URL.canParse(raw)) return '';
+  return String(new URL(raw).hostname || '').toLowerCase();
+};
+
+const hostMatchesDomain = (host, domain) => {
+  const normalizedHost = String(host || '').toLowerCase().trim();
+  const normalizedDomain = String(domain || '').toLowerCase().trim();
+  if (!normalizedHost || !normalizedDomain) return false;
+  return normalizedHost === normalizedDomain || normalizedHost.endsWith(`.${normalizedDomain}`);
+};
+
+const sanitizeCitationRows = (rows) => {
+  const output = [];
+  for (const row of rows || []) {
+    const domain = String(row?.directory_domain || '').toLowerCase().trim();
+    const host = extractHostname(row?.source_url);
+    if (!hostMatchesDomain(host, domain)) continue;
+    output.push(row);
+  }
+  return output;
+};
+
 const normalizePropertyUrl = (value) => {
   try {
     const parsed = new URL(String(value || '').trim());
@@ -146,11 +170,22 @@ export default async function handler(req, res) {
     const canonicalNap = mergeCanonicalNap(signalsCanonical, envCanonical);
     canonicalNap.phone = normalizePhone(canonicalNap.phone);
 
-    const summary = await collectCitationConsistencyRows({
+    const rawSummary = await collectCitationConsistencyRows({
       canonicalNap,
       domainsRaw: process.env.CITATION_CORE_DIRECTORY_DOMAINS || '',
       perDomainLimit
     });
+    const rows = sanitizeCitationRows(rawSummary.rows);
+    const summary = {
+      ...rawSummary,
+      rows,
+      entriesChecked: rows.length,
+      driftCount: rows.filter((row) => row.status !== 'pass').length,
+      alertsCount: rows.filter((row) => ['alert', 'critical'].includes(String(row.alert_level || '').toLowerCase())).length,
+      averageScore: rows.length
+        ? Math.round(rows.reduce((sum, row) => sum + Number(row.consistency_score || 0), 0) / rows.length)
+        : 0
+    };
 
     let persistence = { runPersisted: false, runId: null, tableWarning: null };
     if (persist) {
