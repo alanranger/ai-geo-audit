@@ -7204,6 +7204,26 @@
             </div>
           </div>
 
+          <div class="card" style="margin-bottom: 1.5rem;">
+            <div class="card-header">
+              <h3 style="margin: 0;">Citation Consistency Monitor (Live)</h3>
+              <p class="card-subtitle">Latest NAP drift summary and top drift rows from core directory checks.</p>
+            </div>
+            <div class="card-body" id="impl-citation-status">
+              <p class="card-subtitle">Loading citation consistency summary...</p>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 1.5rem;">
+            <div class="card-header">
+              <h3 style="margin: 0;">Social Mentions Ingestion (Live)</h3>
+              <p class="card-subtitle">Latest Reddit/LinkedIn/YouTube mention baseline summary and top alerts.</p>
+            </div>
+            <div class="card-body" id="impl-mentions-status">
+              <p class="card-subtitle">Loading social mentions summary...</p>
+            </div>
+          </div>
+
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
             <div class="card">
               <div class="card-header"><h3 style="margin: 0;">Done / Current</h3></div>
@@ -23125,6 +23145,167 @@
       }
     }
 
+    async function fetchAndRenderCitationConsistencySummary(cachedPayload = null) {
+      const target = document.getElementById('impl-citation-status');
+      if (!target) return;
+      let payload = cachedPayload;
+      if (!payload) {
+        target.innerHTML = '<p class="card-subtitle">Loading citation consistency summary...</p>';
+      }
+      try {
+        if (!payload) {
+          payload = await fetchAndCacheCitationSummary();
+        }
+        if (!payload || payload.status !== 'ok') {
+          throw new Error(payload?.message || 'Could not load citation consistency summary');
+        }
+        implLatestAuditPayloads.citation = payload;
+        const runStampHtml = buildImplAuditRunStampHtml(payload, Boolean(cachedPayload));
+        const stats = payload?.data?.stats || {};
+        const latestRun = payload?.data?.latestRun || null;
+        const drifts = Array.isArray(payload?.data?.drifts) ? payload.data.drifts : [];
+        const entriesChecked = Number(stats.entriesChecked || 0);
+        const driftCount = Number(stats.driftCount || 0);
+        const alerts = Number(stats.alerts || 0);
+        const avg = Number(stats.averageScore || 0);
+        const emptyHtml = '<tr><td colspan="8" class="ranking-table-empty">No drift rows in current window.</td></tr>';
+        target.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+            <div>
+              <strong style="font-size: 1.05rem;">Citation Consistency Status</strong>
+              <div style="margin-top: 0.35rem; opacity: 0.9;">Window: last ${Number(stats.windowDays || 30)} days | Entries checked: ${entriesChecked}</div>
+              ${runStampHtml}
+            </div>
+            <span class="impl-status-chip ${avg >= 85 ? 'impl-status-green' : (avg >= 60 ? 'impl-status-amber' : 'impl-status-red')}">${avg}% avg</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin-top: 1rem;">
+            <div class="card impl-status-card-amber" style="margin:0;"><strong>Entries Checked</strong><div style="margin-top:0.3rem;">${entriesChecked}</div></div>
+            <div class="card ${driftCount > 0 ? 'impl-status-card-red' : 'impl-status-card-green'}" style="margin:0;"><strong>Drift</strong><div style="margin-top:0.3rem;">${driftCount}</div></div>
+            <div class="card ${alerts > 0 ? 'impl-status-card-red' : 'impl-status-card-green'}" style="margin:0;"><strong>Alerts</strong><div style="margin-top:0.3rem;">${alerts}</div></div>
+            <div class="card impl-status-card-amber" style="margin:0;"><strong>Avg Score</strong><div style="margin-top:0.3rem;">${avg}%</div></div>
+          </div>
+          <div style="margin-top:0.8rem; font-size:0.85rem; opacity:0.9;">
+            Last run: ${latestRun?.run_started_at ? escapeHtml(formatImplPriorityMatrixStamp(Date.parse(String(latestRun.run_started_at)))) : 'Never'}.
+          </div>
+          <div style="margin-top: 0.85rem; overflow-x: auto;">
+            <table class="ranking-table">
+              <thead>
+                <tr>
+                  <th>Directory</th>
+                  <th style="text-align:left;">URL</th>
+                  <th>Status</th>
+                  <th>Score</th>
+                  <th>Missing Signals</th>
+                  <th>Alert</th>
+                  <th>Last Seen</th>
+                  <th>Error</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${drifts.length ? drifts.map((row) => `
+                  <tr>
+                    <td>${escapeHtml(String(row.directory_domain || 'unknown'))}</td>
+                    <td style="text-align:left; max-width: 420px; word-break: break-word;">
+                      <a href="${escapeHtml(String(row.source_url || '#'))}" target="_blank" rel="noopener">${escapeHtml(String(row.source_url || ''))}</a>
+                    </td>
+                    <td>${escapeHtml(String(row.status || 'watch'))}</td>
+                    <td>${Number(row.consistency_score || 0)}%</td>
+                    <td style="text-align:left; max-width: 260px; word-break: break-word;">${escapeHtml((Array.isArray(row.missing_signals) ? row.missing_signals.join(', ') : '') || 'None')}</td>
+                    <td>${escapeHtml(String(row.alert_level || 'watch'))}</td>
+                    <td>${row.last_seen_at ? escapeHtml(formatImplPriorityMatrixStamp(Date.parse(String(row.last_seen_at)))) : 'N/A'}</td>
+                    <td style="text-align:left; max-width: 260px; word-break: break-word;">${escapeHtml(String(row.fetch_error || '')) || '—'}</td>
+                  </tr>
+                `).join('') : emptyHtml}
+              </tbody>
+            </table>
+          </div>
+        `;
+      } catch (error) {
+        target.innerHTML = `<p class="card-subtitle">Could not load citation consistency details: ${escapeHtml(error?.message || 'Unknown error')}</p>`;
+      }
+    }
+
+    async function fetchAndRenderMentionsSummary(cachedPayload = null) {
+      const target = document.getElementById('impl-mentions-status');
+      if (!target) return;
+      let payload = cachedPayload;
+      if (!payload) {
+        target.innerHTML = '<p class="card-subtitle">Loading social mentions summary...</p>';
+      }
+      try {
+        if (!payload) {
+          payload = await fetchAndCacheMentionsSummary();
+        }
+        if (!payload || payload.status !== 'ok') {
+          throw new Error(payload?.message || 'Could not load mentions summary');
+        }
+        implLatestAuditPayloads.mentions = payload;
+        const runStampHtml = buildImplAuditRunStampHtml(payload, Boolean(cachedPayload));
+        const stats = payload?.data?.stats || {};
+        const latestRun = payload?.data?.latestRun || null;
+        const alertsRows = Array.isArray(payload?.data?.alerts) ? payload.data.alerts : [];
+        const activeMentions = Number(stats.activeMentions || 0);
+        const alerts = Number(stats.alerts || 0);
+        const critical = Number(stats.critical || 0);
+        const byPlatform = stats.byPlatform || {};
+        const platformSummary = Object.entries(byPlatform).map(([key, value]) => `${key}: ${Number(value || 0)}`).join(' | ') || 'No mentions yet';
+        const emptyHtml = '<tr><td colspan="8" class="ranking-table-empty">No alert/critical mention rows in current window.</td></tr>';
+        target.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+            <div>
+              <strong style="font-size: 1.05rem;">Social Mentions Status</strong>
+              <div style="margin-top: 0.35rem; opacity: 0.9;">Window: last ${Number(stats.windowDays || 30)} days | Platforms: ${escapeHtml(platformSummary)}</div>
+              ${runStampHtml}
+            </div>
+            <span class="impl-status-chip ${critical > 0 ? 'impl-status-red' : (alerts > 0 ? 'impl-status-amber' : 'impl-status-green')}">${alerts} alerts</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin-top: 1rem;">
+            <div class="card impl-status-card-amber" style="margin:0;"><strong>Active Mentions</strong><div style="margin-top:0.3rem;">${activeMentions}</div></div>
+            <div class="card ${alerts > 0 ? 'impl-status-card-red' : 'impl-status-card-green'}" style="margin:0;"><strong>Alerts</strong><div style="margin-top:0.3rem;">${alerts}</div></div>
+            <div class="card ${critical > 0 ? 'impl-status-card-red' : 'impl-status-card-green'}" style="margin:0;"><strong>Critical</strong><div style="margin-top:0.3rem;">${critical}</div></div>
+            <div class="card impl-status-card-amber" style="margin:0;"><strong>Keywords Used (Last Run)</strong><div style="margin-top:0.3rem;">${Number(latestRun?.keywords_used || 0)}</div></div>
+          </div>
+          <div style="margin-top:0.8rem; font-size:0.85rem; opacity:0.9;">
+            Last run: ${latestRun?.run_started_at ? escapeHtml(formatImplPriorityMatrixStamp(Date.parse(String(latestRun.run_started_at)))) : 'Never'}.
+          </div>
+          <div style="margin-top: 0.85rem; overflow-x: auto;">
+            <table class="ranking-table">
+              <thead>
+                <tr>
+                  <th>Platform</th>
+                  <th style="text-align:left;">URL</th>
+                  <th style="text-align:left;">Title</th>
+                  <th>Score</th>
+                  <th>Alert</th>
+                  <th>Keywords</th>
+                  <th>Published</th>
+                  <th>Last Seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${alertsRows.length ? alertsRows.map((row) => `
+                  <tr>
+                    <td>${escapeHtml(String(row.platform || 'unknown'))}</td>
+                    <td style="text-align:left; max-width: 420px; word-break: break-word;">
+                      <a href="${escapeHtml(String(row.source_url || '#'))}" target="_blank" rel="noopener">${escapeHtml(String(row.source_url || ''))}</a>
+                    </td>
+                    <td style="text-align:left; max-width: 300px; word-break: break-word;">${escapeHtml(String(row.title || '')) || '—'}</td>
+                    <td>${Number(row.mention_score || 0)}</td>
+                    <td>${escapeHtml(String(row.alert_level || 'low'))}</td>
+                    <td style="text-align:left; max-width: 220px; word-break: break-word;">${escapeHtml((Array.isArray(row.matched_keywords) ? row.matched_keywords.join(', ') : '') || '—')}</td>
+                    <td>${row.published_at ? escapeHtml(formatImplPriorityMatrixStamp(Date.parse(String(row.published_at)))) : 'N/A'}</td>
+                    <td>${row.last_seen_at ? escapeHtml(formatImplPriorityMatrixStamp(Date.parse(String(row.last_seen_at)))) : 'N/A'}</td>
+                  </tr>
+                `).join('') : emptyHtml}
+              </tbody>
+            </table>
+          </div>
+        `;
+      } catch (error) {
+        target.innerHTML = `<p class="card-subtitle">Could not load mentions details: ${escapeHtml(error?.message || 'Unknown error')}</p>`;
+      }
+    }
+
     function numberOrNull(value) {
       const n = Number(value);
       return Number.isFinite(n) ? n : null;
@@ -23489,7 +23670,9 @@
         'Technical Foundation (robots/sitemap/indexability)': 'Build technical foundation audit (robots/sitemap/indexability)',
         'Service Schema Coverage': 'Add Service schema to validation and coverage reporting',
         'Schema QA Gate': 'Add pre-deploy schema QA gate (@id, ISO dates, required fields)',
-        'Content Extractability': 'Add content extractability checks (TLDR/direct answer/FAQ/last-updated)'
+        'Content Extractability': 'Add content extractability checks (TLDR/direct answer/FAQ/last-updated)',
+        'Citation Consistency Monitor': 'Add citation consistency monitor (core directories and NAP drift)',
+        'Social Mentions Ingestion (Reddit/LinkedIn/YouTube)': 'Add Reddit, LinkedIn, and YouTube mention ingestion baseline'
       };
       rows.forEach((row) => {
         const ticketTitle = titleByAudit[row?.audit];
@@ -23507,10 +23690,15 @@
         const safeIssues = Number.isFinite(issues) && issues >= 0 ? issues : 0;
         const passRate = safeUrls > 0 ? (safePass / safeUrls) : 0;
         const isTechnicalFoundation = row?.audit === 'Technical Foundation (robots/sitemap/indexability)';
+        const isExternalMonitor = row?.audit === 'Citation Consistency Monitor'
+          || row?.audit === 'Social Mentions Ingestion (Reddit/LinkedIn/YouTube)';
         const healthy = isTechnicalFoundation
           ? ((safeFail === 0 && safeIssues === 0) || (safeFail <= 1 && safeIssues <= 1 && passRate >= 0.995))
-          : (safeFail === 0 && safeIssues === 0);
+          : (isExternalMonitor ? true : (safeFail === 0 && safeIssues === 0));
         ticket.status = healthy ? 'done' : 'in_progress';
+        if (isExternalMonitor) {
+          ticket.lane = healthy ? 'now' : 'later';
+        }
         if (ticket.title === IMPL_EXTRACTABILITY_TICKET_TITLE) {
           ticket.lane = healthy ? 'now' : 'next';
         }
@@ -23892,7 +24080,9 @@
           'impl-local-schema-status',
           'impl-service-schema-status',
           'impl-schema-qa-gate-status',
-          'impl-extractability-status'
+          'impl-extractability-status',
+          'impl-citation-status',
+          'impl-mentions-status'
         ];
         targetIds.forEach((id) => {
           const el = document.getElementById(id);
@@ -23934,11 +24124,13 @@
         if (payloads.citationSummary) {
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.citation, payloads.citationSummary);
           implLatestAuditPayloads.citation = payloads.citationSummary;
+          await fetchAndRenderCitationConsistencySummary(payloads.citationSummary);
           updateImplGlobalProgress(98, 'Updated citation consistency monitor summary.');
         }
         if (payloads.mentionsSummary) {
           saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.mentions, payloads.mentionsSummary);
           implLatestAuditPayloads.mentions = payloads.mentionsSummary;
+          await fetchAndRenderMentionsSummary(payloads.mentionsSummary);
           updateImplGlobalProgress(99, 'Updated social mentions ingestion summary.');
         }
       } catch (error) {
@@ -25692,10 +25884,14 @@
       if (cachedMentionsPayload) {
         implLatestAuditPayloads.mentions = cachedMentionsPayload;
       }
+      await fetchAndRenderCitationConsistencySummary(cachedCitationPayload || null);
+      await fetchAndRenderMentionsSummary(cachedMentionsPayload || null);
 
       renderImplementationPriorityMatrix();
       await fetchAndCacheCitationSummary();
       await fetchAndCacheMentionsSummary();
+      await fetchAndRenderCitationConsistencySummary(implLatestAuditPayloads.citation);
+      await fetchAndRenderMentionsSummary(implLatestAuditPayloads.mentions);
       renderImplementationPriorityMatrix();
 
       // Manual-run only: do not auto-trigger heavy audits on tab load.
