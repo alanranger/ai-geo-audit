@@ -1725,6 +1725,22 @@
       font-weight: 600;
     }
 
+    section[data-panel="traditional-seo"] .traditional-seo-rules-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.4rem 0.65rem;
+      font-size: 0.82rem;
+    }
+
+    section[data-panel="traditional-seo"] .traditional-seo-rules-toggle-icon {
+      display: inline-block;
+      width: 1.1em;
+      text-align: center;
+      font-size: 0.75rem;
+      line-height: 1;
+    }
+
     section[data-panel="traditional-seo"] .traditional-seo-table-wrap {
       overflow-x: auto;
       border-radius: 10px;
@@ -5987,30 +6003,38 @@
 
         <div class="card traditional-seo-rules-card">
           <div style="display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; margin-bottom: 0.65rem; flex-wrap: wrap;">
-            <div style="font-weight: 700;">Traditional SEO Rule Manager</div>
+            <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+              <button type="button" id="traditional-seo-rules-toggle" class="btn traditional-seo-rules-toggle" aria-expanded="false" aria-controls="traditional-seo-rules-table-panel" title="Show or hide rules table">
+                <span class="traditional-seo-rules-toggle-icon" aria-hidden="true">▶</span>
+                <span class="traditional-seo-rules-toggle-text">Expand rules</span>
+              </button>
+              <div style="font-weight: 700;">Traditional SEO Rule Manager</div>
+            </div>
             <div style="display: flex; gap: 0.5rem;">
               <button id="traditional-seo-refresh-btn" class="btn" type="button" style="padding: 0.45rem 0.9rem;">Refresh</button>
               <button id="traditional-seo-save-btn" class="btn" type="button" style="padding: 0.45rem 0.9rem;">Save Rule Settings</button>
             </div>
           </div>
-          <div class="traditional-seo-table-wrap">
-            <table class="traditional-seo-table" id="traditional-seo-rules-table">
-              <thead>
-                <tr>
-                  <th style="width: 8%;">Enabled</th>
-                  <th style="width: 18%;">Category</th>
-                  <th style="width: 42%;">Rule + Explanation</th>
-                  <th style="width: 12%;">Status</th>
-                  <th style="width: 10%;">Weight</th>
-                  <th style="width: 12%;">Severity</th>
-                </tr>
-              </thead>
-              <tbody id="traditional-seo-rules-body">
-                <tr>
-                  <td colspan="6" style="color: var(--dark-text-muted);">Loading rules…</td>
-                </tr>
-              </tbody>
-            </table>
+          <div id="traditional-seo-rules-table-panel" class="traditional-seo-rules-table-panel" hidden>
+            <div class="traditional-seo-table-wrap">
+              <table class="traditional-seo-table" id="traditional-seo-rules-table">
+                <thead>
+                  <tr>
+                    <th style="width: 8%;">Enabled</th>
+                    <th style="width: 18%;">Category</th>
+                    <th style="width: 42%;">Rule + Explanation</th>
+                    <th style="width: 12%;">Status</th>
+                    <th style="width: 10%;">Weight</th>
+                    <th style="width: 12%;">Severity</th>
+                  </tr>
+                </thead>
+                <tbody id="traditional-seo-rules-body">
+                  <tr>
+                    <td colspan="6" style="color: var(--dark-text-muted);">Loading rules…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 
@@ -71674,6 +71698,24 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     function wireTraditionalSeoButtons() {
+      const rulesToggle = document.getElementById('traditional-seo-rules-toggle');
+      const rulesPanel = document.getElementById('traditional-seo-rules-table-panel');
+      if (rulesToggle && rulesPanel && !rulesToggle.dataset.wiredToggle) {
+        rulesToggle.dataset.wiredToggle = '1';
+        const tIcon = rulesToggle.querySelector('.traditional-seo-rules-toggle-icon');
+        const tText = rulesToggle.querySelector('.traditional-seo-rules-toggle-text');
+        function syncRulesPanelToggle() {
+          const open = !rulesPanel.hidden;
+          rulesToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+          if (tIcon) tIcon.textContent = open ? '▼' : '▶';
+          if (tText) tText.textContent = open ? 'Collapse rules' : 'Expand rules';
+        }
+        rulesToggle.addEventListener('click', () => {
+          rulesPanel.hidden = !rulesPanel.hidden;
+          syncRulesPanelToggle();
+        });
+        syncRulesPanelToggle();
+      }
       const refreshBtn = document.getElementById('traditional-seo-refresh-btn');
       const saveBtn = document.getElementById('traditional-seo-save-btn');
       const runBtn = document.getElementById('traditional-seo-run-audit-btn');
