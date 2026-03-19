@@ -70105,9 +70105,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     const TRADITIONAL_SEO_BASELINE_RULES = [
       { rule_key: 'title_tag_present', rule_name: 'Title length (50–60 chars)', description: 'Best practice: page title between 50 and 60 characters (spaces and punctuation count). Uses schema audit title when available.', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.5, sort_order: 10 },
-      { rule_key: 'meta_description_present', rule_name: 'Meta description length (150–160 chars)', description: 'Pass only if meta length is 150–160 chars. Warn if missing; fail if present but outside range. Uses schema-audit meta first, else Extractability HTML (incl. content-before-name order).', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 20 },
+      { rule_key: 'meta_description_present', rule_name: 'Meta description length (150–160 chars)', description: 'Uses the longer of schema-audit vs Extractability HTML meta (avoids truncated schema snippets). Pass 140–170; warn if missing or 120–139 / 171–200; fail if present but outside those bands.', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 20 },
       { rule_key: 'single_h1', rule_name: 'Exactly one H1', description: 'Fail if zero or more than one H1 (parsed from Content Extractability HTML).', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 30 },
-      { rule_key: 'h1_length_best_practice', rule_name: 'H1 length (50–60 chars)', description: 'Uses the longest H1 text on the page (avoids hidden/short first H1 in HTML). Target 50–60 characters.', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 35 },
+      { rule_key: 'h1_length_best_practice', rule_name: 'H1 length (50–60 chars)', description: 'Uses max(longest H1, first H1) plain text from Extractability HTML. Pass 25–90 chars (H1 is not a title tag); warn 15–24 or 91–120; fail if no H1 or extreme length.', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 35 },
       { rule_key: 'canonical_self_or_valid', rule_name: 'Canonical is valid', description: 'Canonical/URL identity checks from Schema QA gate when present.', category: 'technical', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 40 },
       { rule_key: 'url_slug_word_count', rule_name: 'URL slug word count (3–6)', description: 'Final path segment (after splitting on -/_) should be 3–6 words. Homepage root passes.', category: 'technical', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 45 },
       { rule_key: 'indexable_status', rule_name: 'Indexable status', description: 'Technical indexability (HTTP + noindex). Utility/login URLs excluded from this list.', category: 'indexation', severity: 'critical', scope: 'page', current_status: 'pass', enabled: true, weight: 2.0, sort_order: 50 },
@@ -70397,12 +70397,17 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const merged = baseline.map((baseRule) => {
         const remoteRule = remoteByKey.get(baseRule.rule_key);
         if (!remoteRule) return baseRule;
-        return {
+        const merged = {
           ...baseRule,
           ...remoteRule,
           rule_key: baseRule.rule_key,
           sort_order: traditionalSeoToNum(remoteRule.sort_order, baseRule.sort_order)
         };
+        if (merged.rule_key === 'url_slug_word_count') {
+          merged.rule_name = baseRule.rule_name;
+          merged.description = baseRule.description;
+        }
+        return merged;
       });
       remote.forEach((rule) => {
         if (!merged.some((row) => row.rule_key === rule.rule_key)) merged.push(rule);
@@ -70968,10 +70973,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (key === 'meta_description_present') {
         const metaFromSchema = schemaSignal?.metaDescription ? String(schemaSignal.metaDescription).trim() : '';
         const metaFromExtract = extractSignal?.seoMetaDescription ? String(extractSignal.seoMetaDescription).trim() : '';
-        const metaText = metaFromSchema || metaFromExtract;
-        if (!metaText) return 'warn';
-        const len = metaText.length;
-        if (len >= 150 && len <= 160) return 'pass';
+        if (!metaFromSchema && !metaFromExtract) return 'warn';
+        const len = Math.max(metaFromSchema.length, metaFromExtract.length);
+        if (len >= 140 && len <= 170) return 'pass';
+        if (len >= 120 && len <= 200) return 'warn';
         return 'fail';
       }
       if (key === 'single_h1') {
@@ -70990,7 +70995,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const longest = traditionalSeoToNum(extractSignal.seoLongestH1Length, 0);
         const firstLen = traditionalSeoToNum(extractSignal.seoFirstH1Length, 0);
         const hlen = Math.max(longest, firstLen);
-        if (hlen >= 50 && hlen <= 60) return 'pass';
+        if (hlen <= 0) return 'warn';
+        if (hlen >= 25 && hlen <= 90) return 'pass';
+        if (hlen >= 15 && hlen <= 120) return 'warn';
         return 'fail';
       }
       if (key === 'schema_qa_gate_page') {
@@ -71238,11 +71245,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (rk === 'meta_description_present') {
         const metaFromSchema = sc?.metaDescription ? String(sc.metaDescription).trim() : '';
         const metaFromExtract = ex?.seoMetaDescription ? String(ex.seoMetaDescription).trim() : '';
-        const metaText = metaFromSchema || metaFromExtract;
-        if (!metaText) return 'No meta description found (schema audit + Extractability HTML).';
-        const len = metaText.length;
-        const src = metaFromSchema ? 'schema audit' : 'Extractability HTML';
-        return `Length ${len} chars (target 150–160). Source: ${src}.`;
+        if (!metaFromSchema && !metaFromExtract) return 'No meta description found (schema audit + Extractability HTML).';
+        const len = Math.max(metaFromSchema.length, metaFromExtract.length);
+        const src = metaFromExtract.length >= metaFromSchema.length && metaFromExtract ? 'Extractability HTML' : (metaFromSchema ? 'schema audit' : 'Extractability HTML');
+        return `Evaluated length ${len} chars (max of schema vs HTML; pass 140–170). Longer source shown: ${src}.`;
       }
       if (rk === 'single_h1' || rk === 'h1_length_best_practice') {
         if (ex?.excludedFromAudit) return 'Page excluded from extractability scope.';
@@ -71253,7 +71259,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const longest = traditionalSeoToNum(ex.seoLongestH1Length, 0);
         if (rk === 'single_h1') return `H1 count in check HTML: ${c >= 0 ? c : 'unknown'}.`;
         if (c <= 0) return 'No H1 found in check HTML.';
-        return `Longest H1 plain length: ${longest} (target 50–60).`;
+        return `Longest H1 plain length: ${longest} (pass band 25–90).`;
       }
       if (rk === 'external_links_new_tab') {
         if (!ex || ex.requestOk === false) return base;
