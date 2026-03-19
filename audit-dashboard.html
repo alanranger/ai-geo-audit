@@ -6097,16 +6097,17 @@
             <table class="traditional-seo-table" id="traditional-seo-results-table">
               <thead>
                 <tr>
-                  <th style="width: 12%;"><button type="button" class="traditional-seo-sort-btn" data-sort="tier">Tier <span class="sort-ind">↕</span></button></th>
-                  <th style="width: 23%;"><button type="button" class="traditional-seo-sort-btn" data-sort="rule_name">Rule <span class="sort-ind">↕</span></button></th>
-                  <th style="width: 38%;"><button type="button" class="traditional-seo-sort-btn" data-sort="url">URL <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 7%;">View</th>
+                  <th style="width: 11%;"><button type="button" class="traditional-seo-sort-btn" data-sort="tier">Tier <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 21%;"><button type="button" class="traditional-seo-sort-btn" data-sort="rule_name">Rule <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 34%;"><button type="button" class="traditional-seo-sort-btn" data-sort="url">URL <span class="sort-ind">↕</span></button></th>
                   <th style="width: 9%;"><button type="button" class="traditional-seo-sort-btn" data-sort="status">Status <span class="sort-ind">↕</span></button></th>
                   <th style="width: 9%;"><button type="button" class="traditional-seo-sort-btn" data-sort="clicks">Clicks <span class="sort-ind">↕</span></button></th>
                   <th style="width: 9%;"><button type="button" class="traditional-seo-sort-btn" data-sort="impressions">Impr. <span class="sort-ind">↕</span></button></th>
                 </tr>
               </thead>
               <tbody id="traditional-seo-results-body">
-                <tr><td colspan="6" style="color: var(--dark-text-muted);">Run Traditional SEO Audit to populate this table.</td></tr>
+                <tr><td colspan="7" style="color: var(--dark-text-muted);">Run Traditional SEO Audit to populate this table.</td></tr>
               </tbody>
             </table>
           </div>
@@ -7587,6 +7588,30 @@
           justify-content: space-between;
           gap: 0.5rem;
         }
+        .traditional-seo-page-modal-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 10000;
+          background: rgba(2, 6, 23, 0.72);
+          display: none;
+          align-items: center;
+          justify-content: center;
+          padding: 1rem;
+        }
+        .traditional-seo-page-modal-backdrop.is-open {
+          display: flex;
+        }
+        .traditional-seo-page-modal {
+          width: min(920px, 96vw);
+          max-height: 92vh;
+          overflow: hidden;
+          border-radius: 14px;
+          border: 1px solid rgba(148, 163, 184, 0.35);
+          background: #0f172a;
+          color: #e2e8f0;
+          padding: 1rem 1.1rem 1.1rem;
+          box-shadow: 0 18px 60px rgba(15, 23, 42, 0.55);
+        }
       </style>
 
       <!-- Implementation Progress Panel -->
@@ -7970,6 +7995,33 @@
           <div class="impl-progress-modal-meta">
             <span id="impl-tech-progress-percent">5%</span>
             <span id="impl-tech-progress-elapsed">Elapsed: 0s</span>
+          </div>
+        </div>
+      </div>
+      <div id="traditional-seo-page-modal" class="traditional-seo-page-modal-backdrop" aria-hidden="true">
+        <div class="traditional-seo-page-modal" role="dialog" aria-modal="true" aria-labelledby="traditional-seo-page-modal-title">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.75rem;flex-wrap:wrap;">
+            <div style="min-width:0;flex:1;">
+              <h3 id="traditional-seo-page-modal-title" style="margin:0 0 0.35rem;font-size:1.05rem;">All rules for this URL</h3>
+              <p id="traditional-seo-page-modal-url" style="margin:0;font-size:0.82rem;color:#94a3b8;word-break:break-all;"></p>
+            </div>
+            <button type="button" class="btn" id="traditional-seo-page-modal-close" style="flex-shrink:0;">Close</button>
+          </div>
+          <p id="traditional-seo-page-modal-hint" style="margin:0.6rem 0 0.5rem;font-size:0.76rem;color:#94a3b8;"></p>
+          <div class="traditional-seo-table-wrap" style="max-height:min(62vh,640px);overflow:auto;margin-top:0.5rem;border-radius:8px;border:1px solid rgba(148,163,184,0.2);">
+            <table class="traditional-seo-table" style="margin:0;" id="traditional-seo-page-modal-table">
+              <thead>
+                <tr>
+                  <th style="width:28%;">Rule</th>
+                  <th style="width:14%;">Factor</th>
+                  <th style="width:12%;">Status</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody id="traditional-seo-page-modal-body">
+                <tr><td colspan="4" style="color:#94a3b8;">No data.</td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -70735,6 +70787,82 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       ].join('');
     }
 
+    function traditionalSeoRuleMetaByKey() {
+      const map = new Map();
+      (TRADITIONAL_SEO_STATE.rules || []).forEach((r) => {
+        map.set(String(r.rule_key), r);
+      });
+      return map;
+    }
+
+    function traditionalSeoClosePageModal() {
+      const backdrop = document.getElementById('traditional-seo-page-modal');
+      if (!backdrop) return;
+      backdrop.classList.remove('is-open');
+      backdrop.setAttribute('aria-hidden', 'true');
+    }
+
+    function traditionalSeoOpenPageModal(pageUrl) {
+      const backdrop = document.getElementById('traditional-seo-page-modal');
+      const urlEl = document.getElementById('traditional-seo-page-modal-url');
+      const bodyEl = document.getElementById('traditional-seo-page-modal-body');
+      const hintEl = document.getElementById('traditional-seo-page-modal-hint');
+      if (!backdrop || !urlEl || !bodyEl) return;
+      const target = String(pageUrl || '');
+      const all = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
+      const hits = all.filter((row) => String(row.url || '') === target);
+      const meta = traditionalSeoRuleMetaByKey();
+      const order = { fail: 0, warn: 1, pass: 2 };
+      hits.sort((a, b) => {
+        const da = order[String(a.status || 'fail').toLowerCase()] ?? 3;
+        const db = order[String(b.status || 'fail').toLowerCase()] ?? 3;
+        if (da !== db) return da - db;
+        return String(a.rule_name || '').localeCompare(String(b.rule_name || ''));
+      });
+      const safeHref = traditionalSeoSafeExternalHref(target);
+      if (safeHref) {
+        urlEl.innerHTML = `<a href="${traditionalSeoEscapeAttr(safeHref)}" target="_blank" rel="noopener noreferrer">${escapeHtml(target)}</a>`;
+      } else {
+        urlEl.textContent = target || '—';
+      }
+      if (hintEl) {
+        hintEl.textContent = 'Many “warn” results are guardrails (e.g. portfolio/gallery image-alt paths, extractability proxies, short meta). Fails are the priority fixes. This modal lists every enabled rule outcome for this URL.';
+      }
+      if (!hits.length) {
+        bodyEl.innerHTML = '<tr><td colspan="4" style="color:#94a3b8;">No stored results for this URL — run Traditional SEO Audit.</td></tr>';
+      } else {
+        bodyEl.innerHTML = hits.map((row) => {
+          const rk = String(row.rule_key || '');
+          const rule = meta.get(rk) || {};
+          const note = String(rule.description || '').trim() || '—';
+          return `
+            <tr>
+              <td>${escapeHtml(String(row.rule_name || rk))}</td>
+              <td>${escapeHtml(String(row.rule_category || rule.category || 'general'))}</td>
+              <td>${traditionalSeoStatusPill(row.status)}</td>
+              <td style="font-size:0.76rem;color:#94a3b8;">${escapeHtml(note)}</td>
+            </tr>`;
+        }).join('');
+      }
+      backdrop.classList.add('is-open');
+      backdrop.setAttribute('aria-hidden', 'false');
+    }
+
+    function wireTraditionalSeoPageModal() {
+      const backdrop = document.getElementById('traditional-seo-page-modal');
+      const closeBtn = document.getElementById('traditional-seo-page-modal-close');
+      if (backdrop && !backdrop.dataset.wired) {
+        backdrop.dataset.wired = '1';
+        backdrop.addEventListener('click', (e) => {
+          if (e.target === backdrop) traditionalSeoClosePageModal();
+        });
+      }
+      if (closeBtn && !closeBtn.dataset.wired) {
+        closeBtn.dataset.wired = '1';
+        closeBtn.addEventListener('click', () => traditionalSeoClosePageModal());
+      }
+    }
+
     function renderTraditionalSeoResultsTable() {
       const rows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
       TRADITIONAL_SEO_STATE.tierUrlCountsMap = traditionalSeoComputeTierUrlCountsMap(rows);
@@ -70776,7 +70904,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
       if (body) {
         if (!filtered.length) {
-          body.innerHTML = '<tr><td colspan="6" style="color: var(--dark-text-muted);">No rows match current filters.</td></tr>';
+          body.innerHTML = '<tr><td colspan="7" style="color: var(--dark-text-muted);">No rows match current filters.</td></tr>';
         } else {
           body.innerHTML = filtered.slice(0, 700).map((row) => {
             const tierLabel = escapeHtml(traditionalSeoTierCellLabel(row.tier, countMap));
@@ -70787,8 +70915,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             const urlCell = href
               ? `<a class="traditional-seo-url-link" href="${traditionalSeoEscapeAttr(href)}" target="_blank" rel="noopener noreferrer">${urlInner}</a>`
               : urlInner;
+            const viewAttr = traditionalSeoEscapeAttr(urlRaw);
             return `
           <tr>
+            <td style="white-space:nowrap;"><button type="button" class="btn traditional-seo-page-view-btn" style="padding:0.25rem 0.5rem;font-size:0.72rem;" data-page-url="${viewAttr}">View</button></td>
             <td>${tierLabel}</td>
             <td>${escapeHtml(String(row.rule_name || row.rule_key || 'rule'))}</td>
             <td style="word-break: break-all;">${urlCell}</td>
@@ -71261,6 +71391,16 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           TRADITIONAL_SEO_STATE.filters.rule = rk;
           if (ruleFilter) ruleFilter.value = rk;
           renderTraditionalSeoResultsTable();
+        });
+      }
+      wireTraditionalSeoPageModal();
+      if (resultsTable && !resultsTable.dataset.pageViewWired) {
+        resultsTable.dataset.pageViewWired = '1';
+        resultsTable.addEventListener('click', (event) => {
+          const btn = event.target instanceof Element ? event.target.closest('.traditional-seo-page-view-btn') : null;
+          if (!btn) return;
+          const pageUrl = String(btn.getAttribute('data-page-url') || '');
+          if (pageUrl) traditionalSeoOpenPageModal(pageUrl);
         });
       }
     }
