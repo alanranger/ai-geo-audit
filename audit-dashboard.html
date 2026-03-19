@@ -70182,7 +70182,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     const TRADITIONAL_SEO_BASELINE_RULES = [
       { rule_key: 'title_tag_present', rule_name: 'Title length (50–60 chars)', description: 'Best practice: page title between 50 and 60 characters (spaces and punctuation count). Uses schema audit title when available.', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.5, sort_order: 10 },
-      { rule_key: 'meta_description_present', rule_name: 'Meta description length (150–160 chars)', description: 'Pass only if meta length is 150–160 chars. Warn if missing; fail if present but outside range. Length uses the longer of schema-audit vs Extractability HTML (avoids truncated schema snippets).', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 20 },
+      { rule_key: 'meta_description_present', rule_name: 'Meta description length (150–160 chars)', description: 'Pass only if meta length is 150–160 chars (whitespace/newlines collapsed). Warn if missing; fail if outside range. Uses the longer of schema-audit vs Extractability HTML.', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 20 },
       { rule_key: 'single_h1', rule_name: 'Exactly one H1', description: 'Fail if zero or more than one H1 (parsed from Content Extractability HTML).', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 30 },
       { rule_key: 'h1_length_best_practice', rule_name: 'H1 length (50–60 chars)', description: 'Uses the longest H1 plain text on the page (and first H1 when needed). Target 50–60 characters (Extractability HTML).', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 35 },
       { rule_key: 'canonical_self_or_valid', rule_name: 'Canonical is valid', description: 'Canonical/URL identity checks from Schema QA gate when present.', category: 'technical', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 40 },
@@ -70217,6 +70217,19 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     function traditionalSeoToNum(value, fallback = 0) {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    /** Collapse whitespace/newlines so meta length matches editor “characters with spaces”. */
+    function traditionalSeoNormalizeSnippetText(value) {
+      return String(value || '').replace(/\s+/g, ' ').trim();
+    }
+
+    /** Pre-SEO-field cache rows must be refreshed so H1/meta rules match a fresh Extractability run. */
+    function traditionalSeoExtractRowHasUsableSeoFields(row) {
+      if (!row || row.excludedFromAudit === true) return true;
+      if (row.requestOk !== true) return false;
+      const c = Number(row.seoH1Count);
+      return Number.isFinite(c) && c >= 0;
     }
 
     const TRADITIONAL_SEO_BASELINE_LS_KEY = 'gaio_traditional_seo_baseline_v1';
@@ -70426,10 +70439,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         ? loadImplementationAuditCacheAnyAge(key)
         : null;
       const existing = Array.isArray(cache?.data?.rows) ? cache.data.rows : [];
-      const have = new Set();
+      const rowByKey = new Map();
       existing.forEach((r) => {
         const k = traditionalSeoToComparableUrl(r?.url, prop) || String(r?.url || '').trim();
-        if (k) have.add(k);
+        if (k) rowByKey.set(k, r);
       });
       const need = [];
       const seen = new Set();
@@ -70439,7 +70452,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const k = traditionalSeoToComparableUrl(raw, prop) || traditionalSeoNormalizeUrl(raw, prop) || raw;
         if (!k || seen.has(k)) return;
         seen.add(k);
-        if (!have.has(k)) need.push(raw);
+        const row = rowByKey.get(k);
+        if (!traditionalSeoExtractRowHasUsableSeoFields(row)) need.push(raw);
       });
       if (!need.length) return;
       if (typeof onProgress === 'function') onProgress({ done: 0, total: need.length });
@@ -70450,7 +70464,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (typeof onProgress === 'function') onProgress({ done, total: need.length });
         if (typeof window.showStatus === 'function') {
           if (i === 0 || done === need.length || (done % 100 === 0 && done > 0)) {
-            window.showStatus(`Traditional SEO: fetching extractability ${done}/${need.length} missing URLs…`, 'info');
+            window.showStatus(`Traditional SEO: refreshing extractability ${done}/${need.length} URLs (missing or stale SEO fields)…`, 'info');
           }
         }
         const res = await fetch(traditionalSeoApiPath('/api/aigeo/content-extractability'), {
@@ -70464,10 +70478,6 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
         const freshRows = Array.isArray(payload?.data?.rows) ? payload.data.rows : [];
         cache = traditionalSeoMergeExtractabilityCacheMutate(cache, prop, freshRows);
-        freshRows.forEach((r) => {
-          const rk = traditionalSeoToComparableUrl(r?.url, prop) || String(r?.url || '').trim();
-          if (rk) have.add(rk);
-        });
       }
       if (typeof implLatestAuditPayloads === 'object' && implLatestAuditPayloads) {
         implLatestAuditPayloads.extractability = cache;
@@ -71278,8 +71288,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         return 'fail';
       }
       if (key === 'meta_description_present') {
-        const metaFromSchema = schemaSignal?.metaDescription ? String(schemaSignal.metaDescription).trim() : '';
-        const metaFromExtract = extractSignal?.seoMetaDescription ? String(extractSignal.seoMetaDescription).trim() : '';
+        const metaFromSchema = traditionalSeoNormalizeSnippetText(schemaSignal?.metaDescription || '');
+        const metaFromExtract = traditionalSeoNormalizeSnippetText(extractSignal?.seoMetaDescription || '');
         if (!metaFromSchema && !metaFromExtract) return 'warn';
         const len = Math.max(metaFromSchema.length, metaFromExtract.length);
         if (len >= 150 && len <= 160) return 'pass';
@@ -71547,12 +71557,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const ex = traditionalSeoSignalMapGet(maps.extractability, pageUrl, prop);
       const sc = traditionalSeoSignalMapGet(maps.schemaPage, pageUrl, prop);
       if (rk === 'meta_description_present') {
-        const metaFromSchema = sc?.metaDescription ? String(sc.metaDescription).trim() : '';
-        const metaFromExtract = ex?.seoMetaDescription ? String(ex.seoMetaDescription).trim() : '';
+        const metaFromSchema = traditionalSeoNormalizeSnippetText(sc?.metaDescription || '');
+        const metaFromExtract = traditionalSeoNormalizeSnippetText(ex?.seoMetaDescription || '');
         if (!metaFromSchema && !metaFromExtract) return 'No meta description found (schema audit + Extractability HTML).';
         const len = Math.max(metaFromSchema.length, metaFromExtract.length);
         const src = metaFromExtract.length >= metaFromSchema.length && metaFromExtract ? 'Extractability HTML' : (metaFromSchema ? 'schema audit' : 'Extractability HTML');
-        return `Length ${len} chars (target 150–160; max of schema vs HTML). Source: ${src}.`;
+        return `Length ${len} chars (target 150–160; whitespace normalized; longer of schema vs HTML). Source: ${src}.`;
       }
       if (rk === 'single_h1' || rk === 'h1_length_best_practice') {
         if (ex?.excludedFromAudit) return 'Page excluded from extractability scope.';

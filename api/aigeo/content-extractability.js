@@ -386,17 +386,21 @@ function plainTextFromHtmlFragment(fragment = '') {
     .trim();
 }
 
+function normalizeSeoSnippetText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
 /** Meta description: support name= before content= OR content= before name= (common on Squarespace). */
 function extractMetaDescriptionFromHtml(html = '') {
   const source = String(html || '');
   let m = source.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/is);
-  if (m?.[1]) return String(m[1]).trim();
+  if (m?.[1]) return normalizeSeoSnippetText(m[1]);
   m = source.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']description["']/is);
-  if (m?.[1]) return String(m[1]).trim();
+  if (m?.[1]) return normalizeSeoSnippetText(m[1]);
   m = source.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/is);
-  if (m?.[1]) return String(m[1]).trim();
+  if (m?.[1]) return normalizeSeoSnippetText(m[1]);
   m = source.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:description["']/is);
-  return m?.[1] ? String(m[1]).trim() : '';
+  return m?.[1] ? normalizeSeoSnippetText(m[1]) : '';
 }
 
 /** Counts used by Traditional SEO dashboard (H1, images, outbound links). */
