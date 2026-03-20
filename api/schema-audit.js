@@ -459,6 +459,46 @@ function extractMetaDescription(htmlString) {
   return v || null;
 }
 
+function normalizeMetaSnippetForCompare(s) {
+  return String(s || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Walk JSON-LD (incl. @graph) and take longest string `description` (BlogPosting etc. often fuller than <meta>). */
+function longestJsonLdDescriptionFromSchemas(schemas, depthLimit = 12) {
+  let best = '';
+  const visit = (node, d) => {
+    if (d > depthLimit || node == null) return;
+    if (Array.isArray(node)) {
+      node.forEach((x) => visit(x, d + 1));
+      return;
+    }
+    if (typeof node !== 'object') return;
+    const raw = node.description;
+    if (typeof raw === 'string' && raw.trim()) {
+      const plain = normalizeMetaSnippetForCompare(decodeNumericHtmlEntitiesForMeta(raw));
+      if (plain.length > best.length) best = plain;
+    }
+    Object.values(node).forEach((v) => {
+      if (v != null && typeof v === 'object') visit(v, d + 1);
+    });
+  };
+  (Array.isArray(schemas) ? schemas : []).forEach((s) => visit(s, 0));
+  return best;
+}
+
+/** Prefer longer normalized string: meta tags vs JSON-LD description (fixes blog excerpt vs truncated meta). */
+function bestMetaDescriptionFromPage(htmlString, schemas) {
+  const fromTags = extractMetaDescription(htmlString) || '';
+  const fromLd = longestJsonLdDescriptionFromSchemas(schemas);
+  if (fromLd.length > fromTags.length) return fromLd || null;
+  return fromTags || fromLd || null;
+}
+
 /**
  * Normalize schema types from a schema object
  * Returns array of @type values
@@ -1252,7 +1292,7 @@ async function crawlUrl(url, semaphore, delayAfterMs = 0, retryCount = 0) {
     const html = await response.text();
     const schemas = await extractJsonLd(html, url);
     const title = extractTitle(html);
-    const metaDescription = extractMetaDescription(html);
+    const metaDescription = bestMetaDescriptionFromPage(html, schemas);
     
     // Debug: Log ALL extracted schemas and their detection
     if (schemas.length > 0) {
