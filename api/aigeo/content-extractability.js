@@ -210,7 +210,10 @@ function decodeBasicHtmlEntities(text = '') {
     .replaceAll(/&quot;/gi, '"')
     .replaceAll(/&#39;/gi, "'")
     .replaceAll(/&lt;/gi, '<')
-    .replaceAll(/&gt;/gi, '>');
+    .replaceAll(/&gt;/gi, '>')
+    .replaceAll(/&mdash;/gi, '\u2014')
+    .replaceAll(/&ndash;/gi, '\u2013')
+    .replaceAll(/&hellip;/gi, '\u2026');
   s = decodeNumericHtmlEntities(s);
   return s;
 }
