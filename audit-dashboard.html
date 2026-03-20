@@ -70684,9 +70684,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
         await traditionalSeoMergeExtractabilityForUrl(propertyUrl, url, payload);
         if (typeof window.showStatus === 'function') {
-          window.showStatus('Page refreshed. Re-running Traditional SEO…', 'info');
+          window.showStatus('Page refreshed. Re-scoring this URL only…', 'info');
         }
-        await runTraditionalSeoEvaluation({ refreshAudit: false });
+        await runTraditionalSeoEvaluation({ refreshAudit: false, onlyRescorePageUrls: [url] });
         traditionalSeoOpenPageModal(url);
         if (typeof window.showStatus === 'function') {
           window.showStatus('Re-audit complete.', 'success');
@@ -72278,6 +72278,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     async function runTraditionalSeoEvaluation(options = {}) {
       const refreshAudit = options?.refreshAudit === true;
+      const rawOnly = options?.onlyRescorePageUrls;
+      const priorRows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows)
+        ? TRADITIONAL_SEO_STATE.evaluationRows.slice()
+        : [];
+      let partialPageUrls = [];
+      if (Array.isArray(rawOnly)) {
+        partialPageUrls = rawOnly.map((u) => String(u || '').trim()).filter((u) => /^https?:\/\//i.test(u));
+      } else if (rawOnly && /^https?:\/\//i.test(String(rawOnly))) {
+        partialPageUrls = [String(rawOnly).trim()];
+      }
+      if (partialPageUrls.length && !priorRows.length) partialPageUrls = [];
+      const isPartialPageRescore = partialPageUrls.length > 0;
       const runBtn = document.getElementById('traditional-seo-run-audit-btn');
       const runFullBtn = document.getElementById('traditional-seo-run-full-audit-btn');
       try {
@@ -72290,7 +72302,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           await new Promise((resolve) => setTimeout(resolve, 1500));
         }
 
-        traditionalSeoEvalProgressOpen(refreshAudit);
+        traditionalSeoEvalProgressOpen(
+          refreshAudit,
+          isPartialPageRescore ? 'Re-auditing single page…' : undefined
+        );
         TRADITIONAL_SEO_STATE.seoEvalInFlight = true;
         renderTraditionalSeoResultsTable();
         traditionalSeoEvalProgressStage('Loading saved audit data…', 10);
@@ -72303,15 +72318,23 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const urls = Array.isArray(rawUrls) ? rawUrls.slice() : [];
         const metricLookup = traditionalSeoBuildMetricsLookup(audit, propertyUrl);
         const resolveTier = await traditionalSeoBuildTierResolver(audit);
-        traditionalSeoEvalProgressStage('Refreshing extractability for all URLs (batched)…', 24);
-        await traditionalSeoEnsureExtractabilityForUrls(urls, propertyUrl, (ev) => {
-          if (!ev) return;
-          if (ev.total > 0) {
-            traditionalSeoEvalProgressExtract(ev.done, ev.total);
-          } else if (ev.noHttpUrls) {
-            traditionalSeoEvalProgressStage('Extractability: no https URLs in list to refresh', 52);
-          }
-        });
+        if (!isPartialPageRescore) {
+          traditionalSeoEvalProgressStage('Refreshing extractability for all URLs (batched)…', 24);
+          await traditionalSeoEnsureExtractabilityForUrls(urls, propertyUrl, (ev) => {
+            if (!ev) return;
+            if (ev.total > 0) {
+              traditionalSeoEvalProgressExtract(ev.done, ev.total);
+            } else if (ev.noHttpUrls) {
+              traditionalSeoEvalProgressStage('Extractability: no https URLs in list to refresh', 52);
+            }
+          });
+        } else {
+          traditionalSeoEvalProgressStage(
+            'Skipping full-site extract refresh (this page was just refreshed)…',
+            52
+          );
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
         traditionalSeoEvalProgressStage('Building signals and loading overrides…', 86);
         const implPayloads = traditionalSeoLoadImplementationPayloads();
         const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
@@ -72321,7 +72344,6 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const sourceParity = await traditionalSeoComputeSourceParity(propertyUrl);
         TRADITIONAL_SEO_STATE.sourceParity = sourceParity;
         renderTraditionalSeoSourceParity(sourceParity);
-        traditionalSeoEvalProgressStage('Scoring rules and rendering results…', 90);
         const rules = collectTraditionalSeoRulesFromTable().filter((rule) => rule.enabled !== false);
         const techFoundation = traditionalSeoReadTechFoundation(implPayloads.tech);
         const context = {
@@ -72334,10 +72356,17 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           signalMaps
         };
 
-        const rows = [];
         const pageRules = rules.filter((r) => String(r.scope || 'page').toLowerCase() !== 'sitewide');
         const siteRules = rules.filter((r) => String(r.scope || 'page').toLowerCase() === 'sitewide');
-        urls.forEach((url) => {
+        const urlsToScore = isPartialPageRescore ? partialPageUrls : urls;
+        traditionalSeoEvalProgressStage(
+          isPartialPageRescore
+            ? `Scoring rules for ${urlsToScore.length} URL(s)…`
+            : 'Scoring rules and rendering results…',
+          90
+        );
+        const pageRows = [];
+        urlsToScore.forEach((url) => {
           const tier = String(resolveTier(url) || 'unmapped');
           const norm = traditionalSeoNormalizeUrl(url, propertyUrl) || url;
           const metric = metricLookup.get(url) || metricLookup.get(norm) || { clicks: 0, impressions: 0 };
@@ -72345,7 +72374,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             const rawStatus = traditionalSeoRuleStatusForUrl(rule, url, tier, metric, context);
             const bypass = traditionalSeoHasRuleBypass(url, rule.rule_key);
             const status = bypass ? 'pass' : rawStatus;
-            rows.push({
+            pageRows.push({
               rule_key: rule.rule_key,
               rule_name: rule.rule_name,
               rule_category: String(rule.category || 'general').toLowerCase(),
@@ -72361,25 +72390,42 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           });
         });
 
-        const siteRowUrl = traditionalSeoNormalizeUrl(propertyUrl, propertyUrl)
-          || (urls.length ? String(urls[0]) : 'Site-wide (set property URL)');
-        const siteMetric = { clicks: 0, impressions: 0 };
-        siteRules.forEach((rule) => {
-          const rawStatus = traditionalSeoRuleStatusForUrl(rule, siteRowUrl, 'sitewide', siteMetric, context);
-          rows.push({
-            rule_key: rule.rule_key,
-            rule_name: rule.rule_name,
-            rule_category: String(rule.category || 'general').toLowerCase(),
-            url: siteRowUrl,
-            tier: 'sitewide',
-            status: rawStatus,
-            raw_status: rawStatus,
-            bypassed: false,
-            rule_weight: Math.max(0, traditionalSeoToNum(rule.weight, 1)),
-            clicks: 0,
-            impressions: 0
+        let rows;
+        if (isPartialPageRescore) {
+          const targetKeys = new Set();
+          partialPageUrls.forEach((u) => {
+            const k = traditionalSeoToComparableUrl(u, propertyUrl) || traditionalSeoNormalizeUrl(u, propertyUrl);
+            if (k) targetKeys.add(k);
           });
-        });
+          const kept = priorRows.filter((row) => {
+            if (String(row?.tier || '').toLowerCase() === 'sitewide') return true;
+            const rk = traditionalSeoToComparableUrl(row.url, propertyUrl)
+              || traditionalSeoNormalizeUrl(row.url, propertyUrl);
+            return !targetKeys.has(rk);
+          });
+          rows = kept.concat(pageRows);
+        } else {
+          rows = pageRows.slice();
+          const siteRowUrl = traditionalSeoNormalizeUrl(propertyUrl, propertyUrl)
+            || (urls.length ? String(urls[0]) : 'Site-wide (set property URL)');
+          const siteMetric = { clicks: 0, impressions: 0 };
+          siteRules.forEach((rule) => {
+            const rawStatus = traditionalSeoRuleStatusForUrl(rule, siteRowUrl, 'sitewide', siteMetric, context);
+            rows.push({
+              rule_key: rule.rule_key,
+              rule_name: rule.rule_name,
+              rule_category: String(rule.category || 'general').toLowerCase(),
+              url: siteRowUrl,
+              tier: 'sitewide',
+              status: rawStatus,
+              raw_status: rawStatus,
+              bypassed: false,
+              rule_weight: Math.max(0, traditionalSeoToNum(rule.weight, 1)),
+              clicks: 0,
+              impressions: 0
+            });
+          });
+        }
 
         const pageScoreByUrl = new Map();
         const hitsByUrl = new Map();
@@ -72409,7 +72455,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         traditionalSeoPopulateRuleFilter(updatedRules);
         renderTraditionalSeoResultsTable();
         traditionalSeoEvalProgressClose(true);
-        if (typeof window.showStatus === 'function') window.showStatus('Traditional SEO evaluation complete.', 'success');
+        if (typeof window.showStatus === 'function') {
+          window.showStatus(
+            isPartialPageRescore
+              ? 'Single-page Traditional SEO re-audit complete.'
+              : 'Traditional SEO evaluation complete.',
+            'success'
+          );
+        }
       } catch (err) {
         traditionalSeoEvalProgressClose(false);
         if (typeof window.showStatus === 'function') {
