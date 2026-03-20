@@ -6132,7 +6132,7 @@
           <div id="traditional-seo-source-parity-panel" style="margin-bottom:0.75rem;padding:0.55rem 0.7rem;border:1px solid rgba(148,163,184,0.25);border-radius:8px;background:rgba(15,23,42,0.55);font-size:0.8rem;color:var(--dark-text-muted);">
             URL source parity: checking...
           </div>
-          <div style="display: grid; grid-template-columns: repeat(5, minmax(160px, 1fr)); gap: 0.6rem; align-items: end;">
+          <div style="display: grid; grid-template-columns: repeat(6, minmax(140px, 1fr)); gap: 0.6rem; align-items: end;">
             <div>
               <label style="display:block;font-size:0.78rem;color:var(--dark-text-muted);margin-bottom:0.25rem;">Tier</label>
               <select id="traditional-seo-filter-tier">
@@ -6170,12 +6170,19 @@
               <label style="display:block;font-size:0.78rem;color:var(--dark-text-muted);margin-bottom:0.25rem;">Search URL</label>
               <input id="traditional-seo-filter-query" type="text" placeholder="Filter URL or target keyword...">
             </div>
+            <div>
+              <label style="display:block;font-size:0.78rem;color:var(--dark-text-muted);margin-bottom:0.25rem;">Results view</label>
+              <select id="traditional-seo-results-table-mode" title="By URL = one row per page (fast). Every rule row = full matrix (slow).">
+                <option value="pages">By URL (default)</option>
+                <option value="rules">Every rule row</option>
+              </select>
+            </div>
           </div>
         </div>
 
         <div class="card traditional-seo-results-card" style="margin-top: 0;">
           <div style="display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; margin-bottom: 0.65rem; flex-wrap: wrap;">
-            <div style="font-weight: 700;">Traditional SEO Audit Results (By Tier + Rule)</div>
+            <div style="font-weight: 700;">Traditional SEO Audit Results</div>
             <div id="traditional-seo-results-meta" style="font-size: 0.8rem; color: var(--dark-text-muted);">No evaluation run yet.</div>
           </div>
           <div id="traditional-seo-url-health" class="traditional-seo-health-strip" aria-label="URL-level outcome summary"></div>
@@ -70100,6 +70107,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         status: 'all',
         query: ''
       },
+      /** pages = one row per URL (fast). rules = every URL×rule row (can be 10k+). */
+      resultsTableMode: 'pages',
       sort: {
         key: 'status',
         direction: 'asc'
@@ -71897,19 +71906,61 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       updateTraditionalSeoRuleSummarySortHeaderState();
     }
 
-    function renderTraditionalSeoDrilldownTiles(rows) {
+    function traditionalSeoRowMatchesNonStatusFilters(row, f) {
+      const filt = f || {};
+      if (filt.tier && filt.tier !== 'all' && String(row?.tier) !== String(filt.tier)) return false;
+      if (filt.rule && filt.rule !== 'all' && String(row?.rule_key) !== String(filt.rule)) return false;
+      if (filt.category && filt.category !== 'all' && String(row?.rule_category || '') !== String(filt.category)) return false;
+      if (filt.query) {
+        const q = String(filt.query).toLowerCase();
+        const u = String(row?.url || '').toLowerCase();
+        const kw = String(row?.target_keyword || '').toLowerCase();
+        if (!u.includes(q) && !kw.includes(q)) return false;
+      }
+      return true;
+    }
+
+    function traditionalSeoDrilldownCounts(rows, ctx) {
+      const safeRows = Array.isArray(rows) ? rows : [];
+      const mode = String(ctx?.mode || 'rules');
+      const ruleAll = ctx?.ruleAll !== false;
+      const useUrlLevel = mode === 'pages' && ruleAll;
+      if (!useUrlLevel) {
+        return {
+          all: safeRows.length,
+          fail: safeRows.filter((row) => String(row?.status) === 'fail').length,
+          warn: safeRows.filter((row) => String(row?.status) === 'warn').length,
+          pass: safeRows.filter((row) => String(row?.status) === 'pass').length
+        };
+      }
+      const rankByUrl = new Map();
+      safeRows.forEach((row) => {
+        const u = String(row?.url || '').trim();
+        if (!u) return;
+        const st = String(row?.status || 'fail').toLowerCase();
+        const rank = st === 'fail' ? 0 : st === 'warn' ? 1 : 2;
+        const prev = rankByUrl.get(u);
+        if (prev === undefined || rank < prev) rankByUrl.set(u, rank);
+      });
+      let fail = 0;
+      let warn = 0;
+      let pass = 0;
+      rankByUrl.forEach((rank) => {
+        if (rank === 0) fail += 1;
+        else if (rank === 1) warn += 1;
+        else pass += 1;
+      });
+      return { all: rankByUrl.size, fail, warn, pass };
+    }
+
+    function renderTraditionalSeoDrilldownTiles(rows, ctx) {
       const target = document.getElementById('traditional-seo-drilldown-tiles');
       if (!target) return;
-      const safeRows = Array.isArray(rows) ? rows : [];
-      const counts = {
-        all: safeRows.length,
-        fail: safeRows.filter((row) => String(row?.status) === 'fail').length,
-        warn: safeRows.filter((row) => String(row?.status) === 'warn').length,
-        pass: safeRows.filter((row) => String(row?.status) === 'pass').length
-      };
+      const counts = traditionalSeoDrilldownCounts(rows, ctx || {});
       const activeStatus = String(TRADITIONAL_SEO_STATE.filters?.status || 'all');
+      const allLabel = String(ctx?.allLabel || 'All rows');
       target.innerHTML = [
-        `<button type="button" class="traditional-seo-drill-tile" data-status="all" data-filter-status="all" data-active="${activeStatus === 'all'}"><div class="traditional-seo-drill-count">${counts.all}</div><div class="traditional-seo-drill-label">All Rows</div></button>`,
+        `<button type="button" class="traditional-seo-drill-tile" data-status="all" data-filter-status="all" data-active="${activeStatus === 'all'}"><div class="traditional-seo-drill-count">${counts.all}</div><div class="traditional-seo-drill-label">${escapeHtml(allLabel)}</div></button>`,
         `<button type="button" class="traditional-seo-drill-tile" data-status="fail" data-filter-status="fail" data-active="${activeStatus === 'fail'}"><div class="traditional-seo-drill-count">${counts.fail}</div><div class="traditional-seo-drill-label">Fail</div></button>`,
         `<button type="button" class="traditional-seo-drill-tile" data-status="warn" data-filter-status="warn" data-active="${activeStatus === 'warn'}"><div class="traditional-seo-drill-count">${counts.warn}</div><div class="traditional-seo-drill-label">Warn</div></button>`,
         `<button type="button" class="traditional-seo-drill-tile" data-status="pass" data-filter-status="pass" data-active="${activeStatus === 'pass'}"><div class="traditional-seo-drill-count">${counts.pass}</div><div class="traditional-seo-drill-label">Pass</div></button>`
@@ -72133,18 +72184,89 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
     }
 
+    function traditionalSeoPageSummaryRowsFromScopedRules(scopedRows) {
+      const map = new Map();
+      (Array.isArray(scopedRows) ? scopedRows : []).forEach((row) => {
+        const u = String(row?.url || '').trim();
+        if (!u) return;
+        const st = String(row?.status || 'fail').toLowerCase();
+        if (!map.has(u)) {
+          map.set(u, {
+            url: u,
+            tier: row.tier,
+            target_keyword: String(row.target_keyword || '').trim(),
+            clicks: traditionalSeoToNum(row.clicks, 0),
+            impressions: traditionalSeoToNum(row.impressions, 0),
+            pass: 0,
+            warn: 0,
+            fail: 0
+          });
+        }
+        const g = map.get(u);
+        if (st === 'pass') g.pass += 1;
+        else if (st === 'warn') g.warn += 1;
+        else g.fail += 1;
+      });
+      const out = [];
+      map.forEach((g) => {
+        const worst = g.fail > 0 ? 'fail' : g.warn > 0 ? 'warn' : 'pass';
+        const total = g.pass + g.warn + g.fail;
+        out.push({
+          rule_key: '__page_summary__',
+          rule_name: 'All checks (summary)',
+          rule_category: 'summary',
+          url: g.url,
+          tier: g.tier,
+          target_keyword: g.target_keyword,
+          clicks: g.clicks,
+          impressions: g.impressions,
+          status: worst,
+          raw_status: worst,
+          bypassed: false,
+          rule_weight: 0,
+          summary_pass: g.pass,
+          summary_warn: g.warn,
+          summary_fail: g.fail,
+          summary_total: total
+        });
+      });
+      return out;
+    }
+
     function renderTraditionalSeoResultsTable() {
-      const rows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
-      TRADITIONAL_SEO_STATE.tierUrlCountsMap = traditionalSeoComputeTierUrlCountsMap(rows);
+      const allRows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
+      TRADITIONAL_SEO_STATE.tierUrlCountsMap = traditionalSeoComputeTierUrlCountsMap(allRows);
       traditionalSeoPopulateTierFilter(TRADITIONAL_SEO_STATE.tierUrlCountsMap);
       const body = document.getElementById('traditional-seo-results-body');
       const meta = document.getElementById('traditional-seo-results-meta');
       const countMap = TRADITIONAL_SEO_STATE.tierUrlCountsMap || {};
       const f = TRADITIONAL_SEO_STATE.filters || {};
-      const filtered = rows.filter((row) => {
-        if (f.tier && f.tier !== 'all' && String(row.tier) !== String(f.tier)) return false;
-        if (f.rule && f.rule !== 'all' && String(row.rule_key) !== String(f.rule)) return false;
-        if (f.category && f.category !== 'all' && String(row.rule_category || '') !== String(f.category)) return false;
+      const mode = String(TRADITIONAL_SEO_STATE.resultsTableMode || 'pages');
+      const ruleIsAll = String(f.rule || 'all') === 'all';
+      const fNoStatus = { ...f, status: 'all' };
+
+      const drillBaseRows = allRows.filter((row) => traditionalSeoRowMatchesNonStatusFilters(row, f));
+      renderTraditionalSeoDrilldownTiles(drillBaseRows, {
+        mode,
+        ruleAll: ruleIsAll,
+        allLabel: mode === 'pages' && ruleIsAll ? 'All URLs' : 'All rows'
+      });
+
+      let working = [];
+      if (mode === 'rules') {
+        working = allRows.filter((row) => traditionalSeoRowMatchesNonStatusFilters(row, f));
+      } else if (!ruleIsAll) {
+        working = allRows.filter((row) => traditionalSeoRowMatchesNonStatusFilters(row, f));
+      } else {
+        const scoped = allRows.filter((row) => String(row?.tier || '').toLowerCase() !== 'sitewide'
+          && traditionalSeoRowMatchesNonStatusFilters(row, fNoStatus));
+        const summaries = traditionalSeoPageSummaryRowsFromScopedRules(scoped);
+        const sw = allRows.filter((row) => String(row?.tier || '').toLowerCase() === 'sitewide'
+          && traditionalSeoRowMatchesNonStatusFilters(row, fNoStatus));
+        working = summaries.concat(sw);
+      }
+
+      const filtered = working.filter((row) => {
         if (f.status && f.status !== 'all' && String(row.status) !== String(f.status)) return false;
         if (f.query) {
           const q = String(f.query).toLowerCase();
@@ -72184,15 +72306,16 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         return sortDirection === 'desc' ? (diff * -1) : diff;
       });
 
-      traditionalSeoRenderUrlHealthStrip(rows);
+      traditionalSeoRenderUrlHealthStrip(allRows);
       const summaryRules = (TRADITIONAL_SEO_STATE.rules || []).filter((r) => r.enabled !== false);
-      traditionalSeoRenderRuleSummaryTable(rows, summaryRules.length ? summaryRules : (TRADITIONAL_SEO_STATE.rules || []));
+      traditionalSeoRenderRuleSummaryTable(allRows, summaryRules.length ? summaryRules : (TRADITIONAL_SEO_STATE.rules || []));
 
       if (body) {
         if (!filtered.length) {
           body.innerHTML = '<tr><td colspan="9" style="color: var(--dark-text-muted);">No rows match current filters.</td></tr>';
         } else {
           const scoreMap = TRADITIONAL_SEO_STATE.pageScoreByUrl instanceof Map ? TRADITIONAL_SEO_STATE.pageScoreByUrl : null;
+          const isSummaryRow = (r) => String(r?.rule_key || '') === '__page_summary__';
           body.innerHTML = filtered.map((row) => {
             const tierLabel = escapeHtml(traditionalSeoTierCellLabel(row.tier, countMap));
             const urlRaw = String(row.url || '');
@@ -72209,15 +72332,25 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             }
             const kwRaw = String(row.target_keyword || '').trim();
             const kwCell = kwRaw ? escapeHtml(kwRaw) : '—';
+            const ruleCell = isSummaryRow(row)
+              ? `<span style="color:var(--dark-text-muted);font-size:0.78rem;">${escapeHtml(String(row.summary_total || 0))} checks</span>`
+              : escapeHtml(String(row.rule_name || row.rule_key || 'rule'));
+            let statusCell = traditionalSeoStatusPill(row.status);
+            if (isSummaryRow(row)) {
+              const sp = traditionalSeoToNum(row.summary_pass, 0);
+              const sw = traditionalSeoToNum(row.summary_warn, 0);
+              const sf = traditionalSeoToNum(row.summary_fail, 0);
+              statusCell = `${traditionalSeoStatusPill(row.status)} <span style="color:var(--dark-text-muted);font-size:0.72rem;white-space:nowrap;">(${sp} pass · ${sw} warn · ${sf} fail)</span>`;
+            }
             return `
           <tr>
             <td style="white-space:nowrap;"><button type="button" class="btn traditional-seo-page-view-btn" style="padding:0.25rem 0.5rem;font-size:0.72rem;" data-page-url="${viewAttr}">View</button></td>
             <td class="traditional-seo-score-cell">${escapeHtml(scoreText)}</td>
             <td>${tierLabel}</td>
-            <td>${escapeHtml(String(row.rule_name || row.rule_key || 'rule'))}</td>
+            <td>${ruleCell}</td>
             <td style="word-break: break-all;">${urlCell}</td>
             <td style="font-size:0.76rem;color:var(--dark-text-muted);max-width:12rem;">${kwCell || '—'}</td>
-            <td>${traditionalSeoStatusPill(row.status)}</td>
+            <td>${statusCell}</td>
             <td>${Math.round(traditionalSeoToNum(row.clicks, 0))}</td>
             <td>${Math.round(traditionalSeoToNum(row.impressions, 0))}</td>
           </tr>
@@ -72227,10 +72360,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
 
       if (meta) {
-        meta.textContent = `${filtered.length}/${rows.length} rows · Last run: ${formatTraditionalSeoTimestamp(TRADITIONAL_SEO_STATE.lastEvaluationAt)}`;
+        const checks = allRows.length;
+        const modeLbl = mode === 'pages' && ruleIsAll ? 'URLs' : 'rows';
+        const tail = mode === 'pages' && ruleIsAll && checks ? ` · ${checks} checks stored` : '';
+        meta.textContent = `${filtered.length} ${modeLbl} shown${tail} · Last run: ${formatTraditionalSeoTimestamp(TRADITIONAL_SEO_STATE.lastEvaluationAt)}`;
       }
       updateTraditionalSeoSortHeaderState();
-      renderTraditionalSeoDrilldownTiles(rows);
     }
 
     function traditionalSeoEvalProgressClearTimer() {
@@ -72986,6 +73121,15 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         queryFilter.dataset.wired = '1';
         queryFilter.addEventListener('input', () => {
           TRADITIONAL_SEO_STATE.filters.query = queryFilter.value || '';
+          renderTraditionalSeoResultsTable();
+        });
+      }
+      const resultsModeEl = document.getElementById('traditional-seo-results-table-mode');
+      if (resultsModeEl && !resultsModeEl.dataset.wired) {
+        resultsModeEl.dataset.wired = '1';
+        resultsModeEl.value = TRADITIONAL_SEO_STATE.resultsTableMode || 'pages';
+        resultsModeEl.addEventListener('change', () => {
+          TRADITIONAL_SEO_STATE.resultsTableMode = resultsModeEl.value === 'rules' ? 'rules' : 'pages';
           renderTraditionalSeoResultsTable();
         });
       }
