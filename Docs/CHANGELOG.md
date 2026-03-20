@@ -2,6 +2,18 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-03-13] - Traditional SEO keyword demand (Keywords Everywhere cache)
+
+### Added
+- **Supabase:** `keyword_target_metrics_cache` table (`sql/20260321_keyword_target_metrics_cache.sql`, also in `sql/SUPABASE_SCHEMA.sql`).
+- **API:** `POST /api/aigeo/keyword-target-metrics` — `lookup` (read cache only) and `refresh` (Keywords Everywhere → upsert missing/stale rows).
+- **UI:** Traditional SEO results columns **Kw vol**, **Rank**, **Moz DA**, **Metrics age**; **③ Refresh keyword demand (KE)** in run controls and next to **Rows per page**.
+- **Docs:** `Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md`, root `AGENTS.md`; `HANDOVER.md` / `README.md` updated.
+
+### Notes
+- **① / ②** (Traditional SEO audit buttons) do **not** call Keywords Everwhere; user runs **③** to populate volume + metrics age.
+- **Rank** and **Moz DA** columns are reserved for future data sources (not returned by KE keyword batch in current integration).
+
 ## [2026-01-16] - v1.8.1 - Schema Persistence + Trend Range Fixes
 
 ### Fixed

@@ -35,31 +35,35 @@ To implement, pick a **default** and keep the others as optional toggles:
 
 ---
 
-## Part 2 — URL results table: volume + rank (next)
+## Part 2 — URL results table: volume + rank (shipped in part; rank TBD)
 
-**Goal:** In the **per-URL results table** (alongside existing **clicks** and **impressions** from GSC), add:
+**Shipped (2026-03-13):** Traditional SEO results table columns **Kw vol**, **Rank**, **Moz DA**, **Metrics age** (see `audit-dashboard.html`).
 
-| Column | Meaning |
-|--------|--------|
-| **keyword_search_volume** | Monthly search volume for the **target keyword** (locale + engine to be fixed, e.g. Google UK). |
-| **keyword_rank** | Organic **position** for that keyword for **this URL** (or best matching ranking URL if different — policy TBD). |
-| **keyword_rank_fetched_at** | (Optional) When rank/volume was last refreshed. |
+| Column | Meaning | Current source |
+|--------|--------|----------------|
+| **Kw vol** (`search_volume`) | Monthly search volume for the **target keyword** (KE / GKP-style). | **Keywords Everywhere** via `/api/aigeo/keyword-target-metrics` → `keyword_target_metrics_cache`. |
+| **Metrics age** | When the cache row was last refreshed + stale flag (TTL). | Same cache; TTL `KEYWORD_METRICS_STALE_DAYS` (default 30). |
+| **Rank** (`rank_position`) | Organic position for keyword × URL. | **Not wired** in UI/API yet (nullable in DB). Future: GSC query×page, DataForSEO, etc. |
+| **Moz DA** (`moz_domain_authority`) | Domain authority style metric. | **Not wired** (nullable). KE’s bulk keyword endpoint does not populate this. |
 
-### Data source
+### User flow (important)
 
-**Google Search Console** gives **query × page** performance for queries that actually triggered impressions; it does **not** provide full **search volume** for arbitrary keywords. So:
+- **① / ②** Traditional SEO buttons **do not** call Keywords Everywhere.  
+- **③ Refresh keyword demand (KE)** (or duplicate next to **Rows per page**) runs the external API for **missing/stale** URL+keyword pairs only, then upserts Supabase.  
+- Normal page load / post-audit: **lookup** reads cache only (no KE spend).
 
-- **Volume + rank for a chosen keyword** → third-party API such as **DataForSEO** (or similar) is the usual approach.  
-- **GSC** can still complement: e.g. show **actual query** performance when the target keyword (or close query) appears in GSC data.
+### Documentation
 
-### Implementation note (defer to part 2)
+- **`Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md`** — API, env vars, SQL, troubleshooting.  
+- **GSC** still provides **clicks/impressions** on the same table rows; it does not replace third-party **volume** for arbitrary keywords.
 
-- Extend the structure that already carries money-page rows, e.g. `audit_results.money_pages_metrics.rows[]` in `sql/SUPABASE_SCHEMA.sql` (today: `url`, `title`, `clicks`, `impressions`, `ctr`, `avgPosition`, …) with the new fields above.  
-- Add a **cache table** or JSON blob for DataForSEO responses to avoid hammering the API (keyed by `keyword + locale + date`).  
-- **Part 2** is intentionally separate: credentials, rate limits, cost controls, and “which SERP feature counts as position 1” need their own spec.
+### Legacy note (money pages JSON)
+
+- Extending `audit_results.money_pages_metrics.rows[]` with volume/rank remains optional; the canonical store for Traditional SEO keyword metrics is **`keyword_target_metrics_cache`**.
 
 ---
 
 ## Changelog
 
-- **2026-03-13** — v1 rule set (K1–K5) agreed; Part 2 (volume + rank columns) scoped to DataForSEO-style API + schema extension.
+- **2026-03-13** — K1–K5 unchanged. Part 2: **volume + metrics age** implemented with **Keywords Everywhere** + Supabase cache; **rank/Moz** columns reserved.
+- **2026-03-13** (earlier) — v1 rule set (K1–K5) agreed; Part 2 initially scoped to DataForSEO-style API (superseded for volume by KE cache above).
