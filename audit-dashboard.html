@@ -70238,7 +70238,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     const TRADITIONAL_SEO_BASELINE_RULES = [
       { rule_key: 'title_tag_present', rule_name: 'Title length (50–60 chars)', description: 'Best practice: title 50–60 characters. Prefers live HTML <title> from Extractability when available; otherwise schema crawl title.', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.5, sort_order: 10 },
-      { rule_key: 'meta_description_present', rule_name: 'Meta description length (150–165 chars)', description: 'Pass if meta description is 150–165 chars (whitespace + numeric entities like &#124; normalized). Prefers live HTML meta; falls back to schema crawl. Warn if both missing.', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 20 },
+      { rule_key: 'meta_description_present', rule_name: 'Meta description length (150–165 chars)', description: 'Pass if meta description is 150–165 chars (whitespace + numeric entities like &#124; normalized). Uses Extract HTML meta when present. Schema-only text over 165 chars is WARN (schema often longer than real <meta>). Warn if both missing.', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 20 },
       { rule_key: 'single_h1', rule_name: 'Exactly one H1', description: 'Fail if zero or more than one H1 (Extractability HTML). Exception: under /photo-workshops-uk/ and /photography-services-near-me/ pass if at least one H1 (Squarespace product grids use extra H1s).', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 30 },
       { rule_key: 'h1_length_best_practice', rule_name: 'H1 length (40–60 chars)', description: 'Uses the longest H1 plain text on the page (and first H1 when needed). Target 40–60 characters (Extractability HTML).', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 35 },
       { rule_key: 'canonical_self_or_valid', rule_name: 'Canonical is valid', description: 'Canonical/URL identity checks from Schema QA gate when present.', category: 'technical', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 40 },
@@ -71476,8 +71476,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const metaFromExtract = traditionalSeoNormalizeSnippetText(extractSignal?.seoMetaDescription || '');
         if (!metaFromSchema && !metaFromExtract) return 'warn';
         // Prefer live HTML meta when present — schema crawl often carries longer/different copy than <meta name="description">.
-        const len = metaFromExtract ? metaFromExtract.length : metaFromSchema.length;
+        if (metaFromExtract) {
+          const len = metaFromExtract.length;
+          if (len >= 150 && len <= 165) return 'pass';
+          return 'fail';
+        }
+        const len = metaFromSchema.length;
         if (len >= 150 && len <= 165) return 'pass';
+        if (len > 165) return 'warn';
         return 'fail';
       }
       if (key === 'single_h1') {
@@ -71772,7 +71778,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const alt = usedExtract && metaFromSchema && metaFromSchema !== metaFromExtract
           ? ` Schema crawl text differs (${metaFromSchema.length} chars); rule uses HTML.`
           : '';
-        return `Length ${len} chars (target 150–165; entities + whitespace normalized). ${src}.${alt}`;
+        const tail = !usedExtract && metaFromSchema.length > 165
+          ? ' Long schema-only text is not failed (often JSON-LD ≠ <meta>); refresh extract to score real meta length.'
+          : '';
+        return `Length ${len} chars (target 150–165; entities + whitespace normalized). ${src}.${alt}${tail}`;
       }
       if (rk === 'title_tag_present') {
         const htmlLen = traditionalSeoToNum(ex?.seoTitleTagLength, NaN);
