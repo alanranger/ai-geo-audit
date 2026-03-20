@@ -463,6 +463,24 @@ function extractTitleTagPlainLength(html = '') {
   return normalizeSeoSnippetText(decodeBasicHtmlEntities(m[1])).length;
 }
 
+/** Plain text of first `<title>` (keyword-in-title checks). */
+function extractTitleTagPlainText(html = '') {
+  const source = stripNoiseForSeoTextParsing(String(html || ''));
+  const m = source.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+  if (!m?.[1]) return '';
+  return normalizeSeoSnippetText(decodeBasicHtmlEntities(m[1]));
+}
+
+/** First ~N words of visible text after stripping tags (Traditional SEO intro keyword check). */
+function buildSeoIntroSnippetFromHtml(html = '', maxWords = 150) {
+  const cap = Math.max(20, Math.min(220, Number(maxWords) || 150));
+  const raw = stripHtmlToText(String(html || ''));
+  const norm = normalizeSeoSnippetText(decodeBasicHtmlEntities(raw));
+  if (!norm) return '';
+  const words = norm.split(/\s+/).filter(Boolean);
+  return words.slice(0, cap).join(' ');
+}
+
 /** Apex + subdomains of the same site (e.g. cdn.example.com vs www.example.com → same). */
 function isLikelySameSiteHostname(pageHost, linkHost) {
   const p = String(pageHost || '').toLowerCase();
@@ -504,6 +522,8 @@ function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
     h1Count: 0,
     firstH1PlainLength: 0,
     longestH1PlainLength: 0,
+    firstH1PlainText: '',
+    primaryH1PlainText: '',
     metaDescription: '',
     imgTotal: 0,
     imgMissingAlt: 0,
@@ -515,12 +535,22 @@ function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
   const h1Matches = [...source.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)];
   out.h1Count = h1Matches.length;
   let longest = 0;
+  let primaryText = '';
   h1Matches.forEach((match) => {
-    const len = plainTextFromHtmlFragment(match[1]).length;
-    if (len > longest) longest = len;
+    const plain = plainTextFromHtmlFragment(match[1]);
+    const len = plain.length;
+    if (len > longest) {
+      longest = len;
+      primaryText = plain;
+    }
   });
   out.longestH1PlainLength = longest;
-  if (h1Matches[0]) out.firstH1PlainLength = plainTextFromHtmlFragment(h1Matches[0][1]).length;
+  if (h1Matches[0]) {
+    const firstPlain = plainTextFromHtmlFragment(h1Matches[0][1]);
+    out.firstH1PlainLength = firstPlain.length;
+    out.firstH1PlainText = firstPlain;
+  }
+  out.primaryH1PlainText = primaryText || out.firstH1PlainText;
 
   const imgMatches = [...source.matchAll(/<img\b[^>]*>/gi)];
   imgMatches.forEach((match) => {
@@ -570,6 +600,8 @@ function buildTraditionalSeoSignalsFromHtml(html, htmlForChecks, pageUrl = '') {
     h1Count: useMainH1 ? seoMain.h1Count : seoMerged.h1Count,
     firstH1PlainLength: useMainH1 ? seoMain.firstH1PlainLength : seoMerged.firstH1PlainLength,
     longestH1PlainLength: useMainH1 ? seoMain.longestH1PlainLength : seoMerged.longestH1PlainLength,
+    firstH1PlainText: useMainH1 ? seoMain.firstH1PlainText : seoMerged.firstH1PlainText,
+    primaryH1PlainText: useMainH1 ? seoMain.primaryH1PlainText : seoMerged.primaryH1PlainText,
     metaDescription: seoMain.metaDescription || seoMerged.metaDescription || '',
     imgTotal: seoMerged.imgTotal,
     imgMissingAlt: seoMerged.imgMissingAlt,
@@ -580,8 +612,12 @@ function buildTraditionalSeoSignalsFromHtml(html, htmlForChecks, pageUrl = '') {
     seoH1Count: seo.h1Count,
     seoFirstH1Length: seo.firstH1PlainLength,
     seoLongestH1Length: seo.longestH1PlainLength,
+    seoFirstH1Plain: seo.firstH1PlainText || '',
+    seoPrimaryH1Plain: seo.primaryH1PlainText || seo.firstH1PlainText || '',
     seoMetaDescription: seo.metaDescription || '',
     seoTitleTagLength: extractTitleTagPlainLength(html),
+    seoTitlePlain: extractTitleTagPlainText(html),
+    seoIntroSnippet: buildSeoIntroSnippetFromHtml(htmlForChecks, 150),
     seoImgTotal: seo.imgTotal,
     seoImgMissingAlt: seo.imgMissingAlt,
     seoExtOutbound: seo.extOutboundCount,
@@ -594,8 +630,12 @@ async function checkUrl(url, tierLookup = null) {
     seoH1Count: 0,
     seoFirstH1Length: 0,
     seoLongestH1Length: 0,
+    seoFirstH1Plain: '',
+    seoPrimaryH1Plain: '',
     seoMetaDescription: '',
     seoTitleTagLength: -1,
+    seoTitlePlain: '',
+    seoIntroSnippet: '',
     seoImgTotal: 0,
     seoImgMissingAlt: 0,
     seoExtOutbound: 0,
