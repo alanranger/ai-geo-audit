@@ -452,6 +452,41 @@ function extractTitleTagPlainLength(html = '') {
   return normalizeSeoSnippetText(decodeBasicHtmlEntities(m[1])).length;
 }
 
+/** Apex + subdomains of the same site (e.g. cdn.example.com vs www.example.com → same). */
+function isLikelySameSiteHostname(pageHost, linkHost) {
+  const p = String(pageHost || '').toLowerCase();
+  const h = String(linkHost || '').toLowerCase();
+  if (!p || !h) return false;
+  if (p === h) return true;
+  if (h.endsWith(`.${p}`)) return true;
+  if (p.endsWith(`.${h}`)) return true;
+  return false;
+}
+
+/**
+ * Calendar / maps / embed hosts often omit target=_blank; counting them inflates false fails.
+ * Still http(s) outbound, but we do not require _blank for pass/fail on this rule.
+ */
+function isExternalLinkTargetBlankExemptHost(host) {
+  const h = String(host || '').toLowerCase().replace(/^www\./, '');
+  if (!h) return true;
+  if (h === 'youtu.be') return true;
+  if (h === 'youtube.com' || h.endsWith('.youtube.com')) return true;
+  if (h === 'google.com' || h.endsWith('.google.com')) return true;
+  if (h.endsWith('.google.co.uk')) return true;
+  if (h === 'goo.gl' || h.endsWith('.goo.gl')) return true;
+  if (h.endsWith('squarespace-cdn.com') || h.endsWith('.squarespace-cdn.com')) return true;
+  if (h.endsWith('sqspcdn.com') || h.endsWith('.sqspcdn.com')) return true;
+  return false;
+}
+
+function anchorOpeningTagHasTargetBlank(innerAttrs = '') {
+  const s = String(innerAttrs || '');
+  if (/\btarget\s*=\s*["']?_blank["']?/i.test(s)) return true;
+  if (/\btarget\s*=\s*["'][^"']*blank[^"']*["']/i.test(s)) return true;
+  return false;
+}
+
 /** Counts used by Traditional SEO dashboard (H1, images, outbound links). */
 function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
   const out = {
@@ -504,10 +539,13 @@ function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
     } catch {
       return;
     }
+    const proto = String(absUrl.protocol || '').toLowerCase();
+    if (proto !== 'http:' && proto !== 'https:') return;
     const host = absUrl.hostname.replace(/^www\./i, '').toLowerCase();
-    if (!host || !pageHost || host === pageHost) return;
+    if (!host || !pageHost || isLikelySameSiteHostname(pageHost, host)) return;
+    if (isExternalLinkTargetBlankExemptHost(host)) return;
     out.extOutboundCount += 1;
-    if (!/\btarget\s*=\s*["']?_blank["']?/i.test(inner)) out.extMissingTargetBlank += 1;
+    if (!anchorOpeningTagHasTargetBlank(inner)) out.extMissingTargetBlank += 1;
   });
   return out;
 }
