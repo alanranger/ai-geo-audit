@@ -444,6 +444,14 @@ function extractMetaDescriptionFromHtml(html = '') {
   return v || '';
 }
 
+/** Plain-text length of first `<title>` (Traditional SEO title rule); -1 if missing. */
+function extractTitleTagPlainLength(html = '') {
+  const source = stripNoiseForSeoTextParsing(String(html || ''));
+  const m = source.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+  if (!m?.[1]) return -1;
+  return normalizeSeoSnippetText(decodeBasicHtmlEntities(m[1])).length;
+}
+
 /** Counts used by Traditional SEO dashboard (H1, images, outbound links). */
 function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
   const out = {
@@ -605,6 +613,7 @@ async function checkUrl(url, tierLookup = null) {
       extOutboundCount: seoMerged.extOutboundCount,
       extMissingTargetBlank: seoMerged.extMissingTargetBlank
     };
+    const seoTitleTagLength = extractTitleTagPlainLength(html);
     return {
       url,
       pageTier,
