@@ -6209,6 +6209,18 @@
               </table>
             </div>
           </div>
+          <div id="traditional-seo-results-pagination" style="display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
+            <div style="display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center;">
+              <label for="traditional-seo-results-page-size" style="font-size: 0.78rem; color: var(--dark-text-muted);">Rows per page</label>
+              <select id="traditional-seo-results-page-size" title="Paginate after filters and sort (default 10 for performance)" style="font-size: 0.82rem;">
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="all">All</option>
+              </select>
+            </div>
+            <div id="traditional-seo-results-pager" style="display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; font-size: 0.8rem; color: var(--dark-text-muted);"></div>
+          </div>
           <div class="traditional-seo-table-wrap">
             <table class="traditional-seo-table" id="traditional-seo-results-table">
               <thead>
@@ -70109,6 +70121,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       },
       /** pages = one row per URL (fast). rules = every URL×rule row (can be 10k+). */
       resultsTableMode: 'pages',
+      /** Results table pagination: 10 | 25 | 50 | all */
+      resultsPageSize: '10',
+      resultsPageIndex: 0,
       sort: {
         key: 'status',
         direction: 'asc'
@@ -72184,6 +72199,51 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
     }
 
+    function traditionalSeoResetResultsPageIndex() {
+      TRADITIONAL_SEO_STATE.resultsPageIndex = 0;
+    }
+
+    function traditionalSeoNormalizeResultsPageSize(raw) {
+      const s = String(raw || '10').toLowerCase();
+      if (s === 'all') return { all: true, n: 0 };
+      const x = traditionalSeoToNum(raw, 10);
+      if (x === 25 || x === 50) return { all: false, n: x };
+      return { all: false, n: 10 };
+    }
+
+    function traditionalSeoRenderResultsPager(total, spec) {
+      const pager = document.getElementById('traditional-seo-results-pager');
+      const sizeSel = document.getElementById('traditional-seo-results-page-size');
+      if (sizeSel) {
+        const v = String(TRADITIONAL_SEO_STATE.resultsPageSize || '10');
+        const ok = v === 'all' || v === '10' || v === '25' || v === '50' ? v : '10';
+        if (sizeSel.value !== ok) sizeSel.value = ok;
+      }
+      if (!pager) return;
+      if (!total) {
+        pager.innerHTML = '';
+        return;
+      }
+      if (spec.all || spec.pageSize >= total) {
+        pager.innerHTML = `<span>Showing all ${total}</span>`;
+        return;
+      }
+      const pageSize = Math.max(1, traditionalSeoToNum(spec.pageSize, 10));
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      const idx = Math.min(Math.max(0, traditionalSeoToNum(spec.pageIndex, 0)), totalPages - 1);
+      const from = idx * pageSize + 1;
+      const to = Math.min(total, (idx + 1) * pageSize);
+      const cur = idx + 1;
+      const prevDis = idx <= 0 ? 'disabled' : '';
+      const nextDis = idx >= totalPages - 1 ? 'disabled' : '';
+      pager.innerHTML = [
+        `<span>${from}–${to} of ${total}</span>`,
+        `<button type="button" class="btn traditional-seo-results-prev" ${prevDis} style="padding:0.25rem 0.55rem;font-size:0.75rem;">Prev</button>`,
+        `<span style="font-size:0.78rem;">Page ${cur} / ${totalPages}</span>`,
+        `<button type="button" class="btn traditional-seo-results-next" ${nextDis} style="padding:0.25rem 0.55rem;font-size:0.75rem;">Next</button>`
+      ].join('');
+    }
+
     function traditionalSeoPageSummaryRowsFromScopedRules(scopedRows) {
       const map = new Map();
       (Array.isArray(scopedRows) ? scopedRows : []).forEach((row) => {
@@ -72306,6 +72366,23 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         return sortDirection === 'desc' ? (diff * -1) : diff;
       });
 
+      const ps = traditionalSeoNormalizeResultsPageSize(TRADITIONAL_SEO_STATE.resultsPageSize);
+      const totalFiltered = filtered.length;
+      const pageSize = ps.all ? totalFiltered : ps.n;
+      const totalPages = ps.all || totalFiltered === 0 ? 1 : Math.max(1, Math.ceil(totalFiltered / pageSize));
+      let pageIdx = traditionalSeoToNum(TRADITIONAL_SEO_STATE.resultsPageIndex, 0);
+      if (pageIdx < 0) pageIdx = 0;
+      if (pageIdx > totalPages - 1) pageIdx = totalPages - 1;
+      TRADITIONAL_SEO_STATE.resultsPageIndex = pageIdx;
+      const sliceStart = ps.all || totalFiltered === 0 ? 0 : pageIdx * pageSize;
+      const sliceEnd = ps.all || totalFiltered === 0 ? totalFiltered : Math.min(totalFiltered, sliceStart + pageSize);
+      const pageRows = filtered.slice(sliceStart, sliceEnd);
+      traditionalSeoRenderResultsPager(totalFiltered, {
+        all: ps.all,
+        pageSize: ps.all ? totalFiltered : pageSize,
+        pageIndex: pageIdx
+      });
+
       traditionalSeoRenderUrlHealthStrip(allRows);
       const summaryRules = (TRADITIONAL_SEO_STATE.rules || []).filter((r) => r.enabled !== false);
       traditionalSeoRenderRuleSummaryTable(allRows, summaryRules.length ? summaryRules : (TRADITIONAL_SEO_STATE.rules || []));
@@ -72316,7 +72393,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         } else {
           const scoreMap = TRADITIONAL_SEO_STATE.pageScoreByUrl instanceof Map ? TRADITIONAL_SEO_STATE.pageScoreByUrl : null;
           const isSummaryRow = (r) => String(r?.rule_key || '') === '__page_summary__';
-          body.innerHTML = filtered.map((row) => {
+          body.innerHTML = pageRows.map((row) => {
             const tierLabel = escapeHtml(traditionalSeoTierCellLabel(row.tier, countMap));
             const urlRaw = String(row.url || '');
             const isSitewide = String(row.tier || '').toLowerCase() === 'sitewide';
@@ -72363,7 +72440,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const checks = allRows.length;
         const modeLbl = mode === 'pages' && ruleIsAll ? 'URLs' : 'rows';
         const tail = mode === 'pages' && ruleIsAll && checks ? ` · ${checks} checks stored` : '';
-        meta.textContent = `${filtered.length} ${modeLbl} shown${tail} · Last run: ${formatTraditionalSeoTimestamp(TRADITIONAL_SEO_STATE.lastEvaluationAt)}`;
+        let pageHint = '';
+        if (totalFiltered > 0 && !ps.all && pageSize < totalFiltered) {
+          pageHint = ` · Showing ${sliceStart + 1}–${sliceEnd} of ${totalFiltered}`;
+        }
+        meta.textContent = `${totalFiltered} ${modeLbl} match filters${pageHint}${tail} · Last run: ${formatTraditionalSeoTimestamp(TRADITIONAL_SEO_STATE.lastEvaluationAt)}`;
       }
       updateTraditionalSeoSortHeaderState();
     }
@@ -72612,6 +72693,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
         const merged = existingRows.filter((row) => String(row?.rule_key || '') !== ruleKey).concat(newRows);
         TRADITIONAL_SEO_STATE.evaluationRows = merged;
+        traditionalSeoResetResultsPageIndex();
         TRADITIONAL_SEO_STATE.lastEvaluationAt = new Date().toISOString();
 
         traditionalSeoReapplyBypassesToAllRows();
@@ -72809,6 +72891,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         TRADITIONAL_SEO_STATE.pageScoreByUrl = pageScoreByUrl;
 
         TRADITIONAL_SEO_STATE.evaluationRows = rows;
+        traditionalSeoResetResultsPageIndex();
         TRADITIONAL_SEO_STATE.lastEvaluationAt = new Date().toISOString();
 
         const updatedRules = collectTraditionalSeoRulesFromTable().map((rule) => ({
@@ -73093,6 +73176,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         tierFilter.dataset.wired = '1';
         tierFilter.addEventListener('change', () => {
           TRADITIONAL_SEO_STATE.filters.tier = tierFilter.value || 'all';
+          traditionalSeoResetResultsPageIndex();
           renderTraditionalSeoResultsTable();
         });
       }
@@ -73100,6 +73184,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         ruleFilter.dataset.wired = '1';
         ruleFilter.addEventListener('change', () => {
           TRADITIONAL_SEO_STATE.filters.rule = ruleFilter.value || 'all';
+          traditionalSeoResetResultsPageIndex();
           renderTraditionalSeoResultsTable();
         });
       }
@@ -73107,6 +73192,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         statusFilter.dataset.wired = '1';
         statusFilter.addEventListener('change', () => {
           TRADITIONAL_SEO_STATE.filters.status = statusFilter.value || 'all';
+          traditionalSeoResetResultsPageIndex();
           renderTraditionalSeoResultsTable();
         });
       }
@@ -73114,6 +73200,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         categoryFilter.dataset.wired = '1';
         categoryFilter.addEventListener('change', () => {
           TRADITIONAL_SEO_STATE.filters.category = categoryFilter.value || 'all';
+          traditionalSeoResetResultsPageIndex();
           renderTraditionalSeoResultsTable();
         });
       }
@@ -73121,6 +73208,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         queryFilter.dataset.wired = '1';
         queryFilter.addEventListener('input', () => {
           TRADITIONAL_SEO_STATE.filters.query = queryFilter.value || '';
+          traditionalSeoResetResultsPageIndex();
           renderTraditionalSeoResultsTable();
         });
       }
@@ -73130,7 +73218,33 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         resultsModeEl.value = TRADITIONAL_SEO_STATE.resultsTableMode || 'pages';
         resultsModeEl.addEventListener('change', () => {
           TRADITIONAL_SEO_STATE.resultsTableMode = resultsModeEl.value === 'rules' ? 'rules' : 'pages';
+          traditionalSeoResetResultsPageIndex();
           renderTraditionalSeoResultsTable();
+        });
+      }
+      const resultsPageSizeEl = document.getElementById('traditional-seo-results-page-size');
+      if (resultsPageSizeEl && !resultsPageSizeEl.dataset.wired) {
+        resultsPageSizeEl.dataset.wired = '1';
+        resultsPageSizeEl.value = TRADITIONAL_SEO_STATE.resultsPageSize || '10';
+        resultsPageSizeEl.addEventListener('change', () => {
+          TRADITIONAL_SEO_STATE.resultsPageSize = resultsPageSizeEl.value || '10';
+          traditionalSeoResetResultsPageIndex();
+          renderTraditionalSeoResultsTable();
+        });
+      }
+      const resultsPagBar = document.getElementById('traditional-seo-results-pagination');
+      if (resultsPagBar && !resultsPagBar.dataset.wiredPagerBtns) {
+        resultsPagBar.dataset.wiredPagerBtns = '1';
+        resultsPagBar.addEventListener('click', (event) => {
+          const t = event.target instanceof Element ? event.target.closest('button') : null;
+          if (!t) return;
+          if (t.classList.contains('traditional-seo-results-prev')) {
+            TRADITIONAL_SEO_STATE.resultsPageIndex = Math.max(0, traditionalSeoToNum(TRADITIONAL_SEO_STATE.resultsPageIndex, 0) - 1);
+            renderTraditionalSeoResultsTable();
+          } else if (t.classList.contains('traditional-seo-results-next')) {
+            TRADITIONAL_SEO_STATE.resultsPageIndex = traditionalSeoToNum(TRADITIONAL_SEO_STATE.resultsPageIndex, 0) + 1;
+            renderTraditionalSeoResultsTable();
+          }
         });
       }
       if (resultsTable && !resultsTable.dataset.sortWired) {
@@ -73155,6 +73269,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const statusValue = String(target.getAttribute('data-filter-status') || 'all');
         TRADITIONAL_SEO_STATE.filters.status = statusValue;
         if (statusFilter) statusFilter.value = statusValue;
+        traditionalSeoResetResultsPageIndex();
         renderTraditionalSeoResultsTable();
       };
       if (pwfWrap && !pwfWrap.dataset.wired) {
@@ -73200,6 +73315,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           if (!rk) return;
           TRADITIONAL_SEO_STATE.filters.rule = rk;
           if (ruleFilter) ruleFilter.value = rk;
+          traditionalSeoResetResultsPageIndex();
           renderTraditionalSeoResultsTable();
         });
       }
