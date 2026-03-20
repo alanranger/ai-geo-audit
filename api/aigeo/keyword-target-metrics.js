@@ -65,6 +65,9 @@ function isStaleRow(row, nowMs) {
   return nowMs - t > staleDays() * 86400000;
 }
 
+/** PostgREST `.in()` with hundreds of long URLs can exceed request limits → HTTP 400 "Bad Request". */
+const PAGE_URL_IN_CHUNK = 40;
+
 async function readCacheRows(supabase, pairs) {
   const keys = (Array.isArray(pairs) ? pairs : [])
     .map((p) => ({
@@ -74,12 +77,17 @@ async function readCacheRows(supabase, pairs) {
     .filter((p) => p.page_url && p.keyword);
   if (!keys.length) return [];
   const pageUrls = [...new Set(keys.map((k) => k.page_url))];
-  const { data, error } = await supabase
-    .from('keyword_target_metrics_cache')
-    .select('*')
-    .in('page_url', pageUrls);
-  if (error) throw error;
-  return Array.isArray(data) ? data : [];
+  const urlParts = chunk(pageUrls, PAGE_URL_IN_CHUNK);
+  const rows = [];
+  for (let i = 0; i < urlParts.length; i += 1) {
+    const { data, error } = await supabase
+      .from('keyword_target_metrics_cache')
+      .select('*')
+      .in('page_url', urlParts[i]);
+    if (error) throw error;
+    if (Array.isArray(data)) rows.push(...data);
+  }
+  return rows;
 }
 
 function buildByPageUrlMap(rows, pairs, nowMs) {
@@ -149,11 +157,23 @@ function keywordFromKeItem(item) {
   return normalizeKeyword(item?.keyword || item?.kw || item?.term || '');
 }
 
+function normalizeKeCountry(raw) {
+  let c = String(raw || 'gb').trim().toLowerCase();
+  if (!c) c = 'gb';
+  if (c === 'uk') c = 'gb';
+  return c;
+}
+
+function normalizeKeCurrency(raw) {
+  const u = String(raw || 'GBP').trim().toUpperCase();
+  return u || 'GBP';
+}
+
 async function fetchKeywordsEverywhereVolume(keywords) {
   const apiKey = String(process.env.KEYWORDS_EVERYWHERE_API_KEY || '').trim();
   if (!apiKey) throw new Error('KEYWORDS_EVERYWHERE_API_KEY not configured');
-  const country = String(process.env.KEYWORDS_EVERYWHERE_COUNTRY || 'uk').trim() || 'uk';
-  const currency = String(process.env.KEYWORDS_EVERYWHERE_CURRENCY || 'gbp').trim() || 'gbp';
+  const country = normalizeKeCountry(process.env.KEYWORDS_EVERYWHERE_COUNTRY || 'gb');
+  const currency = normalizeKeCurrency(process.env.KEYWORDS_EVERYWHERE_CURRENCY || 'GBP');
   const map = new Map();
   const batches = chunk(keywords, 100);
   for (let b = 0; b < batches.length; b += 1) {
@@ -166,14 +186,21 @@ async function fetchKeywordsEverywhereVolume(keywords) {
       method: 'POST',
       headers: {
         Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
         Authorization: `Bearer ${apiKey}`
       },
-      body
+      body: body.toString()
     });
-    const json = await res.json().catch(() => ({}));
+    const text = await res.text();
+    let json = {};
+    try {
+      json = text ? JSON.parse(text) : {};
+    } catch {
+      json = {};
+    }
     if (!res.ok) {
-      const msg = json?.message || json?.error || `Keywords Everywhere HTTP ${res.status}`;
-      throw new Error(String(msg));
+      const msg = json?.message || json?.error || text?.slice(0, 280) || `Keywords Everywhere HTTP ${res.status}`;
+      throw new Error(`KE ${res.status}: ${String(msg).trim()}`);
     }
     extractKeItems(json).forEach((item) => {
       const k = keywordFromKeItem(item);
@@ -260,10 +287,13 @@ export default async function handler(req, res) {
     });
 
     if (upserts.length) {
-      const { error } = await supabase
-        .from('keyword_target_metrics_cache')
-        .upsert(upserts, { onConflict: 'page_url,keyword' });
-      if (error) throw error;
+      const parts = chunk(upserts, 100);
+      for (let i = 0; i < parts.length; i += 1) {
+        const { error } = await supabase
+          .from('keyword_target_metrics_cache')
+          .upsert(parts[i], { onConflict: 'page_url,keyword' });
+        if (error) throw error;
+      }
     }
 
     const refreshed = await readCacheRows(supabase, pairs);

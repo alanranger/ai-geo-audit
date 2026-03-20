@@ -221,7 +221,7 @@ A dedicated section tracking money pages performance vs the rest of the site, wi
 
 - **Authentication**: OAuth2 credentials stored securely in Vercel environment variables
 - **Keywords Everywhere (Traditional SEO keyword demand)**:
-  - Set `KEYWORDS_EVERYWHERE_API_KEY` on Vercel; optional `KEYWORDS_EVERYWHERE_COUNTRY` (e.g. `uk`), `KEYWORDS_EVERYWHERE_CURRENCY` (e.g. `gbp`), `KEYWORD_METRICS_STALE_DAYS` (default 30).
+  - Set `KEYWORDS_EVERYWHERE_API_KEY` on Vercel; optional `KEYWORDS_EVERYWHERE_COUNTRY` (default **`gb`**; **`uk` maps to `gb`**), `KEYWORDS_EVERYWHERE_CURRENCY` (default **`GBP`**, case-normalised), `KEYWORD_METRICS_STALE_DAYS` (default 30).
   - In the **Traditional SEO** panel, **①/②** do not fetch volume; use **③ Refresh keyword demand (KE)** after a run. See `Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md`.
 - **API Architecture**: All API calls handled server-side via Vercel serverless functions
 - **Visualizations**: Chart.js (CDN) with custom plugins for speedometer, radar, trend charts

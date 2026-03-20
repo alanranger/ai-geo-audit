@@ -51,8 +51,8 @@
 | `SUPABASE_URL` | Yes | |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Service role for upsert/select |
 | `KEYWORDS_EVERYWHERE_API_KEY` | Yes for `refresh` | Bearer token |
-| `KEYWORDS_EVERYWHERE_COUNTRY` | No | Default `uk` |
-| `KEYWORDS_EVERYWHERE_CURRENCY` | No | Default `gbp` |
+| `KEYWORDS_EVERYWHERE_COUNTRY` | No | Default **`gb`** (Google UK). **`uk` is mapped to `gb`**. |
+| `KEYWORDS_EVERYWHERE_CURRENCY` | No | Default **`GBP`** (uppercase; `gbp` in env is normalised up) |
 | `KEYWORD_METRICS_STALE_DAYS` | No | Default `30` (1–365) |
 
 **KE endpoint (server):** `POST https://api.keywordseverywhere.com/v1/get_keyword_data` (form body: `country`, `currency`, `dataSource=gkp`, repeated `kw[]`). See [Keywords Everywhere API](https://keywordseverywhere.com/api-documentation.html).
@@ -75,8 +75,10 @@
 
 1. **Columns exist but all `—`:** Run **③** after Traditional SEO rows exist with **Target kw**. Check Vercel function logs for `/api/aigeo/keyword-target-metrics`.
 2. **500 / missing_env:** `KEYWORDS_EVERYWHERE_API_KEY` or Supabase vars missing on **Vercel**; redeploy after editing env.
-3. **Empty after refresh:** KE error message in toast; verify credits/plan on Keywords Everywhere account.
-4. **Table missing:** Apply SQL migration; API may return warning in `meta` until table exists.
+3. **`Bad Request` / refresh fails with generic 400:** Often **Supabase `.in('page_url', …)` too large** (many long URLs in one query). The API **chunks page URLs** (default **40** per query) to stay under PostgREST limits. If you still hit limits, lower `PAGE_URL_IN_CHUNK` in `api/aigeo/keyword-target-metrics.js`.
+4. **Keywords Everywhere errors:** Toasts now prefix with `KE {status}:` when the external API fails. **Country:** env `uk` is normalised to **`gb`**. **Currency:** sent **uppercase** (e.g. `GBP`) to match KE examples.
+5. **Empty after refresh:** KE error message in toast; verify credits/plan on Keywords Everywhere account.
+6. **Table missing:** Apply SQL migration; API may return warning in `meta` until table exists.
 
 ---
 

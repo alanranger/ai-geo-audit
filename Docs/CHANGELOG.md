@@ -2,6 +2,13 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-03-20] - Keyword demand: fix Supabase 400 + KE request normalisation
+
+### Fixed
+- **`/api/aigeo/keyword-target-metrics`:** Chunked Supabase reads on `page_url` (**40 URLs per `.in()`**) to avoid PostgREST **400 Bad Request** when refreshing hundreds of rows.
+- **Upserts:** Batched to **100 rows** per `upsert` call.
+- **Keywords Everywhere:** `country` defaults to **`gb`**, maps **`uk` → `gb`**; `currency` sent **uppercase**; explicit `Content-Type` + string body; clearer errors (`KE {status}: …`).
+
 ## [2026-03-13] - Traditional SEO keyword demand (Keywords Everywhere cache)
 
 ### Added

@@ -17,6 +17,7 @@
 - **① / ②** = audit scoring only.  
 - **③** = keyword **volume** + **metrics age** via KE → `keyword_target_metrics_cache`.  
 - **Rank / Moz DA** columns = placeholders until another source writes those fields.
+- If **③** failed with **Bad Request**, older builds hit PostgREST limits on huge `.in('page_url', …)` filters — fixed by **chunking reads** in `api/aigeo/keyword-target-metrics.js` (see `Docs/CHANGELOG.md` **2026-03-20**).
 
 ## Where to put new docs
 

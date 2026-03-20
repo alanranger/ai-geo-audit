@@ -16,6 +16,7 @@
 - ⚠️ **Rank / Moz DA** columns stay `—` until a future integration writes them (KE’s bulk keyword endpoint supplies volume/CPC-style data, not per-URL rank or Moz DA).
 - 📄 **Full spec:** `Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md`
 - ⚠️ **Deploy reminder:** Vercel serves **git `main`**; uncommitted local changes will **not** show in production.
+- 🔧 **2026-03-20:** If **③** failed with **Bad Request**, ensure latest `main`: Supabase `.in(page_url, …)` is **chunked (40)**; KE uses **`gb`/`GBP`** normalisation. See `Docs/CHANGELOG.md`.
 
 ---
 
