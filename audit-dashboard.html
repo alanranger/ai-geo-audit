@@ -6148,6 +6148,7 @@
                 <thead>
                   <tr>
                     <th><button type="button" class="traditional-seo-sort-btn" data-sort="rule_name">Rule <span class="sort-ind">↕</span></button></th>
+                    <th style="text-align:center;"><button type="button" class="traditional-seo-sort-btn" data-sort="priority" title="P0 = highest impact (top of current weight range); P10 = lowest. Based on rule weight vs min/max in this ruleset.">Priority <span class="sort-ind">↕</span></button></th>
                     <th><button type="button" class="traditional-seo-sort-btn" data-sort="scope">Scope <span class="sort-ind">↕</span></button></th>
                     <th style="text-align:right;"><button type="button" class="traditional-seo-sort-btn" data-sort="pass">Pass <span class="sort-ind">↕</span></button></th>
                     <th style="text-align:right;"><button type="button" class="traditional-seo-sort-btn" data-sort="warn">Warn <span class="sort-ind">↕</span></button></th>
@@ -6157,7 +6158,7 @@
                   </tr>
                 </thead>
                 <tbody id="traditional-seo-rule-summary-body">
-                  <tr><td colspan="7" style="color: var(--dark-text-muted);">Run the audit to see aggregated counts.</td></tr>
+                  <tr><td colspan="8" style="color: var(--dark-text-muted);">Run the audit to see aggregated counts.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -70248,6 +70249,26 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return Number.isFinite(c) && c >= 0;
     }
 
+    function traditionalSeoRuleWeightBounds(rules) {
+      const ws = (Array.isArray(rules) ? rules : []).map((r) => Math.max(0, traditionalSeoToNum(r?.weight, 0)));
+      if (!ws.length) return { minW: 1, maxW: 1 };
+      return { minW: Math.min(...ws), maxW: Math.max(...ws) };
+    }
+
+    /** 0 = highest weight in ruleset (P0), 10 = lowest (P10). */
+    function traditionalSeoPriorityIndex(weight, minW, maxW) {
+      const w = Math.max(0, traditionalSeoToNum(weight, minW));
+      const lo = Math.max(0, traditionalSeoToNum(minW, 0));
+      const hi = Math.max(lo, traditionalSeoToNum(maxW, lo));
+      if (hi <= lo) return 5;
+      const t = (hi - w) / (hi - lo);
+      return Math.max(0, Math.min(10, Math.round(t * 10)));
+    }
+
+    function traditionalSeoPriorityLabel(weight, minW, maxW) {
+      return `P${traditionalSeoPriorityIndex(weight, minW, maxW)}`;
+    }
+
     const TRADITIONAL_SEO_BASELINE_LS_KEY = 'gaio_traditional_seo_baseline_v1';
 
     function traditionalSeoReadBaselineFromStorage() {
@@ -71482,7 +71503,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const list = Array.isArray(rules) ? rules : [];
       const rowList = Array.isArray(rows) ? rows : [];
       if (!list.length || !rowList.length) {
-        body.innerHTML = '<tr><td colspan="7" style="color: var(--dark-text-muted);">Run the audit to see aggregated counts.</td></tr>';
+        body.innerHTML = '<tr><td colspan="8" style="color: var(--dark-text-muted);">Run the audit to see aggregated counts.</td></tr>';
         updateTraditionalSeoRuleSummarySortHeaderState();
         return;
       }
@@ -71500,13 +71521,17 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const worstRank = { fail: 0, warn: 1, pass: 2 };
       const sortKey = String(TRADITIONAL_SEO_STATE.ruleSummarySort?.key || 'rule_name');
       const sortDir = String(TRADITIONAL_SEO_STATE.ruleSummarySort?.direction || 'asc');
+      const { minW, maxW } = traditionalSeoRuleWeightBounds(list);
       const built = list.map((rule) => {
         const rk = String(rule.rule_key || '');
         const c = counts.get(rk) || { pass: 0, warn: 0, fail: 0, total: 0 };
         const worst = c.fail > 0 ? 'fail' : (c.warn > 0 ? 'warn' : 'pass');
         const scope = String(rule.scope || 'page').toLowerCase();
         const name = String(rule.rule_name || rk);
-        return { rule, rk, c, worst, scope, name };
+        const wt = Math.max(0, traditionalSeoToNum(rule.weight, 0));
+        const priorityP = traditionalSeoPriorityIndex(wt, minW, maxW);
+        const priorityLbl = traditionalSeoPriorityLabel(wt, minW, maxW);
+        return { rule, rk, c, worst, scope, name, wt, priorityP, priorityLbl };
       });
       built.sort((a, b) => {
         let diff = 0;
@@ -71516,6 +71541,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           diff = traditionalSeoToNum(a.c.total, 0) - traditionalSeoToNum(b.c.total, 0);
         } else if (sortKey === 'worst') {
           diff = (worstRank[a.worst] ?? 9) - (worstRank[b.worst] ?? 9);
+        } else if (sortKey === 'priority') {
+          diff = traditionalSeoToNum(a.priorityP, 0) - traditionalSeoToNum(b.priorityP, 0);
         } else if (sortKey === 'scope') {
           diff = a.scope.localeCompare(b.scope);
         } else {
@@ -71524,11 +71551,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (diff === 0) diff = a.rk.localeCompare(b.rk);
         return sortDir === 'desc' ? -diff : diff;
       });
-      body.innerHTML = built.map(({ rule, rk, c, worst, scope, name }) => {
+      body.innerHTML = built.map(({ rk, c, worst, scope, name, wt, priorityLbl }) => {
         const keyAttr = traditionalSeoEscapeAttr(rk);
+        const pTitle = `Weight ${wt} (ruleset ${minW}-${maxW} maps to P0-P10; lower P = higher modeled impact)`;
         return `
           <tr data-rule-key="${keyAttr}">
             <td>${escapeHtml(name)}</td>
+            <td style="text-align:center;" title="${traditionalSeoEscapeAttr(pTitle)}"><span style="font-weight:700;">${escapeHtml(priorityLbl)}</span> <span style="font-size:0.72rem;color:var(--dark-text-muted);">(${traditionalSeoEscapeAttr(String(wt))})</span></td>
             <td>${escapeHtml(scope)}</td>
             <td style="text-align:right;">${c.pass}</td>
             <td style="text-align:right;">${c.warn}</td>
