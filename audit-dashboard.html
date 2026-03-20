@@ -2031,6 +2031,11 @@
     section[data-panel="traditional-seo"] #traditional-seo-rule-summary-table tbody tr[data-rule-key]:hover {
       background: rgba(30, 41, 59, 0.45);
     }
+    section[data-panel="traditional-seo"] .traditional-seo-rule-reaudit-btn {
+      padding: 0.22rem 0.5rem;
+      font-size: 0.72rem;
+      white-space: nowrap;
+    }
 
     section[data-panel="traditional-seo"] .traditional-seo-sort-btn {
       all: unset;
@@ -6181,6 +6186,7 @@
                 <thead>
                   <tr>
                     <th><button type="button" class="traditional-seo-sort-btn" data-sort="rule_name">Rule <span class="sort-ind">↕</span></button></th>
+                    <th style="text-align:center;width:5.5rem;">Re-audit</th>
                     <th style="text-align:center;"><button type="button" class="traditional-seo-sort-btn" data-sort="priority" title="P0 = highest impact (top of current weight range); P10 = lowest. Based on rule weight vs min/max in this ruleset.">Priority <span class="sort-ind">↕</span></button></th>
                     <th><button type="button" class="traditional-seo-sort-btn" data-sort="scope">Scope <span class="sort-ind">↕</span></button></th>
                     <th style="text-align:right;"><button type="button" class="traditional-seo-sort-btn" data-sort="pass">Pass <span class="sort-ind">↕</span></button></th>
@@ -6191,7 +6197,7 @@
                   </tr>
                 </thead>
                 <tbody id="traditional-seo-rule-summary-body">
-                  <tr><td colspan="8" style="color: var(--dark-text-muted);">Run the audit to see aggregated counts.</td></tr>
+                  <tr><td colspan="9" style="color: var(--dark-text-muted);">Run the audit to see aggregated counts.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -70102,7 +70108,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         direction: 'asc'
       },
       ruleBypassByPage: null,
-      ruleOverridesProperty: ''
+      ruleOverridesProperty: '',
+      seoEvalInFlight: false
     };
 
     const TRADITIONAL_SEO_EVAL_PROGRESS = {
@@ -71642,7 +71649,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const list = Array.isArray(rules) ? rules : [];
       const rowList = Array.isArray(rows) ? rows : [];
       if (!list.length || !rowList.length) {
-        body.innerHTML = '<tr><td colspan="8" style="color: var(--dark-text-muted);">Run the audit to see aggregated counts.</td></tr>';
+        body.innerHTML = '<tr><td colspan="9" style="color: var(--dark-text-muted);">Run the audit to see aggregated counts.</td></tr>';
         updateTraditionalSeoRuleSummarySortHeaderState();
         return;
       }
@@ -71690,12 +71697,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (diff === 0) diff = a.rk.localeCompare(b.rk);
         return sortDir === 'desc' ? -diff : diff;
       });
+      const evalBusy = TRADITIONAL_SEO_STATE.seoEvalInFlight === true;
       body.innerHTML = built.map(({ rk, c, worst, scope, name, wt, priorityLbl }) => {
         const keyAttr = traditionalSeoEscapeAttr(rk);
         const pTitle = `Weight ${wt} (ruleset ${minW}-${maxW} maps to P0-P10; lower P = higher modeled impact)`;
+        const reauditTitle = 'Re-fetch signals if needed, then re-score this rule for every URL (progress in modal).';
+        const reauditDisabled = evalBusy ? ' disabled' : '';
         return `
           <tr data-rule-key="${keyAttr}">
             <td>${escapeHtml(name)}</td>
+            <td style="text-align:center;">
+              <button type="button" class="btn traditional-seo-rule-reaudit-btn"${reauditDisabled} data-rule-reaudit="${keyAttr}" title="${traditionalSeoEscapeAttr(reauditTitle)}">Re-audit</button>
+            </td>
             <td style="text-align:center;" title="${traditionalSeoEscapeAttr(pTitle)}"><span style="font-weight:700;">${escapeHtml(priorityLbl)}</span> <span style="font-size:0.72rem;color:var(--dark-text-muted);">(${traditionalSeoEscapeAttr(String(wt))})</span></td>
             <td>${escapeHtml(scope)}</td>
             <td style="text-align:right;">${c.pass}</td>
@@ -72041,16 +72054,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
     }
 
-    function traditionalSeoEvalProgressOpen(refreshAudit) {
+    function traditionalSeoEvalProgressOpen(refreshAudit, titleOverride) {
       const { modal, title, subtitle } = traditionalSeoEvalProgressDom();
       if (!modal || !title || !subtitle) return;
       traditionalSeoEvalProgressClearTimer();
       TRADITIONAL_SEO_EVAL_PROGRESS.startedAt = Date.now();
       TRADITIONAL_SEO_EVAL_PROGRESS.displayPct = 6;
       TRADITIONAL_SEO_EVAL_PROGRESS.floorPct = 6;
-      title.textContent = refreshAudit
-        ? 'Traditional SEO (after full audit refresh)'
-        : 'Running Traditional SEO (score only)';
+      title.textContent = titleOverride
+        ? String(titleOverride)
+        : (refreshAudit
+          ? 'Traditional SEO (after full audit refresh)'
+          : 'Running Traditional SEO (score only)');
       subtitle.textContent = 'Starting…';
       traditionalSeoEvalProgressPaint();
       modal.classList.add('is-open');
@@ -72100,6 +72115,167 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }, success ? 220 : 380);
     }
 
+    function traditionalSeoRuleNeedsExtractRefresh(ruleKey) {
+      const k = String(ruleKey || '').toLowerCase();
+      return (
+        k === 'title_tag_present'
+        || k === 'meta_description_present'
+        || k === 'single_h1'
+        || k === 'h1_length_best_practice'
+        || k === 'thin_content_guardrail'
+        || k === 'image_alt_coverage'
+        || k === 'external_links_new_tab'
+      );
+    }
+
+    async function traditionalSeoReauditSingleRule(ruleKeyRaw) {
+      const ruleKey = String(ruleKeyRaw || '').trim();
+      if (!ruleKey) return;
+      if (TRADITIONAL_SEO_STATE.seoEvalInFlight) return;
+      const runBtn = document.getElementById('traditional-seo-run-audit-btn');
+      const runFullBtn = document.getElementById('traditional-seo-run-full-audit-btn');
+      const existingRows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
+      if (!existingRows.length) {
+        if (typeof window.showStatus === 'function') {
+          window.showStatus('Run ② (or ①) first to build a full Traditional SEO baseline, then re-audit individual rules.', 'info');
+        }
+        return;
+      }
+      const tableRules = collectTraditionalSeoRulesFromTable();
+      const rule = tableRules.find((r) => String(r?.rule_key || '') === ruleKey);
+      if (!rule || rule.enabled === false) {
+        if (typeof window.showStatus === 'function') window.showStatus('That rule is disabled or not found in the table.', 'warning');
+        return;
+      }
+      try {
+        TRADITIONAL_SEO_STATE.seoEvalInFlight = true;
+        if (runBtn) runBtn.disabled = true;
+        if (runFullBtn) runFullBtn.disabled = true;
+        renderTraditionalSeoResultsTable();
+
+        const ruleLabel = String(rule.rule_name || ruleKey);
+        traditionalSeoEvalProgressOpen(false, `Re-auditing one rule: ${ruleLabel}`);
+        traditionalSeoEvalProgressStage('Loading saved audit data…', 10);
+        const audit = await traditionalSeoLoadAuditData(true);
+        if (!audit) throw new Error('No audit data available. Run a full audit first.');
+        const propertyUrl = traditionalSeoPropertyUrl();
+        traditionalSeoEvalProgressStage('Collecting URLs and GSC metrics…', 18);
+        const rawUrls = await traditionalSeoCollectUrls(audit, propertyUrl);
+        const urls = Array.isArray(rawUrls) ? rawUrls.slice() : [];
+        const metricLookup = traditionalSeoBuildMetricsLookup(audit, propertyUrl);
+        const resolveTier = await traditionalSeoBuildTierResolver(audit);
+
+        if (traditionalSeoRuleNeedsExtractRefresh(ruleKey)) {
+          traditionalSeoEvalProgressStage('Refreshing extractability for all URLs (batched)…', 24);
+          await traditionalSeoEnsureExtractabilityForUrls(urls, propertyUrl, (ev) => {
+            if (!ev) return;
+            if (ev.total > 0) traditionalSeoEvalProgressExtract(ev.done, ev.total);
+            else if (ev.noHttpUrls) {
+              traditionalSeoEvalProgressStage('Extractability: no https URLs in list to refresh', 52);
+            }
+          });
+        } else {
+          traditionalSeoEvalProgressStage('Skipping extractability refresh (rule uses audit/schema/tech signals only)…', 40);
+        }
+
+        traditionalSeoEvalProgressStage('Building signals and loading overrides…', 78);
+        const implPayloads = traditionalSeoLoadImplementationPayloads();
+        const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
+        TRADITIONAL_SEO_STATE.lastSignalMaps = signalMaps;
+        TRADITIONAL_SEO_STATE.lastPropertyUrl = propertyUrl;
+        await traditionalSeoEnsureRuleOverridesLoaded();
+
+        const techFoundation = traditionalSeoReadTechFoundation(implPayloads.tech);
+        const context = {
+          techScore: traditionalSeoToNum(audit?.scores?.technicalBasics?.score ?? audit?.scores?.technical?.score, 70),
+          schemaScore: traditionalSeoToNum(audit?.scores?.contentSchema?.score ?? audit?.scores?.schemaScore, 70),
+          payloads: implPayloads,
+          techFoundation,
+          propertyUrl,
+          evaluatedUrls: urls,
+          signalMaps
+        };
+
+        const newRows = [];
+        const scope = String(rule.scope || 'page').toLowerCase();
+        const isSitewide = scope === 'sitewide';
+        const totalSteps = isSitewide ? 1 : urls.length;
+        let doneSteps = 0;
+
+        if (isSitewide) {
+          const siteRowUrl = traditionalSeoNormalizeUrl(propertyUrl, propertyUrl)
+            || (urls.length ? String(urls[0]) : 'Site-wide (set property URL)');
+          const rawStatus = traditionalSeoRuleStatusForUrl(rule, siteRowUrl, 'sitewide', { clicks: 0, impressions: 0 }, context);
+          newRows.push({
+            rule_key: rule.rule_key,
+            rule_name: rule.rule_name,
+            rule_category: String(rule.category || 'general').toLowerCase(),
+            url: siteRowUrl,
+            tier: 'sitewide',
+            status: rawStatus,
+            raw_status: rawStatus,
+            bypassed: false,
+            rule_weight: Math.max(0, traditionalSeoToNum(rule.weight, 1)),
+            clicks: 0,
+            impressions: 0
+          });
+          doneSteps = 1;
+        } else {
+          const progressEvery = 50;
+          for (let i = 0; i < urls.length; i += 1) {
+            const url = urls[i];
+            const tier = String(resolveTier(url) || 'unmapped');
+            const norm = traditionalSeoNormalizeUrl(url, propertyUrl) || url;
+            const metric = metricLookup.get(url) || metricLookup.get(norm) || { clicks: 0, impressions: 0 };
+            const rawStatus = traditionalSeoRuleStatusForUrl(rule, url, tier, metric, context);
+            const bypass = traditionalSeoHasRuleBypass(url, rule.rule_key);
+            const status = bypass ? 'pass' : rawStatus;
+            newRows.push({
+              rule_key: rule.rule_key,
+              rule_name: rule.rule_name,
+              rule_category: String(rule.category || 'general').toLowerCase(),
+              url,
+              tier,
+              status,
+              raw_status: rawStatus,
+              bypassed: bypass && String(rawStatus || '').toLowerCase() !== 'pass',
+              rule_weight: Math.max(0, traditionalSeoToNum(rule.weight, 1)),
+              clicks: metric.clicks || 0,
+              impressions: metric.impressions || 0
+            });
+            doneSteps += 1;
+            if (i % progressEvery === 0 || i === urls.length - 1) {
+              const slice = 70 + Math.floor((22 * doneSteps) / Math.max(1, totalSteps));
+              traditionalSeoEvalProgressStage(`${ruleLabel}: scored ${doneSteps}/${totalSteps} URLs…`, Math.min(92, slice));
+              await new Promise((r) => setTimeout(r, 0));
+            }
+          }
+        }
+
+        const merged = existingRows.filter((row) => String(row?.rule_key || '') !== ruleKey).concat(newRows);
+        TRADITIONAL_SEO_STATE.evaluationRows = merged;
+        TRADITIONAL_SEO_STATE.lastEvaluationAt = new Date().toISOString();
+
+        traditionalSeoReapplyBypassesToAllRows();
+        traditionalSeoRefreshRulesSummaryFromEvaluationRows();
+        renderTraditionalSeoResultsTable();
+        traditionalSeoEvalProgressClose(true);
+        if (typeof window.showStatus === 'function') {
+          window.showStatus(`Re-audit complete for “${ruleLabel}” (${newRows.length} row${newRows.length === 1 ? '' : 's'}).`, 'success');
+        }
+      } catch (err) {
+        traditionalSeoEvalProgressClose(false);
+        if (typeof window.showStatus === 'function') {
+          window.showStatus(`Rule re-audit failed: ${err?.message || err}`, 'error');
+        }
+      } finally {
+        TRADITIONAL_SEO_STATE.seoEvalInFlight = false;
+        if (runBtn) runBtn.disabled = false;
+        if (runFullBtn) runFullBtn.disabled = false;
+        renderTraditionalSeoResultsTable();
+      }
+    }
+
     async function runTraditionalSeoEvaluation(options = {}) {
       const refreshAudit = options?.refreshAudit === true;
       const runBtn = document.getElementById('traditional-seo-run-audit-btn');
@@ -72115,6 +72291,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
 
         traditionalSeoEvalProgressOpen(refreshAudit);
+        TRADITIONAL_SEO_STATE.seoEvalInFlight = true;
+        renderTraditionalSeoResultsTable();
         traditionalSeoEvalProgressStage('Loading saved audit data…', 10);
         const audit = await traditionalSeoLoadAuditData(true);
         if (!audit) throw new Error('No audit data available. Run a full audit first.');
@@ -72238,8 +72416,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           window.showStatus(`Traditional SEO audit failed: ${err?.message || err}`, 'error');
         }
       } finally {
+        TRADITIONAL_SEO_STATE.seoEvalInFlight = false;
         if (runBtn) runBtn.disabled = false;
         if (runFullBtn) runFullBtn.disabled = false;
+        renderTraditionalSeoResultsTable();
       }
     }
 
@@ -72560,6 +72740,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (ruleSummaryTable && !ruleSummaryTable.dataset.wired) {
         ruleSummaryTable.dataset.wired = '1';
         ruleSummaryTable.addEventListener('click', (event) => {
+          const reauditBtn = event.target instanceof Element ? event.target.closest('[data-rule-reaudit]') : null;
+          if (reauditBtn) {
+            event.preventDefault();
+            event.stopPropagation();
+            const rk = String(reauditBtn.getAttribute('data-rule-reaudit') || '').trim();
+            if (rk) void traditionalSeoReauditSingleRule(rk);
+            return;
+          }
           const sortBtn = event.target instanceof Element ? event.target.closest('thead .traditional-seo-sort-btn') : null;
           if (sortBtn) {
             const nextKey = String(sortBtn.dataset.sort || '');
