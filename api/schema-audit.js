@@ -419,6 +419,18 @@ function stripHtmlNoiseForMeta(htmlString) {
     .replace(/<!--[\s\S]*?-->/g, ' ');
 }
 
+function decodeNumericHtmlEntitiesForMeta(s) {
+  return String(s || '').replace(/&#(\d+);|&#x([0-9a-f]+);/gi, (full, dec, hex) => {
+    try {
+      const n = hex !== undefined ? Number.parseInt(hex, 16) : Number.parseInt(dec, 10);
+      if (!Number.isFinite(n) || n < 0 || n > 0x10ffff) return full;
+      return String.fromCodePoint(n);
+    } catch {
+      return full;
+    }
+  });
+}
+
 /**
  * Extract meta description from HTML
  */
@@ -431,7 +443,7 @@ function extractMetaDescription(htmlString) {
   const html = stripHtmlNoiseForMeta(htmlString || '');
   const pick = (re) => {
     const m = html.match(re);
-    return m?.[1] ? collapse(m[1]) : null;
+    return m?.[1] ? collapse(decodeNumericHtmlEntitiesForMeta(m[1])) : null;
   };
   let v = pick(/<meta\b[^>]*name=["']description["'][^>]*content=["']([\s\S]*?)["']/is);
   if (v) return v;

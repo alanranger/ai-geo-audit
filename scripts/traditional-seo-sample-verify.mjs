@@ -7,7 +7,7 @@
  * Usage (from repo root):
  *   node scripts/traditional-seo-sample-verify.mjs --file=scripts/sample-traditional-seo-urls.txt --limit=25
  *
- * Defaults: a few alanranger.com URLs. Tune bands with --meta-min=150 --meta-max=160 etc.
+ * Defaults: a few alanranger.com URLs. Tune bands with --meta-min=150 --meta-max=165 etc.
  */
 
 import { readFileSync, existsSync } from 'fs';
@@ -30,10 +30,10 @@ function parseArgs(argv) {
     limit: parseIntArg(argv, '--limit', 25),
     delayMs: parseIntArg(argv, '--delay', 450),
     metaMin: parseIntArg(argv, '--meta-min', 150),
-    metaMax: parseIntArg(argv, '--meta-max', 160),
+    metaMax: parseIntArg(argv, '--meta-max', 165),
     titleMin: parseIntArg(argv, '--title-min', 50),
     titleMax: parseIntArg(argv, '--title-max', 60),
-    h1Min: parseIntArg(argv, '--h1-len-min', 50),
+    h1Min: parseIntArg(argv, '--h1-len-min', 40),
     h1Max: parseIntArg(argv, '--h1-len-max', 60)
   };
 }
@@ -102,7 +102,7 @@ async function main() {
     process.exit(1);
   }
   console.log(
-    'url\trequestOk\texcluded\tmetaLen\th1\tlongH1\textOut\tmissBlank\ttitleHtmlLen\tflags'
+    'url\trequestOk\texcluded\tmetaLen\th1\tlongH1\textOut\tmissBlank\ttitleLenApi\tflags'
   );
   for (const url of urls) {
     const row = await checkUrl(url, null);
@@ -114,8 +114,8 @@ async function main() {
         html = '';
       }
     }
-    const titleHtmlLen = titleLenFromHtml(html);
-    const flags = evalFlags(row, titleHtmlLen, o).join(',');
+    const titleFallback = titleLenFromHtml(html);
+    const flags = evalFlags(row, titleFallback, o).join(',');
     const metaLen = String(row.seoMetaDescription || '').trim().length;
     console.log(
       [
@@ -127,14 +127,16 @@ async function main() {
         row.seoLongestH1Length,
         row.seoExtOutbound,
         row.seoExtMissingTargetBlank,
-        titleHtmlLen,
+        Number.isFinite(Number(row.seoTitleTagLength)) && Number(row.seoTitleTagLength) >= 0
+          ? row.seoTitleTagLength
+          : titleFallback,
         flags
       ].join('\t')
     );
     if (o.delayMs > 0) await sleep(o.delayMs);
   }
   console.error(
-    '\nNote: Dashboard "Title tag present" uses schema-audit title length (50–60), not HTML <title> above.'
+    '\nNote: Dashboard title rule prefers API seoTitleTagLength (HTML <title>), else schema (50–60).'
   );
 }
 

@@ -191,14 +191,28 @@ function stripHtmlToText(html = '') {
     .trim();
 }
 
+function decodeNumericHtmlEntities(text = '') {
+  return String(text || '').replace(/&#(\d+);|&#x([0-9a-f]+);/gi, (full, dec, hex) => {
+    try {
+      const n = hex !== undefined ? Number.parseInt(hex, 16) : Number.parseInt(dec, 10);
+      if (!Number.isFinite(n) || n < 0 || n > 0x10ffff) return full;
+      return String.fromCodePoint(n);
+    } catch {
+      return full;
+    }
+  });
+}
+
 function decodeBasicHtmlEntities(text = '') {
-  return String(text || '')
+  let s = String(text || '')
     .replaceAll(/&nbsp;/gi, ' ')
     .replaceAll(/&amp;/gi, '&')
     .replaceAll(/&quot;/gi, '"')
     .replaceAll(/&#39;/gi, "'")
     .replaceAll(/&lt;/gi, '<')
     .replaceAll(/&gt;/gi, '>');
+  s = decodeNumericHtmlEntities(s);
+  return s;
 }
 
 function findJsonLdBlocks(html = '') {
@@ -496,6 +510,7 @@ async function checkUrl(url, tierLookup = null) {
     seoFirstH1Length: 0,
     seoLongestH1Length: 0,
     seoMetaDescription: '',
+    seoTitleTagLength: -1,
     seoImgTotal: 0,
     seoImgMissingAlt: 0,
     seoExtOutbound: 0,
@@ -610,6 +625,7 @@ async function checkUrl(url, tierLookup = null) {
       seoFirstH1Length: seo.firstH1PlainLength,
       seoLongestH1Length: seo.longestH1PlainLength,
       seoMetaDescription: seo.metaDescription || '',
+      seoTitleTagLength,
       seoImgTotal: seo.imgTotal,
       seoImgMissingAlt: seo.imgMissingAlt,
       seoExtOutbound: seo.extOutboundCount,
