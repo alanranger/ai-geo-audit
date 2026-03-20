@@ -1,7 +1,7 @@
 # AI GEO Audit - Comprehensive Handover Document
 
 **Last Updated**: 2026-03-13  
-**Current Commit**: `2fc057c` (Traditional SEO keyword demand: KE cache + ③ refresh UI)  
+**Current Commit**: `d83390a` (docs: AGENTS + Traditional SEO KE handover)  
 **Purpose**: Single source of truth for all projects, phases, tasks, fixes, and key information for any new chat thread.
 
 **New chat agents:** skim **`AGENTS.md`** first, then **`Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md`** for the Keywords Everywhere / Traditional SEO column feature.
@@ -902,7 +902,7 @@ mcp_supabase_execute_sql({ ... })
 **Deployment**: Vercel (https://ai-geo-audit.vercel.app/)  
 **Database**: Supabase (`supabase-main`, project_ref=igzvwbvgvmzvvzoclufx)
 
-**Current Commit**: `2fc057c`  
+**Current Commit**: `d83390a`  
 **Baseline Commit**: `8951fcf`  
 **Status**: Traditional SEO keyword demand cache (KE) shipped; see **Recent: Traditional SEO keyword demand** above. Older Phase 3/4 notes in this file may be partially superseded — verify against git history for stale checklist items.
 
