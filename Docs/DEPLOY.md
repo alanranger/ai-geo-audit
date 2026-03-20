@@ -67,7 +67,7 @@ After deployment, configure OAuth2 credentials:
    - `CRON_SECRET` (optional) - Shared secret for cron endpoints
    - `SUPABASE_DB_PASSWORD` (required for cleanup VACUUM) - Used by `/api/cron/gsc-data-cleanup`
    - `KEYWORDS_EVERYWHERE_API_KEY` (optional) - Enables **Traditional SEO → ③ Refresh keyword demand** (`/api/aigeo/keyword-target-metrics` `refresh` action)
-   - `KEYWORDS_EVERYWHERE_COUNTRY` (optional, e.g. `uk`) / `KEYWORDS_EVERYWHERE_CURRENCY` (optional, e.g. `gbp`)
+   - `KEYWORDS_EVERYWHERE_COUNTRY` (optional; default **`gb`** — **`uk` is auto-mapped to `gb`**) / `KEYWORDS_EVERYWHERE_CURRENCY` (optional; default **`GBP`**, uppercased server-side)
    - `KEYWORD_METRICS_STALE_DAYS` (optional, default `30`) - Cache TTL before `refresh` re-fetches a row
 4. Select **Production**, **Preview**, and **Development** environments
 5. Click **Save**
