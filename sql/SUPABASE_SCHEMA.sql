@@ -137,6 +137,32 @@ CREATE INDEX IF NOT EXISTS idx_audit_cron_schedule_next_run
   ON audit_cron_schedule(next_run_at);
 
 -- ============================================================================
+-- Table: keyword_target_metrics_cache
+-- Purpose: Cached keyword demand (e.g. Keywords Everywhere volume) per page URL + keyword
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.keyword_target_metrics_cache (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  page_url TEXT NOT NULL,
+  keyword TEXT NOT NULL,
+  search_volume INTEGER,
+  cpc NUMERIC(14, 6),
+  competition NUMERIC(14, 6),
+  rank_position NUMERIC(10, 2),
+  moz_domain_authority INTEGER,
+  provider TEXT NOT NULL DEFAULT 'keywordseverywhere',
+  raw_payload JSONB,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT keyword_target_metrics_cache_page_keyword UNIQUE (page_url, keyword)
+);
+
+CREATE INDEX IF NOT EXISTS idx_keyword_target_metrics_cache_page_url
+  ON public.keyword_target_metrics_cache (page_url);
+
+CREATE INDEX IF NOT EXISTS idx_keyword_target_metrics_cache_fetched_at
+  ON public.keyword_target_metrics_cache (fetched_at DESC);
+
+-- ============================================================================
 -- Notes:
 -- ============================================================================
 -- 1. Run this SQL in your Supabase SQL editor

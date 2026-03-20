@@ -6218,6 +6218,9 @@
                 <option value="50">50</option>
                 <option value="all">All</option>
               </select>
+              <button type="button" id="traditional-seo-refresh-kw-metrics-btn" title="Calls Keywords Everywhere once for missing/stale URL+keyword pairs, then saves to Supabase cache. Table load only reads cache." style="font-size: 0.78rem; padding: 0.25rem 0.55rem; border-radius: 6px; border: 1px solid var(--border, #cbd5e1); background: var(--card-bg, #fff); cursor: pointer;">
+                Refresh kw demand
+              </button>
             </div>
             <div id="traditional-seo-results-pager" style="display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; font-size: 0.8rem; color: var(--dark-text-muted);"></div>
           </div>
@@ -6232,12 +6235,16 @@
                   <th style="width: 10%;"><button type="button" class="traditional-seo-sort-btn" data-sort="status">Status <span class="sort-ind">↕</span></button></th>
                   <th style="width: 21%;"><button type="button" class="traditional-seo-sort-btn" data-sort="url">URL <span class="sort-ind">↕</span></button></th>
                   <th style="width: 12%;"><button type="button" class="traditional-seo-sort-btn" data-sort="target_keyword">Target kw <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 7%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_volume" title="Monthly search volume from cached Keywords Everywhere pull (manual refresh).">Kw vol <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 6%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_rank" title="Optional rank position when stored in cache (not from Keywords Everywhere keyword API).">Rank <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 6%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_moz" title="Optional Moz DA when stored in cache (not returned by KE keyword volume endpoint).">Moz DA <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 9%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_updated">Metrics age <span class="sort-ind">↕</span></button></th>
                   <th style="width: 8%;"><button type="button" class="traditional-seo-sort-btn" data-sort="clicks">Clicks <span class="sort-ind">↕</span></button></th>
                   <th style="width: 8%;"><button type="button" class="traditional-seo-sort-btn" data-sort="impressions">Impr. <span class="sort-ind">↕</span></button></th>
                 </tr>
               </thead>
               <tbody id="traditional-seo-results-body">
-                <tr><td colspan="9" style="color: var(--dark-text-muted);">Run Traditional SEO Audit to populate this table.</td></tr>
+                <tr><td colspan="13" style="color: var(--dark-text-muted);">Run Traditional SEO Audit to populate this table.</td></tr>
               </tbody>
             </table>
           </div>
@@ -70134,7 +70141,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       },
       ruleBypassByPage: null,
       ruleOverridesProperty: '',
-      seoEvalInFlight: false
+      seoEvalInFlight: false,
+      /** Cached keyword demand (Supabase); filled via lookup only — no KE on page load. */
+      keywordMetricsByUrl: null,
+      keywordMetricsLoadedForRun: null,
+      keywordMetricsLookupInFlight: false,
+      keywordMetricsRefreshInFlight: false,
+      keywordMetricsStaleDays: 30,
+      keywordMetricsLastNote: ''
     };
 
     const TRADITIONAL_SEO_EVAL_PROGRESS = {
@@ -70784,6 +70798,172 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (Number.isNaN(date.getTime())) return '—';
       if (typeof window.formatUtcTimestamp === 'function') return window.formatUtcTimestamp(value);
       return date.toISOString();
+    }
+
+    function traditionalSeoKeywordMetricPairsFromRows(rows) {
+      const seen = new Set();
+      const pairs = [];
+      (Array.isArray(rows) ? rows : []).forEach((row) => {
+        if (String(row?.tier || '').toLowerCase() === 'sitewide') return;
+        const url = String(row?.url || '').trim();
+        const keyword = String(row?.target_keyword || '').trim();
+        if (!url || !keyword) return;
+        const k = `${url}\n${keyword}`;
+        if (seen.has(k)) return;
+        seen.add(k);
+        pairs.push({ url, keyword });
+      });
+      return pairs;
+    }
+
+    function traditionalSeoApplyKeywordMetricsPayload(payload) {
+      const by = payload && typeof payload.byPageUrl === 'object' ? payload.byPageUrl : {};
+      const map = TRADITIONAL_SEO_STATE.keywordMetricsByUrl instanceof Map
+        ? new Map(TRADITIONAL_SEO_STATE.keywordMetricsByUrl)
+        : new Map();
+      Object.keys(by).forEach((k) => {
+        map.set(k, by[k]);
+      });
+      TRADITIONAL_SEO_STATE.keywordMetricsByUrl = map;
+      const sd = traditionalSeoToNum(payload?.staleDays, 0);
+      if (sd > 0) TRADITIONAL_SEO_STATE.keywordMetricsStaleDays = sd;
+    }
+
+    async function traditionalSeoPostKeywordMetrics(action, pairs, force) {
+      const CHUNK = 400;
+      const merged = {};
+      let lastMeta = null;
+      let refreshedKeywords = 0;
+      let upsertedRows = 0;
+      let staleDaysOut = null;
+      for (let i = 0; i < pairs.length; i += CHUNK) {
+        const slice = pairs.slice(i, i + CHUNK);
+        const res = await fetch(traditionalSeoApiPath('/api/aigeo/keyword-target-metrics'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action, pairs: slice, force: force === true })
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json?.status === 'error') {
+          throw new Error(json?.message || `HTTP ${res.status}`);
+        }
+        const data = json?.data || {};
+        lastMeta = json?.meta || lastMeta;
+        if (data.staleDays != null) staleDaysOut = data.staleDays;
+        Object.assign(merged, data.byPageUrl || {});
+        if (action === 'refresh') {
+          refreshedKeywords = Math.max(refreshedKeywords, traditionalSeoToNum(data.refreshedKeywords, 0));
+          upsertedRows += traditionalSeoToNum(data.upsertedRows, 0);
+        }
+      }
+      return { merged, lastMeta, refreshedKeywords, upsertedRows, staleDays: staleDaysOut };
+    }
+
+    async function traditionalSeoKeywordMetricsLookupSilently() {
+      const rows = TRADITIONAL_SEO_STATE.evaluationRows;
+      const pairs = traditionalSeoKeywordMetricPairsFromRows(rows);
+      if (!pairs.length) {
+        TRADITIONAL_SEO_STATE.keywordMetricsByUrl = new Map();
+        return;
+      }
+      const { merged, lastMeta, staleDays } = await traditionalSeoPostKeywordMetrics('lookup', pairs, false);
+      traditionalSeoApplyKeywordMetricsPayload({ byPageUrl: merged, staleDays });
+      if (lastMeta?.warning) TRADITIONAL_SEO_STATE.keywordMetricsLastNote = String(lastMeta.warning);
+    }
+
+    async function traditionalSeoKeywordMetricsLookupIfNeededForRun() {
+      const runAt = TRADITIONAL_SEO_STATE.lastEvaluationAt;
+      if (!runAt) return;
+      if (!Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) || !TRADITIONAL_SEO_STATE.evaluationRows.length) return;
+      if (TRADITIONAL_SEO_STATE.keywordMetricsLoadedForRun === runAt) return;
+      if (TRADITIONAL_SEO_STATE.keywordMetricsLookupInFlight) return;
+      TRADITIONAL_SEO_STATE.keywordMetricsLookupInFlight = true;
+      try {
+        await traditionalSeoKeywordMetricsLookupSilently();
+        TRADITIONAL_SEO_STATE.keywordMetricsLoadedForRun = runAt;
+      } catch (err) {
+        TRADITIONAL_SEO_STATE.keywordMetricsLastNote = String(err?.message || err);
+        if (typeof window.showStatus === 'function') {
+          window.showStatus(`Keyword demand cache: ${TRADITIONAL_SEO_STATE.keywordMetricsLastNote}`, 'warning');
+        }
+      } finally {
+        TRADITIONAL_SEO_STATE.keywordMetricsLookupInFlight = false;
+        renderTraditionalSeoResultsTable();
+      }
+    }
+
+    async function traditionalSeoRefreshKeywordMetricsFromProvider() {
+      if (TRADITIONAL_SEO_STATE.keywordMetricsRefreshInFlight) return;
+      const rows = TRADITIONAL_SEO_STATE.evaluationRows;
+      const pairs = traditionalSeoKeywordMetricPairsFromRows(rows);
+      if (!pairs.length) {
+        if (typeof window.showStatus === 'function') window.showStatus('No URL + target keyword pairs to refresh.', 'info');
+        return;
+      }
+      const btn = document.getElementById('traditional-seo-refresh-kw-metrics-btn');
+      TRADITIONAL_SEO_STATE.keywordMetricsRefreshInFlight = true;
+      if (btn) btn.disabled = true;
+      try {
+        if (typeof window.showStatus === 'function') {
+          window.showStatus('Refreshing keyword demand (Keywords Everywhere) for missing/stale rows…', 'info');
+        }
+        const { merged, refreshedKeywords, upsertedRows, lastMeta, staleDays } = await traditionalSeoPostKeywordMetrics(
+          'refresh',
+          pairs,
+          false
+        );
+        traditionalSeoApplyKeywordMetricsPayload({ byPageUrl: merged, staleDays });
+        if (lastMeta?.warning) TRADITIONAL_SEO_STATE.keywordMetricsLastNote = String(lastMeta.warning);
+        if (typeof window.showStatus === 'function') {
+          window.showStatus(
+            `Keyword demand updated (rows upserted: ${upsertedRows}, KE keywords batched: ${refreshedKeywords}).`,
+            'success'
+          );
+        }
+      } catch (err) {
+        TRADITIONAL_SEO_STATE.keywordMetricsLastNote = String(err?.message || err);
+        if (typeof window.showStatus === 'function') {
+          window.showStatus(`Keyword demand refresh failed: ${TRADITIONAL_SEO_STATE.keywordMetricsLastNote}`, 'error');
+        }
+      } finally {
+        TRADITIONAL_SEO_STATE.keywordMetricsRefreshInFlight = false;
+        if (btn) btn.disabled = false;
+        renderTraditionalSeoResultsTable();
+      }
+    }
+
+    function traditionalSeoKeywordDemandCellsForRow(row) {
+      const isSitewide = String(row?.tier || '').toLowerCase() === 'sitewide';
+      if (isSitewide) {
+        return { vol: '—', rank: '—', moz: '—', updated: '—' };
+      }
+      const url = String(row?.url || '').trim();
+      const m = TRADITIONAL_SEO_STATE.keywordMetricsByUrl instanceof Map
+        ? TRADITIONAL_SEO_STATE.keywordMetricsByUrl.get(url)
+        : null;
+      if (!m) {
+        return { vol: '—', rank: '—', moz: '—', updated: '—' };
+      }
+      const vol = m.search_volume != null && Number.isFinite(Number(m.search_volume))
+        ? `${Math.round(Number(m.search_volume))}`
+        : '—';
+      const rank = m.rank_position != null && Number.isFinite(Number(m.rank_position))
+        ? `${Number(m.rank_position)}`
+        : '—';
+      const moz = m.moz_domain_authority != null && Number.isFinite(Number(m.moz_domain_authority))
+        ? `${Math.round(Number(m.moz_domain_authority))}`
+        : '—';
+      let updated = '—';
+      if (m.fetched_at) {
+        const d = new Date(m.fetched_at);
+        if (!Number.isNaN(d.getTime())) {
+          updated = d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+      }
+      if (m.stale) {
+        updated = updated === '—' ? 'Stale' : `${updated} · stale`;
+      }
+      return { vol, rank, moz, updated };
     }
 
     function traditionalSeoStatusPill(status) {
@@ -72357,6 +72537,24 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           diff = scoreFor(a) - scoreFor(b);
         } else if (sortKey === 'clicks' || sortKey === 'impressions') {
           diff = traditionalSeoToNum(a?.[sortKey], 0) - traditionalSeoToNum(b?.[sortKey], 0);
+        } else if (sortKey === 'kw_volume' || sortKey === 'kw_rank' || sortKey === 'kw_moz') {
+          const pick = (row) => {
+            const c = traditionalSeoKeywordDemandCellsForRow(row);
+            if (sortKey === 'kw_volume') return traditionalSeoToNum(c.vol, -1);
+            if (sortKey === 'kw_rank') return traditionalSeoToNum(c.rank, 999999);
+            return traditionalSeoToNum(c.moz, -1);
+          };
+          diff = pick(a) - pick(b);
+        } else if (sortKey === 'kw_updated') {
+          const ts = (row) => {
+            const url = String(row?.url || '').trim();
+            const m = TRADITIONAL_SEO_STATE.keywordMetricsByUrl instanceof Map
+              ? TRADITIONAL_SEO_STATE.keywordMetricsByUrl.get(url)
+              : null;
+            const t = m?.fetched_at ? Date.parse(String(m.fetched_at)) : 0;
+            return Number.isFinite(t) ? t : 0;
+          };
+          diff = ts(a) - ts(b);
         } else if (sortKey === 'target_keyword') {
           diff = String(a?.target_keyword || '').localeCompare(String(b?.target_keyword || ''));
         } else {
@@ -72389,7 +72587,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
       if (body) {
         if (!filtered.length) {
-          body.innerHTML = '<tr><td colspan="9" style="color: var(--dark-text-muted);">No rows match current filters.</td></tr>';
+          body.innerHTML = '<tr><td colspan="13" style="color: var(--dark-text-muted);">No rows match current filters.</td></tr>';
         } else {
           const scoreMap = TRADITIONAL_SEO_STATE.pageScoreByUrl instanceof Map ? TRADITIONAL_SEO_STATE.pageScoreByUrl : null;
           const isSummaryRow = (r) => String(r?.rule_key || '') === '__page_summary__';
@@ -72409,6 +72607,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             }
             const kwRaw = String(row.target_keyword || '').trim();
             const kwCell = kwRaw ? escapeHtml(kwRaw) : '—';
+            const kd = traditionalSeoKeywordDemandCellsForRow(row);
             const ruleCell = isSummaryRow(row)
               ? `<span style="color:var(--dark-text-muted);font-size:0.78rem;">${escapeHtml(String(row.summary_total || 0))} checks</span>`
               : escapeHtml(String(row.rule_name || row.rule_key || 'rule'));
@@ -72428,6 +72627,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             <td>${statusCell}</td>
             <td style="word-break: break-all;">${urlCell}</td>
             <td style="font-size:0.76rem;color:var(--dark-text-muted);max-width:12rem;">${kwCell || '—'}</td>
+            <td style="font-size:0.76rem;white-space:nowrap;">${escapeHtml(kd.vol)}</td>
+            <td style="font-size:0.76rem;white-space:nowrap;">${escapeHtml(kd.rank)}</td>
+            <td style="font-size:0.76rem;white-space:nowrap;">${escapeHtml(kd.moz)}</td>
+            <td style="font-size:0.7rem;color:var(--dark-text-muted);white-space:nowrap;">${escapeHtml(kd.updated)}</td>
             <td>${Math.round(traditionalSeoToNum(row.clicks, 0))}</td>
             <td>${Math.round(traditionalSeoToNum(row.impressions, 0))}</td>
           </tr>
@@ -72444,7 +72647,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (totalFiltered > 0 && !ps.all && pageSize < totalFiltered) {
           pageHint = ` · Showing ${sliceStart + 1}–${sliceEnd} of ${totalFiltered}`;
         }
-        meta.textContent = `${totalFiltered} ${modeLbl} match filters${pageHint}${tail} · Last run: ${formatTraditionalSeoTimestamp(TRADITIONAL_SEO_STATE.lastEvaluationAt)}`;
+        const ttl = traditionalSeoToNum(TRADITIONAL_SEO_STATE.keywordMetricsStaleDays, 30);
+        const kmNote = TRADITIONAL_SEO_STATE.keywordMetricsLastNote
+          ? ` · Kw cache: ${TRADITIONAL_SEO_STATE.keywordMetricsLastNote}`
+          : '';
+        const kmBusy = TRADITIONAL_SEO_STATE.keywordMetricsLookupInFlight || TRADITIONAL_SEO_STATE.keywordMetricsRefreshInFlight
+          ? ' · Loading kw cache…'
+          : '';
+        meta.textContent = `${totalFiltered} ${modeLbl} match filters${pageHint}${tail} · Last run: ${formatTraditionalSeoTimestamp(TRADITIONAL_SEO_STATE.lastEvaluationAt)} · Kw demand TTL: ${ttl}d${kmBusy}${kmNote}`;
       }
       updateTraditionalSeoSortHeaderState();
     }
@@ -72703,6 +72913,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (typeof window.showStatus === 'function') {
           window.showStatus(`Re-audit complete for “${ruleLabel}” (${newRows.length} row${newRows.length === 1 ? '' : 's'}).`, 'success');
         }
+        void traditionalSeoKeywordMetricsLookupIfNeededForRun();
       } catch (err) {
         traditionalSeoEvalProgressClose(false);
         if (typeof window.showStatus === 'function') {
@@ -72913,6 +73124,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             'success'
           );
         }
+        void traditionalSeoKeywordMetricsLookupIfNeededForRun();
       } catch (err) {
         traditionalSeoEvalProgressClose(false);
         if (typeof window.showStatus === 'function') {
@@ -73258,9 +73470,17 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             TRADITIONAL_SEO_STATE.sort.direction = TRADITIONAL_SEO_STATE.sort.direction === 'asc' ? 'desc' : 'asc';
           } else {
             TRADITIONAL_SEO_STATE.sort.key = nextKey;
-            TRADITIONAL_SEO_STATE.sort.direction = nextKey === 'clicks' || nextKey === 'impressions' ? 'desc' : 'asc';
+            const descKeys = ['clicks', 'impressions', 'kw_volume', 'kw_moz', 'kw_updated'];
+            TRADITIONAL_SEO_STATE.sort.direction = descKeys.includes(nextKey) ? 'desc' : 'asc';
           }
           renderTraditionalSeoResultsTable();
+        });
+      }
+      const kwMetricsBtn = document.getElementById('traditional-seo-refresh-kw-metrics-btn');
+      if (kwMetricsBtn && !kwMetricsBtn.dataset.wiredKwMetrics) {
+        kwMetricsBtn.dataset.wiredKwMetrics = '1';
+        kwMetricsBtn.addEventListener('click', () => {
+          void traditionalSeoRefreshKeywordMetricsFromProvider();
         });
       }
       const onStatusDrill = (event) => {
@@ -73347,6 +73567,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               traditionalSeoReapplyBypassesToAllRows();
               traditionalSeoRefreshRulesSummaryFromEvaluationRows();
               renderTraditionalSeoResultsTable();
+              void traditionalSeoKeywordMetricsLookupIfNeededForRun();
             }
           })
           .catch(() => {});
