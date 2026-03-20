@@ -70214,10 +70214,25 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return false;
     }
 
+    /**
+     * Squarespace product index + PDP “You might also like” blocks use &lt;h1&gt; for each product title.
+     * We cannot fix platform markup; relax “exactly one H1” to “at least one H1” on these paths only.
+     */
+    function traditionalSeoShouldRelaxSquarespaceMultiH1(url) {
+      let path = '';
+      try {
+        path = String(new URL(String(url || '').trim()).pathname || '/').toLowerCase();
+      } catch (err) {
+        return false;
+      }
+      const roots = ['/photo-workshops-uk', '/photography-services-near-me'];
+      return roots.some((root) => path === root || path.startsWith(`${root}/`));
+    }
+
     const TRADITIONAL_SEO_BASELINE_RULES = [
       { rule_key: 'title_tag_present', rule_name: 'Title length (50–60 chars)', description: 'Best practice: title 50–60 characters. Prefers live HTML <title> from Extractability when available; otherwise schema crawl title.', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.5, sort_order: 10 },
       { rule_key: 'meta_description_present', rule_name: 'Meta description length (150–165 chars)', description: 'Pass if meta description is 150–165 chars (whitespace + numeric entities like &#124; normalized). Prefers live HTML meta; falls back to schema crawl. Warn if both missing.', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 20 },
-      { rule_key: 'single_h1', rule_name: 'Exactly one H1', description: 'Fail if zero or more than one H1 (parsed from Content Extractability HTML).', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 30 },
+      { rule_key: 'single_h1', rule_name: 'Exactly one H1', description: 'Fail if zero or more than one H1 (Extractability HTML). Exception: under /photo-workshops-uk/ and /photography-services-near-me/ pass if at least one H1 (Squarespace product grids use extra H1s).', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 30 },
       { rule_key: 'h1_length_best_practice', rule_name: 'H1 length (40–60 chars)', description: 'Uses the longest H1 plain text on the page (and first H1 when needed). Target 40–60 characters (Extractability HTML).', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 35 },
       { rule_key: 'canonical_self_or_valid', rule_name: 'Canonical is valid', description: 'Canonical/URL identity checks from Schema QA gate when present.', category: 'technical', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 40 },
       { rule_key: 'url_slug_word_count', rule_name: 'URL slug word count (3–6)', description: 'Final path segment (after splitting on -/_) should be 3–6 words. Homepage root passes.', category: 'technical', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 45 },
@@ -71464,6 +71479,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (!extractSignal || extractSignal.requestOk === false) return 'warn';
         const c = traditionalSeoToNum(extractSignal.seoH1Count, -1);
         if (c < 0) return 'warn';
+        if (traditionalSeoShouldRelaxSquarespaceMultiH1(url)) {
+          return c >= 1 ? 'pass' : 'fail';
+        }
         if (c === 1) return 'pass';
         return 'fail';
       }
@@ -71759,7 +71777,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
         const c = traditionalSeoToNum(ex.seoH1Count, -1);
         const longest = traditionalSeoToNum(ex.seoLongestH1Length, 0);
-        if (rk === 'single_h1') return `H1 count in check HTML: ${c >= 0 ? c : 'unknown'}.`;
+        if (rk === 'single_h1') {
+          const relax = traditionalSeoShouldRelaxSquarespaceMultiH1(pageUrl);
+          const suffix = relax
+            ? ' Path uses relaxed rule: /photo-workshops-uk/ or /photography-services-near-me/ (≥1 H1 passes; Squarespace “related” blocks use extra H1s).'
+            : '';
+          return `H1 count in check HTML: ${c >= 0 ? c : 'unknown'}.${suffix}`;
+        }
         if (c <= 0) return 'No H1 found in check HTML.';
         return `Longest H1 plain length: ${longest} (target 40–60).`;
       }
