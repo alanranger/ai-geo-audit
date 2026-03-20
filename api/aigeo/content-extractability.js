@@ -420,8 +420,9 @@ function stripNoiseForSeoTextParsing(html = '') {
 }
 
 /**
- * Meta description: multiline `content="..."`, content before name (Squarespace), og/twitter fallbacks.
- * Uses [\s\S]*? inside quoted content (not [^"']+) so line breaks inside attributes match.
+ * Meta description: multiline `content="..."` / `content='...'`, content before name (Squarespace), og/twitter fallbacks.
+ * Closing delimiter must match the opening quote for `content` — do NOT use ["'] for the close, or apostrophes
+ * inside double-quoted copy (e.g. don't, beginner's) truncate the match early.
  */
 function extractMetaDescriptionFromHtml(html = '') {
   const source = stripNoiseForSeoTextParsing(String(html || ''));
@@ -430,18 +431,25 @@ function extractMetaDescriptionFromHtml(html = '') {
     if (!m?.[1]) return '';
     return normalizeSeoSnippetText(decodeBasicHtmlEntities(m[1]));
   };
-  let v = pick(/<meta\b[^>]*name=["']description["'][^>]*content=["']([\s\S]*?)["']/is);
-  if (v) return v;
-  v = pick(/<meta\b[^>]*content=["']([\s\S]*?)["'][^>]*name=["']description["']/is);
-  if (v) return v;
-  v = pick(/<meta\b[^>]*property=["']og:description["'][^>]*content=["']([\s\S]*?)["']/is);
-  if (v) return v;
-  v = pick(/<meta\b[^>]*content=["']([\s\S]*?)["'][^>]*property=["']og:description["']/is);
-  if (v) return v;
-  v = pick(/<meta\b[^>]*name=["']twitter:description["'][^>]*content=["']([\s\S]*?)["']/is);
-  if (v) return v;
-  v = pick(/<meta\b[^>]*content=["']([\s\S]*?)["'][^>]*name=["']twitter:description["']/is);
-  return v || '';
+  const tries = [
+    /<meta\b[^>]*name=["']description["'][^>]*content="([\s\S]*?)"/is,
+    /<meta\b[^>]*name=["']description["'][^>]*content='([\s\S]*?)'/is,
+    /<meta\b[^>]*content="([\s\S]*?)"[^>]*name=["']description["']/is,
+    /<meta\b[^>]*content='([\s\S]*?)'[^>]*name=["']description["']/is,
+    /<meta\b[^>]*property=["']og:description["'][^>]*content="([\s\S]*?)"/is,
+    /<meta\b[^>]*property=["']og:description["'][^>]*content='([\s\S]*?)'/is,
+    /<meta\b[^>]*content="([\s\S]*?)"[^>]*property=["']og:description["']/is,
+    /<meta\b[^>]*content='([\s\S]*?)'[^>]*property=["']og:description["']/is,
+    /<meta\b[^>]*name=["']twitter:description["'][^>]*content="([\s\S]*?)"/is,
+    /<meta\b[^>]*name=["']twitter:description["'][^>]*content='([\s\S]*?)'/is,
+    /<meta\b[^>]*content="([\s\S]*?)"[^>]*name=["']twitter:description["']/is,
+    /<meta\b[^>]*content='([\s\S]*?)'[^>]*name=["']twitter:description["']/is
+  ];
+  for (let i = 0; i < tries.length; i += 1) {
+    const v = pick(tries[i]);
+    if (v) return v;
+  }
+  return '';
 }
 
 /** Plain-text length of first `<title>` (Traditional SEO title rule); -1 if missing. */
