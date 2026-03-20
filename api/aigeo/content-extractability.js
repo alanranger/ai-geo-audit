@@ -14,8 +14,6 @@ const TIER_SEGMENTATION_SOURCES = [
   'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/page%20segmentation%20by%20tier.csv'
 ];
 const DEFAULT_SITE_ORIGIN = 'https://www.alanranger.com';
-/** Bump when on-page HTML signal rules change; dashboard skips refetch only when row.seoSignalsVersion matches. */
-const SEO_HTML_SIGNALS_VERSION = 2;
 const MEMBER_UTILITY_PATH_PATTERNS = [
   /^\/academy\/login(?:\/|$)/i,
   /^\/academy\/trial-expired(?:\/|$)/i,
@@ -562,8 +560,7 @@ async function checkUrl(url, tierLookup = null) {
     seoImgTotal: 0,
     seoImgMissingAlt: 0,
     seoExtOutbound: 0,
-    seoExtMissingTargetBlank: 0,
-    seoSignalsVersion: SEO_HTML_SIGNALS_VERSION
+    seoExtMissingTargetBlank: 0
   };
   const pageTier = getTierForUrl(url, tierLookup);
   const preflightExclusionReason = getPreflightExclusionReason(url);
@@ -679,8 +676,7 @@ async function checkUrl(url, tierLookup = null) {
       seoImgTotal: seo.imgTotal,
       seoImgMissingAlt: seo.imgMissingAlt,
       seoExtOutbound: seo.extOutboundCount,
-      seoExtMissingTargetBlank: seo.extMissingTargetBlank,
-      seoSignalsVersion: SEO_HTML_SIGNALS_VERSION
+      seoExtMissingTargetBlank: seo.extMissingTargetBlank
     };
   } catch (error) {
     return {

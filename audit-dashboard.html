@@ -6108,14 +6108,14 @@
             <div style="font-weight: 700;">Traditional SEO — run controls</div>
           </div>
           <p class="traditional-seo-run-sequence-hint" id="traditional-seo-run-sequence-hint">
-            <strong>② (green)</strong> = quick rescore: saved audit + extractability. Extractability refetches in <strong>batches of 25</strong> only for URLs missing a row or below <code>seoSignalsVersion</code> (cached pages are reused).
-            <strong>① (amber)</strong> = full site audit refresh, <em>then</em> Traditional SEO in one go — use after big site/schema changes or when data feels stale.
+            <strong>② (green)</strong> = quick rescore: saved audit + <strong>full extractability refresh</strong> for <em>every</em> URL (deduped), in <strong>batches of 25</strong>, then Traditional SEO scoring. Slower but always matches live HTML.
+            <strong>① (amber)</strong> = full site audit refresh, <em>then</em> Traditional SEO in one go — use after big site/schema changes or when crawl/GSC data feels stale.
             After <strong>①</strong>, you do <strong>not</strong> need to click <strong>②</strong>.
           </p>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
             <button id="traditional-seo-run-audit-btn" class="btn traditional-seo-run-step2-btn" type="button" style="padding: 0.45rem 0.9rem;"
               aria-describedby="traditional-seo-run-sequence-hint"
-              title="Fast path: rescores from saved audit + extractability cache. Refetches extractability in batches of 25 only for missing/stale rows (seoSignalsVersion). Does not re-run full site audit.">
+              title="Refetches extractability for every URL (batches of 25), updates the cache, then rescores Traditional SEO. Uses saved main audit only — does not re-run full site audit.">
               ② Score Traditional SEO only
             </button>
             <button id="traditional-seo-run-full-audit-btn" class="btn traditional-seo-run-step1-btn" type="button" style="padding: 0.45rem 0.9rem;"
@@ -70369,20 +70369,6 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         .trim();
     }
 
-    /** Must match api/aigeo/content-extractability.js SEO_HTML_SIGNALS_VERSION (bump both when HTML signal rules change). */
-    const TRADITIONAL_SEO_EXTRACT_SEO_SIGNALS_VERSION = 2;
-
-    /** Pre-SEO-field cache rows must be refreshed so H1/meta/external-link rules match current extract logic. */
-    function traditionalSeoExtractRowHasUsableSeoFields(row) {
-      if (!row) return false;
-      if (row.excludedFromAudit === true) return true;
-      if (row.requestOk !== true) return false;
-      const ver = traditionalSeoToNum(row.seoSignalsVersion, 0);
-      if (ver < TRADITIONAL_SEO_EXTRACT_SEO_SIGNALS_VERSION) return false;
-      const c = Number(row.seoH1Count);
-      return Number.isFinite(c) && c >= 0;
-    }
-
     function traditionalSeoRuleWeightBounds(rules) {
       const ws = (Array.isArray(rules) ? rules : []).map((r) => Math.max(0, traditionalSeoToNum(r?.weight, 0)));
       if (!ws.length) return { minW: 1, maxW: 1 };
@@ -70609,12 +70595,6 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       let cache = typeof loadImplementationAuditCacheAnyAge === 'function'
         ? loadImplementationAuditCacheAnyAge(key)
         : null;
-      const existing = Array.isArray(cache?.data?.rows) ? cache.data.rows : [];
-      const rowByKey = new Map();
-      existing.forEach((r) => {
-        const k = traditionalSeoToComparableUrl(r?.url, prop) || String(r?.url || '').trim();
-        if (k) rowByKey.set(k, r);
-      });
       const need = [];
       const seen = new Set();
       (Array.isArray(urls) ? urls : []).forEach((u) => {
@@ -70623,13 +70603,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const k = traditionalSeoToComparableUrl(raw, prop) || traditionalSeoNormalizeUrl(raw, prop) || raw;
         if (!k || seen.has(k)) return;
         seen.add(k);
-        const row = rowByKey.get(k);
-        if (!traditionalSeoExtractRowHasUsableSeoFields(row)) need.push(raw);
+        need.push(raw);
       });
       if (!need.length) {
-        if (typeof onProgress === 'function') {
-          onProgress({ done: 0, total: 0, cachedUrls: seen.size, signalsVersion: TRADITIONAL_SEO_EXTRACT_SEO_SIGNALS_VERSION });
-        }
+        if (typeof onProgress === 'function') onProgress({ done: 0, total: 0, noHttpUrls: true });
         return;
       }
       if (typeof onProgress === 'function') onProgress({ done: 0, total: need.length });
@@ -70640,7 +70617,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (typeof onProgress === 'function') onProgress({ done, total: need.length });
         if (typeof window.showStatus === 'function') {
           if (i === 0 || done === need.length || (done % 100 === 0 && done > 0)) {
-            window.showStatus(`Traditional SEO: refreshing extractability ${done}/${need.length} URLs (missing or stale SEO fields)…`, 'info');
+            window.showStatus(`Traditional SEO: full extractability refresh ${done}/${need.length} URLs (batch size ${chunkSize})…`, 'info');
           }
         }
         const res = await fetch(traditionalSeoApiPath('/api/aigeo/content-extractability'), {
@@ -72124,17 +72101,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const urls = Array.isArray(rawUrls) ? rawUrls.slice() : [];
         const metricLookup = traditionalSeoBuildMetricsLookup(audit, propertyUrl);
         const resolveTier = await traditionalSeoBuildTierResolver(audit);
-        traditionalSeoEvalProgressStage('Checking extractability (fetching any missing URLs)…', 24);
+        traditionalSeoEvalProgressStage('Refreshing extractability for all URLs (batched)…', 24);
         await traditionalSeoEnsureExtractabilityForUrls(urls, propertyUrl, (ev) => {
           if (!ev) return;
           if (ev.total > 0) {
             traditionalSeoEvalProgressExtract(ev.done, ev.total);
-          } else if (ev.cachedUrls != null) {
-            const v = ev.signalsVersion != null ? ev.signalsVersion : TRADITIONAL_SEO_EXTRACT_SEO_SIGNALS_VERSION;
-            traditionalSeoEvalProgressStage(
-              `Extractability: cache OK — ${ev.cachedUrls} URLs already at signals v${v} (no batch refetch)`,
-              52
-            );
+          } else if (ev.noHttpUrls) {
+            traditionalSeoEvalProgressStage('Extractability: no https URLs in list to refresh', 52);
           }
         });
         traditionalSeoEvalProgressStage('Building signals and loading overrides…', 86);
