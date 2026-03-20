@@ -550,6 +550,34 @@ function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
   return out;
 }
 
+/** HTML-derived fields for Traditional SEO (meta/title/H1/links) — same logic for full + excluded rows. */
+function buildTraditionalSeoSignalsFromHtml(html, htmlForChecks, pageUrl = '') {
+  const seoMain = analyzeTraditionalSeoHtmlSignals(html, pageUrl);
+  const seoMerged = analyzeTraditionalSeoHtmlSignals(htmlForChecks, pageUrl);
+  const useMainH1 = seoMain.h1Count > 0;
+  const seo = {
+    h1Count: useMainH1 ? seoMain.h1Count : seoMerged.h1Count,
+    firstH1PlainLength: useMainH1 ? seoMain.firstH1PlainLength : seoMerged.firstH1PlainLength,
+    longestH1PlainLength: useMainH1 ? seoMain.longestH1PlainLength : seoMerged.longestH1PlainLength,
+    metaDescription: seoMain.metaDescription || seoMerged.metaDescription || '',
+    imgTotal: seoMerged.imgTotal,
+    imgMissingAlt: seoMerged.imgMissingAlt,
+    extOutboundCount: seoMerged.extOutboundCount,
+    extMissingTargetBlank: seoMerged.extMissingTargetBlank
+  };
+  return {
+    seoH1Count: seo.h1Count,
+    seoFirstH1Length: seo.firstH1PlainLength,
+    seoLongestH1Length: seo.longestH1PlainLength,
+    seoMetaDescription: seo.metaDescription || '',
+    seoTitleTagLength: extractTitleTagPlainLength(html),
+    seoImgTotal: seo.imgTotal,
+    seoImgMissingAlt: seo.imgMissingAlt,
+    seoExtOutbound: seo.extOutboundCount,
+    seoExtMissingTargetBlank: seo.extMissingTargetBlank
+  };
+}
+
 async function checkUrl(url, tierLookup = null) {
   const seoNone = {
     seoH1Count: 0,
@@ -564,25 +592,6 @@ async function checkUrl(url, tierLookup = null) {
   };
   const pageTier = getTierForUrl(url, tierLookup);
   const preflightExclusionReason = getPreflightExclusionReason(url);
-  if (preflightExclusionReason) {
-    return {
-      url,
-      pageTier,
-      requestOk: true,
-      statusCode: null,
-      errorType: null,
-      pass: true,
-      score: 100,
-      hasTldr: false,
-      hasDirectAnswer: false,
-      hasFaq: false,
-      hasLastUpdated: false,
-      issues: [],
-      excludedFromAudit: true,
-      exclusionReason: preflightExclusionReason,
-      ...seoNone
-    };
-  }
   try {
     const response = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AI-GEO-Audit/1.0; +https://ai-geo-audit.vercel.app)' },
@@ -608,11 +617,36 @@ async function checkUrl(url, tierLookup = null) {
         hasFaq: false,
         hasLastUpdated: false,
         issues: [`HTTP ${response.status}: ${response.statusText}`],
+        excludedFromAudit: Boolean(preflightExclusionReason),
+        exclusionReason: preflightExclusionReason || '',
         ...seoNone
       };
     }
     const html = await response.text();
     const noindexSignals = extractNoindexSignals(response, html);
+    const htmlForChecks = await enrichHtmlWithSnippetLoaderContent(url, html);
+    const seoSignals = buildTraditionalSeoSignalsFromHtml(html, htmlForChecks, url);
+
+    if (preflightExclusionReason) {
+      return {
+        url,
+        pageTier,
+        requestOk: true,
+        statusCode: response.status,
+        errorType: null,
+        pass: true,
+        score: 100,
+        hasTldr: false,
+        hasDirectAnswer: false,
+        hasFaq: false,
+        hasLastUpdated: false,
+        issues: [],
+        excludedFromAudit: true,
+        exclusionReason: preflightExclusionReason,
+        ...seoSignals
+      };
+    }
+
     if (noindexSignals.hasNoindex) {
       return {
         url,
@@ -631,27 +665,12 @@ async function checkUrl(url, tierLookup = null) {
         exclusionReason: 'Meta/X-Robots noindex page (excluded from actionable extractability scope)',
         xRobotsTag: noindexSignals.xRobotsTag || '',
         metaRobots: noindexSignals.metaRobots || '',
-        ...seoNone
+        ...seoSignals
       };
     }
-    const htmlForChecks = await enrichHtmlWithSnippetLoaderContent(url, html);
     const jsonLdBlocks = findJsonLdBlocks(htmlForChecks);
     const result = evaluateExtractability(htmlForChecks, jsonLdBlocks, url);
     const plainText = stripHtmlToText(htmlForChecks);
-    const seoMain = analyzeTraditionalSeoHtmlSignals(html, url);
-    const seoMerged = analyzeTraditionalSeoHtmlSignals(htmlForChecks, url);
-    const useMainH1 = seoMain.h1Count > 0;
-    const seo = {
-      h1Count: useMainH1 ? seoMain.h1Count : seoMerged.h1Count,
-      firstH1PlainLength: useMainH1 ? seoMain.firstH1PlainLength : seoMerged.firstH1PlainLength,
-      longestH1PlainLength: useMainH1 ? seoMain.longestH1PlainLength : seoMerged.longestH1PlainLength,
-      metaDescription: seoMain.metaDescription || seoMerged.metaDescription || '',
-      imgTotal: seoMerged.imgTotal,
-      imgMissingAlt: seoMerged.imgMissingAlt,
-      extOutboundCount: seoMerged.extOutboundCount,
-      extMissingTargetBlank: seoMerged.extMissingTargetBlank
-    };
-    const seoTitleTagLength = extractTitleTagPlainLength(html);
     return {
       url,
       pageTier,
@@ -668,15 +687,7 @@ async function checkUrl(url, tierLookup = null) {
       textLength: plainText.length,
       excludedFromAudit: false,
       exclusionReason: '',
-      seoH1Count: seo.h1Count,
-      seoFirstH1Length: seo.firstH1PlainLength,
-      seoLongestH1Length: seo.longestH1PlainLength,
-      seoMetaDescription: seo.metaDescription || '',
-      seoTitleTagLength,
-      seoImgTotal: seo.imgTotal,
-      seoImgMissingAlt: seo.imgMissingAlt,
-      seoExtOutbound: seo.extOutboundCount,
-      seoExtMissingTargetBlank: seo.extMissingTargetBlank
+      ...seoSignals
     };
   } catch (error) {
     return {
@@ -692,8 +703,8 @@ async function checkUrl(url, tierLookup = null) {
       hasFaq: false,
       hasLastUpdated: false,
       issues: [error?.message || 'Request failed'],
-      excludedFromAudit: false,
-      exclusionReason: '',
+      excludedFromAudit: Boolean(preflightExclusionReason),
+      exclusionReason: preflightExclusionReason || '',
       ...seoNone
     };
   }
