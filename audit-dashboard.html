@@ -1876,6 +1876,13 @@
       --accent: #ef4444;
       box-shadow: inset 0 0 0 2px rgba(239, 68, 68, 0.27), 0 0 0 1px rgba(239, 68, 68, 0.16);
     }
+    section[data-panel="traditional-seo"] .dashboard-dial-ring[data-rag="neutral"] {
+      --accent: rgba(148, 163, 184, 0.5);
+      box-shadow: inset 0 0 0 2px rgba(148, 163, 184, 0.2);
+    }
+    section[data-panel="traditional-seo"] .traditional-seo-metric-placeholder.dashboard-dial-ring {
+      background: conic-gradient(rgba(148, 163, 184, 0.35) calc(var(--pct) * 1%), var(--ring) 0);
+    }
 
     section[data-panel="traditional-seo"] .dashboard-dial-ring:hover {
       transform: translateY(-2px) scale(1.01);
@@ -6018,6 +6025,32 @@
             </div>
             <div id="traditional-seo-source-parity" style="margin-top:0.35rem; font-size:0.76rem; color:var(--dark-text-muted); text-align:center;">
               URL source parity: checking...
+            </div>
+          </div>
+          <div class="card">
+            <div style="font-size: 0.9rem; color: var(--dark-text-muted); margin-bottom: 0.25rem;">Domain strength (organic)</div>
+            <div style="font-size: 0.75rem; color: var(--dark-text-muted); margin-bottom: 0.5rem;">Labs visibility: keywords you rank for &amp; traffic value (not Moz DA).</div>
+            <div id="traditional-seo-domain-strength-ring" class="dashboard-dial-ring" data-pct="0" data-rag="neutral" style="margin: 0 auto; width: 180px; height: 180px;">
+              <div class="dashboard-dial-inner">
+                <div id="traditional-seo-domain-strength-value" class="dashboard-dial-value">—/100</div>
+                <div id="traditional-seo-domain-strength-delta" class="dashboard-dial-delta" data-dir="flat">—</div>
+              </div>
+            </div>
+            <div id="traditional-seo-domain-strength-meta" style="margin-top: 0.75rem; font-size: 0.76rem; color: var(--dark-text-muted); text-align: center; line-height: 1.35;">
+              Loading domain strength…
+            </div>
+          </div>
+          <div class="card">
+            <div style="font-size: 0.9rem; color: var(--dark-text-muted); margin-bottom: 0.25rem;">Link profile strength</div>
+            <div style="font-size: 0.75rem; color: var(--dark-text-muted); margin-bottom: 0.5rem;">DataForSEO Backlinks API · summary <code>rank</code> 0–100 (closer to “classic DA” feel).</div>
+            <div id="traditional-seo-link-rank-ring" class="dashboard-dial-ring traditional-seo-metric-placeholder" data-pct="0" data-rag="neutral" style="margin: 0 auto; width: 180px; height: 180px;">
+              <div class="dashboard-dial-inner">
+                <div id="traditional-seo-link-rank-value" class="dashboard-dial-value">—</div>
+                <div id="traditional-seo-link-rank-delta" class="dashboard-dial-delta" data-dir="flat">Placeholder</div>
+              </div>
+            </div>
+            <div style="margin-top: 0.75rem; font-size: 0.76rem; color: var(--dark-text-muted); text-align: center; line-height: 1.35;">
+              Next: persist backlinks <code>summary.rank</code> (+ optional referring domains) in Supabase and trend it here.
             </div>
           </div>
           <div class="card" style="display: flex; flex-direction: column; justify-content: center;">
@@ -70215,6 +70248,101 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         || '';
     }
 
+    function traditionalSeoPropertyHostname() {
+      const prop = traditionalSeoPropertyUrl();
+      try {
+        if (prop && URL.canParse(prop)) {
+          return new URL(prop).hostname.replace(/^www\./i, '').toLowerCase();
+        }
+      } catch (e) { /* ignore */ }
+      return '';
+    }
+
+    function traditionalSeoPickGoogleDomainStrength(items, host) {
+      const list = Array.isArray(items) ? items : [];
+      const h = String(host || '').toLowerCase();
+      if (h) {
+        const hit = list.find(
+          (it) => String(it?.domain || '').toLowerCase() === h && String(it?.searchEngine || '').toLowerCase() === 'google'
+        );
+        if (hit) return hit;
+      }
+      return list.find((it) => it && it.isCompetitor === false && String(it?.searchEngine || '').toLowerCase() === 'google') || null;
+    }
+
+    async function refreshTraditionalSeoDomainCards() {
+      const ring = document.getElementById('traditional-seo-domain-strength-ring');
+      const valueEl = document.getElementById('traditional-seo-domain-strength-value');
+      const deltaEl = document.getElementById('traditional-seo-domain-strength-delta');
+      const metaEl = document.getElementById('traditional-seo-domain-strength-meta');
+      if (!ring || !valueEl) return;
+      const host = traditionalSeoPropertyHostname();
+      valueEl.textContent = '…';
+      if (deltaEl) {
+        deltaEl.textContent = 'Loading…';
+        deltaEl.dataset.dir = 'flat';
+      }
+      if (metaEl) metaEl.textContent = host ? `Matching Labs snapshots to ${host}…` : 'Select a property URL to match domain.';
+      try {
+        const res = await fetch(traditionalSeoApiPath('/api/domain-strength/overview'), { cache: 'no-store' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.status !== 'ok') throw new Error(data.message || `HTTP ${res.status}`);
+        const pick = traditionalSeoPickGoogleDomainStrength(data.items, host);
+        const latest = pick?.latest;
+        if (!latest || latest.score == null) {
+          ring.style.setProperty('--pct', '0');
+          ring.dataset.rag = 'neutral';
+          valueEl.textContent = '—/100';
+          if (deltaEl) {
+            deltaEl.textContent = 'No snapshot';
+            deltaEl.dataset.dir = 'flat';
+          }
+          if (metaEl) {
+            metaEl.textContent = host
+              ? `No Labs snapshot for ${host} yet. Run Domain Strength snapshot.`
+              : 'No property URL — cannot match domain.';
+          }
+          return;
+        }
+        const score = Math.max(0, Math.min(100, traditionalSeoToNum(latest.score, 0)));
+        ring.style.setProperty('--pct', `${score}`);
+        ring.dataset.rag = traditionalSeoRagFromScore(score);
+        valueEl.textContent = `${Math.round(score * 100) / 100}/100`;
+        const d = pick?.trend?.deltaLatest;
+        if (deltaEl) {
+          if (typeof d === 'number' && Number.isFinite(d)) {
+            const sign = d > 0 ? '+' : '';
+            deltaEl.textContent = `${sign}${d.toFixed(1)} vs prior`;
+            deltaEl.dataset.dir = d > 0 ? 'up' : d < 0 ? 'down' : 'flat';
+          } else {
+            deltaEl.textContent = 'No prior snapshot';
+            deltaEl.dataset.dir = 'flat';
+          }
+        }
+        if (metaEl) {
+          const dt = latest.snapshotDate ? String(latest.snapshotDate) : '';
+          const band = latest.band ? String(latest.band) : '';
+          const etv = traditionalSeoToNum(latest.organicEtv, NaN);
+          const kw = traditionalSeoToNum(latest.organicKeywordsTotal, NaN);
+          const bits = [];
+          if (dt) bits.push(`Snapshot: ${dt}`);
+          if (band) bits.push(band);
+          if (Number.isFinite(etv)) bits.push(`ETV ≈ ${etv.toFixed(0)}`);
+          if (Number.isFinite(kw)) bits.push(`${kw.toFixed(0)} organic kw`);
+          metaEl.textContent = bits.length ? bits.join(' · ') : 'Latest Labs row loaded.';
+        }
+      } catch (err) {
+        ring.style.setProperty('--pct', '0');
+        ring.dataset.rag = 'neutral';
+        valueEl.textContent = '—';
+        if (deltaEl) {
+          deltaEl.textContent = 'Unavailable';
+          deltaEl.dataset.dir = 'flat';
+        }
+        if (metaEl) metaEl.textContent = String(err?.message || err);
+      }
+    }
+
     function traditionalSeoToNum(value, fallback = 0) {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : fallback;
@@ -72457,6 +72585,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
         renderTraditionalSeoSourceParity(TRADITIONAL_SEO_STATE.sourceParity);
         wireTraditionalSeoButtons();
+        void refreshTraditionalSeoDomainCards();
         void traditionalSeoEnsureRuleOverridesLoaded()
           .then(() => {
             if (Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) && TRADITIONAL_SEO_STATE.evaluationRows.length) {
@@ -72487,6 +72616,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
       } finally {
         TRADITIONAL_SEO_STATE.loading = false;
+        void refreshTraditionalSeoDomainCards();
         wireTraditionalSeoButtons();
       }
     };
