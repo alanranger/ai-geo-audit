@@ -396,17 +396,38 @@ function normalizeSeoSnippetText(value) {
     .trim();
 }
 
-/** Meta description: support name= before content= OR content= before name= (common on Squarespace). */
+/** Remove script/style/noscript/comments so H1/link/img counts ignore inline strings (major false-positive source). */
+function stripNoiseForSeoTextParsing(html = '') {
+  return String(html || '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ');
+}
+
+/**
+ * Meta description: multiline `content="..."`, content before name (Squarespace), og/twitter fallbacks.
+ * Uses [\s\S]*? inside quoted content (not [^"']+) so line breaks inside attributes match.
+ */
 function extractMetaDescriptionFromHtml(html = '') {
-  const source = String(html || '');
-  let m = source.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/is);
-  if (m?.[1]) return normalizeSeoSnippetText(decodeBasicHtmlEntities(m[1]));
-  m = source.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']description["']/is);
-  if (m?.[1]) return normalizeSeoSnippetText(decodeBasicHtmlEntities(m[1]));
-  m = source.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/is);
-  if (m?.[1]) return normalizeSeoSnippetText(decodeBasicHtmlEntities(m[1]));
-  m = source.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:description["']/is);
-  return m?.[1] ? normalizeSeoSnippetText(decodeBasicHtmlEntities(m[1])) : '';
+  const source = stripNoiseForSeoTextParsing(String(html || ''));
+  const pick = (re) => {
+    const m = source.match(re);
+    if (!m?.[1]) return '';
+    return normalizeSeoSnippetText(decodeBasicHtmlEntities(m[1]));
+  };
+  let v = pick(/<meta\b[^>]*name=["']description["'][^>]*content=["']([\s\S]*?)["']/is);
+  if (v) return v;
+  v = pick(/<meta\b[^>]*content=["']([\s\S]*?)["'][^>]*name=["']description["']/is);
+  if (v) return v;
+  v = pick(/<meta\b[^>]*property=["']og:description["'][^>]*content=["']([\s\S]*?)["']/is);
+  if (v) return v;
+  v = pick(/<meta\b[^>]*content=["']([\s\S]*?)["'][^>]*property=["']og:description["']/is);
+  if (v) return v;
+  v = pick(/<meta\b[^>]*name=["']twitter:description["'][^>]*content=["']([\s\S]*?)["']/is);
+  if (v) return v;
+  v = pick(/<meta\b[^>]*content=["']([\s\S]*?)["'][^>]*name=["']twitter:description["']/is);
+  return v || '';
 }
 
 /** Counts used by Traditional SEO dashboard (H1, images, outbound links). */
@@ -421,8 +442,8 @@ function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
     extOutboundCount: 0,
     extMissingTargetBlank: 0
   };
-  const source = String(html || '');
-  out.metaDescription = extractMetaDescriptionFromHtml(source);
+  const source = stripNoiseForSeoTextParsing(String(html || ''));
+  out.metaDescription = extractMetaDescriptionFromHtml(String(html || ''));
   const h1Matches = [...source.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)];
   out.h1Count = h1Matches.length;
   let longest = 0;

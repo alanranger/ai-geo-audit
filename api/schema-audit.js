@@ -409,6 +409,17 @@ function extractTitle(htmlString) {
 }
 
 /**
+ * Strip script/style noise before meta regex (avoids false matches; aligns with extractability parser).
+ */
+function stripHtmlNoiseForMeta(htmlString) {
+  return String(htmlString || '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ');
+}
+
+/**
  * Extract meta description from HTML
  */
 function extractMetaDescription(htmlString) {
@@ -417,19 +428,23 @@ function extractMetaDescription(htmlString) {
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  const html = String(htmlString || '');
-  // Standard order: name= then content=
-  let metaDescMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/is);
-  if (metaDescMatch?.[1]) return collapse(metaDescMatch[1]);
-  // Squarespace / CMS: content= before name= on same tag
-  metaDescMatch = html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']description["']/is);
-  if (metaDescMatch?.[1]) return collapse(metaDescMatch[1]);
-  // Open Graph
-  let ogDescMatch = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/is);
-  if (ogDescMatch?.[1]) return collapse(ogDescMatch[1]);
-  ogDescMatch = html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:description["']/is);
-  if (ogDescMatch?.[1]) return collapse(ogDescMatch[1]);
-  return null;
+  const html = stripHtmlNoiseForMeta(htmlString || '');
+  const pick = (re) => {
+    const m = html.match(re);
+    return m?.[1] ? collapse(m[1]) : null;
+  };
+  let v = pick(/<meta\b[^>]*name=["']description["'][^>]*content=["']([\s\S]*?)["']/is);
+  if (v) return v;
+  v = pick(/<meta\b[^>]*content=["']([\s\S]*?)["'][^>]*name=["']description["']/is);
+  if (v) return v;
+  v = pick(/<meta\b[^>]*property=["']og:description["'][^>]*content=["']([\s\S]*?)["']/is);
+  if (v) return v;
+  v = pick(/<meta\b[^>]*content=["']([\s\S]*?)["'][^>]*property=["']og:description["']/is);
+  if (v) return v;
+  v = pick(/<meta\b[^>]*name=["']twitter:description["'][^>]*content=["']([\s\S]*?)["']/is);
+  if (v) return v;
+  v = pick(/<meta\b[^>]*content=["']([\s\S]*?)["'][^>]*name=["']twitter:description["']/is);
+  return v || null;
 }
 
 /**
