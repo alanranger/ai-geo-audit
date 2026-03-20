@@ -6116,6 +6116,7 @@
             <strong>② (green)</strong> = quick rescore: saved audit + <strong>full extractability refresh</strong> for <em>every</em> URL (deduped), in <strong>batches of 25</strong>, then Traditional SEO scoring. Slower but always matches live HTML.
             <strong>① (amber)</strong> = full site audit refresh, <em>then</em> Traditional SEO in one go — use after big site/schema changes or when crawl/GSC data feels stale.
             After <strong>①</strong>, you do <strong>not</strong> need to click <strong>②</strong>.
+            <strong>③ (blue)</strong> = <strong>keyword demand only</strong>: calls <strong>Keywords Everywhere</strong> for URL+target-keyword pairs (missing/stale in Supabase), then fills <strong>Kw vol</strong> + <strong>Metrics age</strong>. Does <em>not</em> change Traditional SEO pass/fail. <strong>Rank</strong> / <strong>Moz DA</strong> stay blank until a separate source writes them.
           </p>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
             <button id="traditional-seo-run-audit-btn" class="btn traditional-seo-run-step2-btn" type="button" style="padding: 0.45rem 0.9rem;"
@@ -6127,6 +6128,11 @@
               aria-describedby="traditional-seo-run-sequence-hint"
               title="Long path: runs the full site audit first (refreshes inputs), then runs Traditional SEO scoring automatically. Use when schema, GSC, or crawl data may be out of date. You do not need to press ② afterwards.">
               ① Full audit refresh + Traditional SEO
+            </button>
+            <button type="button" class="btn" data-traditional-seo-refresh-kw="1" id="traditional-seo-refresh-kw-metrics-btn-controls" style="padding: 0.45rem 0.9rem; border: 1px solid rgba(56, 189, 248, 0.55); background: rgba(14, 165, 233, 0.18); color: inherit;"
+              aria-describedby="traditional-seo-run-sequence-hint"
+              title="Uses Keywords Everywhere API (server). Upserts Supabase cache for missing/stale pairs only. Then reloads Kw vol + Metrics age in the table.">
+              ③ Refresh keyword demand (KE)
             </button>
           </div>
           <div id="traditional-seo-source-parity-panel" style="margin-bottom:0.75rem;padding:0.55rem 0.7rem;border:1px solid rgba(148,163,184,0.25);border-radius:8px;background:rgba(15,23,42,0.55);font-size:0.8rem;color:var(--dark-text-muted);">
@@ -6218,8 +6224,8 @@
                 <option value="50">50</option>
                 <option value="all">All</option>
               </select>
-              <button type="button" id="traditional-seo-refresh-kw-metrics-btn" title="Calls Keywords Everywhere once for missing/stale URL+keyword pairs, then saves to Supabase cache. Table load only reads cache." style="font-size: 0.78rem; padding: 0.25rem 0.55rem; border-radius: 6px; border: 1px solid var(--border, #cbd5e1); background: var(--card-bg, #fff); cursor: pointer;">
-                Refresh kw demand
+              <button type="button" class="btn" data-traditional-seo-refresh-kw="1" id="traditional-seo-refresh-kw-metrics-btn" title="Same as ③ above: Keywords Everywhere → Supabase cache → Kw vol + Metrics age." style="font-size: 0.78rem; padding: 0.3rem 0.65rem; border: 1px solid rgba(56, 189, 248, 0.55); background: rgba(14, 165, 233, 0.18); color: inherit; cursor: pointer;">
+                ③ Refresh kw demand
               </button>
             </div>
             <div id="traditional-seo-results-pager" style="display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; font-size: 0.8rem; color: var(--dark-text-muted);"></div>
@@ -70900,9 +70906,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (typeof window.showStatus === 'function') window.showStatus('No URL + target keyword pairs to refresh.', 'info');
         return;
       }
-      const btn = document.getElementById('traditional-seo-refresh-kw-metrics-btn');
+      const kwBtns = Array.from(document.querySelectorAll('[data-traditional-seo-refresh-kw="1"]'));
       TRADITIONAL_SEO_STATE.keywordMetricsRefreshInFlight = true;
-      if (btn) btn.disabled = true;
+      kwBtns.forEach((b) => {
+        b.disabled = true;
+      });
       try {
         if (typeof window.showStatus === 'function') {
           window.showStatus('Refreshing keyword demand (Keywords Everywhere) for missing/stale rows…', 'info');
@@ -70927,7 +70935,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
       } finally {
         TRADITIONAL_SEO_STATE.keywordMetricsRefreshInFlight = false;
-        if (btn) btn.disabled = false;
+        kwBtns.forEach((b) => {
+          b.disabled = false;
+        });
         renderTraditionalSeoResultsTable();
       }
     }
@@ -73476,13 +73486,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           renderTraditionalSeoResultsTable();
         });
       }
-      const kwMetricsBtn = document.getElementById('traditional-seo-refresh-kw-metrics-btn');
-      if (kwMetricsBtn && !kwMetricsBtn.dataset.wiredKwMetrics) {
-        kwMetricsBtn.dataset.wiredKwMetrics = '1';
-        kwMetricsBtn.addEventListener('click', () => {
+      document.querySelectorAll('[data-traditional-seo-refresh-kw="1"]').forEach((kwBtn) => {
+        if (kwBtn.dataset.wiredKwMetrics) return;
+        kwBtn.dataset.wiredKwMetrics = '1';
+        kwBtn.addEventListener('click', () => {
           void traditionalSeoRefreshKeywordMetricsFromProvider();
         });
-      }
+      });
       const onStatusDrill = (event) => {
         const target = event.target instanceof Element ? event.target.closest('[data-filter-status]') : null;
         if (!target) return;
