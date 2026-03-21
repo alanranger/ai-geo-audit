@@ -36395,7 +36395,11 @@
         const primaryUrl = PRIMARY_CSV_URL.includes('?')
           ? `${PRIMARY_CSV_URL}&${cacheBust}`
           : `${PRIMARY_CSV_URL}?${cacheBust}`;
-        const res = await fetch(primaryUrl, { cache: 'no-store' });
+        const csvSig =
+          typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+            ? AbortSignal.timeout(20000)
+            : undefined;
+        const res = await fetch(primaryUrl, { cache: 'no-store', ...(csvSig ? { signal: csvSig } : {}) });
         if (!res.ok) throw new Error(`Primary fetch failed: HTTP ${res.status}`);
         const csvText = await res.text();
         
@@ -36470,7 +36474,14 @@
       } catch (githubErr) {
         // Try fallback
         try {
-          const fallbackRes = await fetch(FALLBACK_CSV_URL);
+          const fbSig =
+            typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+              ? AbortSignal.timeout(20000)
+              : undefined;
+          const fallbackRes = await fetch(FALLBACK_CSV_URL, {
+            cache: 'no-store',
+            ...(fbSig ? { signal: fbSig } : {})
+          });
           if (!fallbackRes.ok) throw new Error(`Fallback fetch failed: HTTP ${fallbackRes.status}`);
           const csvText = await fallbackRes.text();
           
@@ -70175,6 +70186,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
   (() => {
     const TRADITIONAL_SEO_STATE = {
       loading: false,
+      loadingSince: 0,
       rules: [],
       latestSummary: null,
       latestSnapshot: null,
@@ -71460,12 +71472,27 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return out;
     }
 
+    function traditionalSeoAbortSignalMs(ms) {
+      if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+        try {
+          return AbortSignal.timeout(ms);
+        } catch (e) {
+          /* ignore */
+        }
+      }
+      return undefined;
+    }
+
     async function traditionalSeoFetchSegmentationCsvText() {
       const cacheBuster = Date.now();
       for (const sourceUrl of TRADITIONAL_SEO_SEGMENTATION_SOURCES) {
         try {
+          const sig = traditionalSeoAbortSignalMs(20000);
           const separator = sourceUrl.includes('?') ? '&' : '?';
-          const response = await fetch(`${sourceUrl}${separator}cb=${encodeURIComponent(cacheBuster)}`, { cache: 'no-store' });
+          const response = await fetch(`${sourceUrl}${separator}cb=${encodeURIComponent(cacheBuster)}`, {
+            cache: 'no-store',
+            ...(sig ? { signal: sig } : {})
+          });
           if (!response.ok) continue;
           const text = await response.text();
           if (text && text.trim()) return text;
@@ -74151,7 +74178,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     window.renderTraditionalSeoTab = async function renderTraditionalSeoTab(force = false) {
-      if (TRADITIONAL_SEO_STATE.loading) return;
+      if (TRADITIONAL_SEO_STATE.loading) {
+        if (typeof TRADITIONAL_SEO_STATE.loadingSince === 'number' && Date.now() - TRADITIONAL_SEO_STATE.loadingSince < 90000) {
+          return;
+        }
+        TRADITIONAL_SEO_STATE.loading = false;
+      }
       if (!force && TRADITIONAL_SEO_STATE.rules.length > 0) {
         if (!TRADITIONAL_SEO_STATE.sourceParity) {
           const parity = await traditionalSeoComputeSourceParity(traditionalSeoPropertyUrl());
@@ -74173,6 +74205,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         return;
       }
       TRADITIONAL_SEO_STATE.loading = true;
+      TRADITIONAL_SEO_STATE.loadingSince = Date.now();
       try {
         const payload = await fetchTraditionalSeoRules();
         applyTraditionalSeoPayload(payload || {});
@@ -74191,6 +74224,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
       } finally {
         TRADITIONAL_SEO_STATE.loading = false;
+        TRADITIONAL_SEO_STATE.loadingSince = 0;
         void refreshTraditionalSeoDomainCards();
         wireTraditionalSeoButtons();
       }
@@ -74200,21 +74234,6 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
 </body>
 </html>
-
-
-
-
-</html>
-
-
-
-<!-- CACHE BUST: 2026-01-13 14:46:33 -->
-C a c h e - b u s t :   2 0 2 6 - 0 1 - 1 3   1 8 : 0 5 : 3 9 
- 
- 
- 
-
-
 
 
 
