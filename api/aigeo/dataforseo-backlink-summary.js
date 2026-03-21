@@ -120,8 +120,20 @@ function mapRowToCache(domainHost, includeSubdomains, apiRow, cost) {
     crawled_pages: pickInt('crawled_pages'),
     internal_links_count: pickInt('internal_links_count'),
     external_links_count: pickInt('external_links_count'),
-    dofollow_backlinks: pickFirstInt(['dofollow_backlinks', 'dofollow']),
-    nofollow_backlinks: pickFirstInt(['nofollow_backlinks', 'nofollow']),
+    dofollow_backlinks: pickFirstInt([
+      'dofollow_backlinks',
+      'dofollow',
+      'backlinks_dofollow',
+      'referring_links_dofollow',
+      'dofollow_domains'
+    ]),
+    nofollow_backlinks: pickFirstInt([
+      'nofollow_backlinks',
+      'nofollow',
+      'backlinks_nofollow',
+      'referring_links_nofollow',
+      'nofollow_domains'
+    ]),
     cost_last: cost != null && Number.isFinite(cost) ? cost : null,
     raw_result: apiRow && typeof apiRow === 'object' ? apiRow : null,
     fetched_at: new Date().toISOString(),

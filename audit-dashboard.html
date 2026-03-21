@@ -6387,6 +6387,7 @@
                   <th style="width: 5%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_rank" title="SERP position for this keyword on this URL (KE get_url_keywords, UK).">SERP <span class="sort-ind">↕</span></button></th>
                   <th style="width: 6%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_url_traffic" title="KE monthly model: total estimated visits/month for the whole URL (get_url_traffic_metrics, UK). Not comparable to GSC clicks.">URL traf <span class="sort-ind">↕</span></button></th>
                   <th style="width: 5%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_page_bl" title="KE get_page_backlinks sample size. With &quot;Filter disavowed&quot; on (BL sample column), this matches rows left after your disavow file + spam filter when stored JSON exists.">Pg bl <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 5%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_dfs_page_bl" title="DataForSEO page backlink rows stored after Fetch DFS backlinks (capped per page). Respects Filter disavowed when rows are present.">DFS bl <span class="sort-ind">↕</span></button></th>
                   <th style="width: 6%;" title="Opens stored backlink rows (last ③). Optional: filter counts in the table to match rows left after disavow + spam rules.">
                     <div style="font-weight: 700; color: var(--dark-text-muted); margin-bottom: 0.25rem;">BL sample</div>
                     <label style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.72rem; font-weight: 600; color: var(--dark-text-muted); cursor: pointer; white-space: nowrap;">
@@ -6399,7 +6400,7 @@
                 </tr>
               </thead>
               <tbody id="traditional-seo-results-body">
-                <tr><td colspan="15" style="color: var(--dark-text-muted);">Run Traditional SEO Audit to populate this table.</td></tr>
+                <tr><td colspan="16" style="color: var(--dark-text-muted);">Run Traditional SEO Audit to populate this table.</td></tr>
               </tbody>
             </table>
           </div>
@@ -70813,12 +70814,88 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (!(map instanceof Map)) return null;
       const u = String(urlRaw || '').trim();
       if (!u) return null;
-      let row = map.get(u);
-      if (row) return row;
       const prop = traditionalSeoPropertyUrl();
-      const cmp = traditionalSeoToComparableUrl(u, prop);
-      if (cmp) row = map.get(cmp);
-      return row || null;
+      const keys = [];
+      const add = (k) => {
+        const s = String(k || '').trim();
+        if (s && !keys.includes(s)) keys.push(s);
+      };
+      add(u);
+      add(traditionalSeoToComparableUrl(u, prop));
+      add(traditionalSeoNormalizeUrl(u, prop));
+      add(traditionalSeoOverridePageKey(u));
+      add(traditionalSeoSignalMapKey(u, prop));
+      for (let i = 0; i < keys.length; i += 1) {
+        const hit = map.get(keys[i]);
+        if (hit) return hit;
+      }
+      return null;
+    }
+
+    function traditionalSeoDfsPageRowPairCounts(row) {
+      if (!row || typeof row !== 'object') return null;
+      const dc = row.dofollow_count;
+      const nc = row.nofollow_count;
+      if (dc != null && nc != null && Number.isFinite(Number(dc)) && Number.isFinite(Number(nc))) {
+        return { df: Math.round(Number(dc)), nf: Math.round(Number(nc)) };
+      }
+      const items = Array.isArray(row.backlink_rows) ? row.backlink_rows : [];
+      if (!items.length) return null;
+      let df = 0;
+      let nf = 0;
+      for (let i = 0; i < items.length; i += 1) {
+        const it = items[i];
+        if (it?.dofollow === true) df += 1;
+        else if (it?.dofollow === false) nf += 1;
+      }
+      return { df, nf };
+    }
+
+    function traditionalSeoAggregateDfsFollowSplitFromCachedPages(domainHostNorm) {
+      const map = TRADITIONAL_SEO_STATE.dfsPageBacklinksByUrl;
+      const dom = String(domainHostNorm || '')
+        .trim()
+        .toLowerCase()
+        .replace(/^www\./, '');
+      if (!(map instanceof Map) || !dom) return null;
+      let sumDf = 0;
+      let sumNf = 0;
+      let any = false;
+      map.forEach((prow) => {
+        const dh = String(prow?.domain_host || '')
+          .trim()
+          .toLowerCase()
+          .replace(/^www\./, '');
+        if (!dh || dh !== dom) return;
+        const p = traditionalSeoDfsPageRowPairCounts(prow);
+        if (!p) return;
+        any = true;
+        sumDf += p.df;
+        sumNf += p.nf;
+      });
+      return any ? { df: sumDf, nf: sumNf } : null;
+    }
+
+    function traditionalSeoDfsPageBlDisplayNumberForUrl(urlRaw) {
+      if (!traditionalSeoBacklinkIndexShowDfs()) return null;
+      const row = traditionalSeoGetDfsPageRow(urlRaw);
+      if (!row) return null;
+      const items = Array.isArray(row.backlink_rows) ? row.backlink_rows : [];
+      const cap = traditionalSeoToNum(row.row_count, NaN);
+      const hasCap = Number.isFinite(cap) && cap >= 0;
+      if (!items.length && !hasCap) return null;
+      const pack = traditionalSeoDisavowPackForDisplay();
+      const useFiltered = TRADITIONAL_SEO_STATE.filterDisavowedBacklinkCounts !== false;
+      if (items.length) {
+        const filtered = useFiltered ? traditionalSeoFilterBacklinksDisavow(items, pack) : items;
+        return filtered.length;
+      }
+      return Math.max(0, Math.round(cap));
+    }
+
+    function traditionalSeoDfsPageBlSortValueForUrl(url) {
+      const n = traditionalSeoDfsPageBlDisplayNumberForUrl(String(url || '').trim());
+      return n != null && Number.isFinite(Number(n)) ? Number(n) : -1;
     }
 
     async function traditionalSeoDfsPagesCall(action, pageUrls, force) {
@@ -71062,13 +71139,25 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
       b.textContent = fmt(s.backlinks);
       r.textContent = fmt(s.referring_domains);
-      const df = s.dofollow_backlinks;
-      const nf = s.nofollow_backlinks;
+      let df = s.dofollow_backlinks;
+      let nf = s.nofollow_backlinks;
+      const splitOk =
+        df != null && nf != null && Number.isFinite(Number(df)) && Number.isFinite(Number(nf));
+      if (!splitOk && traditionalSeoBacklinkIndexShowDfs()) {
+        const agg = traditionalSeoAggregateDfsFollowSplitFromCachedPages(s.domain_host || traditionalSeoPropertyHostname());
+        if (agg) {
+          df = agg.df;
+          nf = agg.nf;
+        }
+      }
       if (splitEl) {
         if (df != null && nf != null && Number.isFinite(Number(df)) && Number.isFinite(Number(nf))) {
           splitEl.textContent = `${fmt(df)} / ${fmt(nf)}`;
+          if (!splitOk) splitEl.title = 'Estimated from per-page DFS samples in cache (not full-domain totals).';
+          else splitEl.removeAttribute('title');
         } else {
           splitEl.textContent = '—';
+          splitEl.removeAttribute('title');
         }
       }
       const rank = s.rank != null && Number.isFinite(Number(s.rank)) ? String(Math.round(Number(s.rank))) : '—';
@@ -73295,6 +73384,25 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     /** Moz-style domain authority for the *linking* side, if KE (or future payload) includes it. */
+    function traditionalSeoFollowLabelFromBacklinkObject(o) {
+      if (!o || typeof o !== 'object') return '—';
+      const d = o.dofollow;
+      if (d === true || d === 'true' || Number(d) === 1) return 'Dofollow';
+      if (d === false || d === 'false' || Number(d) === 0) return 'Nofollow';
+      const raw = o.is_dofollow ?? o.isDofollow ?? o.follow ?? o.link_dofollow ?? o.isDoFollow;
+      if (raw === true || raw === 'true' || Number(raw) === 1) return 'Dofollow';
+      if (raw === false || raw === 'false' || Number(raw) === 0) return 'Nofollow';
+      const nf = o.nofollow ?? o.is_nofollow ?? o.no_follow ?? o.noFollow;
+      if (nf === true || nf === 'true' || Number(nf) === 1) return 'Nofollow';
+      const rel = String(o.link_rel ?? o.rel ?? o.rel_attribute ?? o.rel_type ?? '').toLowerCase();
+      if (rel.includes('nofollow') || rel.includes('ugc') || rel.includes('sponsored')) return 'Nofollow';
+      if (rel.includes('dofollow')) return 'Dofollow';
+      const lt = String(o.link_type ?? o.type ?? o.item_type ?? '').toLowerCase();
+      if (lt === 'nofollow' || lt === 'no_follow') return 'Nofollow';
+      if (lt === 'dofollow' || lt === 'do_follow') return 'Dofollow';
+      return '—';
+    }
+
     function traditionalSeoLinkingDomainMozDa(o) {
       if (!o || typeof o !== 'object') return null;
       const pick = (v) => {
@@ -73376,13 +73484,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           : '';
       const strN = traditionalSeoToNum(o.strength, NaN);
       const strengthLine = Number.isFinite(strN)
-        ? `<div style="font-size:0.78rem;color:#cbd5e1;margin-top:0.25rem;"><strong>Strength (DFS rank)</strong> ${escapeHtml(
+        ? `<div style="font-size:0.78rem;color:#cbd5e1;margin-top:0.25rem;"><strong>Linking domain rank (DataForSEO)</strong> ${escapeHtml(
             String(Math.round(strN))
           )}</div>`
         : '';
-      let followLabel = '—';
-      if (o.dofollow === true || o.dofollow === 'true') followLabel = 'Dofollow';
-      else if (o.dofollow === false || o.dofollow === 'false') followLabel = 'Nofollow';
+      const followLabel = traditionalSeoFollowLabelFromBacklinkObject(o);
       const followLine = `<div style="font-size:0.78rem;color:#cbd5e1;margin-top:0.25rem;"><strong>Follow</strong> ${escapeHtml(
         followLabel
       )}</div>`;
@@ -73433,7 +73539,20 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         'mozDa',
         'da',
         'strength',
-        'dofollow'
+        'dofollow',
+        'is_dofollow',
+        'isDofollow',
+        'nofollow',
+        'is_nofollow',
+        'follow',
+        'link_dofollow',
+        'link_rel',
+        'rel',
+        'rel_attribute',
+        'rel_type',
+        'link_type',
+        'item_type',
+        'type'
       ]);
       const extra = Object.keys(o)
         .filter((k) => !known.has(k))
@@ -73942,7 +74061,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           sortKey === 'kw_volume' ||
           sortKey === 'kw_est_traffic' ||
           sortKey === 'kw_url_traffic' ||
-          sortKey === 'kw_page_bl'
+          sortKey === 'kw_page_bl' ||
+          sortKey === 'kw_dfs_page_bl'
         ) {
           const metricMap = TRADITIONAL_SEO_STATE.keywordMetricsByUrl instanceof Map
             ? TRADITIONAL_SEO_STATE.keywordMetricsByUrl
@@ -73967,6 +74087,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             }
             if (sortKey === 'kw_page_bl') {
               return traditionalSeoPageBlSortValueForUrl(url);
+            }
+            if (sortKey === 'kw_dfs_page_bl') {
+              return traditionalSeoDfsPageBlSortValueForUrl(url);
             }
             return -1;
           };
@@ -74007,7 +74130,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           const emptyHint = !allRows.length
             ? 'No Traditional SEO results yet. Run <strong>② Score Traditional SEO</strong> or <strong>① Full audit + Traditional SEO</strong> first. Then use <strong>③</strong> to refresh keyword demand (Keywords Everywhere).'
             : 'No rows match current filters.';
-          body.innerHTML = `<tr><td colspan="15" style="color: var(--dark-text-muted);">${emptyHint}</td></tr>`;
+          body.innerHTML = `<tr><td colspan="16" style="color: var(--dark-text-muted);">${emptyHint}</td></tr>`;
         } else {
           const scoreMap = TRADITIONAL_SEO_STATE.pageScoreByUrl instanceof Map ? TRADITIONAL_SEO_STATE.pageScoreByUrl : null;
           const isSummaryRow = (r) => String(r?.rule_key || '') === '__page_summary__';
@@ -74027,6 +74150,15 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             }
             const kwRaw = String(row.target_keyword || '').trim();
             const kwCell = kwRaw ? escapeHtml(kwRaw) : '—';
+            const dfsRowForUi = !isSitewide ? traditionalSeoGetDfsPageRow(urlRaw) : null;
+            const dfsItemsForUi = Array.isArray(dfsRowForUi?.backlink_rows) ? dfsRowForUi.backlink_rows : [];
+            const dfsBlN = !isSitewide ? traditionalSeoDfsPageBlDisplayNumberForUrl(urlRaw) : null;
+            const dfsBl =
+              isSitewide || !traditionalSeoBacklinkIndexShowDfs()
+                ? '—'
+                : dfsBlN != null && Number.isFinite(Number(dfsBlN))
+                  ? `${Math.round(Number(dfsBlN))}`
+                  : '—';
             const kd = traditionalSeoKeywordDemandCellsForRow(row);
             const clicksFmt = formatTraditionalSeoSearchVolume(row.clicks);
             const imprFmt = formatTraditionalSeoSearchVolume(row.impressions);
@@ -74034,15 +74166,32 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             const blArr = mForBl ? traditionalSeoBacklinkItemsFromMetric(mForBl) : [];
             const nBlCount = traditionalSeoToNum(mForBl?.page_backlinks_sample, 0);
             const blViewCount = mForBl ? traditionalSeoPageBlDisplayNumberForMetric(mForBl) : null;
-            const blHasSample =
+            const keHas =
               !isSitewide &&
               mForBl &&
               (blArr.length > 0 || nBlCount > 0 || (blViewCount != null && Number(blViewCount) === 0));
+            const dfsHas =
+              !isSitewide &&
+              traditionalSeoBacklinkIndexShowDfs() &&
+              (dfsItemsForUi.length > 0 ||
+                (dfsBlN != null && Number.isFinite(Number(dfsBlN)) && Number(dfsBlN) >= 0));
+            const blHasSample = keHas || dfsHas;
+            const useDfsFirst =
+              traditionalSeoBacklinkIndexShowDfs() &&
+              (dfsItemsForUi.length > 0 ||
+                (dfsBlN != null && Number.isFinite(Number(dfsBlN))));
+            const nForBtn = useDfsFirst
+              ? dfsBlN != null && Number.isFinite(Number(dfsBlN))
+                ? Math.round(Number(dfsBlN))
+                : dfsItemsForUi.length
+              : blViewCount != null
+                ? Math.round(Number(blViewCount))
+                : blArr.length || nBlCount;
             /* By URL (default) rows are __page_summary__ — still show BL sample from keywordMetricsByUrl for that page URL. */
             const blSampleCell = isSitewide
               ? '—'
               : blHasSample
-                ? `<button type="button" class="btn traditional-seo-backlinks-view-btn" style="padding:0.25rem 0.5rem;font-size:0.72rem;" data-page-url="${viewAttr}">View (${blViewCount != null ? Math.round(Number(blViewCount)) : blArr.length || nBlCount})</button>`
+                ? `<button type="button" class="btn traditional-seo-backlinks-view-btn" style="padding:0.25rem 0.5rem;font-size:0.72rem;" data-page-url="${viewAttr}">View (${nForBtn})</button>`
                 : '—';
             const ruleCell = isSummaryRow(row)
               ? `<span style="color:var(--dark-text-muted);font-size:0.78rem;">${escapeHtml(String(row.summary_total || 0))} checks</span>`
@@ -74068,6 +74217,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             <td class="traditional-seo-metric-cell">${escapeHtml(kd.rank)}</td>
             <td class="traditional-seo-metric-cell">${escapeHtml(kd.urlTraf)}</td>
             <td class="traditional-seo-metric-cell">${escapeHtml(kd.pageBl)}</td>
+            <td class="traditional-seo-metric-cell">${escapeHtml(dfsBl)}</td>
             <td class="traditional-seo-metric-cell">${blSampleCell}</td>
             <td class="traditional-seo-metric-cell">${escapeHtml(clicksFmt)}</td>
             <td class="traditional-seo-metric-cell">${escapeHtml(imprFmt)}</td>
@@ -74954,7 +75104,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             TRADITIONAL_SEO_STATE.sort.direction = TRADITIONAL_SEO_STATE.sort.direction === 'asc' ? 'desc' : 'asc';
           } else {
             TRADITIONAL_SEO_STATE.sort.key = nextKey;
-            const descKeys = ['clicks', 'impressions', 'kw_volume', 'kw_est_traffic', 'kw_url_traffic', 'kw_page_bl'];
+            const descKeys = ['clicks', 'impressions', 'kw_volume', 'kw_est_traffic', 'kw_url_traffic', 'kw_page_bl', 'kw_dfs_page_bl'];
             TRADITIONAL_SEO_STATE.sort.direction = descKeys.includes(nextKey) ? 'desc' : 'asc';
           }
           renderTraditionalSeoResultsTable();

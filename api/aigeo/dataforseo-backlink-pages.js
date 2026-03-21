@@ -107,11 +107,39 @@ function isStaleRow(row, nowMs) {
 }
 
 function pickStrength(it) {
-  const keys = ['domain_from_rank', 'page_from_rank', 'rank', 'domain_rank', 'domain_from_platform_rank'];
+  const keys = [
+    'domain_from_rank',
+    'domain_from_platform_rank',
+    'page_from_rank',
+    'domain_rank',
+    'rank',
+    'domain_from_rating',
+    'rank_score'
+  ];
   for (const k of keys) {
     const v = toNum(it?.[k], null);
     if (v != null && Number.isFinite(v)) return Math.round(v);
   }
+  return null;
+}
+
+function parseDofollowFromItem(it) {
+  if (!it || typeof it !== 'object') return null;
+  const raw =
+    it.dofollow ??
+    it.is_dofollow ??
+    it.isDofollow ??
+    it.follow ??
+    it.link_dofollow ??
+    it.isDoFollow;
+  if (raw === true || raw === 'true' || Number(raw) === 1) return true;
+  if (raw === false || raw === 'false' || Number(raw) === 0) return false;
+  const rel = String(it.link_rel ?? it.rel ?? it.rel_attribute ?? it.rel_type ?? '').toLowerCase();
+  if (rel.includes('nofollow') || rel.includes('ugc') || rel.includes('sponsored')) return false;
+  if (rel.includes('dofollow')) return true;
+  const lt = String(it.type ?? it.link_type ?? it.item_type ?? '').toLowerCase();
+  if (lt === 'nofollow' || lt === 'no_follow') return false;
+  if (lt === 'dofollow' || lt === 'do_follow') return true;
   return null;
 }
 
@@ -120,10 +148,7 @@ function mapDfsItem(it) {
   const src = String(it.url_from ?? it.urlFrom ?? '').trim();
   const tgt = String(it.url_to ?? it.urlTo ?? '').trim();
   const anchor = String(it.anchor ?? it.text ?? '').trim();
-  const df = it.dofollow;
-  const dofollow = df === true || df === 'true' || Number(df) === 1;
-  const nofollow = df === false || df === 'false' || Number(df) === 0;
-  const follow = dofollow ? true : nofollow ? false : null;
+  const follow = parseDofollowFromItem(it);
   const strength = pickStrength(it);
   let srcDomain = String(it.domain_from ?? it.domainFrom ?? '').trim();
   if (!srcDomain && src) {
