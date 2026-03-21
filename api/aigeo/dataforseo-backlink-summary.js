@@ -137,13 +137,24 @@ function mapRowToCache(domainHost, includeSubdomains, apiRow, cost) {
     'backlinks_nofollow',
     'referring_links_nofollow'
   ]);
-  const nfAttr = attrBucketCount(apiRow?.referring_links_attributes, 'nofollow');
+  const attrs = apiRow?.referring_links_attributes;
+  let nfFromAttrs = attrBucketCount(attrs, 'nofollow');
+  if (
+    nfFromAttrs == null &&
+    backlinksTotal != null &&
+    attrs &&
+    typeof attrs === 'object' &&
+    !Array.isArray(attrs) &&
+    Object.keys(attrs).length > 0
+  ) {
+    nfFromAttrs = 0;
+  }
   if (
     (dofollow_backlinks == null || nofollow_backlinks == null) &&
     backlinksTotal != null &&
-    nfAttr != null
+    nfFromAttrs != null
   ) {
-    const nf = Math.max(0, Math.min(nfAttr, backlinksTotal));
+    const nf = Math.max(0, Math.min(nfFromAttrs, backlinksTotal));
     nofollow_backlinks = nf;
     dofollow_backlinks = backlinksTotal - nf;
   }

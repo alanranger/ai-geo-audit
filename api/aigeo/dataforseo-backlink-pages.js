@@ -2,6 +2,11 @@ export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
 import { dfsClientLimits, dfsPageBacklinksMax } from '../../lib/dfs-backlink-limits.js';
+import {
+  normalizeDfsPageUrl as normalizePageUrl,
+  expandUrlListForBacklinkCacheQuery,
+  indexDfsCacheRowsByCanonical
+} from '../../lib/dfs-page-url-keys.js';
 
 const DFS_BACKLINKS_LIVE = 'https://api.dataforseo.com/v3/backlinks/backlinks/live';
 
@@ -36,19 +41,6 @@ const parseBody = (req) => {
   if (req.body && typeof req.body === 'object') return req.body;
   return {};
 };
-
-function normalizePageUrl(raw) {
-  const s = String(raw || '').trim();
-  if (!s || !/^https?:\/\//i.test(s)) return '';
-  try {
-    const u = new URL(s);
-    const host = String(u.hostname || '').toLowerCase().replace(/^www\./, '');
-    const path = String(u.pathname || '/').replace(/\/+$/, '') || '/';
-    return `${u.protocol}//${host}${path}`;
-  } catch {
-    return '';
-  }
-}
 
 function normalizeDomainHost(raw) {
   let s = String(raw || '').trim().toLowerCase();
@@ -213,9 +205,10 @@ function payloadFromDbRow(row, nowMs) {
   };
 }
 
-async function readRows(supabase, urls) {
-  if (!urls.length) return [];
-  const { data, error } = await supabase.from('dfs_page_backlinks_cache').select('*').in('page_url', urls);
+async function readRowsForUrls(supabase, canonicalUrls) {
+  const expanded = expandUrlListForBacklinkCacheQuery(canonicalUrls);
+  if (!expanded.length) return [];
+  const { data, error } = await supabase.from('dfs_page_backlinks_cache').select('*').in('page_url', expanded);
   if (error && !String(error.message || '').includes('does not exist')) throw error;
   return Array.isArray(data) ? data : [];
 }
@@ -256,11 +249,11 @@ async function runLookup(supabase, pageUrls, nowMs) {
   const chunk = 100;
   for (let i = 0; i < pageUrls.length; i += chunk) {
     const part = pageUrls.slice(i, i + chunk);
-    const rows = await readRows(supabase, part);
-    const map = new Map(rows.map((r) => [r.page_url, r]));
+    const rows = await readRowsForUrls(supabase, part);
+    const canonMap = indexDfsCacheRowsByCanonical(rows);
     for (let j = 0; j < part.length; j += 1) {
       const u = part[j];
-      byPageUrl[u] = payloadFromDbRow(map.get(u), nowMs);
+      byPageUrl[u] = payloadFromDbRow(canonMap.get(u) || null, nowMs);
     }
   }
   return { status: 200, body: { status: 'ok', data: { byPageUrl, staleDays: pageStaleDays(), ...dfsClientLimits() }, meta: { generatedAt: new Date().toISOString() } } };
@@ -357,7 +350,7 @@ async function runRefresh(supabase, pageUrlsNorm, force, nowMs) {
       const done = await upsertOnePageFromTask(supabase, pageUrl, tasks[t], limit, nowMs);
       if (!done.ok) {
         apiErrors += 1;
-        byPageUrl[pageUrl] = payloadFromDbRow(existingMap.get(pageUrl), nowMs);
+        byPageUrl[pageUrl] = payloadFromDbRow(existingByCanon.get(pageUrl) || null, nowMs);
         continue;
       }
       totalCost += done.cost;
@@ -367,13 +360,13 @@ async function runRefresh(supabase, pageUrlsNorm, force, nowMs) {
     for (let t = n; t < batch.length; t += 1) {
       const pageUrl = batch[t];
       apiErrors += 1;
-      byPageUrl[pageUrl] = payloadFromDbRow(existingMap.get(pageUrl), nowMs);
+      byPageUrl[pageUrl] = payloadFromDbRow(existingByCanon.get(pageUrl) || null, nowMs);
     }
   }
 
   for (const u of pageUrlsNorm) {
     if (byPageUrl[u] === undefined) {
-      byPageUrl[u] = payloadFromDbRow(existingMap.get(u), nowMs);
+      byPageUrl[u] = payloadFromDbRow(existingByCanon.get(u) || null, nowMs);
     }
   }
 
