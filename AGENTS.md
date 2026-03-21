@@ -16,7 +16,7 @@
 
 - **① / ②** = audit scoring only.  
 - **③** = keyword **volume** + **metrics age** via KE → `keyword_target_metrics_cache`.  
-- **Pg bl:** same disavow file as `public/Disavow links https_www_alanranger_com.txt` — server filters on refresh; modal **fetch + filter** too. **`DISAVOW_FILE_PATH`** overrides server read path.  
+- **Pg bl:** disavow in `public/` (`disavow-alanranger-com.txt` + long-name copy); modal loads **`/api/aigeo/disavow-list`** (SPA rewrite used to serve HTML for `.txt` URLs). **`DISAVOW_FILE_PATH`** overrides server read path.  
 - **Rank / Moz DA** columns = placeholders until another source writes those fields.
 - If **③** failed with **Bad Request**, older builds hit PostgREST limits on huge `.in('page_url', …)` filters — fixed by **chunking reads** in `api/aigeo/keyword-target-metrics.js` (see `Docs/CHANGELOG.md` **2026-03-20**).
 
