@@ -11,7 +11,7 @@ const KE_URL_TRAFFIC = `${KE_BASE}/get_url_traffic_metrics`;
 const KE_URL_KEYWORDS = `${KE_BASE}/get_url_keywords`;
 const KE_PAGE_BACKLINKS = `${KE_BASE}/get_page_backlinks`;
 const KE_UNIQUE_DOMAIN_BACKLINKS = `${KE_BASE}/get_unique_domain_backlinks`;
-/** Often includes sitewide totals; `get_unique_domain_backlinks` responses are frequently row-only (`data: []`). */
+/** Docs: `data` rows only + credits; 1 credit per row. https://api.keywordseverywhere.com/docs/#/backlink_data/get_domain_backlinks */
 const KE_DOMAIN_BACKLINKS = `${KE_BASE}/get_domain_backlinks`;
 
 const sendJson = (res, status, body) => {
@@ -725,116 +725,31 @@ function extractMozDaDeep(obj, depth = 0, parentKey = '') {
   return null;
 }
 
-function keNonNegativeInt(v) {
-  const n = toNum(v, null);
-  if (n == null || !Number.isFinite(n)) return null;
-  const r = Math.round(n);
-  return r >= 0 ? r : null;
-}
-
-/** KE backlink responses may expose sitewide totals; names vary. Never walk into `data` row arrays (false zeros). */
-function extractKeDomainLinkTotals(payload) {
-  const pickFrom = (obj) => {
-    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return { ref: null, bl: null };
-    const get = (keys) => {
-      for (let i = 0; i < keys.length; i += 1) {
-        const key = keys[i];
-        if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
-        return keNonNegativeInt(obj[key]);
-      }
-      return null;
-    };
-    return {
-      ref: get([
-        'referring_domains',
-        'referringDomains',
-        'unique_referring_domains',
-        'total_referring_domains',
-        'referring_domain_count',
-        'ref_domains',
-        'num_referring_domains'
-      ]),
-      bl: get([
-        'total_backlinks',
-        'totalBacklinks',
-        'backlinks_total',
-        'backlinksTotal',
-        'total_external_backlinks',
-        'external_backlinks',
-        'num_backlinks',
-        'backlink_count',
-        'links_count',
-        'total_links'
-      ])
-    };
-  };
-  let referringDomainsTotal = null;
-  let totalBacklinks = null;
-  const merge = (o) => {
-    const t = pickFrom(o);
-    if (referringDomainsTotal == null) referringDomainsTotal = t.ref;
-    if (totalBacklinks == null) totalBacklinks = t.bl;
-  };
-  if (payload && typeof payload === 'object') {
-    merge(payload);
-    if (payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)) merge(payload.data);
-    merge(payload.meta);
-    merge(payload.metrics);
-    merge(payload.stats);
-    merge(payload.summary);
-    merge(payload.result);
-  }
-  const deepWalk = (obj, depth) => {
-    if (referringDomainsTotal != null && totalBacklinks != null) return;
-    if (!obj || typeof obj !== 'object' || depth > 5) return;
-    if (Array.isArray(obj)) return;
-    const keys = Object.keys(obj);
-    for (let i = 0; i < keys.length; i += 1) {
-      const k = keys[i];
-      const kl = String(k).toLowerCase();
-      const v = obj[k];
-      if (v != null && typeof v === 'object') {
-        if (!Array.isArray(v)) deepWalk(v, depth + 1);
-        continue;
-      }
-      const n = keNonNegativeInt(v);
-      if (n == null) continue;
-      if (referringDomainsTotal == null && kl === 'referring_domains') referringDomainsTotal = n;
-      if (totalBacklinks == null && (kl === 'total_backlinks' || kl === 'backlinks_total')) totalBacklinks = n;
-    }
-  };
-  if (referringDomainsTotal == null || totalBacklinks == null) deepWalk(payload, 0);
-  return { referringDomainsTotal, totalBacklinks };
-}
-
-/** If we have a non-empty sample but KE reports 0 totals, treat as unknown (row-level JSON often lacks real sitewide counts). */
-function sanitizeKeLinkTotals(ref, bl, sampleRows) {
-  const s = toNum(sampleRows, 0) || 0;
-  const fix = (v) => {
-    if (v == null || !Number.isFinite(Number(v))) return null;
-    const n = Math.round(Number(v));
-    if (n === 0 && s > 0) return null;
-    return n;
-  };
-  return { referringDomainsTotal: fix(ref), totalBacklinks: fix(bl) };
-}
-
-async function fetchKeDomainBacklinksTotals(apiKey, domainHost) {
-  const host = normalizeDomainHost(domainHost);
-  if (!host) return { referringDomainsTotal: null, totalBacklinks: null };
-  try {
-    const { res, json } = await kePostForm(apiKey, KE_DOMAIN_BACKLINKS, { domain: host, num: 1 });
-    if (!res.ok) return { referringDomainsTotal: null, totalBacklinks: null };
-    return extractKeDomainLinkTotals(json);
-  } catch {
-    return { referringDomainsTotal: null, totalBacklinks: null };
-  }
+/**
+ * `get_domain_backlinks`: up to `num` link rows (1 credit each per KE docs). No sitewide total field in JSON.
+ * https://api.keywordseverywhere.com/docs/#/backlink_data/get_domain_backlinks
+ */
+async function fetchDomainBacklinksSample(apiKey, domainHost, num, disavow) {
+  const d = disavow || { domains: new Set(), urls: new Set() };
+  const oversample = envInt('KE_DOMAIN_BACKLINKS_OVERSAMPLE_MULT', 3, 1, 15);
+  const fetchCap = envInt('KE_DOMAIN_BACKLINKS_FETCH_CAP', 300, 30, 2000);
+  const want = Math.max(1, Math.round(Number(num)) || 80);
+  const askNum = Math.min(fetchCap, Math.max(want * oversample, want + 20));
+  const { res, json, text } = await kePostForm(apiKey, KE_DOMAIN_BACKLINKS, {
+    domain: domainHost,
+    num: askNum
+  });
+  if (!res.ok) throw keError(res, json, text);
+  const list = extractKeItems(json);
+  const filtered = filterDisavowedBacklinks(list, d.domains, d.urls);
+  const trimmed = filtered.slice(0, want);
+  return trimmed.length;
 }
 
 async function fetchUniqueDomainBacklinks(apiKey, domainHost, num, disavow) {
   const d = disavow || { domains: new Set(), urls: new Set() };
-  const oversample = envInt('KE_DOMAIN_BACKLINKS_OVERSAMPLE_MULT', 3, 1, 15);
-  const fetchCap = envInt('KE_DOMAIN_BACKLINKS_FETCH_CAP', 300, 30, 2000);
+  const oversample = envInt('KE_UNIQUE_DOMAIN_BACKLINKS_OVERSAMPLE_MULT', 3, 1, 15);
+  const fetchCap = envInt('KE_UNIQUE_DOMAIN_BACKLINKS_FETCH_CAP', 300, 30, 2000);
   const want = Math.max(1, Math.round(Number(num)) || 80);
   const askNum = Math.min(fetchCap, Math.max(want * oversample, want + 20));
   const { res, json, text } = await kePostForm(apiKey, KE_UNIQUE_DOMAIN_BACKLINKS, {
@@ -847,14 +762,10 @@ async function fetchUniqueDomainBacklinks(apiKey, domainHost, num, disavow) {
   const trimmed = filtered.slice(0, want);
   const referringDomainsSample = trimmed.length;
   const moz = extractMozDaDeep(json, 0, '') ?? extractMozDaDeep({ items: list }, 0, '');
-  const totals = extractKeDomainLinkTotals(json);
-  const cleaned = sanitizeKeLinkTotals(totals.referringDomainsTotal, totals.totalBacklinks, referringDomainsSample);
   return {
     referringDomainsSample,
     moz,
-    raw: json,
-    referringDomainsTotal: cleaned.referringDomainsTotal,
-    totalBacklinks: cleaned.totalBacklinks
+    raw: json
   };
 }
 
@@ -898,28 +809,12 @@ async function upsertDomainMetrics(supabase, domainHost, payload) {
 
 function domainMetricsPayload(row, nowMs) {
   if (!row) return null;
-  let referring_domains_total = row.referring_domains_total ?? null;
-  let total_backlinks = row.total_backlinks ?? null;
-  if (
-    (referring_domains_total == null || total_backlinks == null) &&
-    row.raw_payload != null &&
-    typeof row.raw_payload === 'object'
-  ) {
-    const t = extractKeDomainLinkTotals(row.raw_payload);
-    if (referring_domains_total == null) referring_domains_total = t.referringDomainsTotal;
-    if (total_backlinks == null) total_backlinks = t.totalBacklinks;
-  }
-  const fin = sanitizeKeLinkTotals(
-    referring_domains_total,
-    total_backlinks,
-    row.referring_domains_sample ?? 0
-  );
   return {
     domain_host: row.domain_host,
     moz_domain_authority: row.moz_domain_authority ?? null,
     referring_domains_sample: row.referring_domains_sample ?? null,
-    referring_domains_total: fin.referringDomainsTotal,
-    total_backlinks: fin.totalBacklinks,
+    referring_domains_total: row.referring_domains_total ?? null,
+    total_backlinks: row.total_backlinks ?? null,
     fetched_at: row.fetched_at || null,
     stale: isStaleRow(row, nowMs)
   };
@@ -1056,17 +951,20 @@ export default async function handler(req, res) {
     if (domainHost && domainNeedsKeFetch(domainRow, force, nowMs)) {
       try {
         const dom = await fetchUniqueDomainBacklinks(apiKey, domainHost, domainBlNum, disavowLists);
-        const supTotals = await fetchKeDomainBacklinksTotals(apiKey, domainHost);
-        let refT = dom.referringDomainsTotal ?? supTotals.referringDomainsTotal;
-        let blT = dom.totalBacklinks ?? supTotals.totalBacklinks;
-        const fin = sanitizeKeLinkTotals(refT, blT, dom.referringDomainsSample);
-        await upsertDomainMetrics(supabase, domainHost, {
+        let backlinkRows = null;
+        try {
+          backlinkRows = await fetchDomainBacklinksSample(apiKey, domainHost, domainBlNum, disavowLists);
+        } catch (domainBacklinksErr) {
+          enrichNotes.push(`get_domain_backlinks — ${String(domainBacklinksErr?.message || domainBacklinksErr)}`);
+        }
+        const domainPatch = {
           moz_domain_authority: dom.moz,
           referring_domains_sample: dom.referringDomainsSample,
-          referring_domains_total: fin.referringDomainsTotal,
-          total_backlinks: fin.totalBacklinks,
+          referring_domains_total: null,
           raw_payload: dom.raw
-        });
+        };
+        if (backlinkRows != null) domainPatch.total_backlinks = backlinkRows;
+        await upsertDomainMetrics(supabase, domainHost, domainPatch);
         domainRow = await readDomainMetricsRow(supabase, domainHost);
       } catch (e) {
         enrichNotes.push(`domain backlinks — ${String(e?.message || e)}`);
