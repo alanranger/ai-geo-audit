@@ -72555,10 +72555,81 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return false;
     }
 
+    function traditionalSeoIsSeoAnomalySpamHost(host) {
+      const h = traditionalSeoDisavowNormalizeHost(host);
+      return Boolean(h && h.includes('seo-anomaly'));
+    }
+
+    function traditionalSeoBacklinkRowLooksLikeSeoAnomalySpam(row) {
+      if (row == null) return false;
+      if (typeof row === 'string') return String(row).toLowerCase().includes('seo-anomaly');
+      if (typeof row !== 'object') return false;
+      const o = row;
+      const anchor = String(o.anchor_text ?? o.anchorText ?? o.anchor ?? '').toLowerCase();
+      if (anchor.includes('seo-anomaly') || anchor.includes('seo_anomaly')) return true;
+      const httpish = [];
+      const pushStr = (v) => {
+        if (typeof v !== 'string') return;
+        const s = v.trim();
+        if (/^https?:\/\//i.test(s)) httpish.push(s);
+      };
+      Object.keys(o).forEach((k) => pushStr(o[k]));
+      const nested = o.source;
+      if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+        Object.keys(nested).forEach((k) => pushStr(nested[k]));
+      }
+      for (let i = 0; i < httpish.length; i += 1) {
+        try {
+          if (traditionalSeoIsSeoAnomalySpamHost(new URL(httpish[i]).hostname)) return true;
+        } catch {
+          if (httpish[i].toLowerCase().includes('seo-anomaly')) return true;
+        }
+      }
+      return false;
+    }
+
     function traditionalSeoBacklinkSourceHostUi(row) {
-      const dom = row?.domain_source ?? row?.domainSource;
+      if (typeof row === 'string') {
+        const s = String(row).trim();
+        if (!s) return '';
+        if (/^https?:\/\//i.test(s)) {
+          try {
+            return traditionalSeoDisavowNormalizeHost(new URL(s).hostname);
+          } catch {
+            return '';
+          }
+        }
+        return traditionalSeoDisavowNormalizeHost(s);
+      }
+      const o = row && typeof row === 'object' ? row : {};
+      const dom =
+        o.domain_source ??
+        o.domainSource ??
+        o.source_domain ??
+        o.sourceDomain ??
+        o.linking_domain ??
+        o.linkingDomain ??
+        o.from_domain ??
+        o.fromDomain ??
+        o.referring_domain ??
+        o.referringDomain ??
+        o.domain;
       if (dom) return traditionalSeoDisavowNormalizeHost(dom);
-      const u = String((row?.url_source ?? row?.urlSource) || '').trim();
+      const u = String(
+        (o.url_source ??
+          o.urlSource ??
+          o.source_url ??
+          o.sourceUrl ??
+          o.from_url ??
+          o.fromUrl ??
+          o.referring_url ??
+          o.referringUrl ??
+          o.link_url ??
+          o.linkUrl ??
+          o.linking_url ??
+          o.linkingUrl) ||
+          ''
+      ).trim();
       if (!u) return '';
       try {
         return traditionalSeoDisavowNormalizeHost(new URL(u).hostname);
@@ -72568,19 +72639,39 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     function traditionalSeoBacklinkSourceUrlUi(row) {
-      const u = String((row?.url_source ?? row?.urlSource) || '').trim();
+      if (typeof row === 'string') {
+        const s = String(row).trim();
+        return /^https?:\/\//i.test(s) ? traditionalSeoDisavowNormalizePageUrl(s) : '';
+      }
+      const o = row && typeof row === 'object' ? row : {};
+      const u = String(
+        (o.url_source ??
+          o.urlSource ??
+          o.source_url ??
+          o.sourceUrl ??
+          o.from_url ??
+          o.fromUrl ??
+          o.referring_url ??
+          o.referringUrl ??
+          o.link_url ??
+          o.linkUrl ??
+          o.linking_url ??
+          o.linkingUrl) ||
+          ''
+      ).trim();
       return u ? traditionalSeoDisavowNormalizePageUrl(u) : '';
     }
 
     function traditionalSeoFilterBacklinksDisavow(items, pack) {
       const d = pack?.domains && pack.domains.size ? pack.domains : null;
       const u = pack?.urls && pack.urls.size ? pack.urls : null;
-      if (!d && !u) return items.slice();
       return items.filter((row) => {
+        if (traditionalSeoBacklinkRowLooksLikeSeoAnomalySpam(row)) return false;
         const h = traditionalSeoBacklinkSourceHostUi(row);
-        if (d && h && traditionalSeoHostMatchesDisavow(h, d)) return false;
+        if (h && traditionalSeoIsSeoAnomalySpamHost(h)) return false;
         const nu = u ? traditionalSeoBacklinkSourceUrlUi(row) : '';
         if (nu && u.has(nu)) return false;
+        if (d && h && traditionalSeoHostMatchesDisavow(h, d)) return false;
         return true;
       });
     }
@@ -72591,18 +72682,30 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
       if (!TRADITIONAL_SEO_STATE.disavowUiPromise) {
         TRADITIONAL_SEO_STATE.disavowUiPromise = fetch(TRADITIONAL_SEO_DISAVOW_URL, { cache: 'no-store' })
-          .then((r) => (r.ok ? r.text() : ''))
+          .then(async (r) => {
+            if (!r.ok) return null;
+            return r.text();
+          })
           .then((text) => {
-            TRADITIONAL_SEO_STATE.disavowUiLoaded = text
-              ? traditionalSeoParseDisavowText(text)
-              : { domains: new Set(), urls: new Set() };
             TRADITIONAL_SEO_STATE.disavowUiPromise = null;
+            const empty = { domains: new Set(), urls: new Set() };
+            if (text == null || !String(text).trim()) {
+              TRADITIONAL_SEO_STATE.disavowUiLoaded = empty;
+              return empty;
+            }
+            const trimmed = String(text).trim();
+            if (trimmed.startsWith('<') || trimmed.toLowerCase().startsWith('<!doctype')) {
+              TRADITIONAL_SEO_STATE.disavowUiLoaded = empty;
+              return empty;
+            }
+            TRADITIONAL_SEO_STATE.disavowUiLoaded = traditionalSeoParseDisavowText(text);
             return TRADITIONAL_SEO_STATE.disavowUiLoaded;
           })
           .catch(() => {
-            TRADITIONAL_SEO_STATE.disavowUiLoaded = { domains: new Set(), urls: new Set() };
             TRADITIONAL_SEO_STATE.disavowUiPromise = null;
-            return TRADITIONAL_SEO_STATE.disavowUiLoaded;
+            const empty = { domains: new Set(), urls: new Set() };
+            TRADITIONAL_SEO_STATE.disavowUiLoaded = empty;
+            return empty;
           });
       }
       return TRADITIONAL_SEO_STATE.disavowUiPromise;
@@ -72646,13 +72749,41 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     function traditionalSeoFormatOneBacklinkBlock(it, idx) {
       const o = it && typeof it === 'object' ? it : {};
-      const srcUrl = String(o.url_source || o.urlSource || '').trim();
-      const tgtUrl = String(o.url_target || o.urlTarget || '').trim();
+      const srcUrl = String(
+        o.url_source ||
+          o.urlSource ||
+          o.source_url ||
+          o.sourceUrl ||
+          o.from_url ||
+          o.fromUrl ||
+          o.referring_url ||
+          o.referringUrl ||
+          o.link_url ||
+          o.linkUrl ||
+          o.linking_url ||
+          o.linkingUrl ||
+          ''
+      ).trim();
+      const tgtUrl = String(o.url_target || o.urlTarget || o.target_url || o.targetUrl || '').trim();
       const srcHref = srcUrl ? traditionalSeoSafeExternalHref(srcUrl) : '';
       const tgtHref = tgtUrl ? traditionalSeoSafeExternalHref(tgtUrl) : '';
-      const anchor = escapeHtml(String(o.anchor_text || o.anchorText || '—'));
-      const dsrc = escapeHtml(String(o.domain_source || o.domainSource || '—'));
-      const dtgt = escapeHtml(String(o.domain_target || o.domainTarget || '—'));
+      const anchor = escapeHtml(String(o.anchor_text || o.anchorText || o.anchor || '—'));
+      const dsrc = escapeHtml(
+        String(
+          o.domain_source ||
+            o.domainSource ||
+            o.source_domain ||
+            o.sourceDomain ||
+            o.linking_domain ||
+            o.linkingDomain ||
+            o.from_domain ||
+            o.fromDomain ||
+            '—'
+        )
+      );
+      const dtgt = escapeHtml(
+        String(o.domain_target || o.domainTarget || o.target_domain || o.targetDomain || '—')
+      );
       const linkingDa = traditionalSeoLinkingDomainMozDa(o);
       const daLine =
         linkingDa != null
@@ -72663,14 +72794,38 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const known = new Set([
         'url_source',
         'urlSource',
+        'source_url',
+        'sourceUrl',
+        'from_url',
+        'fromUrl',
+        'referring_url',
+        'referringUrl',
+        'link_url',
+        'linkUrl',
+        'linking_url',
+        'linkingUrl',
         'url_target',
         'urlTarget',
+        'target_url',
+        'targetUrl',
         'anchor_text',
         'anchorText',
+        'anchor',
         'domain_source',
         'domainSource',
+        'source_domain',
+        'sourceDomain',
+        'linking_domain',
+        'linkingDomain',
+        'from_domain',
+        'fromDomain',
+        'referring_domain',
+        'referringDomain',
+        'domain',
         'domain_target',
         'domainTarget',
+        'target_domain',
+        'targetDomain',
         'linking_domain_authority',
         'source_domain_authority',
         'referring_domain_authority',

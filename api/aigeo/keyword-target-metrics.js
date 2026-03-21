@@ -203,10 +203,81 @@ function hostMatchesDisavowSet(host, domainSet) {
   return false;
 }
 
+/** Known spam network; block even if disavow file failed to load on serverless. */
+function isSeoAnomalySpamHost(host) {
+  const h = normalizeDomainHost(host);
+  return Boolean(h && h.includes('seo-anomaly'));
+}
+
+function backlinkRowLooksLikeSeoAnomalySpam(row) {
+  if (row == null) return false;
+  if (typeof row === 'string') return String(row).toLowerCase().includes('seo-anomaly');
+  if (typeof row !== 'object') return false;
+  const anchor = String(row.anchor_text ?? row.anchorText ?? row.anchor ?? '').toLowerCase();
+  if (anchor.includes('seo-anomaly') || anchor.includes('seo_anomaly')) return true;
+  const httpish = [];
+  const pushStr = (v) => {
+    if (typeof v !== 'string') return;
+    const s = v.trim();
+    if (/^https?:\/\//i.test(s)) httpish.push(s);
+  };
+  Object.keys(row).forEach((k) => pushStr(row[k]));
+  const nested = row.source;
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    Object.keys(nested).forEach((k) => pushStr(nested[k]));
+  }
+  for (let i = 0; i < httpish.length; i += 1) {
+    try {
+      if (isSeoAnomalySpamHost(new URL(httpish[i]).hostname)) return true;
+    } catch {
+      if (httpish[i].toLowerCase().includes('seo-anomaly')) return true;
+    }
+  }
+  return false;
+}
+
 function backlinkSourceHost(row) {
-  const dom = row?.domain_source ?? row?.domainSource;
+  if (typeof row === 'string') {
+    const s = String(row).trim();
+    if (!s) return '';
+    if (/^https?:\/\//i.test(s)) {
+      try {
+        return normalizeDomainHost(new URL(s).hostname);
+      } catch {
+        return '';
+      }
+    }
+    return normalizeDomainHost(s);
+  }
+  if (!row || typeof row !== 'object') return '';
+  const dom =
+    row.domain_source ??
+    row.domainSource ??
+    row.source_domain ??
+    row.sourceDomain ??
+    row.linking_domain ??
+    row.linkingDomain ??
+    row.from_domain ??
+    row.fromDomain ??
+    row.referring_domain ??
+    row.referringDomain ??
+    row.domain;
   if (dom) return normalizeDomainHost(dom);
-  const u = String((row?.url_source ?? row?.urlSource) || '').trim();
+  const u = String(
+    (row.url_source ??
+      row.urlSource ??
+      row.source_url ??
+      row.sourceUrl ??
+      row.from_url ??
+      row.fromUrl ??
+      row.referring_url ??
+      row.referringUrl ??
+      row.link_url ??
+      row.linkUrl ??
+      row.linking_url ??
+      row.linkingUrl) ||
+      ''
+  ).trim();
   if (!u) return '';
   try {
     return normalizeDomainHost(new URL(u).hostname);
@@ -216,7 +287,26 @@ function backlinkSourceHost(row) {
 }
 
 function normalizeBacklinkSourceUrl(row) {
-  const u = String((row?.url_source ?? row?.urlSource) || '').trim();
+  if (typeof row === 'string') {
+    const s = String(row).trim();
+    return /^https?:\/\//i.test(s) ? normalizeDisavowPageUrl(s) : '';
+  }
+  if (!row || typeof row !== 'object') return '';
+  const u = String(
+    (row.url_source ??
+      row.urlSource ??
+      row.source_url ??
+      row.sourceUrl ??
+      row.from_url ??
+      row.fromUrl ??
+      row.referring_url ??
+      row.referringUrl ??
+      row.link_url ??
+      row.linkUrl ??
+      row.linking_url ??
+      row.linkingUrl) ||
+      ''
+  ).trim();
   return u ? normalizeDisavowPageUrl(u) : '';
 }
 
@@ -224,12 +314,13 @@ function filterDisavowedBacklinks(list, domainSet, urlSet) {
   if (!Array.isArray(list) || !list.length) return Array.isArray(list) ? list : [];
   const d = domainSet && domainSet.size ? domainSet : null;
   const u = urlSet && urlSet.size ? urlSet : null;
-  if (!d && !u) return list.slice();
   return list.filter((row) => {
+    if (backlinkRowLooksLikeSeoAnomalySpam(row)) return false;
     const h = backlinkSourceHost(row);
-    if (d && h && hostMatchesDisavowSet(h, d)) return false;
+    if (h && isSeoAnomalySpamHost(h)) return false;
     const nu = u ? normalizeBacklinkSourceUrl(row) : '';
     if (nu && u.has(nu)) return false;
+    if (d && h && hostMatchesDisavowSet(h, d)) return false;
     return true;
   });
 }
@@ -253,8 +344,12 @@ function uniqueDomainRowHost(row) {
 
 function filterDisavowedDomainRows(list, domainSet) {
   if (!Array.isArray(list) || !list.length) return Array.isArray(list) ? list : [];
-  if (!domainSet || !domainSet.size) return list.slice();
-  return list.filter((row) => !hostMatchesDisavowSet(uniqueDomainRowHost(row), domainSet));
+  return list.filter((row) => {
+    const h = uniqueDomainRowHost(row);
+    if (h && isSeoAnomalySpamHost(h)) return false;
+    if (!domainSet || !domainSet.size) return true;
+    return !hostMatchesDisavowSet(h, domainSet);
+  });
 }
 
 async function readCacheRows(supabase, pairs) {
