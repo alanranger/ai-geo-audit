@@ -88,6 +88,26 @@ function isStaleRow(row, nowMs) {
   return nowMs - t > staleDays() * 86400000;
 }
 
+/** Rows created before URL-traffic enrich: fresh `fetched_at` but new columns still null — must re-run ③ enrich. */
+function rowNeedsKeUrlEnrichment(row) {
+  if (!row) return false;
+  return row.url_estimated_traffic == null;
+}
+
+function domainNeedsKeFetch(domainRow, force, nowMs) {
+  if (force) return true;
+  if (!domainRow) return true;
+  if (isStaleRow(domainRow, nowMs)) return true;
+  if (
+    domainRow.referring_domains_sample == null &&
+    domainRow.moz_domain_authority == null &&
+    (domainRow.raw_payload == null || domainRow.raw_payload === undefined)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** PostgREST `.in()` with hundreds of long URLs can exceed request limits → HTTP 400 "Bad Request". */
 const PAGE_URL_IN_CHUNK = 40;
 
@@ -194,6 +214,12 @@ function normalizeKeCountry(raw) {
   if (!c) c = 'gb';
   if (c === 'uk') c = 'gb';
   return c;
+}
+
+/** `get_url_traffic_metrics` / `get_url_keywords` reject `gb`; UK must be `uk` on those routes. */
+function keCountryForUrlEndpoints(raw) {
+  const c = normalizeKeCountry(raw);
+  return c === 'gb' ? 'uk' : c;
 }
 
 function normalizeKeCurrency(raw) {
@@ -318,12 +344,13 @@ function findUrlKeywordRow(items, targetKeyword) {
 
 async function fetchUrlTrafficMap(apiKey, urls, country) {
   const map = new Map();
+  const urlCountry = keCountryForUrlEndpoints(country);
   const batchSize = envInt('KE_URL_TRAFFIC_BATCH', 15, 1, 50);
   const parts = chunk([...new Set(urls.map((u) => normalizePageUrl(u)).filter(Boolean))], batchSize);
   for (let i = 0; i < parts.length; i += 1) {
     const { res, json, text } = await kePostJson(apiKey, KE_URL_TRAFFIC, {
       urls: parts[i],
-      country
+      country: urlCountry
     });
     if (!res.ok) throw keError(res, json, text);
     extractKeItems(json).forEach((row) => {
@@ -339,9 +366,10 @@ async function fetchUrlTrafficMap(apiKey, urls, country) {
 }
 
 async function fetchUrlKeywordsForPage(apiKey, pageUrl, country, num) {
+  const urlCountry = keCountryForUrlEndpoints(country);
   const { res, json, text } = await kePostForm(apiKey, KE_URL_KEYWORDS, {
     url: pageUrl,
-    country,
+    country: urlCountry,
     num
   });
   if (!res.ok) throw keError(res, json, text);
@@ -547,7 +575,9 @@ export default async function handler(req, res) {
     const stalePageUrls = [];
     want.forEach((meta, mapKey) => {
       const row = existing.find((r) => `${r.page_url}\n${r.keyword}` === mapKey);
-      if (!force && row && !isStaleRow(row, nowMs)) return;
+      const need =
+        force || !row || isStaleRow(row, nowMs) || rowNeedsKeUrlEnrichment(row);
+      if (!need) return;
       if (meta.page_url && !stalePageUrls.includes(meta.page_url)) stalePageUrls.push(meta.page_url);
     });
 
@@ -585,7 +615,7 @@ export default async function handler(req, res) {
       }
     }
 
-    if (domainHost && (force || !domainRow || isStaleRow(domainRow, nowMs))) {
+    if (domainHost && domainNeedsKeFetch(domainRow, force, nowMs)) {
       try {
         const dom = await fetchUniqueDomainBacklinks(apiKey, domainHost, domainBlNum);
         await upsertDomainMetrics(supabase, domainHost, {
@@ -605,9 +635,11 @@ export default async function handler(req, res) {
     want.forEach((meta) => {
       const key = `${meta.page_url}\n${meta.keyword}`;
       const row = existing.find((r) => `${r.page_url}\n${r.keyword}` === key);
-      if (!force && row && !isStaleRow(row, nowMs)) return;
+      const needUpsert =
+        force || !row || isStaleRow(row, nowMs) || rowNeedsKeUrlEnrichment(row);
+      if (!needUpsert) return;
       const hit = keMap.get(meta.keyword.toLowerCase());
-      const canonical = meta.page_url;
+      const canonical = normalizePageUrl(meta.page_url) || meta.page_url;
       const kwRows = urlKeywordsMap.get(canonical) || [];
       const kwHit = findUrlKeywordRow(kwRows, meta.keyword);
       const traffic = urlTrafficMap.get(canonical) || {};
@@ -625,16 +657,19 @@ export default async function handler(req, res) {
       upserts.push({
         page_url: meta.page_url,
         keyword: meta.keyword,
-        search_volume: hit?.search_volume ?? null,
-        cpc: hit?.cpc ?? null,
-        competition: hit?.competition ?? null,
+        search_volume: hit?.search_volume ?? row?.search_volume ?? null,
+        cpc: hit?.cpc ?? row?.cpc ?? null,
+        competition: hit?.competition ?? row?.competition ?? null,
         rank_position: serp != null && Number.isFinite(serp) ? serp : row?.rank_position ?? null,
-        estimated_traffic: est != null && Number.isFinite(est) ? Math.round(est) : null,
-        url_estimated_traffic: urlEst != null && Number.isFinite(urlEst) ? Math.round(urlEst) : null,
-        page_backlinks_sample: pbl != null && Number.isFinite(Number(pbl)) ? Math.round(Number(pbl)) : null,
+        estimated_traffic: est != null && Number.isFinite(est) ? Math.round(est) : row?.estimated_traffic ?? null,
+        url_estimated_traffic: urlEst != null && Number.isFinite(urlEst) ? Math.round(urlEst) : row?.url_estimated_traffic ?? null,
+        page_backlinks_sample:
+          pbl != null && Number.isFinite(Number(pbl))
+            ? Math.round(Number(pbl))
+            : row?.page_backlinks_sample ?? null,
         moz_domain_authority: domMoz,
         provider: 'keywordseverywhere',
-        raw_payload: hit?.raw ? hit.raw : null,
+        raw_payload: hit?.raw ? hit.raw : row?.raw_payload ?? null,
         fetched_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       });
