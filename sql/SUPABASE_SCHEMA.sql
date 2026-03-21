@@ -148,6 +148,9 @@ CREATE TABLE IF NOT EXISTS public.keyword_target_metrics_cache (
   cpc NUMERIC(14, 6),
   competition NUMERIC(14, 6),
   rank_position NUMERIC(10, 2),
+  estimated_traffic INTEGER,
+  url_estimated_traffic INTEGER,
+  page_backlinks_sample INTEGER,
   moz_domain_authority INTEGER,
   provider TEXT NOT NULL DEFAULT 'keywordseverywhere',
   raw_payload JSONB,
@@ -155,6 +158,18 @@ CREATE TABLE IF NOT EXISTS public.keyword_target_metrics_cache (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT keyword_target_metrics_cache_page_keyword UNIQUE (page_url, keyword)
 );
+
+CREATE TABLE IF NOT EXISTS public.ke_domain_metrics_cache (
+  domain_host TEXT PRIMARY KEY,
+  moz_domain_authority INTEGER,
+  referring_domains_sample INTEGER,
+  raw_payload JSONB,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ke_domain_metrics_cache_fetched_at
+  ON public.ke_domain_metrics_cache (fetched_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_keyword_target_metrics_cache_page_url
   ON public.keyword_target_metrics_cache (page_url);

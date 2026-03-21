@@ -6058,6 +6058,19 @@
               Filled from the same Keywords Everywhere pull as <strong>Kw vol</strong> (not per-URL in the table).
             </div>
           </div>
+          <div class="card">
+            <div style="font-size: 0.9rem; color: var(--dark-text-muted); margin-bottom: 0.25rem;">Domain backlinks (sample)</div>
+            <div style="font-size: 0.75rem; color: var(--dark-text-muted); margin-bottom: 0.5rem;">Keywords Everywhere <code>get_unique_domain_backlinks</code> — count is rows returned (not necessarily total backlinks).</div>
+            <div id="traditional-seo-domain-bl-ring" class="dashboard-dial-ring traditional-seo-metric-placeholder" data-pct="0" data-rag="neutral" style="margin: 0 auto; width: 180px; height: 180px;">
+              <div class="dashboard-dial-inner">
+                <div id="traditional-seo-domain-bl-value" class="dashboard-dial-value">—</div>
+                <div id="traditional-seo-domain-bl-delta" class="dashboard-dial-delta" data-dir="flat">Run ③ to load</div>
+              </div>
+            </div>
+            <div id="traditional-seo-domain-bl-meta" style="margin-top: 0.75rem; font-size: 0.76rem; color: var(--dark-text-muted); text-align: center; line-height: 1.35;">
+              Updated with Moz DA on the same domain refresh.
+            </div>
+          </div>
           <div class="card" style="display: flex; flex-direction: column; justify-content: center;">
             <div style="font-size: 0.85rem; color: var(--dark-text-muted); margin-bottom: 0.35rem;">Rules Enabled</div>
             <div id="traditional-seo-enabled-count" style="font-size: 1.8rem; font-weight: 800;">—</div>
@@ -6116,7 +6129,7 @@
             <strong>② (green)</strong> = quick rescore: saved audit + <strong>full extractability refresh</strong> for <em>every</em> URL (deduped), in <strong>batches of 25</strong>, then Traditional SEO scoring. Slower but always matches live HTML.
             <strong>① (amber)</strong> = full site audit refresh, <em>then</em> Traditional SEO in one go — use after big site/schema changes or when crawl/GSC data feels stale.
             After <strong>①</strong>, you do <strong>not</strong> need to click <strong>②</strong>.
-            <strong>③ (blue)</strong> = <strong>keyword demand only</strong>: calls <strong>Keywords Everywhere</strong> for URL+target-keyword pairs (missing/stale in Supabase), then fills <strong>Kw vol</strong> and updates the <strong>Moz domain authority</strong> tile when KE returns it. Does <em>not</em> change Traditional SEO pass/fail. <strong>Rank</strong> stays blank until a separate source writes it.
+            <strong>③ (blue)</strong> = <strong>keyword demand + KE enrich</strong>: volume (get_keyword_data), per-URL traffic + keyword traffic/SERP (get_url_traffic_metrics + get_url_keywords), page backlink samples (get_page_backlinks), domain Moz + referring-domain sample (get_unique_domain_backlinks). Uses credits per <a href="https://api.keywordseverywhere.com/docs/#/" target="_blank" rel="noopener noreferrer">KE docs</a>. Does <em>not</em> change Traditional SEO pass/fail.
           </p>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
             <button id="traditional-seo-run-audit-btn" class="btn traditional-seo-run-step2-btn" type="button" style="padding: 0.45rem 0.9rem;"
@@ -6241,14 +6254,17 @@
                   <th style="width: 10%;"><button type="button" class="traditional-seo-sort-btn" data-sort="status">Status <span class="sort-ind">↕</span></button></th>
                   <th style="width: 21%;"><button type="button" class="traditional-seo-sort-btn" data-sort="url">URL <span class="sort-ind">↕</span></button></th>
                   <th style="width: 12%;"><button type="button" class="traditional-seo-sort-btn" data-sort="target_keyword">Target kw <span class="sort-ind">↕</span></button></th>
-                  <th style="width: 7%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_volume" title="Monthly search volume from cached Keywords Everywhere pull (manual refresh).">Kw vol <span class="sort-ind">↕</span></button></th>
-                  <th style="width: 6%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_rank" title="Optional rank position when stored in cache (not from Keywords Everywhere keyword API).">Rank <span class="sort-ind">↕</span></button></th>
-                  <th style="width: 8%;"><button type="button" class="traditional-seo-sort-btn" data-sort="clicks">Clicks <span class="sort-ind">↕</span></button></th>
-                  <th style="width: 8%;"><button type="button" class="traditional-seo-sort-btn" data-sort="impressions">Impr. <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 6%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_volume" title="Monthly search volume (Keywords Everywhere).">Kw vol <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 6%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_est_traffic" title="Estimated monthly traffic for this target keyword on this URL (KE get_url_keywords, UK).">Est. traf <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 5%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_rank" title="SERP position for this keyword on this URL (KE get_url_keywords, UK).">SERP <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 6%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_url_traffic" title="Total estimated monthly traffic for the page (KE get_url_traffic_metrics, UK).">URL traf <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 5%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_page_bl" title="Backlink rows returned for this page (KE get_page_backlinks sample; not total backlinks).">Pg bl <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 7%;"><button type="button" class="traditional-seo-sort-btn" data-sort="clicks">Clicks <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 7%;"><button type="button" class="traditional-seo-sort-btn" data-sort="impressions">Impr. <span class="sort-ind">↕</span></button></th>
                 </tr>
               </thead>
               <tbody id="traditional-seo-results-body">
-                <tr><td colspan="11" style="color: var(--dark-text-muted);">Run Traditional SEO Audit to populate this table.</td></tr>
+                <tr><td colspan="14" style="color: var(--dark-text-muted);">Run Traditional SEO Audit to populate this table.</td></tr>
               </tbody>
             </table>
           </div>
@@ -70152,7 +70168,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       keywordMetricsLookupInFlight: false,
       keywordMetricsRefreshInFlight: false,
       keywordMetricsStaleDays: 30,
-      keywordMetricsLastNote: ''
+      keywordMetricsLastNote: '',
+      /** Domain-level KE cache row (Moz DA + referring domains sample) from keyword-target-metrics API. */
+      keDomainMetrics: null
     };
 
     const TRADITIONAL_SEO_EVAL_PROGRESS = {
@@ -70419,23 +70437,31 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const deltaEl = document.getElementById('traditional-seo-link-rank-delta');
       const metaEl = document.getElementById('traditional-seo-moz-da-meta');
       if (!ring || !valueEl) return;
-      const metricMap = TRADITIONAL_SEO_STATE.keywordMetricsByUrl instanceof Map
-        ? TRADITIONAL_SEO_STATE.keywordMetricsByUrl
-        : null;
+      const dm = TRADITIONAL_SEO_STATE.keDomainMetrics;
       let bestMoz = null;
       let bestTs = 0;
-      if (metricMap) {
-        metricMap.forEach((m) => {
-          const da = m?.moz_domain_authority;
-          const n = traditionalSeoToNum(da, NaN);
-          if (!Number.isFinite(n)) return;
-          const t = m?.fetched_at ? Date.parse(String(m.fetched_at)) : 0;
-          const ts = Number.isFinite(t) ? t : 0;
-          if (ts >= bestTs) {
-            bestTs = ts;
-            bestMoz = Math.max(0, Math.min(100, Math.round(n)));
-          }
-        });
+      if (dm?.moz_domain_authority != null && Number.isFinite(Number(dm.moz_domain_authority))) {
+        bestMoz = Math.max(0, Math.min(100, Math.round(Number(dm.moz_domain_authority))));
+        const t = dm?.fetched_at ? Date.parse(String(dm.fetched_at)) : 0;
+        bestTs = Number.isFinite(t) ? t : 0;
+      }
+      if (bestMoz == null) {
+        const metricMap = TRADITIONAL_SEO_STATE.keywordMetricsByUrl instanceof Map
+          ? TRADITIONAL_SEO_STATE.keywordMetricsByUrl
+          : null;
+        if (metricMap) {
+          metricMap.forEach((m) => {
+            const da = m?.moz_domain_authority;
+            const n = traditionalSeoToNum(da, NaN);
+            if (!Number.isFinite(n)) return;
+            const t = m?.fetched_at ? Date.parse(String(m.fetched_at)) : 0;
+            const ts = Number.isFinite(t) ? t : 0;
+            if (ts >= bestTs) {
+              bestTs = ts;
+              bestMoz = Math.max(0, Math.min(100, Math.round(n)));
+            }
+          });
+        }
       }
       if (bestMoz == null) {
         ring.style.setProperty('--pct', '0');
@@ -70447,7 +70473,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           deltaEl.dataset.dir = 'flat';
         }
         if (metaEl) {
-          metaEl.textContent = 'Moz DA is taken from the Keywords Everywhere payload when the API includes it (same refresh as Kw vol).';
+          metaEl.textContent =
+            'Moz DA is read from the Keywords Everywhere domain backlink response when present (see ke_domain_metrics_cache). Apply sql/20260322_ke_traffic_backlink_domain_cache.sql if missing.';
         }
         return;
       }
@@ -70468,6 +70495,51 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
       if (metaEl) {
         metaEl.innerHTML = `Updated <strong>${escapeHtml(dateStr)}</strong> · Keywords Everywhere`;
+      }
+    }
+
+    function renderTraditionalSeoDomainBacklinksTile() {
+      const ring = document.getElementById('traditional-seo-domain-bl-ring');
+      const valueEl = document.getElementById('traditional-seo-domain-bl-value');
+      const deltaEl = document.getElementById('traditional-seo-domain-bl-delta');
+      const metaEl = document.getElementById('traditional-seo-domain-bl-meta');
+      if (!ring || !valueEl) return;
+      const dm = TRADITIONAL_SEO_STATE.keDomainMetrics;
+      const n = dm?.referring_domains_sample;
+      const num = traditionalSeoToNum(n, NaN);
+      let dateStr = '—';
+      const t = dm?.fetched_at ? Date.parse(String(dm.fetched_at)) : 0;
+      if (Number.isFinite(t) && t > 0) {
+        const d = new Date(t);
+        if (!Number.isNaN(d.getTime())) {
+          dateStr = d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+      }
+      if (!Number.isFinite(num) || num < 0) {
+        ring.style.setProperty('--pct', '0');
+        ring.dataset.rag = 'neutral';
+        ring.classList.add('traditional-seo-metric-placeholder');
+        valueEl.textContent = '—';
+        if (deltaEl) {
+          deltaEl.textContent = 'Run ③ to load';
+          deltaEl.dataset.dir = 'flat';
+        }
+        if (metaEl) {
+          metaEl.textContent = 'Sample size from get_unique_domain_backlinks (not a full-site total).';
+        }
+        return;
+      }
+      ring.classList.remove('traditional-seo-metric-placeholder');
+      const pct = Math.max(0, Math.min(100, Math.round((Math.log10(num + 1) / Math.log10(2001)) * 100)));
+      ring.style.setProperty('--pct', String(pct));
+      ring.dataset.rag = 'neutral';
+      valueEl.textContent = String(Math.round(num));
+      if (deltaEl) {
+        deltaEl.textContent = 'Ref. domains (sample)';
+        deltaEl.dataset.dir = 'flat';
+      }
+      if (metaEl) {
+        metaEl.innerHTML = `Updated <strong>${escapeHtml(dateStr)}</strong> · KE sample (see tooltip on column <strong>Pg bl</strong>)`;
       }
     }
 
@@ -70906,6 +70978,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       TRADITIONAL_SEO_STATE.keywordMetricsByUrl = map;
       const sd = traditionalSeoToNum(payload?.staleDays, 0);
       if (sd > 0) TRADITIONAL_SEO_STATE.keywordMetricsStaleDays = sd;
+      if (payload && Object.prototype.hasOwnProperty.call(payload, 'domainMetrics')) {
+        TRADITIONAL_SEO_STATE.keDomainMetrics = payload.domainMetrics || null;
+      }
     }
 
     async function traditionalSeoPostKeywordMetrics(action, pairs, force) {
@@ -70915,12 +70990,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       let refreshedKeywords = 0;
       let upsertedRows = 0;
       let staleDaysOut = null;
+      let mergedDomainMetrics = null;
       for (let i = 0; i < pairs.length; i += CHUNK) {
         const slice = pairs.slice(i, i + CHUNK);
         const res = await fetch(traditionalSeoApiPath('/api/aigeo/keyword-target-metrics'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action, pairs: slice, force: force === true })
+          body: JSON.stringify({
+            action,
+            pairs: slice,
+            force: force === true,
+            propertyDomain: traditionalSeoPropertyHostname()
+          })
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok || json?.status === 'error') {
@@ -70930,12 +71011,20 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         lastMeta = json?.meta || lastMeta;
         if (data.staleDays != null) staleDaysOut = data.staleDays;
         Object.assign(merged, data.byPageUrl || {});
+        if (data.domainMetrics) mergedDomainMetrics = data.domainMetrics;
         if (action === 'refresh') {
           refreshedKeywords = Math.max(refreshedKeywords, traditionalSeoToNum(data.refreshedKeywords, 0));
           upsertedRows += traditionalSeoToNum(data.upsertedRows, 0);
         }
       }
-      return { merged, lastMeta, refreshedKeywords, upsertedRows, staleDays: staleDaysOut };
+      return {
+        merged,
+        lastMeta,
+        refreshedKeywords,
+        upsertedRows,
+        staleDays: staleDaysOut,
+        domainMetrics: mergedDomainMetrics
+      };
     }
 
     async function traditionalSeoKeywordMetricsLookupSilently() {
@@ -70945,8 +71034,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         TRADITIONAL_SEO_STATE.keywordMetricsByUrl = new Map();
         return;
       }
-      const { merged, lastMeta, staleDays } = await traditionalSeoPostKeywordMetrics('lookup', pairs, false);
-      traditionalSeoApplyKeywordMetricsPayload({ byPageUrl: merged, staleDays });
+      const { merged, lastMeta, staleDays, domainMetrics } = await traditionalSeoPostKeywordMetrics('lookup', pairs, false);
+      traditionalSeoApplyKeywordMetricsPayload({ byPageUrl: merged, staleDays, domainMetrics });
       if (lastMeta?.warning) TRADITIONAL_SEO_STATE.keywordMetricsLastNote = String(lastMeta.warning);
     }
 
@@ -70988,13 +71077,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (typeof window.showStatus === 'function') {
           window.showStatus('Refreshing keyword demand (Keywords Everywhere) for missing/stale rows…', 'info');
         }
-        const { merged, refreshedKeywords, upsertedRows, lastMeta, staleDays } = await traditionalSeoPostKeywordMetrics(
-          'refresh',
-          pairs,
-          false
-        );
-        traditionalSeoApplyKeywordMetricsPayload({ byPageUrl: merged, staleDays });
-        if (lastMeta?.warning) TRADITIONAL_SEO_STATE.keywordMetricsLastNote = String(lastMeta.warning);
+        const { merged, refreshedKeywords, upsertedRows, lastMeta, staleDays, domainMetrics } =
+          await traditionalSeoPostKeywordMetrics('refresh', pairs, false);
+        traditionalSeoApplyKeywordMetricsPayload({ byPageUrl: merged, staleDays, domainMetrics });
+        if (lastMeta?.warning) {
+          TRADITIONAL_SEO_STATE.keywordMetricsLastNote = String(lastMeta.warning);
+        } else if (lastMeta?.keNotes?.length) {
+          TRADITIONAL_SEO_STATE.keywordMetricsLastNote = String(lastMeta.keNotes.slice(0, 3).join(' · '));
+        }
         if (typeof window.showStatus === 'function') {
           window.showStatus(
             `Keyword demand updated (rows upserted: ${upsertedRows}, KE keywords batched: ${refreshedKeywords}).`,
@@ -71018,23 +71108,35 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     function traditionalSeoKeywordDemandCellsForRow(row) {
       const isSitewide = String(row?.tier || '').toLowerCase() === 'sitewide';
       if (isSitewide) {
-        return { vol: '—', rank: '—' };
+        return { vol: '—', est: '—', rank: '—', urlTraf: '—', pageBl: '—' };
       }
       const url = String(row?.url || '').trim();
       const m = TRADITIONAL_SEO_STATE.keywordMetricsByUrl instanceof Map
         ? TRADITIONAL_SEO_STATE.keywordMetricsByUrl.get(url)
         : null;
       if (!m) {
-        return { vol: '—', rank: '—' };
+        return { vol: '—', est: '—', rank: '—', urlTraf: '—', pageBl: '—' };
       }
       const vol =
         m.search_volume != null && Number.isFinite(Number(m.search_volume))
           ? formatTraditionalSeoSearchVolume(m.search_volume)
           : '—';
+      const est =
+        m.estimated_traffic != null && Number.isFinite(Number(m.estimated_traffic))
+          ? formatTraditionalSeoSearchVolume(m.estimated_traffic)
+          : '—';
       const rank = m.rank_position != null && Number.isFinite(Number(m.rank_position))
-        ? `${Number(m.rank_position)}`
+        ? `${Math.round(Number(m.rank_position))}`
         : '—';
-      return { vol, rank };
+      const urlTraf =
+        m.url_estimated_traffic != null && Number.isFinite(Number(m.url_estimated_traffic))
+          ? formatTraditionalSeoSearchVolume(m.url_estimated_traffic)
+          : '—';
+      const pageBl =
+        m.page_backlinks_sample != null && Number.isFinite(Number(m.page_backlinks_sample))
+          ? `${Math.round(Number(m.page_backlinks_sample))}`
+          : '—';
+      return { vol, est, rank, urlTraf, pageBl };
     }
 
     function traditionalSeoStatusPill(status) {
@@ -72608,7 +72710,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           diff = scoreFor(a) - scoreFor(b);
         } else if (sortKey === 'clicks' || sortKey === 'impressions') {
           diff = traditionalSeoToNum(a?.[sortKey], 0) - traditionalSeoToNum(b?.[sortKey], 0);
-        } else if (sortKey === 'kw_volume' || sortKey === 'kw_rank') {
+        } else if (
+          sortKey === 'kw_volume' ||
+          sortKey === 'kw_rank' ||
+          sortKey === 'kw_est_traffic' ||
+          sortKey === 'kw_url_traffic' ||
+          sortKey === 'kw_page_bl'
+        ) {
           const metricMap = TRADITIONAL_SEO_STATE.keywordMetricsByUrl instanceof Map
             ? TRADITIONAL_SEO_STATE.keywordMetricsByUrl
             : null;
@@ -72617,6 +72725,21 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             const m = metricMap && url ? metricMap.get(url) : null;
             if (sortKey === 'kw_volume') {
               const v = m?.search_volume;
+              const n = Number(v);
+              return Number.isFinite(n) ? n : -1;
+            }
+            if (sortKey === 'kw_est_traffic') {
+              const v = m?.estimated_traffic;
+              const n = Number(v);
+              return Number.isFinite(n) ? n : -1;
+            }
+            if (sortKey === 'kw_url_traffic') {
+              const v = m?.url_estimated_traffic;
+              const n = Number(v);
+              return Number.isFinite(n) ? n : -1;
+            }
+            if (sortKey === 'kw_page_bl') {
+              const v = m?.page_backlinks_sample;
               const n = Number(v);
               return Number.isFinite(n) ? n : -1;
             }
@@ -72657,7 +72780,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
       if (body) {
         if (!filtered.length) {
-          body.innerHTML = '<tr><td colspan="11" style="color: var(--dark-text-muted);">No rows match current filters.</td></tr>';
+          body.innerHTML = '<tr><td colspan="14" style="color: var(--dark-text-muted);">No rows match current filters.</td></tr>';
         } else {
           const scoreMap = TRADITIONAL_SEO_STATE.pageScoreByUrl instanceof Map ? TRADITIONAL_SEO_STATE.pageScoreByUrl : null;
           const isSummaryRow = (r) => String(r?.rule_key || '') === '__page_summary__';
@@ -72698,7 +72821,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             <td style="word-break: break-all;">${urlCell}</td>
             <td style="font-size:0.76rem;color:var(--dark-text-muted);max-width:12rem;">${kwCell || '—'}</td>
             <td style="font-size:0.76rem;white-space:nowrap;">${escapeHtml(kd.vol)}</td>
+            <td style="font-size:0.76rem;white-space:nowrap;">${escapeHtml(kd.est)}</td>
             <td style="font-size:0.76rem;white-space:nowrap;">${escapeHtml(kd.rank)}</td>
+            <td style="font-size:0.76rem;white-space:nowrap;">${escapeHtml(kd.urlTraf)}</td>
+            <td style="font-size:0.76rem;white-space:nowrap;">${escapeHtml(kd.pageBl)}</td>
             <td>${Math.round(traditionalSeoToNum(row.clicks, 0))}</td>
             <td>${Math.round(traditionalSeoToNum(row.impressions, 0))}</td>
           </tr>
@@ -72726,6 +72852,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
       updateTraditionalSeoSortHeaderState();
       renderTraditionalSeoMozDaTile();
+      renderTraditionalSeoDomainBacklinksTile();
     }
 
     function traditionalSeoEvalProgressClearTimer() {
@@ -73539,7 +73666,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             TRADITIONAL_SEO_STATE.sort.direction = TRADITIONAL_SEO_STATE.sort.direction === 'asc' ? 'desc' : 'asc';
           } else {
             TRADITIONAL_SEO_STATE.sort.key = nextKey;
-            const descKeys = ['clicks', 'impressions', 'kw_volume'];
+            const descKeys = ['clicks', 'impressions', 'kw_volume', 'kw_est_traffic', 'kw_url_traffic', 'kw_page_bl'];
             TRADITIONAL_SEO_STATE.sort.direction = descKeys.includes(nextKey) ? 'desc' : 'asc';
           }
           renderTraditionalSeoResultsTable();
