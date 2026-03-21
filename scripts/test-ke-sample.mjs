@@ -108,6 +108,30 @@ function summarize(label, { ok, status, json }) {
   }
 }
 
+function numericLeaves(obj, maxKeys = 40) {
+  const out = [];
+  const walk = (o, prefix, depth) => {
+    if (out.length >= maxKeys || depth > 4 || o == null) return;
+    if (Array.isArray(o)) {
+      out.push(`${prefix}[] len=${o.length}`);
+      return;
+    }
+    if (typeof o !== 'object') return;
+    for (const [k, v] of Object.entries(o)) {
+      const p = prefix ? `${prefix}.${k}` : k;
+      if (typeof v === 'number' && Number.isFinite(v)) {
+        out.push(`${p}=${v}`);
+      } else if (typeof v === 'string' && /^\d+$/.test(v)) {
+        out.push(`${p}="${v}"`);
+      } else if (v && typeof v === 'object' && !Array.isArray(v)) {
+        walk(v, p, depth + 1);
+      }
+    }
+  };
+  walk(obj, '', 0);
+  return out;
+}
+
 async function main() {
   console.log('KE sample:', { sampleUrlRaw, sampleUrl, sampleKw, domain, country, kwCountry, urlCountry });
 
@@ -158,6 +182,30 @@ async function main() {
     num: 15
   });
   summarize('get_unique_domain_backlinks', dom);
+  if (dom.ok && dom.json?.data && Array.isArray(dom.json.data)) {
+    console.log('  data row count:', dom.json.data.length);
+    console.log('  numeric-ish top-level (non-array):', numericLeaves(dom.json).slice(0, 25).join('\n    ') || '(none)');
+  }
+
+  const domAll = await postForm(`${BASE}/get_domain_backlinks`, {
+    domain,
+    num: 1
+  });
+  summarize('get_domain_backlinks (num=1)', domAll);
+  if (domAll.ok && domAll.json && typeof domAll.json === 'object') {
+    console.log('  numeric-ish fields:', numericLeaves(domAll.json).slice(0, 35).join('\n    ') || '(none)');
+    if (Array.isArray(domAll.json.data)) console.log('  data row count:', domAll.json.data.length);
+  }
+
+  const domAll15 = await postForm(`${BASE}/get_domain_backlinks`, {
+    domain,
+    num: 15
+  });
+  summarize('get_domain_backlinks (num=15)', domAll15);
+  if (domAll15.ok && domAll15.json && typeof domAll15.json === 'object') {
+    console.log('  numeric-ish fields:', numericLeaves(domAll15.json).slice(0, 35).join('\n    ') || '(none)');
+    if (Array.isArray(domAll15.json.data)) console.log('  data row count:', domAll15.json.data.length);
+  }
 }
 
 main().catch((e) => {
