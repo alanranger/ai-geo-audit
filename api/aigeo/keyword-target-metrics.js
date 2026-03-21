@@ -153,6 +153,37 @@ function competitionFromKeItem(item) {
   return toNum(c, null);
 }
 
+/** KE payload shape varies; try common keys (0–100). */
+function mozDaFromKeItem(item) {
+  if (!item || typeof item !== 'object') return null;
+  const asInt = (v) => {
+    const n = toNum(v, null);
+    if (n == null || !Number.isFinite(n)) return null;
+    const r = Math.round(n);
+    if (r < 0 || r > 100) return null;
+    return r;
+  };
+  const mozObj = item.moz && typeof item.moz === 'object' ? item.moz : null;
+  const candidates = [
+    item.moz_da,
+    item.mozDA,
+    item.moz_domain_authority,
+    item.domain_authority,
+    item.domainAuthority,
+    item.da,
+    mozObj?.da,
+    mozObj?.domain_authority,
+    item.metrics?.moz_da,
+    item.metrics?.domain_authority,
+    typeof item.moz === 'number' ? item.moz : null
+  ];
+  for (let i = 0; i < candidates.length; i += 1) {
+    const hit = asInt(candidates[i]);
+    if (hit != null) return hit;
+  }
+  return null;
+}
+
 function keywordFromKeItem(item) {
   return normalizeKeyword(item?.keyword || item?.kw || item?.term || '');
 }
@@ -209,11 +240,30 @@ async function fetchKeywordsEverywhereVolume(keywords) {
         search_volume: volumeFromKeItem(item),
         cpc: cpcFromKeItem(item),
         competition: competitionFromKeItem(item),
+        moz_domain_authority: mozDaFromKeItem(item),
         raw: item
       });
     });
   }
   return map;
+}
+
+function propagateSharedMozDa(map) {
+  if (!(map instanceof Map) || !map.size) return;
+  let shared = null;
+  map.forEach((v) => {
+    if (shared != null) return;
+    const mz = v?.moz_domain_authority;
+    if (mz == null || !Number.isFinite(Number(mz))) return;
+    const r = Math.round(Number(mz));
+    if (r >= 0 && r <= 100) shared = r;
+  });
+  if (shared == null) return;
+  map.forEach((v) => {
+    if (v && (v.moz_domain_authority == null || !Number.isFinite(Number(v.moz_domain_authority)))) {
+      v.moz_domain_authority = shared;
+    }
+  });
 }
 
 export default async function handler(req, res) {
@@ -263,6 +313,7 @@ export default async function handler(req, res) {
     let keMap = new Map();
     if (uniqueKw.length) {
       keMap = await fetchKeywordsEverywhereVolume(uniqueKw);
+      propagateSharedMozDa(keMap);
     }
 
     const upserts = [];
@@ -271,6 +322,7 @@ export default async function handler(req, res) {
       const row = existing.find((r) => `${r.page_url}\n${r.keyword}` === key);
       if (!force && row && !isStaleRow(row, nowMs)) return;
       const hit = keMap.get(meta.keyword.toLowerCase());
+      const mozFromKe = hit?.moz_domain_authority;
       upserts.push({
         page_url: meta.page_url,
         keyword: meta.keyword,
@@ -278,7 +330,10 @@ export default async function handler(req, res) {
         cpc: hit?.cpc ?? null,
         competition: hit?.competition ?? null,
         rank_position: row?.rank_position ?? null,
-        moz_domain_authority: row?.moz_domain_authority ?? null,
+        moz_domain_authority:
+          mozFromKe != null && Number.isFinite(Number(mozFromKe))
+            ? Math.round(Number(mozFromKe))
+            : row?.moz_domain_authority ?? null,
         provider: 'keywordseverywhere',
         raw_payload: hit?.raw ? hit.raw : null,
         fetched_at: new Date().toISOString(),
