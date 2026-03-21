@@ -72480,9 +72480,16 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const raw = m?.page_backlinks_json;
       const items = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? Object.values(raw) : [];
       urlEl.textContent = url;
+      const sampleN = traditionalSeoToNum(m?.page_backlinks_sample, 0);
       if (!items.length) {
-        listEl.innerHTML =
-          '<p style="color:#94a3b8;margin:0;">No backlink sample stored for this URL. Apply <code>sql/20260323_page_backlinks_json.sql</code> in Supabase if the column is missing, then run <strong>③ Refresh keyword demand (KE)</strong>.</p>';
+        if (sampleN > 0) {
+          listEl.innerHTML =
+            `<p style="color:#94a3b8;margin:0;line-height:1.5;">Keywords Everywhere reported <strong>${sampleN}</strong> row(s) in the last <strong>Pg bl</strong> sample for this page, but the detailed list is not in the database yet.</p>` +
+            '<p style="color:#94a3b8;margin:0.75rem 0 0;line-height:1.5;">Apply <code>sql/20260323_page_backlinks_json.sql</code> in Supabase if you have not, then click <strong>③ Refresh keyword demand (KE)</strong> once to backfill JSON. The next refresh will re-fetch pages that have a count but no stored rows.</p>';
+        } else {
+          listEl.innerHTML =
+            '<p style="color:#94a3b8;margin:0;">No backlink sample for this URL. Run <strong>③ Refresh keyword demand (KE)</strong> after the cache migration is applied.</p>';
+        }
       } else {
         listEl.innerHTML = items.map((it, i) => traditionalSeoFormatOneBacklinkBlock(it, i)).join('');
       }
@@ -72971,12 +72978,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               : blJsonRaw && typeof blJsonRaw === 'object'
                 ? Object.values(blJsonRaw)
                 : [];
+            const nBlCount = traditionalSeoToNum(mForBl?.page_backlinks_sample, 0);
             const blSampleCell = isSummaryRow(row)
               ? '—'
               : isSitewide
                 ? '—'
-                : blArr.length
-                  ? `<button type="button" class="btn traditional-seo-backlinks-view-btn" style="padding:0.25rem 0.5rem;font-size:0.72rem;" data-page-url="${viewAttr}">View (${blArr.length})</button>`
+                : blArr.length || nBlCount > 0
+                  ? `<button type="button" class="btn traditional-seo-backlinks-view-btn" style="padding:0.25rem 0.5rem;font-size:0.72rem;" data-page-url="${viewAttr}">View (${blArr.length || nBlCount})</button>`
                   : '—';
             const ruleCell = isSummaryRow(row)
               ? `<span style="color:var(--dark-text-muted);font-size:0.78rem;">${escapeHtml(String(row.summary_total || 0))} checks</span>`

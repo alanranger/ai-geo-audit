@@ -88,10 +88,24 @@ function isStaleRow(row, nowMs) {
   return nowMs - t > staleDays() * 86400000;
 }
 
-/** Rows created before URL-traffic enrich: fresh `fetched_at` but new columns still null — must re-run ③ enrich. */
+function rowHasBacklinksJsonPayload(row) {
+  const j = row?.page_backlinks_json;
+  if (j == null) return false;
+  if (Array.isArray(j)) return j.length > 0;
+  if (typeof j === 'object') return Object.keys(j).length > 0;
+  return false;
+}
+
+/**
+ * Rows that still need a KE pass: missing URL traffic, or Pg bl count without stored JSON
+ * (e.g. shipped before page_backlinks_json column / UI).
+ */
 function rowNeedsKeUrlEnrichment(row) {
   if (!row) return false;
-  return row.url_estimated_traffic == null;
+  if (row.url_estimated_traffic == null) return true;
+  const n = toNum(row.page_backlinks_sample, null);
+  if (n != null && n > 0 && !rowHasBacklinksJsonPayload(row)) return true;
+  return false;
 }
 
 function domainNeedsKeFetch(domainRow, force, nowMs) {
