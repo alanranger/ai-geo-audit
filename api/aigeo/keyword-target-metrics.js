@@ -167,6 +167,11 @@ function buildByPageUrlMap(rows, pairs, nowMs) {
       estimated_traffic: row?.estimated_traffic ?? null,
       url_estimated_traffic: row?.url_estimated_traffic ?? null,
       page_backlinks_sample: row?.page_backlinks_sample ?? null,
+      page_backlinks_json: Array.isArray(row?.page_backlinks_json)
+        ? row.page_backlinks_json
+        : row?.page_backlinks_json && typeof row.page_backlinks_json === 'object'
+          ? Object.values(row.page_backlinks_json)
+          : null,
       moz_domain_authority: row?.moz_domain_authority ?? null,
       provider: row?.provider || null,
       fetched_at: row?.fetched_at || null,
@@ -393,6 +398,17 @@ async function fetchUrlKeywordsForPage(apiKey, pageUrl, country, num) {
   return extractKeItems(json);
 }
 
+function sanitizeBacklinksForDb(list, maxItems) {
+  const cap = Math.max(1, Math.min(200, maxItems || 25));
+  const src = Array.isArray(list) ? list.slice(0, cap) : [];
+  try {
+    return JSON.parse(JSON.stringify(src));
+  } catch {
+    return [];
+  }
+}
+
+/** Returns { count, items } — items are a capped JSON-safe array for Supabase jsonb. */
 async function fetchPageBacklinksSample(apiKey, pageUrl, num) {
   const { res, json, text } = await kePostForm(apiKey, KE_PAGE_BACKLINKS, {
     page: pageUrl,
@@ -400,7 +416,8 @@ async function fetchPageBacklinksSample(apiKey, pageUrl, num) {
   });
   if (!res.ok) throw keError(res, json, text);
   const list = extractKeItems(json);
-  return Array.isArray(list) ? list.length : 0;
+  const items = sanitizeBacklinksForDb(list, num);
+  return { count: items.length, items };
 }
 
 function extractMozDaDeep(obj, depth = 0, parentKey = '') {
@@ -664,7 +681,20 @@ export default async function handler(req, res) {
       const est = kwHit ? toNum(kwHit.estimated_monthly_traffic, null) : null;
       const serp = kwHit ? toNum(kwHit.serp_position, null) : null;
       const urlEst = toNum(traffic.url_estimated_traffic, null);
-      const pbl = pageBlMap.has(canonical) ? pageBlMap.get(canonical) : row?.page_backlinks_sample ?? null;
+      let pblCount = row?.page_backlinks_sample ?? null;
+      let pblJson = Array.isArray(row?.page_backlinks_json)
+        ? row.page_backlinks_json
+        : row?.page_backlinks_json && typeof row.page_backlinks_json === 'object'
+          ? Object.values(row.page_backlinks_json)
+          : null;
+      const pbPack = pageBlMap.get(canonical);
+      if (pbPack && typeof pbPack === 'object' && !Array.isArray(pbPack)) {
+        pblCount = Number.isFinite(Number(pbPack.count)) ? Math.round(Number(pbPack.count)) : pblCount;
+        pblJson = Array.isArray(pbPack.items) ? pbPack.items : pblJson;
+      } else if (pbPack === null) {
+        pblCount = null;
+        pblJson = null;
+      }
 
       const domMoz =
         domainMetricsForRows?.moz_domain_authority != null &&
@@ -682,9 +712,10 @@ export default async function handler(req, res) {
         estimated_traffic: est != null && Number.isFinite(est) ? Math.round(est) : row?.estimated_traffic ?? null,
         url_estimated_traffic: urlEst != null && Number.isFinite(urlEst) ? Math.round(urlEst) : row?.url_estimated_traffic ?? null,
         page_backlinks_sample:
-          pbl != null && Number.isFinite(Number(pbl))
-            ? Math.round(Number(pbl))
+          pblCount != null && Number.isFinite(Number(pblCount))
+            ? Math.round(Number(pblCount))
             : row?.page_backlinks_sample ?? null,
+        page_backlinks_json: pblJson != null ? pblJson : row?.page_backlinks_json ?? null,
         moz_domain_authority: domMoz,
         provider: 'keywordseverywhere',
         raw_payload: hit?.raw ? hit.raw : row?.raw_payload ?? null,
@@ -729,7 +760,7 @@ export default async function handler(req, res) {
         meta: {
           generatedAt: new Date().toISOString(),
           warning:
-            'keyword_target_metrics_cache or ke_domain_metrics_cache missing — apply sql/20260321_keyword_target_metrics_cache.sql and sql/20260322_ke_traffic_backlink_domain_cache.sql'
+            'keyword_target_metrics_cache or ke_domain_metrics_cache missing — apply sql/20260321_keyword_target_metrics_cache.sql, sql/20260322_ke_traffic_backlink_domain_cache.sql, and sql/20260323_page_backlinks_json.sql'
         }
       });
     }

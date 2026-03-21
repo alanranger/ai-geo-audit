@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS public.keyword_target_metrics_cache (
   estimated_traffic INTEGER,
   url_estimated_traffic INTEGER,
   page_backlinks_sample INTEGER,
+  page_backlinks_json JSONB,
   moz_domain_authority INTEGER,
   provider TEXT NOT NULL DEFAULT 'keywordseverywhere',
   raw_payload JSONB,
