@@ -6176,7 +6176,7 @@
             <strong>② (green)</strong> = quick rescore: saved audit + <strong>full extractability refresh</strong> for <em>every</em> URL (deduped), in <strong>batches of 25</strong>, then Traditional SEO scoring. Slower but always matches live HTML.
             <strong>① (amber)</strong> = full site audit refresh, <em>then</em> Traditional SEO in one go — use after big site/schema changes or when crawl/GSC data feels stale.
             After <strong>①</strong>, you do <strong>not</strong> need to click <strong>②</strong>.
-            <strong>③ (blue)</strong> = <strong>keyword demand + KE enrich</strong>: volume (get_keyword_data), per-URL traffic + keyword traffic/SERP (get_url_traffic_metrics + get_url_keywords), page backlink samples (get_page_backlinks), domain Moz + referring-domain sample (get_unique_domain_backlinks), plus <strong>referring-domains total</strong> and <strong>total-backlinks total</strong> when present in that response. Uses credits per <a href="https://api.keywordseverywhere.com/docs/#/" target="_blank" rel="noopener noreferrer">KE docs</a>. Does <em>not</em> change Traditional SEO pass/fail.
+            <strong>③ (blue)</strong> = <strong>keyword demand + KE enrich</strong>: volume (get_keyword_data), per-URL traffic + keyword traffic/SERP (get_url_traffic_metrics + get_url_keywords), page backlink samples (get_page_backlinks), domain Moz + referring-domain sample (get_unique_domain_backlinks), plus sitewide <strong>referring domains</strong> / <strong>total backlinks</strong> totals when Keywords Everywhere returns them (we also call <code>get_domain_backlinks</code> once because many plans only return row lists on the unique-domain route). Uses credits per <a href="https://api.keywordseverywhere.com/docs/#/" target="_blank" rel="noopener noreferrer">KE docs</a>. Does <em>not</em> change Traditional SEO pass/fail.
             <span style="display:block;margin-top:0.35rem;color:var(--dark-text-muted);font-size:0.82rem;"><strong>GSC vs KE:</strong> <strong>Clicks</strong> and <strong>Impr.</strong> come from your saved audit’s Google Search Console query-page export (same window as the main audit, typically the last <strong>28 days</strong> ending near the audit date — not “rolling live” after the audit). Keywords Everywhere <strong>Est. traf</strong> / <strong>URL traf</strong> are <strong>monthly model estimates</strong> from KE (UK routing), not the same period or methodology as GSC — use them as directional demand signals, not as “should match clicks”.</span>
           </p>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
@@ -70670,10 +70670,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           dateStr = d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
         }
       }
+      const sampleN = traditionalSeoToNum(dm?.referring_domains_sample, 0);
       const r = traditionalSeoToNum(dm?.referring_domains_total, NaN);
       const b = traditionalSeoToNum(dm?.total_backlinks, NaN);
-      const hasR = Number.isFinite(r) && r >= 0;
-      const hasB = Number.isFinite(b) && b >= 0;
+      const hasR =
+        Number.isFinite(r) && (r > 0 || (r === 0 && !(sampleN > 0)));
+      const hasB =
+        Number.isFinite(b) && (b > 0 || (b === 0 && !(sampleN > 0)));
       refVal.textContent = hasR ? formatTraditionalSeoSearchVolume(r) : '—';
       blVal.textContent = hasB ? formatTraditionalSeoSearchVolume(b) : '—';
       if (refMeta) {
