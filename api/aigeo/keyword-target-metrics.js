@@ -342,11 +342,28 @@ function findUrlKeywordRow(items, targetKeyword) {
   );
 }
 
+function urlTrafficFromKeRow(row) {
+  const v =
+    row?.estimated_monthly_traffic ??
+    row?.estimatedTraffic ??
+    row?.monthly_traffic ??
+    row?.organic_traffic ??
+    row?.traffic;
+  return toNum(v, null);
+}
+
 async function fetchUrlTrafficMap(apiKey, urls, country) {
   const map = new Map();
   const urlCountry = keCountryForUrlEndpoints(country);
   const batchSize = envInt('KE_URL_TRAFFIC_BATCH', 15, 1, 50);
-  const parts = chunk([...new Set(urls.map((u) => normalizePageUrl(u)).filter(Boolean))], batchSize);
+  const uniq = [
+    ...new Set(
+      urls
+        .map((u) => String(u || '').trim())
+        .filter((u) => /^https?:\/\//i.test(u))
+    )
+  ];
+  const parts = chunk(uniq, batchSize);
   for (let i = 0; i < parts.length; i += 1) {
     const { res, json, text } = await kePostJson(apiKey, KE_URL_TRAFFIC, {
       urls: parts[i],
@@ -357,7 +374,7 @@ async function fetchUrlTrafficMap(apiKey, urls, country) {
       const u = normalizePageUrl(row?.url);
       if (!u) return;
       map.set(u, {
-        url_estimated_traffic: toNum(row?.estimated_monthly_traffic, null),
+        url_estimated_traffic: urlTrafficFromKeRow(row),
         total_ranking_keywords: toNum(row?.total_ranking_keywords, null)
       });
     });
@@ -578,7 +595,8 @@ export default async function handler(req, res) {
       const need =
         force || !row || isStaleRow(row, nowMs) || rowNeedsKeUrlEnrichment(row);
       if (!need) return;
-      if (meta.page_url && !stalePageUrls.includes(meta.page_url)) stalePageUrls.push(meta.page_url);
+      const keUrl = String(meta.url || '').trim() || meta.page_url;
+      if (keUrl && !stalePageUrls.includes(keUrl)) stalePageUrls.push(keUrl);
     });
 
     const urlTrafficMap = new Map();
