@@ -71194,9 +71194,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         m.estimated_traffic != null && Number.isFinite(Number(m.estimated_traffic))
           ? formatTraditionalSeoSearchVolume(m.estimated_traffic)
           : '—';
-      const rank = m.rank_position != null && Number.isFinite(Number(m.rank_position))
-        ? `${Math.round(Number(m.rank_position))}`
-        : '—';
+      const rankRaw = m.rank_position != null && Number.isFinite(Number(m.rank_position))
+        ? Math.round(Number(m.rank_position))
+        : null;
+      const rank = rankRaw != null && rankRaw > 0 ? `${rankRaw}` : '—';
       const urlTraf =
         m.url_estimated_traffic != null && Number.isFinite(Number(m.url_estimated_traffic))
           ? formatTraditionalSeoSearchVolume(m.url_estimated_traffic)
@@ -72872,9 +72873,30 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           diff = scoreFor(a) - scoreFor(b);
         } else if (sortKey === 'clicks' || sortKey === 'impressions') {
           diff = traditionalSeoToNum(a?.[sortKey], 0) - traditionalSeoToNum(b?.[sortKey], 0);
+        } else if (sortKey === 'kw_rank') {
+          const metricMap = TRADITIONAL_SEO_STATE.keywordMetricsByUrl instanceof Map
+            ? TRADITIONAL_SEO_STATE.keywordMetricsByUrl
+            : null;
+          const serpTuple = (row) => {
+            const url = String(row?.url || '').trim();
+            const m = metricMap && url ? metricMap.get(url) : null;
+            const r = m?.rank_position;
+            const n = Number(r);
+            const valid = Number.isFinite(n) && n > 0;
+            return { valid, n: valid ? n : null };
+          };
+          const ra = serpTuple(a);
+          const rb = serpTuple(b);
+          if (ra.valid !== rb.valid) {
+            diff = ra.valid ? -1 : 1;
+          } else if (!ra.valid) {
+            diff = 0;
+          } else {
+            diff = ra.n - rb.n;
+            if (sortDirection === 'desc') diff = -diff;
+          }
         } else if (
           sortKey === 'kw_volume' ||
-          sortKey === 'kw_rank' ||
           sortKey === 'kw_est_traffic' ||
           sortKey === 'kw_url_traffic' ||
           sortKey === 'kw_page_bl'
@@ -72905,9 +72927,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               const n = Number(v);
               return Number.isFinite(n) ? n : -1;
             }
-            const r = m?.rank_position;
-            const n = Number(r);
-            return Number.isFinite(n) ? n : 999999;
+            return -1;
           };
           diff = pick(a) - pick(b);
         } else if (sortKey === 'target_keyword') {
@@ -72916,7 +72936,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           diff = String(a?.[sortKey] || '').localeCompare(String(b?.[sortKey] || ''));
         }
         if (diff === 0) diff = String(a.url || '').localeCompare(String(b.url || ''));
-        return sortDirection === 'desc' ? (diff * -1) : diff;
+        if (sortDirection === 'desc' && sortKey !== 'kw_rank') diff *= -1;
+        return diff;
       });
 
       const ps = traditionalSeoNormalizeResultsPageSize(TRADITIONAL_SEO_STATE.resultsPageSize);
