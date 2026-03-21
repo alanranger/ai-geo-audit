@@ -1173,6 +1173,19 @@
       background: rgba(56, 189, 248, 0.92);
       animation: traditionalSeoKwShimmer 1.15s ease-in-out infinite;
     }
+    #traditional-seo-dfs-activity-bar-track {
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.35);
+      overflow: hidden;
+    }
+    #traditional-seo-dfs-activity-bar-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(251, 191, 36, 0.85), rgba(245, 158, 11, 0.95));
+      transition: width 0.22s ease-out;
+    }
     .ranking-ai-step-label {
       flex: 1;
       font-size: 0.9rem;
@@ -6245,6 +6258,14 @@
             <div id="traditional-seo-kw-activity-msg" style="margin-bottom:0.35rem;color:inherit;"></div>
             <div id="traditional-seo-kw-activity-bar" style="display:none;height:4px;border-radius:999px;background:rgba(148,163,184,0.35);overflow:hidden;">
               <div class="traditional-seo-kw-activity-bar-fill"></div>
+            </div>
+          </div>
+          <div id="traditional-seo-dfs-activity" role="status" aria-live="polite" style="display:none;margin:0.65rem 0 0;padding:0.55rem 0.65rem;border-radius:8px;border:1px solid rgba(251,191,36,0.45);background:rgba(245,158,11,0.1);font-size:0.78rem;color:var(--dark-text-muted);">
+            <div id="traditional-seo-dfs-activity-msg" style="margin-bottom:0.35rem;color:inherit;"></div>
+            <div id="traditional-seo-dfs-activity-bar-wrap" style="display:none;">
+              <div id="traditional-seo-dfs-activity-bar-track">
+                <div id="traditional-seo-dfs-activity-bar-fill"></div>
+              </div>
             </div>
           </div>
           <div id="traditional-seo-source-parity-panel" style="margin-bottom:0.75rem;padding:0.55rem 0.7rem;border:1px solid rgba(148,163,184,0.25);border-radius:8px;background:rgba(15,23,42,0.55);font-size:0.8rem;color:var(--dark-text-muted);">
@@ -70854,6 +70875,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     async function traditionalSeoFetchDfsBacklinksFull() {
       if (TRADITIONAL_SEO_STATE.dfsPageBacklinksFetchInFlight) return;
       if (!traditionalSeoBacklinkIndexShowDfs()) {
+        traditionalSeoDfsActivitySet({ show: false });
         if (typeof window.showStatus === 'function') {
           window.showStatus('DataForSEO path off — set TRADITIONAL_SEO_BACKLINK_INDEX_SOURCE to dataforseo or both.', 'info');
         }
@@ -70862,6 +70884,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const rows = TRADITIONAL_SEO_STATE.evaluationRows;
       const urls = traditionalSeoPageUrlsFromRows(rows);
       if (!urls.length) {
+        traditionalSeoDfsActivitySet({ show: false });
         if (typeof window.showStatus === 'function') {
           window.showStatus('No URL rows — run ② or ① first, then Fetch DFS backlinks.', 'info');
         }
@@ -70878,16 +70901,41 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         b.textContent = 'Fetching DFS…';
         b.disabled = true;
       });
+      traditionalSeoDfsActivitySet({
+        show: true,
+        bar: true,
+        pct: 4,
+        text: `DataForSEO: starting… (${urls.length} page URL${urls.length === 1 ? '' : 's'})`
+      });
+      let dfsFetchHadErrors = false;
       try {
-        if (typeof window.showStatus === 'function') {
-          window.showStatus('DataForSEO: refreshing domain summary…', 'info');
-        }
+        traditionalSeoDfsActivitySet({
+          show: true,
+          bar: true,
+          pct: 10,
+          text: 'DataForSEO: refreshing domain summary (this can take a few seconds)…'
+        });
         await traditionalSeoDfsSummaryCall('refresh', false);
         const batch = Math.max(1, traditionalSeoToNum(TRADITIONAL_SEO_STATE.dfsPageRefreshBatch, 10));
+        const totalBatches = Math.max(1, Math.ceil(urls.length / batch));
         let refreshed = 0;
         let errors = 0;
+        let batchIndex = 0;
         for (let i = 0; i < urls.length; i += batch) {
+          batchIndex += 1;
           const slice = urls.slice(i, i + batch);
+          const spanLo = 18;
+          const spanHi = 82;
+          const pct =
+            totalBatches <= 1
+              ? spanHi
+              : spanLo + Math.round(((batchIndex - 1) / Math.max(1, totalBatches - 1)) * (spanHi - spanLo));
+          traditionalSeoDfsActivitySet({
+            show: true,
+            bar: true,
+            pct,
+            text: `DataForSEO: page backlinks batch ${batchIndex} of ${totalBatches} (${slice.length} URL${slice.length === 1 ? '' : 's'} this batch)…`
+          });
           const res = await fetch(traditionalSeoApiPath('/api/aigeo/dataforseo-backlink-pages'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -70897,6 +70945,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           if (!res.ok || json?.status === 'error') {
             errors += 1;
             TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote = String(json?.message || `HTTP ${res.status}`);
+            traditionalSeoDfsActivitySet({
+              show: true,
+              bar: true,
+              pct: Math.max(pct, 88),
+              text: `DataForSEO: stopped after an error — ${TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote}`
+            });
             break;
           }
           const data = json?.data || {};
@@ -70909,6 +70963,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             TRADITIONAL_SEO_STATE.dfsPageRefreshBatch = Math.max(1, Math.round(Number(data.refreshBatchMax)));
           }
         }
+        traditionalSeoDfsActivitySet({
+          show: true,
+          bar: true,
+          pct: 90,
+          text: 'DataForSEO: syncing dashboard from cache…'
+        });
         try {
           await traditionalSeoDfsPagesLookupSilently();
         } catch (e2) {
@@ -70922,11 +70982,25 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const costNote = TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote;
         const okMsg = `DataForSEO: updated domain summary and ~${refreshed} page row set(s).${errors ? ' Some batches failed.' : ''}`;
         TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote = costNote || okMsg;
+        dfsFetchHadErrors = errors > 0;
+        traditionalSeoDfsActivitySet({
+          show: true,
+          bar: true,
+          pct: 100,
+          text: dfsFetchHadErrors ? `Finished with issues — ${okMsg}` : `Done — ${okMsg}`
+        });
         if (typeof window.showStatus === 'function') {
-          window.showStatus(okMsg, errors ? 'warning' : 'success');
+          window.showStatus(okMsg, dfsFetchHadErrors ? 'warning' : 'success');
         }
       } catch (err) {
+        dfsFetchHadErrors = true;
         TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote = String(err?.message || err);
+        traditionalSeoDfsActivitySet({
+          show: true,
+          bar: true,
+          pct: 100,
+          text: `Failed — ${TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote}`
+        });
         if (typeof window.showStatus === 'function') {
           window.showStatus(`DataForSEO fetch failed: ${TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote}`, 'error');
         }
@@ -70938,6 +71012,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         });
         renderTraditionalSeoDfsBacklinkTiles();
         renderTraditionalSeoResultsTable();
+        setTimeout(() => traditionalSeoDfsActivitySet({ show: false }), dfsFetchHadErrors ? 5000 : 2800);
       }
     }
 
@@ -71572,6 +71647,27 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       wrap.style.display = on ? 'block' : 'none';
       if (opts && opts.text != null) msg.textContent = String(opts.text);
       if (bar) bar.style.display = on && opts && opts.bar !== false ? 'block' : 'none';
+    }
+
+    function traditionalSeoDfsActivitySet(opts) {
+      const wrap = document.getElementById('traditional-seo-dfs-activity');
+      const msg = document.getElementById('traditional-seo-dfs-activity-msg');
+      const barWrap = document.getElementById('traditional-seo-dfs-activity-bar-wrap');
+      const fill = document.getElementById('traditional-seo-dfs-activity-bar-fill');
+      if (!wrap || !msg) return;
+      const on = !!(opts && opts.show);
+      wrap.style.display = on ? 'block' : 'none';
+      if (opts && opts.text != null) msg.textContent = String(opts.text);
+      const showBar = on && opts && opts.bar !== false;
+      if (barWrap) barWrap.style.display = showBar ? 'block' : 'none';
+      if (fill) {
+        if (opts && opts.pct != null) {
+          const p = Math.max(0, Math.min(100, Math.round(Number(opts.pct) || 0)));
+          fill.style.width = `${p}%`;
+        } else if (!on) {
+          fill.style.width = '0%';
+        }
+      }
     }
 
     async function traditionalSeoKeywordMetricsLookupIfNeededForRun() {
