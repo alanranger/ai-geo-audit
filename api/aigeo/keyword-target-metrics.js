@@ -151,7 +151,9 @@ function normalizeDisavowPageUrl(raw) {
 function parseGoogleDisavowFile(text) {
   const domains = new Set();
   const urls = new Set();
-  const lines = String(text || '').split(/\r?\n/);
+  const lines = String(text || '')
+    .replace(/^\uFEFF/, '')
+    .split(/\r?\n/);
   for (let i = 0; i < lines.length; i += 1) {
     const line = String(lines[i] || '').trim();
     if (!line || line.startsWith('#')) continue;
@@ -171,12 +173,15 @@ function parseGoogleDisavowFile(text) {
 
 function loadDisavowForBacklinks() {
   const override = String(process.env.DISAVOW_FILE_PATH || '').trim();
-  const name = 'Disavow links https_www_alanranger_com.txt';
-  const relPublic = path.join('public', name);
+  const names = ['disavow-alanranger-com.txt', 'Disavow links https_www_alanranger_com.txt'];
+  const roots = [process.cwd(), path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')];
   const candidates = [];
   if (override) candidates.push(override);
-  candidates.push(path.join(process.cwd(), relPublic));
-  candidates.push(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', relPublic));
+  for (let r = 0; r < roots.length; r += 1) {
+    for (let n = 0; n < names.length; n += 1) {
+      candidates.push(path.join(roots[r], 'public', names[n]));
+    }
+  }
   for (let i = 0; i < candidates.length; i += 1) {
     try {
       const txt = fs.readFileSync(candidates[i], 'utf8');

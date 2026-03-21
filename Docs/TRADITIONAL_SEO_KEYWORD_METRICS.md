@@ -62,7 +62,7 @@
 | `KE_DOMAIN_BACKLINKS_OVERSAMPLE_MULT` | No | Default **`3`** (1–15) — same idea for `get_unique_domain_backlinks`. |
 | `KE_DOMAIN_BACKLINKS_FETCH_CAP` | No | Default **`300`**, max **2000**. |
 
-**Disavow + Pg bl:** KE does not accept a blocklist. The server **oversamples**, filters against the disavow file, then stores up to **`KE_PAGE_BACKLINKS_NUM`** rows. The BL modal **fetches the same file from `/Disavow%20…`** and filters again so old cache rows stay hidden without a refresh.
+**Disavow + Pg bl:** KE does not accept a blocklist. The server **oversamples**, filters against the disavow file, then stores up to **`KE_PAGE_BACKLINKS_NUM`** rows. The BL modal loads the list from **`GET /api/aigeo/disavow-list`** (not a raw `.txt` URL — the SPA rewrite would return HTML). It filters cached rows the same way as the server.
 
 **Why not “all” backlinks?** KE credits / rate limits, serverless time, and Supabase **jsonb** size all scale with row count. Defaults keep the dashboard fast; raise **`KE_PAGE_BACKLINKS_NUM`** and **`KE_PAGE_BACKLINKS_MAX_STORED`** if you need a deeper sample (still bounded).
 

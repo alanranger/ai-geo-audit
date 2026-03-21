@@ -70224,7 +70224,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       disavowUiPromise: null
     };
 
-    const TRADITIONAL_SEO_DISAVOW_PUBLIC = '/Disavow%20links%20https_www_alanranger_com.txt';
+    /** SPA rewrite sends most paths to audit-dashboard.html; load disavow via API so we get real text. */
+    const TRADITIONAL_SEO_DISAVOW_URL = '/api/aigeo/disavow-list';
 
     const TRADITIONAL_SEO_EVAL_PROGRESS = {
       timer: null,
@@ -72465,7 +72466,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     function traditionalSeoParseDisavowText(text) {
       const domains = new Set();
       const urls = new Set();
-      const lines = String(text || '').split(/\r?\n/);
+      const lines = String(text || '')
+        .replace(/^\uFEFF/, '')
+        .split(/\r?\n/);
       for (let i = 0; i < lines.length; i += 1) {
         const line = String(lines[i] || '').trim();
         if (!line || line.startsWith('#')) continue;
@@ -72528,7 +72531,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         return Promise.resolve(TRADITIONAL_SEO_STATE.disavowUiLoaded);
       }
       if (!TRADITIONAL_SEO_STATE.disavowUiPromise) {
-        TRADITIONAL_SEO_STATE.disavowUiPromise = fetch(TRADITIONAL_SEO_DISAVOW_PUBLIC, { cache: 'force-cache' })
+        TRADITIONAL_SEO_STATE.disavowUiPromise = fetch(TRADITIONAL_SEO_DISAVOW_URL, { cache: 'no-store' })
           .then((r) => (r.ok ? r.text() : ''))
           .then((text) => {
             TRADITIONAL_SEO_STATE.disavowUiLoaded = text
