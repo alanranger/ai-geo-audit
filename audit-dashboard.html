@@ -71038,8 +71038,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const map = TRADITIONAL_SEO_STATE.keywordMetricsByUrl instanceof Map
         ? new Map(TRADITIONAL_SEO_STATE.keywordMetricsByUrl)
         : new Map();
+      const prop = traditionalSeoPropertyUrl();
       Object.keys(by).forEach((k) => {
         map.set(k, by[k]);
+        const cmp = traditionalSeoToComparableUrl(k, prop);
+        if (cmp && cmp !== k) map.set(cmp, by[k]);
       });
       TRADITIONAL_SEO_STATE.keywordMetricsByUrl = map;
       const sd = traditionalSeoToNum(payload?.staleDays, 0);
@@ -71202,15 +71205,44 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
     }
 
+    function traditionalSeoGetKeywordMetricRow(urlRaw) {
+      const map = TRADITIONAL_SEO_STATE.keywordMetricsByUrl;
+      if (!(map instanceof Map)) return null;
+      const u = String(urlRaw || '').trim();
+      if (!u) return null;
+      let m = map.get(u);
+      if (m) return m;
+      const prop = traditionalSeoPropertyUrl();
+      const cmp = traditionalSeoToComparableUrl(u, prop);
+      if (cmp) {
+        m = map.get(cmp);
+        if (m) return m;
+      }
+      try {
+        if (URL.canParse(u)) {
+          const parsed = new URL(u);
+          const path = String(parsed.pathname || '/').replace(/\/+$/, '') || '/';
+          const noTrail = `${parsed.protocol}//${parsed.hostname.toLowerCase()}${path}`;
+          m = map.get(noTrail);
+          if (m) return m;
+          const hostNoWww = parsed.hostname.toLowerCase().replace(/^www\./, '');
+          const canon = `${parsed.protocol}//${hostNoWww}${path}`;
+          m = map.get(canon);
+          if (m) return m;
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      return null;
+    }
+
     function traditionalSeoKeywordDemandCellsForRow(row) {
       const isSitewide = String(row?.tier || '').toLowerCase() === 'sitewide';
       if (isSitewide) {
         return { vol: '—', est: '—', rank: '—', urlTraf: '—', pageBl: '—' };
       }
       const url = String(row?.url || '').trim();
-      const m = TRADITIONAL_SEO_STATE.keywordMetricsByUrl instanceof Map
-        ? TRADITIONAL_SEO_STATE.keywordMetricsByUrl.get(url)
-        : null;
+      const m = traditionalSeoGetKeywordMetricRow(url);
       if (!m) {
         return { vol: '—', est: '—', rank: '—', urlTraf: '—', pageBl: '—' };
       }
@@ -72681,7 +72713,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const listEl = document.getElementById('traditional-seo-backlinks-modal-list');
       const urlEl = document.getElementById('traditional-seo-backlinks-modal-url');
       if (!backdrop || !listEl || !urlEl) return;
-      const m = TRADITIONAL_SEO_STATE.keywordMetricsByUrl instanceof Map ? TRADITIONAL_SEO_STATE.keywordMetricsByUrl.get(url) : null;
+      const m = traditionalSeoGetKeywordMetricRow(url);
       const raw = m?.page_backlinks_json;
       const items = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? Object.values(raw) : [];
       urlEl.textContent = url;
@@ -73206,10 +73238,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             const kd = traditionalSeoKeywordDemandCellsForRow(row);
             const clicksFmt = formatTraditionalSeoSearchVolume(row.clicks);
             const imprFmt = formatTraditionalSeoSearchVolume(row.impressions);
-            const mForBl =
-              !isSitewide && TRADITIONAL_SEO_STATE.keywordMetricsByUrl instanceof Map
-                ? TRADITIONAL_SEO_STATE.keywordMetricsByUrl.get(urlRaw)
-                : null;
+            const mForBl = !isSitewide ? traditionalSeoGetKeywordMetricRow(urlRaw) : null;
             let blJsonRaw = mForBl?.page_backlinks_json;
             const blArr = Array.isArray(blJsonRaw)
               ? blJsonRaw
@@ -73542,6 +73571,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         TRADITIONAL_SEO_STATE.seoEvalInFlight = false;
         if (runBtn) runBtn.disabled = false;
         if (runFullBtn) runFullBtn.disabled = false;
+        wireTraditionalSeoButtons();
         renderTraditionalSeoResultsTable();
       }
     }
@@ -73753,6 +73783,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         TRADITIONAL_SEO_STATE.seoEvalInFlight = false;
         if (runBtn) runBtn.disabled = false;
         if (runFullBtn) runFullBtn.disabled = false;
+        wireTraditionalSeoButtons();
         renderTraditionalSeoResultsTable();
       }
     }
@@ -74178,6 +74209,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     window.renderTraditionalSeoTab = async function renderTraditionalSeoTab(force = false) {
+      wireTraditionalSeoButtons();
       if (TRADITIONAL_SEO_STATE.loading) {
         if (typeof TRADITIONAL_SEO_STATE.loadingSince === 'number' && Date.now() - TRADITIONAL_SEO_STATE.loadingSince < 90000) {
           return;
