@@ -134,6 +134,12 @@ function parseDofollowFromItem(it) {
     it.isDoFollow;
   if (raw === true || raw === 'true' || Number(raw) === 1) return true;
   if (raw === false || raw === 'false' || Number(raw) === 0) return false;
+  const attrLists = [it.attributes, it.link_attributes, it.rel_attributes];
+  for (const al of attrLists) {
+    if (!Array.isArray(al)) continue;
+    const lower = al.map((x) => String(x || '').toLowerCase());
+    if (lower.some((x) => x.includes('nofollow') || x === 'ugc' || x === 'sponsored')) return false;
+  }
   const rel = String(it.link_rel ?? it.rel ?? it.rel_attribute ?? it.rel_type ?? '').toLowerCase();
   if (rel.includes('nofollow') || rel.includes('ugc') || rel.includes('sponsored')) return false;
   if (rel.includes('dofollow')) return true;
@@ -263,9 +269,14 @@ async function runLookup(supabase, pageUrls, nowMs) {
 function followCountsForRows(sliced) {
   let dofollow_count = 0;
   let nofollow_count = 0;
+  let unknown = 0;
   for (const r of sliced) {
     if (r.dofollow === true) dofollow_count += 1;
     else if (r.dofollow === false) nofollow_count += 1;
+    else unknown += 1;
+  }
+  if (unknown > 0 && dofollow_count === 0 && nofollow_count === 0) {
+    return { dofollow_count: null, nofollow_count: null };
   }
   return { dofollow_count, nofollow_count };
 }

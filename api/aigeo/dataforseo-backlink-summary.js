@@ -94,6 +94,26 @@ function extractSummaryTaskRow(body) {
   return { row: result[0], cost: toNum(task?.cost, null) };
 }
 
+function attrBucketCount(attrsObj, name) {
+  if (!attrsObj || typeof attrsObj !== 'object') return null;
+  const want = String(name || '').toLowerCase();
+  for (const [k, raw] of Object.entries(attrsObj)) {
+    if (String(k || '').toLowerCase() === want) {
+      const n = toNum(raw, null);
+      return n != null && Number.isFinite(n) ? Math.round(n) : null;
+    }
+  }
+  return null;
+}
+
+function targetSpamFromSummaryRow(apiRow) {
+  const top = toNum(apiRow?.target_spam_score, null);
+  if (top != null && Number.isFinite(top)) return Math.round(top);
+  const inf = apiRow?.info;
+  const nested = toNum(inf?.target_spam_score, null);
+  return nested != null && Number.isFinite(nested) ? Math.round(nested) : null;
+}
+
 function mapRowToCache(domainHost, includeSubdomains, apiRow, cost) {
   const pickInt = (k) => {
     const v = toNum(apiRow?.[k], null);
@@ -106,34 +126,43 @@ function mapRowToCache(domainHost, includeSubdomains, apiRow, cost) {
     }
     return null;
   };
+  const backlinksTotal = pickInt('backlinks');
+  let dofollow_backlinks = pickFirstInt([
+    'dofollow_backlinks',
+    'backlinks_dofollow',
+    'referring_links_dofollow'
+  ]);
+  let nofollow_backlinks = pickFirstInt([
+    'nofollow_backlinks',
+    'backlinks_nofollow',
+    'referring_links_nofollow'
+  ]);
+  const nfAttr = attrBucketCount(apiRow?.referring_links_attributes, 'nofollow');
+  if (
+    (dofollow_backlinks == null || nofollow_backlinks == null) &&
+    backlinksTotal != null &&
+    nfAttr != null
+  ) {
+    const nf = Math.max(0, Math.min(nfAttr, backlinksTotal));
+    nofollow_backlinks = nf;
+    dofollow_backlinks = backlinksTotal - nf;
+  }
   return {
     domain_host: domainHost,
     include_subdomains: !!includeSubdomains,
-    backlinks: pickInt('backlinks'),
+    backlinks: backlinksTotal,
     referring_domains: pickInt('referring_domains'),
     referring_main_domains: pickInt('referring_main_domains'),
     broken_backlinks: pickInt('broken_backlinks'),
     broken_pages: pickInt('broken_pages'),
     backlinks_spam_score: pickInt('backlinks_spam_score'),
-    target_spam_score: pickInt('target_spam_score'),
+    target_spam_score: targetSpamFromSummaryRow(apiRow),
     rank: pickInt('rank'),
     crawled_pages: pickInt('crawled_pages'),
     internal_links_count: pickInt('internal_links_count'),
     external_links_count: pickInt('external_links_count'),
-    dofollow_backlinks: pickFirstInt([
-      'dofollow_backlinks',
-      'dofollow',
-      'backlinks_dofollow',
-      'referring_links_dofollow',
-      'dofollow_domains'
-    ]),
-    nofollow_backlinks: pickFirstInt([
-      'nofollow_backlinks',
-      'nofollow',
-      'backlinks_nofollow',
-      'referring_links_nofollow',
-      'nofollow_domains'
-    ]),
+    dofollow_backlinks,
+    nofollow_backlinks,
     cost_last: cost != null && Number.isFinite(cost) ? cost : null,
     raw_result: apiRow && typeof apiRow === 'object' ? apiRow : null,
     fetched_at: new Date().toISOString(),
