@@ -4,6 +4,7 @@
 
 1. **`HANDOVER.md`** — architecture, buttons, Supabase projects, user preferences (no `console.log`; complexity preference; diagnose-before-change).
 2. **`Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md`** — Traditional SEO **③** Keywords Everywhere cache, API, DB, deploy pitfalls.
+3. **`Docs/TRADITIONAL_SEO_BACKLINKS_DFS.md`** — Backlinks product spec: DFS summary tile, per-URL modal, disavow toggle, explicit fetch (no auto-spend on load).
 
 ## Critical gotchas
 
