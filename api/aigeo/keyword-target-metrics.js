@@ -723,6 +723,78 @@ function extractMozDaDeep(obj, depth = 0, parentKey = '') {
   return null;
 }
 
+function keNonNegativeInt(v) {
+  const n = toNum(v, null);
+  if (n == null || !Number.isFinite(n)) return null;
+  const r = Math.round(n);
+  return r >= 0 ? r : null;
+}
+
+/** KE `get_unique_domain_backlinks` may expose sitewide totals alongside row samples; names vary by payload version. */
+function extractKeDomainLinkTotals(payload) {
+  const pickFrom = (obj) => {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return { ref: null, bl: null };
+    const get = (keys) => {
+      for (let i = 0; i < keys.length; i += 1) {
+        const key = keys[i];
+        if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+        return keNonNegativeInt(obj[key]);
+      }
+      return null;
+    };
+    return {
+      ref: get(['referring_domains', 'referringDomains', 'unique_referring_domains', 'ref_domains']),
+      bl: get([
+        'total_backlinks',
+        'totalBacklinks',
+        'backlinks_total',
+        'backlinksTotal',
+        'total_external_backlinks',
+        'external_backlinks'
+      ])
+    };
+  };
+  let referringDomainsTotal = null;
+  let totalBacklinks = null;
+  const merge = (o) => {
+    const t = pickFrom(o);
+    if (referringDomainsTotal == null) referringDomainsTotal = t.ref;
+    if (totalBacklinks == null) totalBacklinks = t.bl;
+  };
+  if (payload && typeof payload === 'object') {
+    merge(payload);
+    merge(payload.data);
+    merge(payload.meta);
+    merge(payload.metrics);
+    merge(payload.stats);
+    merge(payload.summary);
+  }
+  const deepWalk = (obj, depth) => {
+    if (referringDomainsTotal != null && totalBacklinks != null) return;
+    if (!obj || typeof obj !== 'object' || depth > 5) return;
+    if (Array.isArray(obj)) {
+      for (let i = 0; i < Math.min(obj.length, 2); i += 1) deepWalk(obj[i], depth + 1);
+      return;
+    }
+    const keys = Object.keys(obj);
+    for (let i = 0; i < keys.length; i += 1) {
+      const k = keys[i];
+      const kl = String(k).toLowerCase();
+      const v = obj[k];
+      if (v != null && typeof v === 'object') {
+        deepWalk(v, depth + 1);
+        continue;
+      }
+      const n = keNonNegativeInt(v);
+      if (n == null) continue;
+      if (referringDomainsTotal == null && kl === 'referring_domains') referringDomainsTotal = n;
+      if (totalBacklinks == null && (kl === 'total_backlinks' || kl === 'backlinks_total')) totalBacklinks = n;
+    }
+  };
+  if (referringDomainsTotal == null || totalBacklinks == null) deepWalk(payload, 0);
+  return { referringDomainsTotal, totalBacklinks };
+}
+
 async function fetchUniqueDomainBacklinks(apiKey, domainHost, num, disavow) {
   const d = disavow || { domains: new Set(), urls: new Set() };
   const oversample = envInt('KE_DOMAIN_BACKLINKS_OVERSAMPLE_MULT', 3, 1, 15);
@@ -739,7 +811,14 @@ async function fetchUniqueDomainBacklinks(apiKey, domainHost, num, disavow) {
   const trimmed = filtered.slice(0, want);
   const referringDomainsSample = trimmed.length;
   const moz = extractMozDaDeep(json, 0, '') ?? extractMozDaDeep({ items: list }, 0, '');
-  return { referringDomainsSample, moz, raw: json };
+  const totals = extractKeDomainLinkTotals(json);
+  return {
+    referringDomainsSample,
+    moz,
+    raw: json,
+    referringDomainsTotal: totals.referringDomainsTotal,
+    totalBacklinks: totals.totalBacklinks
+  };
 }
 
 async function readDomainMetricsRow(supabase, domainHost) {
@@ -755,10 +834,24 @@ async function readDomainMetricsRow(supabase, domainHost) {
 
 async function upsertDomainMetrics(supabase, domainHost, payload) {
   if (!domainHost) return;
+  let prev = null;
+  try {
+    prev = await readDomainMetricsRow(supabase, domainHost);
+  } catch {
+    prev = null;
+  }
   const row = {
     domain_host: domainHost,
     moz_domain_authority: payload.moz_domain_authority ?? null,
     referring_domains_sample: payload.referring_domains_sample ?? null,
+    referring_domains_total:
+      payload.referring_domains_total != null && Number.isFinite(Number(payload.referring_domains_total))
+        ? Math.round(Number(payload.referring_domains_total))
+        : prev?.referring_domains_total ?? null,
+    total_backlinks:
+      payload.total_backlinks != null && Number.isFinite(Number(payload.total_backlinks))
+        ? Math.round(Number(payload.total_backlinks))
+        : prev?.total_backlinks ?? null,
     raw_payload: payload.raw_payload ?? null,
     fetched_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
@@ -769,10 +862,23 @@ async function upsertDomainMetrics(supabase, domainHost, payload) {
 
 function domainMetricsPayload(row, nowMs) {
   if (!row) return null;
+  let referring_domains_total = row.referring_domains_total ?? null;
+  let total_backlinks = row.total_backlinks ?? null;
+  if (
+    (referring_domains_total == null || total_backlinks == null) &&
+    row.raw_payload != null &&
+    typeof row.raw_payload === 'object'
+  ) {
+    const t = extractKeDomainLinkTotals(row.raw_payload);
+    if (referring_domains_total == null) referring_domains_total = t.referringDomainsTotal;
+    if (total_backlinks == null) total_backlinks = t.totalBacklinks;
+  }
   return {
     domain_host: row.domain_host,
     moz_domain_authority: row.moz_domain_authority ?? null,
     referring_domains_sample: row.referring_domains_sample ?? null,
+    referring_domains_total,
+    total_backlinks,
     fetched_at: row.fetched_at || null,
     stale: isStaleRow(row, nowMs)
   };
@@ -912,6 +1018,8 @@ export default async function handler(req, res) {
         await upsertDomainMetrics(supabase, domainHost, {
           moz_domain_authority: dom.moz,
           referring_domains_sample: dom.referringDomainsSample,
+          referring_domains_total: dom.referringDomainsTotal,
+          total_backlinks: dom.totalBacklinks,
           raw_payload: dom.raw
         });
         domainRow = await readDomainMetricsRow(supabase, domainHost);
@@ -1024,7 +1132,7 @@ export default async function handler(req, res) {
         meta: {
           generatedAt: new Date().toISOString(),
           warning:
-            'keyword_target_metrics_cache or ke_domain_metrics_cache missing — apply sql/20260321_keyword_target_metrics_cache.sql, sql/20260322_ke_traffic_backlink_domain_cache.sql, and sql/20260323_page_backlinks_json.sql'
+            'keyword_target_metrics_cache or ke_domain_metrics_cache missing — apply sql/20260321_keyword_target_metrics_cache.sql, sql/20260322_ke_traffic_backlink_domain_cache.sql, sql/20260323_page_backlinks_json.sql, sql/20260324_ke_domain_link_totals.sql'
         }
       });
     }

@@ -6089,6 +6089,36 @@
             </div>
           </div>
           <div class="card" style="display: flex; flex-direction: column; justify-content: center;">
+            <div
+              style="font-size: 0.85rem; color: var(--dark-text-muted); margin-bottom: 0.35rem;"
+              title="Referring Domains: This is the total number of unique domains that have links to this website. If one website links multiple times to another one, this will be counted as only one referring domain."
+            >
+              Referring domains (KE total)
+            </div>
+            <div style="font-size: 0.72rem; color: var(--dark-text-muted); margin-bottom: 0.35rem; line-height: 1.35;">
+              Unique domains linking to this site (Keywords Everywhere).
+            </div>
+            <div id="traditional-seo-ke-referring-domains-total" style="font-size: 1.8rem; font-weight: 800;">—</div>
+            <div id="traditional-seo-ke-referring-domains-meta" style="font-size: 0.76rem; color: var(--dark-text-muted); margin-top: 0.35rem; line-height: 1.35;">
+              Run <strong>③</strong> to load.
+            </div>
+          </div>
+          <div class="card" style="display: flex; flex-direction: column; justify-content: center;">
+            <div
+              style="font-size: 0.85rem; color: var(--dark-text-muted); margin-bottom: 0.35rem;"
+              title="Total Backlinks: This is the total number of backlinks to this website. If one website links multiple times to another one, every link will be counted."
+            >
+              Total backlinks (KE total)
+            </div>
+            <div style="font-size: 0.72rem; color: var(--dark-text-muted); margin-bottom: 0.35rem; line-height: 1.35;">
+              All backlinks counted (Keywords Everywhere).
+            </div>
+            <div id="traditional-seo-ke-total-backlinks" style="font-size: 1.8rem; font-weight: 800;">—</div>
+            <div id="traditional-seo-ke-total-backlinks-meta" style="font-size: 0.76rem; color: var(--dark-text-muted); margin-top: 0.35rem; line-height: 1.35;">
+              Run <strong>③</strong> to load.
+            </div>
+          </div>
+          <div class="card" style="display: flex; flex-direction: column; justify-content: center;">
             <div style="font-size: 0.85rem; color: var(--dark-text-muted); margin-bottom: 0.35rem;">Rules Enabled</div>
             <div id="traditional-seo-enabled-count" style="font-size: 1.8rem; font-weight: 800;">—</div>
             <div style="font-size: 0.85rem; color: var(--dark-text-muted); margin-top: 0.35rem;">Active weighted checks contributing to score.</div>
@@ -6146,7 +6176,7 @@
             <strong>② (green)</strong> = quick rescore: saved audit + <strong>full extractability refresh</strong> for <em>every</em> URL (deduped), in <strong>batches of 25</strong>, then Traditional SEO scoring. Slower but always matches live HTML.
             <strong>① (amber)</strong> = full site audit refresh, <em>then</em> Traditional SEO in one go — use after big site/schema changes or when crawl/GSC data feels stale.
             After <strong>①</strong>, you do <strong>not</strong> need to click <strong>②</strong>.
-            <strong>③ (blue)</strong> = <strong>keyword demand + KE enrich</strong>: volume (get_keyword_data), per-URL traffic + keyword traffic/SERP (get_url_traffic_metrics + get_url_keywords), page backlink samples (get_page_backlinks), domain Moz + referring-domain sample (get_unique_domain_backlinks). Uses credits per <a href="https://api.keywordseverywhere.com/docs/#/" target="_blank" rel="noopener noreferrer">KE docs</a>. Does <em>not</em> change Traditional SEO pass/fail.
+            <strong>③ (blue)</strong> = <strong>keyword demand + KE enrich</strong>: volume (get_keyword_data), per-URL traffic + keyword traffic/SERP (get_url_traffic_metrics + get_url_keywords), page backlink samples (get_page_backlinks), domain Moz + referring-domain sample (get_unique_domain_backlinks), plus <strong>referring-domains total</strong> and <strong>total-backlinks total</strong> when present in that response. Uses credits per <a href="https://api.keywordseverywhere.com/docs/#/" target="_blank" rel="noopener noreferrer">KE docs</a>. Does <em>not</em> change Traditional SEO pass/fail.
             <span style="display:block;margin-top:0.35rem;color:var(--dark-text-muted);font-size:0.82rem;"><strong>GSC vs KE:</strong> <strong>Clicks</strong> and <strong>Impr.</strong> come from your saved audit’s Google Search Console query-page export (same window as the main audit, typically the last <strong>28 days</strong> ending near the audit date — not “rolling live” after the audit). Keywords Everywhere <strong>Est. traf</strong> / <strong>URL traf</strong> are <strong>monthly model estimates</strong> from KE (UK routing), not the same period or methodology as GSC — use them as directional demand signals, not as “should match clicks”.</span>
           </p>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
@@ -70625,6 +70655,39 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
     }
 
+    function renderTraditionalSeoKeDomainLinkTotalsTiles() {
+      const refVal = document.getElementById('traditional-seo-ke-referring-domains-total');
+      const blVal = document.getElementById('traditional-seo-ke-total-backlinks');
+      const refMeta = document.getElementById('traditional-seo-ke-referring-domains-meta');
+      const blMeta = document.getElementById('traditional-seo-ke-total-backlinks-meta');
+      if (!refVal || !blVal) return;
+      const dm = TRADITIONAL_SEO_STATE.keDomainMetrics;
+      const t = dm?.fetched_at ? Date.parse(String(dm.fetched_at)) : NaN;
+      let dateStr = '—';
+      if (Number.isFinite(t) && t > 0) {
+        const d = new Date(t);
+        if (!Number.isNaN(d.getTime())) {
+          dateStr = d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+      }
+      const r = traditionalSeoToNum(dm?.referring_domains_total, NaN);
+      const b = traditionalSeoToNum(dm?.total_backlinks, NaN);
+      const hasR = Number.isFinite(r) && r >= 0;
+      const hasB = Number.isFinite(b) && b >= 0;
+      refVal.textContent = hasR ? formatTraditionalSeoSearchVolume(r) : '—';
+      blVal.textContent = hasB ? formatTraditionalSeoSearchVolume(b) : '—';
+      if (refMeta) {
+        refMeta.innerHTML = hasR
+          ? `Updated <strong>${escapeHtml(dateStr)}</strong> · Keywords Everywhere`
+          : 'Run <strong>③</strong> to load (same KE domain pull as Moz DA). If still blank, totals are not present in the API JSON for your plan.';
+      }
+      if (blMeta) {
+        blMeta.innerHTML = hasB
+          ? `Updated <strong>${escapeHtml(dateStr)}</strong> · Keywords Everywhere`
+          : 'Run <strong>③</strong> to load (same KE domain pull as Moz DA). If still blank, totals are not present in the API JSON for your plan.';
+      }
+    }
+
     function traditionalSeoToNum(value, fallback = 0) {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : fallback;
@@ -73509,6 +73572,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       updateTraditionalSeoSortHeaderState();
       renderTraditionalSeoMozDaTile();
       renderTraditionalSeoDomainBacklinksTile();
+      renderTraditionalSeoKeDomainLinkTotalsTiles();
     }
 
     function traditionalSeoEvalProgressClearTimer() {

@@ -164,6 +164,8 @@ CREATE TABLE IF NOT EXISTS public.ke_domain_metrics_cache (
   domain_host TEXT PRIMARY KEY,
   moz_domain_authority INTEGER,
   referring_domains_sample INTEGER,
+  referring_domains_total INTEGER,
+  total_backlinks INTEGER,
   raw_payload JSONB,
   fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
