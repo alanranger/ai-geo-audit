@@ -6230,26 +6230,34 @@
           </div>
           <div id="traditional-seo-url-health" class="traditional-seo-health-strip" aria-label="URL-level outcome summary"></div>
           <div id="traditional-seo-rule-summary-wrap" style="margin-bottom: 0.85rem;">
-            <div style="font-weight: 600; font-size: 0.82rem; margin-bottom: 0.35rem; color: var(--dark-text-muted);">Per-rule URL outcomes (click a row to filter)</div>
-            <div class="traditional-seo-table-wrap">
-              <table id="traditional-seo-rule-summary-table">
-                <thead>
-                  <tr>
-                    <th><button type="button" class="traditional-seo-sort-btn" data-sort="rule_name">Rule <span class="sort-ind">↕</span></button></th>
-                    <th style="text-align:center;width:5.5rem;">Re-audit</th>
-                    <th style="text-align:center;"><button type="button" class="traditional-seo-sort-btn" data-sort="priority" title="P0 = highest impact (top of current weight range); P10 = lowest. Based on rule weight vs min/max in this ruleset.">Priority <span class="sort-ind">↕</span></button></th>
-                    <th><button type="button" class="traditional-seo-sort-btn" data-sort="scope">Scope <span class="sort-ind">↕</span></button></th>
-                    <th style="text-align:right;"><button type="button" class="traditional-seo-sort-btn" data-sort="pass">Pass <span class="sort-ind">↕</span></button></th>
-                    <th style="text-align:right;"><button type="button" class="traditional-seo-sort-btn" data-sort="warn">Warn <span class="sort-ind">↕</span></button></th>
-                    <th style="text-align:right;"><button type="button" class="traditional-seo-sort-btn" data-sort="fail">Fail <span class="sort-ind">↕</span></button></th>
-                    <th style="text-align:right;"><button type="button" class="traditional-seo-sort-btn" data-sort="total">Rows <span class="sort-ind">↕</span></button></th>
-                    <th><button type="button" class="traditional-seo-sort-btn" data-sort="worst">Worst <span class="sort-ind">↕</span></button></th>
-                  </tr>
-                </thead>
-                <tbody id="traditional-seo-rule-summary-body">
-                  <tr><td colspan="9" style="color: var(--dark-text-muted);">Run the audit to see aggregated counts.</td></tr>
-                </tbody>
-              </table>
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; flex-wrap: wrap;">
+              <button type="button" id="traditional-seo-rule-summary-toggle" class="btn traditional-seo-rules-toggle" aria-expanded="false" aria-controls="traditional-seo-rule-summary-panel" title="Show or hide per-rule outcomes table">
+                <span class="traditional-seo-rules-toggle-icon" aria-hidden="true">▶</span>
+                <span class="traditional-seo-rules-toggle-text">Expand per-rule outcomes</span>
+              </button>
+              <div style="font-weight: 600; font-size: 0.82rem; color: var(--dark-text-muted);">Per-rule URL outcomes (click a row to filter)</div>
+            </div>
+            <div id="traditional-seo-rule-summary-panel" class="traditional-seo-rules-table-panel" hidden>
+              <div class="traditional-seo-table-wrap">
+                <table id="traditional-seo-rule-summary-table">
+                  <thead>
+                    <tr>
+                      <th><button type="button" class="traditional-seo-sort-btn" data-sort="rule_name">Rule <span class="sort-ind">↕</span></button></th>
+                      <th style="text-align:center;width:5.5rem;">Re-audit</th>
+                      <th style="text-align:center;"><button type="button" class="traditional-seo-sort-btn" data-sort="priority" title="P0 = highest impact (top of current weight range); P10 = lowest. Based on rule weight vs min/max in this ruleset.">Priority <span class="sort-ind">↕</span></button></th>
+                      <th><button type="button" class="traditional-seo-sort-btn" data-sort="scope">Scope <span class="sort-ind">↕</span></button></th>
+                      <th style="text-align:right;"><button type="button" class="traditional-seo-sort-btn" data-sort="pass">Pass <span class="sort-ind">↕</span></button></th>
+                      <th style="text-align:right;"><button type="button" class="traditional-seo-sort-btn" data-sort="warn">Warn <span class="sort-ind">↕</span></button></th>
+                      <th style="text-align:right;"><button type="button" class="traditional-seo-sort-btn" data-sort="fail">Fail <span class="sort-ind">↕</span></button></th>
+                      <th style="text-align:right;"><button type="button" class="traditional-seo-sort-btn" data-sort="total">Rows <span class="sort-ind">↕</span></button></th>
+                      <th><button type="button" class="traditional-seo-sort-btn" data-sort="worst">Worst <span class="sort-ind">↕</span></button></th>
+                    </tr>
+                  </thead>
+                  <tbody id="traditional-seo-rule-summary-body">
+                    <tr><td colspan="9" style="color: var(--dark-text-muted);">Run the audit to see aggregated counts.</td></tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
           <div id="traditional-seo-results-pagination" style="display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
@@ -74138,6 +74146,24 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           syncRulesPanelToggle();
         });
         syncRulesPanelToggle();
+      }
+      const ruleSummaryToggle = document.getElementById('traditional-seo-rule-summary-toggle');
+      const ruleSummaryPanel = document.getElementById('traditional-seo-rule-summary-panel');
+      if (ruleSummaryToggle && ruleSummaryPanel && !ruleSummaryToggle.dataset.wiredToggle) {
+        ruleSummaryToggle.dataset.wiredToggle = '1';
+        const rsIcon = ruleSummaryToggle.querySelector('.traditional-seo-rules-toggle-icon');
+        const rsText = ruleSummaryToggle.querySelector('.traditional-seo-rules-toggle-text');
+        function syncRuleSummaryPanelToggle() {
+          const open = !ruleSummaryPanel.hidden;
+          ruleSummaryToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+          if (rsIcon) rsIcon.textContent = open ? '▼' : '▶';
+          if (rsText) rsText.textContent = open ? 'Collapse per-rule outcomes' : 'Expand per-rule outcomes';
+        }
+        ruleSummaryToggle.addEventListener('click', () => {
+          ruleSummaryPanel.hidden = !ruleSummaryPanel.hidden;
+          syncRuleSummaryPanelToggle();
+        });
+        syncRuleSummaryPanelToggle();
       }
       const refreshBtn = document.getElementById('traditional-seo-refresh-btn');
       const saveBtn = document.getElementById('traditional-seo-save-btn');
