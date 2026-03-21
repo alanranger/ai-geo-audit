@@ -6290,8 +6290,14 @@
                   <th style="width: 6%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_est_traffic" title="KE monthly model: estimated visits/month for this target keyword on this URL (get_url_keywords, UK). Not comparable to GSC clicks (28-day actuals).">Est. traf <span class="sort-ind">↕</span></button></th>
                   <th style="width: 5%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_rank" title="SERP position for this keyword on this URL (KE get_url_keywords, UK).">SERP <span class="sort-ind">↕</span></button></th>
                   <th style="width: 6%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_url_traffic" title="KE monthly model: total estimated visits/month for the whole URL (get_url_traffic_metrics, UK). Not comparable to GSC clicks.">URL traf <span class="sort-ind">↕</span></button></th>
-                  <th style="width: 5%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_page_bl" title="Count of backlink rows returned in one KE get_page_backlinks request (capped sample), not total backlinks sitewide.">Pg bl <span class="sort-ind">↕</span></button></th>
-                  <th style="width: 6%;" title="Opens the Keywords Everywhere backlink sample stored for this page (last ③ refresh). Not sortable.">BL sample</th>
+                  <th style="width: 5%;"><button type="button" class="traditional-seo-sort-btn" data-sort="kw_page_bl" title="KE get_page_backlinks sample size. With &quot;Filter disavowed&quot; on (BL sample column), this matches rows left after your disavow file + spam filter when stored JSON exists.">Pg bl <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 6%;" title="Opens stored backlink rows (last ③). Optional: filter counts in the table to match rows left after disavow + spam rules.">
+                    <div style="font-weight: 700; color: var(--dark-text-muted); margin-bottom: 0.25rem;">BL sample</div>
+                    <label style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.72rem; font-weight: 600; color: var(--dark-text-muted); cursor: pointer; white-space: nowrap;">
+                      <input type="checkbox" id="traditional-seo-filter-disavowed-bl" checked title="When on, Pg bl and View (n) match rows left after disavow + spam filter (needs stored backlink JSON)." />
+                      <span>Filter disavowed</span>
+                    </label>
+                  </th>
                   <th style="width: 7%;"><button type="button" class="traditional-seo-sort-btn" data-sort="clicks" title="Google Search Console clicks from the saved audit’s query-page data (typically last 28 days ending near audit date).">Clicks <span class="sort-ind">↕</span></button></th>
                   <th style="width: 7%;"><button type="button" class="traditional-seo-sort-btn" data-sort="impressions" title="Google Search Console impressions from the saved audit’s query-page data (typically last 28 days ending near audit date).">Impr. <span class="sort-ind">↕</span></button></th>
                 </tr>
@@ -70241,7 +70247,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       keDomainMetrics: null,
       /** Parsed disavow file for BL modal (fetch from public/). */
       disavowUiLoaded: null,
-      disavowUiPromise: null
+      disavowUiPromise: null,
+      /** When true (default), Pg bl + BL sample counts exclude disavowed / spam rows when JSON rows exist. */
+      filterDisavowedBacklinkCounts: true
     };
 
     /** SPA rewrite sends most paths to audit-dashboard.html; load disavow via API so we get real text. */
@@ -71270,10 +71278,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         m.url_estimated_traffic != null && Number.isFinite(Number(m.url_estimated_traffic))
           ? formatTraditionalSeoSearchVolume(m.url_estimated_traffic)
           : '—';
-      const pageBl =
-        m.page_backlinks_sample != null && Number.isFinite(Number(m.page_backlinks_sample))
-          ? `${Math.round(Number(m.page_backlinks_sample))}`
-          : '—';
+      const pageBlN = traditionalSeoPageBlDisplayNumberForMetric(m);
+      const pageBl = pageBlN != null && Number.isFinite(Number(pageBlN)) ? `${Math.round(Number(pageBlN))}` : '—';
       return { vol, est, rank, urlTraf, pageBl };
     }
 
@@ -72719,6 +72725,40 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return TRADITIONAL_SEO_STATE.disavowUiPromise;
     }
 
+    function traditionalSeoBacklinkItemsFromMetric(m) {
+      const raw = m?.page_backlinks_json;
+      if (Array.isArray(raw)) return raw;
+      if (raw && typeof raw === 'object') return Object.values(raw);
+      return [];
+    }
+
+    function traditionalSeoDisavowPackForDisplay() {
+      const p = TRADITIONAL_SEO_STATE.disavowUiLoaded;
+      if (p && p.domains instanceof Set && p.urls instanceof Set) return p;
+      return { domains: new Set(), urls: new Set() };
+    }
+
+    /** Integer for Pg bl column; null means show em dash (no KE backlink data). */
+    function traditionalSeoPageBlDisplayNumberForMetric(m) {
+      if (!m) return null;
+      const items = traditionalSeoBacklinkItemsFromMetric(m);
+      const nSample = traditionalSeoToNum(m?.page_backlinks_sample, 0);
+      const hasData = nSample > 0 || items.length > 0;
+      if (!hasData) return null;
+      const raw = items.length > 0 ? items.length : Math.round(nSample);
+      const filtered = items.length
+        ? traditionalSeoFilterBacklinksDisavow(items, traditionalSeoDisavowPackForDisplay()).length
+        : raw;
+      const useFiltered = TRADITIONAL_SEO_STATE.filterDisavowedBacklinkCounts !== false;
+      return useFiltered ? filtered : raw;
+    }
+
+    function traditionalSeoPageBlSortValueForUrl(url) {
+      const m = traditionalSeoGetKeywordMetricRow(String(url || '').trim());
+      const n = traditionalSeoPageBlDisplayNumberForMetric(m);
+      return n != null && Number.isFinite(Number(n)) ? Number(n) : -1;
+    }
+
     /** Moz-style domain authority for the *linking* side, if KE (or future payload) includes it. */
     function traditionalSeoLinkingDomainMozDa(o) {
       if (!o || typeof o !== 'object') return null;
@@ -73222,6 +73262,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     function renderTraditionalSeoResultsTable() {
+      if (TRADITIONAL_SEO_STATE.filterDisavowedBacklinkCounts !== false && TRADITIONAL_SEO_STATE.disavowUiLoaded === null) {
+        traditionalSeoEnsureDisavowLoadedUi().then(() => renderTraditionalSeoResultsTable());
+      }
       const allRows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
       TRADITIONAL_SEO_STATE.tierUrlCountsMap = traditionalSeoComputeTierUrlCountsMap(allRows);
       traditionalSeoPopulateTierFilter(TRADITIONAL_SEO_STATE.tierUrlCountsMap);
@@ -73335,9 +73378,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               return Number.isFinite(n) ? n : -1;
             }
             if (sortKey === 'kw_page_bl') {
-              const v = m?.page_backlinks_sample;
-              const n = Number(v);
-              return Number.isFinite(n) ? n : -1;
+              return traditionalSeoPageBlSortValueForUrl(url);
             }
             return -1;
           };
@@ -73402,18 +73443,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             const clicksFmt = formatTraditionalSeoSearchVolume(row.clicks);
             const imprFmt = formatTraditionalSeoSearchVolume(row.impressions);
             const mForBl = !isSitewide ? traditionalSeoGetKeywordMetricRow(urlRaw) : null;
-            let blJsonRaw = mForBl?.page_backlinks_json;
-            const blArr = Array.isArray(blJsonRaw)
-              ? blJsonRaw
-              : blJsonRaw && typeof blJsonRaw === 'object'
-                ? Object.values(blJsonRaw)
-                : [];
+            const blArr = mForBl ? traditionalSeoBacklinkItemsFromMetric(mForBl) : [];
             const nBlCount = traditionalSeoToNum(mForBl?.page_backlinks_sample, 0);
+            const blViewCount = mForBl ? traditionalSeoPageBlDisplayNumberForMetric(mForBl) : null;
+            const blHasSample =
+              !isSitewide &&
+              mForBl &&
+              (blArr.length > 0 || nBlCount > 0 || (blViewCount != null && Number(blViewCount) === 0));
             /* By URL (default) rows are __page_summary__ — still show BL sample from keywordMetricsByUrl for that page URL. */
             const blSampleCell = isSitewide
               ? '—'
-              : blArr.length || nBlCount > 0
-                ? `<button type="button" class="btn traditional-seo-backlinks-view-btn" style="padding:0.25rem 0.5rem;font-size:0.72rem;" data-page-url="${viewAttr}">View (${blArr.length || nBlCount})</button>`
+              : blHasSample
+                ? `<button type="button" class="btn traditional-seo-backlinks-view-btn" style="padding:0.25rem 0.5rem;font-size:0.72rem;" data-page-url="${viewAttr}">View (${blViewCount != null ? Math.round(Number(blViewCount)) : blArr.length || nBlCount})</button>`
                 : '—';
             const ruleCell = isSummaryRow(row)
               ? `<span style="color:var(--dark-text-muted);font-size:0.78rem;">${escapeHtml(String(row.summary_total || 0))} checks</span>`
@@ -74164,6 +74205,15 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           syncRuleSummaryPanelToggle();
         });
         syncRuleSummaryPanelToggle();
+      }
+      const filterDisavowedBl = document.getElementById('traditional-seo-filter-disavowed-bl');
+      if (filterDisavowedBl && !filterDisavowedBl.dataset.wired) {
+        filterDisavowedBl.dataset.wired = '1';
+        filterDisavowedBl.checked = TRADITIONAL_SEO_STATE.filterDisavowedBacklinkCounts !== false;
+        filterDisavowedBl.addEventListener('change', () => {
+          TRADITIONAL_SEO_STATE.filterDisavowedBacklinkCounts = Boolean(filterDisavowedBl.checked);
+          renderTraditionalSeoResultsTable();
+        });
       }
       const refreshBtn = document.getElementById('traditional-seo-refresh-btn');
       const saveBtn = document.getElementById('traditional-seo-save-btn');
