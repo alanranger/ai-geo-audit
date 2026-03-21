@@ -1162,6 +1162,17 @@
       0%, 100% { transform: scale(1); }
       50% { transform: scale(1.1); }
     }
+    @keyframes traditionalSeoKwShimmer {
+      0% { transform: translateX(-120%); }
+      100% { transform: translateX(320%); }
+    }
+    .traditional-seo-kw-activity-bar-fill {
+      height: 100%;
+      width: 38%;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.92);
+      animation: traditionalSeoKwShimmer 1.15s ease-in-out infinite;
+    }
     .ranking-ai-step-label {
       flex: 1;
       font-size: 0.9rem;
@@ -6147,6 +6158,12 @@
               title="Uses Keywords Everywhere API (server). Upserts Supabase cache for missing/stale pairs only. Then reloads Kw vol in the table and the Moz DA tile when KE returns it.">
               ③ Refresh keyword demand (KE)
             </button>
+          </div>
+          <div id="traditional-seo-kw-activity" role="status" aria-live="polite" style="display:none;margin:0.65rem 0 0;padding:0.55rem 0.65rem;border-radius:8px;border:1px solid rgba(56,189,248,0.45);background:rgba(14,165,233,0.12);font-size:0.78rem;color:var(--dark-text-muted);">
+            <div id="traditional-seo-kw-activity-msg" style="margin-bottom:0.35rem;color:inherit;"></div>
+            <div id="traditional-seo-kw-activity-bar" style="display:none;height:4px;border-radius:999px;background:rgba(148,163,184,0.35);overflow:hidden;">
+              <div class="traditional-seo-kw-activity-bar-fill"></div>
+            </div>
           </div>
           <div id="traditional-seo-source-parity-panel" style="margin-bottom:0.75rem;padding:0.55rem 0.7rem;border:1px solid rgba(148,163,184,0.25);border-radius:8px;background:rgba(15,23,42,0.55);font-size:0.8rem;color:var(--dark-text-muted);">
             URL source parity: checking...
@@ -71039,6 +71056,17 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (lastMeta?.warning) TRADITIONAL_SEO_STATE.keywordMetricsLastNote = String(lastMeta.warning);
     }
 
+    function traditionalSeoKwActivitySet(opts) {
+      const wrap = document.getElementById('traditional-seo-kw-activity');
+      const msg = document.getElementById('traditional-seo-kw-activity-msg');
+      const bar = document.getElementById('traditional-seo-kw-activity-bar');
+      if (!wrap || !msg) return;
+      const on = !!(opts && opts.show);
+      wrap.style.display = on ? 'block' : 'none';
+      if (opts && opts.text != null) msg.textContent = String(opts.text);
+      if (bar) bar.style.display = on && opts && opts.bar !== false ? 'block' : 'none';
+    }
+
     async function traditionalSeoKeywordMetricsLookupIfNeededForRun() {
       const runAt = TRADITIONAL_SEO_STATE.lastEvaluationAt;
       if (!runAt) return;
@@ -71046,6 +71074,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (TRADITIONAL_SEO_STATE.keywordMetricsLoadedForRun === runAt) return;
       if (TRADITIONAL_SEO_STATE.keywordMetricsLookupInFlight) return;
       TRADITIONAL_SEO_STATE.keywordMetricsLookupInFlight = true;
+      renderTraditionalSeoResultsTable();
       try {
         await traditionalSeoKeywordMetricsLookupSilently();
         TRADITIONAL_SEO_STATE.keywordMetricsLoadedForRun = runAt;
@@ -71065,14 +71094,31 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const rows = TRADITIONAL_SEO_STATE.evaluationRows;
       const pairs = traditionalSeoKeywordMetricPairsFromRows(rows);
       if (!pairs.length) {
-        if (typeof window.showStatus === 'function') window.showStatus('No URL + target keyword pairs to refresh.', 'info');
+        traditionalSeoKwActivitySet({
+          show: true,
+          bar: false,
+          text:
+            'No URL rows loaded yet. Run ② Score Traditional SEO (or ① Full audit + Traditional SEO) first. Button ③ only fills keyword demand for URLs already in this table.'
+        });
+        if (typeof window.showStatus === 'function') {
+          window.showStatus('No URL + target keyword pairs — run ② or ① first, then ③.', 'info');
+        }
+        renderTraditionalSeoResultsTable();
         return;
       }
       const kwBtns = Array.from(document.querySelectorAll('[data-traditional-seo-refresh-kw="1"]'));
       TRADITIONAL_SEO_STATE.keywordMetricsRefreshInFlight = true;
       kwBtns.forEach((b) => {
+        if (!b.dataset.tsKwDefaultLabel) b.dataset.tsKwDefaultLabel = b.textContent.trim();
+        b.textContent = '③ Refreshing…';
         b.disabled = true;
       });
+      traditionalSeoKwActivitySet({
+        show: true,
+        bar: true,
+        text: 'Keywords Everywhere refresh in progress (server). This can take a minute for many URLs; the table meta line also shows “Loading kw cache…”.'
+      });
+      renderTraditionalSeoResultsTable();
       try {
         if (typeof window.showStatus === 'function') {
           window.showStatus('Refreshing keyword demand (Keywords Everywhere) for missing/stale rows…', 'info');
@@ -71099,8 +71145,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       } finally {
         TRADITIONAL_SEO_STATE.keywordMetricsRefreshInFlight = false;
         kwBtns.forEach((b) => {
+          if (b.dataset.tsKwDefaultLabel) b.textContent = b.dataset.tsKwDefaultLabel;
           b.disabled = false;
         });
+        traditionalSeoKwActivitySet({ show: false });
         renderTraditionalSeoResultsTable();
       }
     }
@@ -72780,7 +72828,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
       if (body) {
         if (!filtered.length) {
-          body.innerHTML = '<tr><td colspan="14" style="color: var(--dark-text-muted);">No rows match current filters.</td></tr>';
+          const emptyHint = !allRows.length
+            ? 'No Traditional SEO results yet. Run <strong>② Score Traditional SEO</strong> or <strong>① Full audit + Traditional SEO</strong> first. Then use <strong>③</strong> to refresh keyword demand (Keywords Everywhere).'
+            : 'No rows match current filters.';
+          body.innerHTML = `<tr><td colspan="14" style="color: var(--dark-text-muted);">${emptyHint}</td></tr>`;
         } else {
           const scoreMap = TRADITIONAL_SEO_STATE.pageScoreByUrl instanceof Map ? TRADITIONAL_SEO_STATE.pageScoreByUrl : null;
           const isSummaryRow = (r) => String(r?.rule_key || '') === '__page_summary__';
