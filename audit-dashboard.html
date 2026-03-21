@@ -70218,8 +70218,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       keywordMetricsStaleDays: 30,
       keywordMetricsLastNote: '',
       /** Domain-level KE cache row (Moz DA + referring domains sample) from keyword-target-metrics API. */
-      keDomainMetrics: null
+      keDomainMetrics: null,
+      /** Parsed disavow file for BL modal (fetch from public/). */
+      disavowUiLoaded: null,
+      disavowUiPromise: null
     };
+
+    const TRADITIONAL_SEO_DISAVOW_PUBLIC = '/Disavow%20links%20https_www_alanranger_com.txt';
 
     const TRADITIONAL_SEO_EVAL_PROGRESS = {
       timer: null,
@@ -72437,6 +72442,146 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       backdrop.setAttribute('aria-hidden', 'true');
     }
 
+    function traditionalSeoDisavowNormalizeHost(raw) {
+      let s = String(raw || '').trim().toLowerCase();
+      s = s.replace(/^https?:\/\//i, '');
+      s = s.split('/')[0].replace(/^www\./, '');
+      return s.replace(/:\d+$/, '');
+    }
+
+    function traditionalSeoDisavowNormalizePageUrl(raw) {
+      const s = String(raw || '').trim();
+      if (!s) return '';
+      try {
+        const u = new URL(s);
+        let pathname = u.pathname || '/';
+        if (pathname.length > 1 && pathname.endsWith('/')) pathname = pathname.slice(0, -1);
+        return `${u.protocol}//${u.hostname.toLowerCase()}${pathname}${u.search}`.toLowerCase();
+      } catch {
+        return s.toLowerCase();
+      }
+    }
+
+    function traditionalSeoParseDisavowText(text) {
+      const domains = new Set();
+      const urls = new Set();
+      const lines = String(text || '').split(/\r?\n/);
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = String(lines[i] || '').trim();
+        if (!line || line.startsWith('#')) continue;
+        const low = line.toLowerCase();
+        if (low.startsWith('domain:')) {
+          const d = traditionalSeoDisavowNormalizeHost(low.slice(7));
+          if (d) domains.add(d);
+          continue;
+        }
+        if (/^https?:\/\//i.test(line)) {
+          const u = traditionalSeoDisavowNormalizePageUrl(line);
+          if (u) urls.add(u);
+        }
+      }
+      return { domains, urls };
+    }
+
+    function traditionalSeoHostMatchesDisavow(host, domainSet) {
+      const h = traditionalSeoDisavowNormalizeHost(host);
+      if (!h || !domainSet || !domainSet.size) return false;
+      for (const d of domainSet) {
+        if (!d) continue;
+        if (h === d || h.endsWith(`.${d}`)) return true;
+      }
+      return false;
+    }
+
+    function traditionalSeoBacklinkSourceHostUi(row) {
+      const dom = row?.domain_source ?? row?.domainSource;
+      if (dom) return traditionalSeoDisavowNormalizeHost(dom);
+      const u = String(row?.url_source ?? row?.urlSource || '').trim();
+      if (!u) return '';
+      try {
+        return traditionalSeoDisavowNormalizeHost(new URL(u).hostname);
+      } catch {
+        return '';
+      }
+    }
+
+    function traditionalSeoBacklinkSourceUrlUi(row) {
+      const u = String(row?.url_source ?? row?.urlSource || '').trim();
+      return u ? traditionalSeoDisavowNormalizePageUrl(u) : '';
+    }
+
+    function traditionalSeoFilterBacklinksDisavow(items, pack) {
+      const d = pack?.domains && pack.domains.size ? pack.domains : null;
+      const u = pack?.urls && pack.urls.size ? pack.urls : null;
+      if (!d && !u) return items.slice();
+      return items.filter((row) => {
+        const h = traditionalSeoBacklinkSourceHostUi(row);
+        if (d && h && traditionalSeoHostMatchesDisavow(h, d)) return false;
+        const nu = u ? traditionalSeoBacklinkSourceUrlUi(row) : '';
+        if (nu && u.has(nu)) return false;
+        return true;
+      });
+    }
+
+    function traditionalSeoEnsureDisavowLoadedUi() {
+      if (TRADITIONAL_SEO_STATE.disavowUiLoaded != null) {
+        return Promise.resolve(TRADITIONAL_SEO_STATE.disavowUiLoaded);
+      }
+      if (!TRADITIONAL_SEO_STATE.disavowUiPromise) {
+        TRADITIONAL_SEO_STATE.disavowUiPromise = fetch(TRADITIONAL_SEO_DISAVOW_PUBLIC, { cache: 'force-cache' })
+          .then((r) => (r.ok ? r.text() : ''))
+          .then((text) => {
+            TRADITIONAL_SEO_STATE.disavowUiLoaded = text
+              ? traditionalSeoParseDisavowText(text)
+              : { domains: new Set(), urls: new Set() };
+            TRADITIONAL_SEO_STATE.disavowUiPromise = null;
+            return TRADITIONAL_SEO_STATE.disavowUiLoaded;
+          })
+          .catch(() => {
+            TRADITIONAL_SEO_STATE.disavowUiLoaded = { domains: new Set(), urls: new Set() };
+            TRADITIONAL_SEO_STATE.disavowUiPromise = null;
+            return TRADITIONAL_SEO_STATE.disavowUiLoaded;
+          });
+      }
+      return TRADITIONAL_SEO_STATE.disavowUiPromise;
+    }
+
+    /** Moz-style domain authority for the *linking* side, if KE (or future payload) includes it. */
+    function traditionalSeoLinkingDomainMozDa(o) {
+      if (!o || typeof o !== 'object') return null;
+      const pick = (v) => {
+        const n = traditionalSeoToNum(v, NaN);
+        if (!Number.isFinite(n)) return null;
+        const r = Math.round(n);
+        return r >= 0 && r <= 100 ? r : null;
+      };
+      const flatKeys = [
+        'linking_domain_authority',
+        'source_domain_authority',
+        'referring_domain_authority',
+        'domain_authority',
+        'domainAuthority',
+        'moz_source_domain_authority',
+        'moz_domain_authority',
+        'mozDomainAuthority',
+        'moz_da',
+        'mozDa',
+        'da'
+      ];
+      for (let i = 0; i < flatKeys.length; i += 1) {
+        const hit = pick(o[flatKeys[i]]);
+        if (hit != null) return hit;
+      }
+      const src = o.source;
+      if (src && typeof src === 'object') {
+        const hit = pick(
+          src.domain_authority ?? src.domainAuthority ?? src.moz_domain_authority ?? src.moz_da ?? src.da
+        );
+        if (hit != null) return hit;
+      }
+      return null;
+    }
+
     function traditionalSeoFormatOneBacklinkBlock(it, idx) {
       const o = it && typeof it === 'object' ? it : {};
       const srcUrl = String(o.url_source || o.urlSource || '').trim();
@@ -72446,6 +72591,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const anchor = escapeHtml(String(o.anchor_text || o.anchorText || '—'));
       const dsrc = escapeHtml(String(o.domain_source || o.domainSource || '—'));
       const dtgt = escapeHtml(String(o.domain_target || o.domainTarget || '—'));
+      const linkingDa = traditionalSeoLinkingDomainMozDa(o);
+      const daLine =
+        linkingDa != null
+          ? `<div style="font-size:0.78rem;color:#cbd5e1;margin-top:0.25rem;"><strong>Linking domain DA (Moz)</strong> ${escapeHtml(
+              String(linkingDa)
+            )}</div>`
+          : '';
       const known = new Set([
         'url_source',
         'urlSource',
@@ -72456,7 +72608,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         'domain_source',
         'domainSource',
         'domain_target',
-        'domainTarget'
+        'domainTarget',
+        'linking_domain_authority',
+        'source_domain_authority',
+        'referring_domain_authority',
+        'domain_authority',
+        'domainAuthority',
+        'moz_source_domain_authority',
+        'moz_domain_authority',
+        'mozDomainAuthority',
+        'moz_da',
+        'mozDa',
+        'da'
       ]);
       const extra = Object.keys(o)
         .filter((k) => !known.has(k))
@@ -72477,6 +72640,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           <div style="font-size:0.8rem;line-height:1.45;margin-bottom:0.35rem;"><strong style="color:#e2e8f0;">Target page</strong><br>${linkOrText(tgtHref, tgtUrl || '—')}</div>
           <div style="font-size:0.78rem;color:#cbd5e1;margin-bottom:0.25rem;"><strong>Anchor</strong> ${anchor}</div>
           <div style="font-size:0.78rem;color:#cbd5e1;"><strong>Domains</strong> ${dsrc} → ${dtgt}</div>
+          ${daLine}
           ${extra}
         </div>`;
     }
@@ -72492,6 +72656,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const items = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? Object.values(raw) : [];
       urlEl.textContent = url;
       const sampleN = traditionalSeoToNum(m?.page_backlinks_sample, 0);
+      const openBackdrop = () => {
+        backdrop.classList.add('is-open');
+        backdrop.setAttribute('aria-hidden', 'false');
+      };
       if (!items.length) {
         if (sampleN > 0) {
           listEl.innerHTML =
@@ -72501,11 +72669,20 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           listEl.innerHTML =
             '<p style="color:#94a3b8;margin:0;">No backlink sample for this URL. Run <strong>③ Refresh keyword demand (KE)</strong> after the cache migration is applied.</p>';
         }
-      } else {
-        listEl.innerHTML = items.map((it, i) => traditionalSeoFormatOneBacklinkBlock(it, i)).join('');
+        openBackdrop();
+        return;
       }
-      backdrop.classList.add('is-open');
-      backdrop.setAttribute('aria-hidden', 'false');
+      listEl.innerHTML = '<p style="color:#94a3b8;margin:0;">Applying disavow list…</p>';
+      openBackdrop();
+      traditionalSeoEnsureDisavowLoadedUi().then((pack) => {
+        const filtered = traditionalSeoFilterBacklinksDisavow(items, pack);
+        if (!filtered.length) {
+          listEl.innerHTML =
+            '<p style="color:#94a3b8;margin:0;">No rows left after applying your disavow file (every sample row matched a listed domain or URL).</p>';
+          return;
+        }
+        listEl.innerHTML = filtered.map((it, i) => traditionalSeoFormatOneBacklinkBlock(it, i)).join('');
+      });
     }
 
     function wireTraditionalSeoBacklinksModal() {

@@ -1,5 +1,8 @@
 export const config = { runtime: 'nodejs' };
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 
 const KE_BASE = 'https://api.keywordseverywhere.com/v1';
@@ -129,6 +132,124 @@ function envInt(name, def, min, max) {
   const n = toNum(process.env[name], def);
   const v = Math.round(Number.isFinite(n) ? n : def);
   return Math.max(min, Math.min(max, v));
+}
+
+/** Same normalisation for disavow URL lines and KE `url_source` (exact match after normalise). */
+function normalizeDisavowPageUrl(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  try {
+    const u = new URL(s);
+    let pathname = u.pathname || '/';
+    if (pathname.length > 1 && pathname.endsWith('/')) pathname = pathname.slice(0, -1);
+    return `${u.protocol}//${u.hostname.toLowerCase()}${pathname}${u.search}`.toLowerCase();
+  } catch {
+    return s.toLowerCase();
+  }
+}
+
+function parseGoogleDisavowFile(text) {
+  const domains = new Set();
+  const urls = new Set();
+  const lines = String(text || '').split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = String(lines[i] || '').trim();
+    if (!line || line.startsWith('#')) continue;
+    const low = line.toLowerCase();
+    if (low.startsWith('domain:')) {
+      const d = normalizeDomainHost(low.slice(7));
+      if (d) domains.add(d);
+      continue;
+    }
+    if (/^https?:\/\//i.test(line)) {
+      const u = normalizeDisavowPageUrl(line);
+      if (u) urls.add(u);
+    }
+  }
+  return { domains, urls };
+}
+
+function loadDisavowForBacklinks() {
+  const override = String(process.env.DISAVOW_FILE_PATH || '').trim();
+  const name = 'Disavow links https_www_alanranger_com.txt';
+  const relPublic = path.join('public', name);
+  const candidates = [];
+  if (override) candidates.push(override);
+  candidates.push(path.join(process.cwd(), relPublic));
+  candidates.push(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', relPublic));
+  for (let i = 0; i < candidates.length; i += 1) {
+    try {
+      const txt = fs.readFileSync(candidates[i], 'utf8');
+      return parseGoogleDisavowFile(txt);
+    } catch {
+      /* try next path */
+    }
+  }
+  return { domains: new Set(), urls: new Set() };
+}
+
+function hostMatchesDisavowSet(host, domainSet) {
+  const h = normalizeDomainHost(host);
+  if (!h || !domainSet || !domainSet.size) return false;
+  for (const d of domainSet) {
+    if (!d) continue;
+    if (h === d || h.endsWith(`.${d}`)) return true;
+  }
+  return false;
+}
+
+function backlinkSourceHost(row) {
+  const dom = row?.domain_source ?? row?.domainSource;
+  if (dom) return normalizeDomainHost(dom);
+  const u = String(row?.url_source ?? row?.urlSource || '').trim();
+  if (!u) return '';
+  try {
+    return normalizeDomainHost(new URL(u).hostname);
+  } catch {
+    return '';
+  }
+}
+
+function normalizeBacklinkSourceUrl(row) {
+  const u = String(row?.url_source ?? row?.urlSource || '').trim();
+  return u ? normalizeDisavowPageUrl(u) : '';
+}
+
+function filterDisavowedBacklinks(list, domainSet, urlSet) {
+  if (!Array.isArray(list) || !list.length) return Array.isArray(list) ? list : [];
+  const d = domainSet && domainSet.size ? domainSet : null;
+  const u = urlSet && urlSet.size ? urlSet : null;
+  if (!d && !u) return list.slice();
+  return list.filter((row) => {
+    const h = backlinkSourceHost(row);
+    if (d && h && hostMatchesDisavowSet(h, d)) return false;
+    const nu = u ? normalizeBacklinkSourceUrl(row) : '';
+    if (nu && u.has(nu)) return false;
+    return true;
+  });
+}
+
+function uniqueDomainRowHost(row) {
+  if (!row || typeof row !== 'object') return '';
+  const v =
+    row.domain ?? row.domain_name ?? row.domain_host ?? row.domain_source ?? row.source_domain ?? row.host ?? row.url;
+  if (!v) return '';
+  const s = String(v).trim();
+  if (!s) return '';
+  if (/^https?:\/\//i.test(s)) {
+    try {
+      return normalizeDomainHost(new URL(s).hostname);
+    } catch {
+      return normalizeDomainHost(s);
+    }
+  }
+  return normalizeDomainHost(s);
+}
+
+function filterDisavowedDomainRows(list, domainSet) {
+  if (!Array.isArray(list) || !list.length) return Array.isArray(list) ? list : [];
+  if (!domainSet || !domainSet.size) return list.slice();
+  return list.filter((row) => !hostMatchesDisavowSet(uniqueDomainRowHost(row), domainSet));
 }
 
 async function readCacheRows(supabase, pairs) {
@@ -413,7 +534,8 @@ async function fetchUrlKeywordsForPage(apiKey, pageUrl, country, num) {
 }
 
 function sanitizeBacklinksForDb(list, maxItems) {
-  const cap = Math.max(1, Math.min(200, maxItems || 25));
+  const globalMax = envInt('KE_PAGE_BACKLINKS_MAX_STORED', 200, 1, 2000);
+  const cap = Math.max(1, Math.min(globalMax, maxItems || 25));
   const src = Array.isArray(list) ? list.slice(0, cap) : [];
   try {
     return JSON.parse(JSON.stringify(src));
@@ -422,15 +544,24 @@ function sanitizeBacklinksForDb(list, maxItems) {
   }
 }
 
-/** Returns { count, items } — items are a capped JSON-safe array for Supabase jsonb. */
-async function fetchPageBacklinksSample(apiKey, pageUrl, num) {
+/**
+ * KE cannot exclude domains server-side. We request a larger `num`, drop disavowed rows, then cap to `desiredCount`.
+ * Returns { count, items } — items are a capped JSON-safe array for Supabase jsonb.
+ */
+async function fetchPageBacklinksSample(apiKey, pageUrl, desiredCount, disavow) {
+  const d = disavow || { domains: new Set(), urls: new Set() };
+  const oversample = envInt('KE_PAGE_BACKLINKS_OVERSAMPLE_MULT', 5, 1, 20);
+  const fetchCap = envInt('KE_PAGE_BACKLINKS_FETCH_CAP', 500, 50, 2000);
+  const want = Math.max(1, Math.round(Number(desiredCount)) || 25);
+  const askNum = Math.min(fetchCap, Math.max(want * oversample, want + 40));
   const { res, json, text } = await kePostForm(apiKey, KE_PAGE_BACKLINKS, {
     page: pageUrl,
-    num
+    num: askNum
   });
   if (!res.ok) throw keError(res, json, text);
   const list = extractKeItems(json);
-  const items = sanitizeBacklinksForDb(list, num);
+  const filtered = filterDisavowedBacklinks(list, d.domains, d.urls);
+  const items = sanitizeBacklinksForDb(filtered, want);
   return { count: items.length, items };
 }
 
@@ -492,14 +623,21 @@ function extractMozDaDeep(obj, depth = 0, parentKey = '') {
   return null;
 }
 
-async function fetchUniqueDomainBacklinks(apiKey, domainHost, num) {
+async function fetchUniqueDomainBacklinks(apiKey, domainHost, num, disavow) {
+  const d = disavow || { domains: new Set(), urls: new Set() };
+  const oversample = envInt('KE_DOMAIN_BACKLINKS_OVERSAMPLE_MULT', 3, 1, 15);
+  const fetchCap = envInt('KE_DOMAIN_BACKLINKS_FETCH_CAP', 300, 30, 2000);
+  const want = Math.max(1, Math.round(Number(num)) || 80);
+  const askNum = Math.min(fetchCap, Math.max(want * oversample, want + 20));
   const { res, json, text } = await kePostForm(apiKey, KE_UNIQUE_DOMAIN_BACKLINKS, {
     domain: domainHost,
-    num
+    num: askNum
   });
   if (!res.ok) throw keError(res, json, text);
   const list = extractKeItems(json);
-  const referringDomainsSample = Array.isArray(list) ? list.length : 0;
+  const filtered = filterDisavowedDomainRows(list, d.domains);
+  const trimmed = filtered.slice(0, want);
+  const referringDomainsSample = trimmed.length;
   const moz = extractMozDaDeep(json, 0, '') ?? extractMozDaDeep({ items: list }, 0, '');
   return { referringDomainsSample, moz, raw: json };
 }
@@ -636,6 +774,10 @@ export default async function handler(req, res) {
     const enrichNotes = [];
     let domainMetricsForRows = null;
 
+    const needDisavow =
+      stalePageUrls.length > 0 || (domainHost && domainNeedsKeFetch(domainRow, force, nowMs));
+    const disavowLists = needDisavow ? loadDisavowForBacklinks() : { domains: new Set(), urls: new Set() };
+
     if (stalePageUrls.length) {
       try {
         const m = await fetchUrlTrafficMap(apiKey, stalePageUrls, country);
@@ -655,7 +797,7 @@ export default async function handler(req, res) {
           urlKeywordsMap.set(canonical, []);
         }
         try {
-          const n = await fetchPageBacklinksSample(apiKey, pu, pageBlNum);
+          const n = await fetchPageBacklinksSample(apiKey, pu, pageBlNum, disavowLists);
           pageBlMap.set(canonical, n);
         } catch (e) {
           enrichNotes.push(`${canonical}: page backlinks — ${String(e?.message || e)}`);
@@ -666,7 +808,7 @@ export default async function handler(req, res) {
 
     if (domainHost && domainNeedsKeFetch(domainRow, force, nowMs)) {
       try {
-        const dom = await fetchUniqueDomainBacklinks(apiKey, domainHost, domainBlNum);
+        const dom = await fetchUniqueDomainBacklinks(apiKey, domainHost, domainBlNum, disavowLists);
         await upsertDomainMetrics(supabase, domainHost, {
           moz_domain_authority: dom.moz,
           referring_domains_sample: dom.referringDomainsSample,
@@ -762,6 +904,14 @@ export default async function handler(req, res) {
       },
       meta: {
         generatedAt: new Date().toISOString(),
+        ...(needDisavow && (disavowLists.domains.size > 0 || disavowLists.urls.size > 0)
+          ? {
+              disavowLoaded: {
+                domainEntries: disavowLists.domains.size,
+                urlEntries: disavowLists.urls.size
+              }
+            }
+          : {}),
         ...(enrichNotes.length ? { keNotes: enrichNotes.slice(0, 8) } : {})
       }
     });

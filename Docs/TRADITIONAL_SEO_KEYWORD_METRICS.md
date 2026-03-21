@@ -2,7 +2,7 @@
 
 **Purpose:** Handover for new chat agents and humans. Describes the **Kw vol / Rank / Moz DA / Metrics age** columns and the **③ Refresh keyword demand (KE)** flow.
 
-**Last updated:** 2026-03-13
+**Last updated:** 2026-03-21
 
 ---
 
@@ -54,6 +54,17 @@
 | `KEYWORDS_EVERYWHERE_COUNTRY` | No | Default **`gb`** (Google UK). **`uk` is mapped to `gb`**. |
 | `KEYWORDS_EVERYWHERE_CURRENCY` | No | Default **`GBP`** (uppercase; `gbp` in env is normalised up) |
 | `KEYWORD_METRICS_STALE_DAYS` | No | Default `30` (1–365) |
+| `DISAVOW_FILE_PATH` | No | Optional absolute path to the disavow `.txt`. Default: `public/Disavow links https_www_alanranger_com.txt` (also served to the dashboard for the BL modal). |
+| `KE_PAGE_BACKLINKS_NUM` | No | Default **`25`** — max **clean** backlinks stored per page after disavow filtering (see below). |
+| `KE_PAGE_BACKLINKS_MAX_STORED` | No | Default **`200`**, max **2000** — hard cap on JSON rows in `page_backlinks_json` (payload / DB size). |
+| `KE_PAGE_BACKLINKS_OVERSAMPLE_MULT` | No | Default **`5`** (1–20) — KE `get_page_backlinks` is called with `num ≈ min(FETCH_CAP, max(desired × mult, desired + 40))` so spam rows can be dropped while still filling `desired`. |
+| `KE_PAGE_BACKLINKS_FETCH_CAP` | No | Default **`500`**, max **2000** — upper bound on `num` sent to KE for page backlinks. |
+| `KE_DOMAIN_BACKLINKS_OVERSAMPLE_MULT` | No | Default **`3`** (1–15) — same idea for `get_unique_domain_backlinks`. |
+| `KE_DOMAIN_BACKLINKS_FETCH_CAP` | No | Default **`300`**, max **2000**. |
+
+**Disavow + Pg bl:** KE does not accept a blocklist. The server **oversamples**, filters against the disavow file, then stores up to **`KE_PAGE_BACKLINKS_NUM`** rows. The BL modal **fetches the same file from `/Disavow%20…`** and filters again so old cache rows stay hidden without a refresh.
+
+**Why not “all” backlinks?** KE credits / rate limits, serverless time, and Supabase **jsonb** size all scale with row count. Defaults keep the dashboard fast; raise **`KE_PAGE_BACKLINKS_NUM`** and **`KE_PAGE_BACKLINKS_MAX_STORED`** if you need a deeper sample (still bounded).
 
 **KE endpoint (server):** `POST https://api.keywordseverywhere.com/v1/get_keyword_data` (form body: `country`, `currency`, `dataSource=gkp`, repeated `kw[]`). See [Keywords Everywhere API](https://keywordseverywhere.com/api-documentation.html).
 
