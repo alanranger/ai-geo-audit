@@ -206,7 +206,7 @@ function hostMatchesDisavowSet(host, domainSet) {
 function backlinkSourceHost(row) {
   const dom = row?.domain_source ?? row?.domainSource;
   if (dom) return normalizeDomainHost(dom);
-  const u = String(row?.url_source ?? row?.urlSource || '').trim();
+  const u = String((row?.url_source ?? row?.urlSource) || '').trim();
   if (!u) return '';
   try {
     return normalizeDomainHost(new URL(u).hostname);
@@ -216,7 +216,7 @@ function backlinkSourceHost(row) {
 }
 
 function normalizeBacklinkSourceUrl(row) {
-  const u = String(row?.url_source ?? row?.urlSource || '').trim();
+  const u = String((row?.url_source ?? row?.urlSource) || '').trim();
   return u ? normalizeDisavowPageUrl(u) : '';
 }
 
