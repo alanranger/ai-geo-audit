@@ -161,12 +161,16 @@ async function handleDomainStatus(supabase, domainHost, src) {
 
 async function handleDomainFull(supabase, creds, domainHost, src) {
   const runId = randomUUID();
-  const { rows, pages, totalCost, maxFirstSeen, truncated, itemsFromApi } = await paginateDomainBacklinks(
-    creds,
-    domainHost,
-    filtersFullSpamOnly(),
-    runId
-  );
+  const {
+    rows,
+    pages,
+    totalCost,
+    maxFirstSeen,
+    truncated,
+    itemsFromApi,
+    itemsUnmapped,
+    providerTotalCount
+  } = await paginateDomainBacklinks(creds, domainHost, filtersFullSpamOnly(), runId);
   if (!rows.length && itemsFromApi > 0) {
     return {
       status: 422,
@@ -209,6 +213,8 @@ async function handleDomainFull(supabase, creds, domainHost, src) {
         action: 'full',
         rowsWritten: rows.length,
         itemsFromApi,
+        itemsUnmapped,
+        providerTotalCount,
         rowCount: cnt,
         dofollowSplit,
         pagesFetched: pages,
@@ -240,12 +246,16 @@ async function handleDomainDelta(supabase, creds, domainHost, src) {
     return { status: 400, body: { status: 'error', message: 'Invalid delta_first_seen_floor in state.' } };
   }
   const runId = randomUUID();
-  const { rows, pages, totalCost, maxFirstSeen, truncated, itemsFromApi } = await paginateDomainBacklinks(
-    creds,
-    domainHost,
-    filters,
-    runId
-  );
+  const {
+    rows,
+    pages,
+    totalCost,
+    maxFirstSeen,
+    truncated,
+    itemsFromApi,
+    itemsUnmapped,
+    providerTotalCount
+  } = await paginateDomainBacklinks(creds, domainHost, filters, runId);
   if (!rows.length && itemsFromApi > 0) {
     return {
       status: 422,
@@ -287,6 +297,8 @@ async function handleDomainDelta(supabase, creds, domainHost, src) {
         action: 'delta',
         rowsUpserted: rows.length,
         itemsFromApi,
+        itemsUnmapped,
+        providerTotalCount,
         rowCount: cnt,
         dofollowSplit,
         pagesFetched: pages,

@@ -90,9 +90,12 @@ function extractSummaryTaskRow(body) {
   const sc = toNum(task?.status_code, null);
   if (sc !== 20000) return { err: String(task?.status_message || `DataForSEO task status ${sc}`) };
   const result = task?.result;
-  if (!Array.isArray(result) || !result.length) return { err: 'Empty DataForSEO result' };
+  let row0 = null;
+  if (Array.isArray(result) && result.length) row0 = result[0];
+  else if (result && typeof result === 'object' && !Array.isArray(result)) row0 = result;
+  if (!row0) return { err: 'Empty DataForSEO result' };
   const taskData = task?.data && typeof task.data === 'object' ? task.data : null;
-  return { row: result[0], cost: toNum(task?.cost, null), taskData };
+  return { row: row0, cost: toNum(task?.cost, null), taskData };
 }
 
 function attrBucketCount(attrsObj, name) {

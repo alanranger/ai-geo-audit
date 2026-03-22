@@ -70370,6 +70370,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       dfsFilteredIndexRowCount: null,
       /** { dofollow, nofollow, unknown } from domain index status / ingest. */
       dfsFilteredDofollowSplit: null,
+      /** Last DFS domain ingest counters (API items vs written). */
+      dfsLastIngestStats: null,
       dfsPageRefreshBatch: 10,
       /** Server: TRADITIONAL_SEO_BACKLINK_INDEX_SOURCE → ke | dataforseo | both */
       backlinkIndexSource: null,
@@ -71033,11 +71035,32 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
         const cost = d.approxCost != null ? String(d.approxCost) : '—';
         const rc = d.rowsWritten != null ? d.rowsWritten : d.rowsUpserted;
-        const apiN = d.itemsFromApi != null ? d.itemsFromApi : null;
-        const apiPart = apiN != null ? ` · API items ${apiN}` : '';
+        const apiCt = d.itemsFromApi != null ? Number(d.itemsFromApi) : NaN;
+        const unmappedCt = d.itemsUnmapped != null ? Number(d.itemsUnmapped) : NaN;
+        const writtenN = rc != null ? Number(rc) : NaN;
+        const apiN = Number.isFinite(apiCt) ? String(Math.round(apiCt)) : '—';
+        const unmappedN = Number.isFinite(unmappedCt) ? String(Math.round(unmappedCt)) : '—';
         const dbN = d.rowCount != null ? d.rowCount : '—';
         const trunc = d.truncated ? ' (hit page cap — raise DFS_DOMAIN_INGEST_MAX_PAGES or re-run).' : '';
-        TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote = `~$${cost} · wrote ${rc != null ? rc : '—'} · DB ${dbN}${apiPart}${trunc}`;
+        let pctKept = null;
+        if (Number.isFinite(apiCt) && apiCt > 0 && Number.isFinite(writtenN)) {
+          pctKept = Math.round((writtenN / apiCt) * 1000) / 10;
+        }
+        const provTC = d.providerTotalCount != null ? Math.round(Number(d.providerTotalCount)) : null;
+        TRADITIONAL_SEO_STATE.dfsLastIngestStats = {
+          itemsFromApi: Number.isFinite(apiCt) ? Math.round(apiCt) : 0,
+          itemsUnmapped: Number.isFinite(unmappedCt) ? Math.round(unmappedCt) : 0,
+          written: Number.isFinite(writtenN) ? Math.round(writtenN) : 0,
+          providerTotalCount: provTC != null && Number.isFinite(provTC) ? provTC : null,
+          pctKept,
+          at: new Date().toISOString()
+        };
+        const keptPart = pctKept != null ? ` · kept ${pctKept}% of API batch` : '';
+        const provPart =
+          provTC != null && Number.isFinite(provTC) ? ` · provider total (query) ${provTC}` : '';
+        TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote = `~$${cost} · API items ${apiN} · unmapped ${unmappedN} · wrote ${
+          rc != null ? rc : '—'
+        } · DB ${dbN}${keptPart}${provPart}${trunc}`;
         traditionalSeoDfsActivitySet({
           show: true,
           bar: true,
@@ -71050,11 +71073,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           pct: 62,
           text: 'DataForSEO: refreshing domain summary…'
         });
-        if (m === 'full') {
-          await traditionalSeoDfsSummaryCall('refresh', false);
-        } else {
-          await traditionalSeoDfsSummaryCall('lookup', false);
-        }
+        await traditionalSeoDfsSummaryCall('refresh', true);
         traditionalSeoDfsActivitySet({
           show: true,
           bar: true,
@@ -71223,9 +71242,38 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         } else {
           splitLine = '— (refresh page or run <strong>DFS full index</strong> to load split)';
         }
-        parts.push(`<li><strong>Dofollow / Nofollow (filtered index):</strong> ${splitLine}</li>`);
+        let followPctStr = '';
+        if (
+          spl &&
+          dfC != null &&
+          nfC != null &&
+          Number.isFinite(Number(dfC)) &&
+          Number.isFinite(Number(nfC))
+        ) {
+          const k = Math.max(0, Math.round(Number(dfC)) + Math.round(Number(nfC)));
+          if (k > 0) {
+            const p = Math.round((Math.max(0, Number(dfC)) / k) * 1000) / 10;
+            followPctStr = ` · <strong>${p}%</strong> follow (known rel only)`;
+          }
+        }
         parts.push(
-          `<li style="color:var(--dark-text-muted);font-size:0.78rem;list-style:none;margin-left:0;">Every line in this tile is from the spam-filtered Supabase index, not the raw provider totals.</li>`
+          `<li><strong>Dofollow / Nofollow (filtered index):</strong> ${splitLine}${followPctStr}</li>`
+        );
+        const ig = TRADITIONAL_SEO_STATE.dfsLastIngestStats;
+        if (ig && (ig.itemsFromApi > 0 || ig.written > 0)) {
+          const prov =
+            ig.providerTotalCount != null && Number.isFinite(Number(ig.providerTotalCount))
+              ? ` · provider query total ${fmt(Math.round(Number(ig.providerTotalCount)))}`
+              : '';
+          const pk = ig.pctKept != null && Number.isFinite(Number(ig.pctKept)) ? `${ig.pctKept}%` : '—';
+          parts.push(
+            `<li><strong>Last DFS ingest:</strong> ${fmt(ig.itemsFromApi)} API items · ${fmt(
+              ig.itemsUnmapped
+            )} not mapped to rows · ${fmt(ig.written)} written · <strong>${pk}</strong> of API batch indexed${prov}</li>`
+          );
+        }
+        parts.push(
+          `<li style="color:var(--dark-text-muted);font-size:0.76rem;list-style:none;margin-left:0;">Ring = spam-filtered row count in Supabase (may exceed dofollow+nofollow if some rows have unknown rel).</li>`
         );
       } else {
         parts.push(
