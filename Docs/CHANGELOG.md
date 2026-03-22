@@ -6,6 +6,7 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 
 ### Changed
 - **Traditional SEO “By URL” table:** homepage-style paths **`/`** and **`/home`** (same origin) roll up to **one row** (display URL follows the property URL host, e.g. `https://www…/`). **Clicks / impressions** sum across those variants; **rule counts** dedupe by `rule_key` (worst status wins). **Page score**, **KE**, **DFS** lookups, **rule bypass** map, and the **page modal** use the same alias so metrics and drill-down stay consistent.
+- **Traditional SEO rollup follow-up:** use **`lastPropertyUrl` from the current audit session** (fall back to `gsc_property_url` / `last_property_url`) so canonical display + comparable keys match GSC/KE after a run; **bootstrap** `lastPropertyUrl` from localStorage when results exist but session URL was empty. **Rules** mode / **rule filter ≠ All:** URL column + **GSC / KE / DFS** cells use the same homepage canonical + rolled-up totals; **KE** rows for `/` vs `/home` are **merged** field-by-field; table meta notes when a rule filter is narrowing rows.
 
 ### Added
 - **Supabase:** `dfs_domain_backlink_rows`, `dfs_backlink_ingest_state` (`migrations/20260321_dfs_domain_backlink_index.sql`, `sql/20260321_dfs_domain_backlink_index.sql`, `sql/SUPABASE_SCHEMA.sql`).
