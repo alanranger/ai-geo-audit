@@ -181,8 +181,15 @@ function mapRowToCache(domainHost, includeSubdomains, apiRow, cost) {
   };
 }
 
+function referringPagesFromRaw(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const n = toNum(raw.referring_pages ?? raw.referring_pages_count ?? raw.pages_with_backlinks, null);
+  return n != null && Number.isFinite(n) ? Math.round(n) : null;
+}
+
 function summaryPayload(row, nowMs) {
   if (!row) return null;
+  const referring_pages = referringPagesFromRaw(row.raw_result);
   return {
     domain_host: row.domain_host,
     include_subdomains: row.include_subdomains !== false,
@@ -197,6 +204,7 @@ function summaryPayload(row, nowMs) {
     crawled_pages: row.crawled_pages ?? null,
     dofollow_backlinks: row.dofollow_backlinks ?? null,
     nofollow_backlinks: row.nofollow_backlinks ?? null,
+    referring_pages,
     fetched_at: row.fetched_at || null,
     stale: isStaleRow(row, nowMs)
   };
