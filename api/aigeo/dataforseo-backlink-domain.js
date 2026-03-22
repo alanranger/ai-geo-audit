@@ -133,6 +133,16 @@ function throwIfSupabaseErr(err, label) {
   throw new Error(`${label}: ${String(err.message || err)}`);
 }
 
+function lastIngestFromState(st) {
+  if (!st?.last_ingest_at) return null;
+  return {
+    action: st.last_ingest_action != null ? String(st.last_ingest_action) : null,
+    apiItems: st.last_ingest_api_items != null ? Math.round(Number(st.last_ingest_api_items)) : null,
+    rowsStored: st.last_ingest_rows_stored != null ? Math.round(Number(st.last_ingest_rows_stored)) : null,
+    at: String(st.last_ingest_at)
+  };
+}
+
 async function handleDomainStatus(supabase, domainHost, src) {
   const st = await readState(supabase, domainHost);
   const cnt = await countRows(supabase, domainHost);
@@ -150,6 +160,7 @@ async function handleDomainStatus(supabase, domainHost, src) {
         domain: domainHost,
         rowCount: cnt,
         dofollowSplit,
+        lastIngest: lastIngestFromState(st),
         state: st,
         filtersVersion: DFS_SPAM_FILTERS_VERSION,
         backlinkIndexSource: src
@@ -161,16 +172,13 @@ async function handleDomainStatus(supabase, domainHost, src) {
 
 async function handleDomainFull(supabase, creds, domainHost, src) {
   const runId = randomUUID();
-  const {
-    rows,
-    pages,
-    totalCost,
-    maxFirstSeen,
-    truncated,
-    itemsFromApi,
-    itemsUnmapped,
-    providerTotalCount
-  } = await paginateDomainBacklinks(creds, domainHost, filtersFullSpamOnly(), runId);
+  const prev = (await readState(supabase, domainHost)) || {};
+  const { rows, pages, totalCost, maxFirstSeen, truncated, itemsFromApi } = await paginateDomainBacklinks(
+    creds,
+    domainHost,
+    filtersFullSpamOnly(),
+    runId
+  );
   if (!rows.length && itemsFromApi > 0) {
     return {
       status: 422,
@@ -193,15 +201,21 @@ async function handleDomainFull(supabase, creds, domainHost, src) {
     dofollowSplit = { dofollow: 0, nofollow: 0, unknown: 0 };
   }
   const floor = maxFirstSeen || new Date().toISOString();
+  const ingestedAt = new Date().toISOString();
   await writeState(supabase, {
+    ...prev,
     domain_host: domainHost,
-    last_full_at: new Date().toISOString(),
+    last_full_at: ingestedAt,
     last_delta_at: null,
     delta_first_seen_floor: floor,
     filters_version: DFS_SPAM_FILTERS_VERSION,
     last_full_run_id: runId,
     last_delta_run_id: null,
-    approx_row_count: cnt
+    approx_row_count: cnt,
+    last_ingest_action: 'full',
+    last_ingest_api_items: itemsFromApi,
+    last_ingest_rows_stored: rows.length,
+    last_ingest_at: ingestedAt
   });
 
   return {
@@ -213,10 +227,14 @@ async function handleDomainFull(supabase, creds, domainHost, src) {
         action: 'full',
         rowsWritten: rows.length,
         itemsFromApi,
-        itemsUnmapped,
-        providerTotalCount,
         rowCount: cnt,
         dofollowSplit,
+        lastIngest: {
+          action: 'full',
+          apiItems: itemsFromApi,
+          rowsStored: rows.length,
+          at: ingestedAt
+        },
         pagesFetched: pages,
         approxCost: Number(totalCost.toFixed(6)),
         truncated,
@@ -246,16 +264,12 @@ async function handleDomainDelta(supabase, creds, domainHost, src) {
     return { status: 400, body: { status: 'error', message: 'Invalid delta_first_seen_floor in state.' } };
   }
   const runId = randomUUID();
-  const {
-    rows,
-    pages,
-    totalCost,
-    maxFirstSeen,
-    truncated,
-    itemsFromApi,
-    itemsUnmapped,
-    providerTotalCount
-  } = await paginateDomainBacklinks(creds, domainHost, filters, runId);
+  const { rows, pages, totalCost, maxFirstSeen, truncated, itemsFromApi } = await paginateDomainBacklinks(
+    creds,
+    domainHost,
+    filters,
+    runId
+  );
   if (!rows.length && itemsFromApi > 0) {
     return {
       status: 422,
@@ -277,15 +291,21 @@ async function handleDomainDelta(supabase, creds, domainHost, src) {
   } catch {
     dofollowSplit = { dofollow: 0, nofollow: 0, unknown: 0 };
   }
+  const ingestedAt = new Date().toISOString();
   await writeState(supabase, {
+    ...st,
     domain_host: domainHost,
     last_full_at: st.last_full_at,
-    last_delta_at: new Date().toISOString(),
+    last_delta_at: ingestedAt,
     delta_first_seen_floor: nextFloor,
     filters_version: DFS_SPAM_FILTERS_VERSION,
     last_full_run_id: st.last_full_run_id,
     last_delta_run_id: runId,
-    approx_row_count: cnt
+    approx_row_count: cnt,
+    last_ingest_action: 'delta',
+    last_ingest_api_items: itemsFromApi,
+    last_ingest_rows_stored: rows.length,
+    last_ingest_at: ingestedAt
   });
 
   return {
@@ -297,10 +317,14 @@ async function handleDomainDelta(supabase, creds, domainHost, src) {
         action: 'delta',
         rowsUpserted: rows.length,
         itemsFromApi,
-        itemsUnmapped,
-        providerTotalCount,
         rowCount: cnt,
         dofollowSplit,
+        lastIngest: {
+          action: 'delta',
+          apiItems: itemsFromApi,
+          rowsStored: rows.length,
+          at: ingestedAt
+        },
         pagesFetched: pages,
         approxCost: Number(totalCost.toFixed(6)),
         truncated,

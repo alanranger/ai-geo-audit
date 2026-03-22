@@ -90,12 +90,9 @@ function extractSummaryTaskRow(body) {
   const sc = toNum(task?.status_code, null);
   if (sc !== 20000) return { err: String(task?.status_message || `DataForSEO task status ${sc}`) };
   const result = task?.result;
-  let row0 = null;
-  if (Array.isArray(result) && result.length) row0 = result[0];
-  else if (result && typeof result === 'object' && !Array.isArray(result)) row0 = result;
-  if (!row0) return { err: 'Empty DataForSEO result' };
+  if (!Array.isArray(result) || !result.length) return { err: 'Empty DataForSEO result' };
   const taskData = task?.data && typeof task.data === 'object' ? task.data : null;
-  return { row: row0, cost: toNum(task?.cost, null), taskData };
+  return { row: result[0], cost: toNum(task?.cost, null), taskData };
 }
 
 function attrBucketCount(attrsObj, name) {
@@ -211,7 +208,7 @@ function summaryPayload(row, nowMs) {
     broken_pages: row.broken_pages ?? null,
     backlinks_spam_score: row.backlinks_spam_score ?? null,
     target_spam_score: row.target_spam_score ?? null,
-    rank: row.rank ?? null,
+    rank: pickRawInt(raw, 'rank') ?? row.rank ?? null,
     rank_scale:
       raw && typeof raw === 'object' && raw.rank_scale != null && raw.rank_scale !== ''
         ? String(raw.rank_scale)
@@ -255,7 +252,9 @@ async function fetchLiveSummary(login, password, domainHost, includeSubdomains) 
       Authorization: authHeader(login, password),
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify([{ target: domainHost, include_subdomains: !!includeSubdomains }])
+    body: JSON.stringify([
+      { target: domainHost, include_subdomains: !!includeSubdomains, rank_scale: 'one_hundred' }
+    ])
   });
   const text = await res.text();
   let json = null;
