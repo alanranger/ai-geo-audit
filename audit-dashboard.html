@@ -18861,13 +18861,13 @@
                   }
                   
                   // Also check query_pages for URL-based matching (query+page level data)
-                  // First try scores.query_pages, then searchData.queryPages (where fresh audit data stores it)
+                  // Prefer searchData.queryPages (canonical); scores.query_pages may be stale after local merge.
                   if (!currentMetrics) {
                     let queryPages = [];
-                    if (parsed.scores && parsed.scores.query_pages && Array.isArray(parsed.scores.query_pages)) {
-                      queryPages = parsed.scores.query_pages;
-                    } else if (parsed.searchData && parsed.searchData.queryPages && Array.isArray(parsed.searchData.queryPages)) {
+                    if (parsed.searchData && parsed.searchData.queryPages && Array.isArray(parsed.searchData.queryPages)) {
                       queryPages = parsed.searchData.queryPages;
+                    } else if (parsed.scores && parsed.scores.query_pages && Array.isArray(parsed.scores.query_pages)) {
+                      queryPages = parsed.scores.query_pages;
                     }
                     
                     if (queryPages.length > 0) {
@@ -19047,13 +19047,13 @@
                     }
                     
                     // Check query_pages from Supabase (query+page level data)
-                    // First try scores.query_pages, then searchData.queryPages (where fresh audit data stores it)
+                    // Prefer searchData.queryPages from API (canonical query_pages column).
                     if (!currentMetrics) {
                       let queryPages = [];
-                      if (supabaseData.scores && supabaseData.scores.query_pages && Array.isArray(supabaseData.scores.query_pages)) {
-                        queryPages = supabaseData.scores.query_pages;
-                      } else if (supabaseData.searchData && supabaseData.searchData.queryPages && Array.isArray(supabaseData.searchData.queryPages)) {
+                      if (supabaseData.searchData && supabaseData.searchData.queryPages && Array.isArray(supabaseData.searchData.queryPages)) {
                         queryPages = supabaseData.searchData.queryPages;
+                      } else if (supabaseData.scores && supabaseData.scores.query_pages && Array.isArray(supabaseData.scores.query_pages)) {
+                        queryPages = supabaseData.scores.query_pages;
                       }
                       
                       if (queryPages.length > 0) {
@@ -65590,12 +65590,12 @@ Final Score: ${score}/100`;
 
       function getDashboardQueryPagesFromAudit(auditLike) {
         if (!auditLike || typeof auditLike !== 'object') return [];
-        /* Same sources as Optimisation / Supabase merge: batch saves may leave pages only under scores.query_pages. */
-        if (Array.isArray(auditLike?.scores?.query_pages) && auditLike.scores.query_pages.length > 0) {
-          return auditLike.scores.query_pages;
-        }
+        /* Prefer searchData.queryPages (canonical GSC query+page from Supabase column). scores.query_pages can be stale after local merge. */
         if (Array.isArray(auditLike?.searchData?.queryPages) && auditLike.searchData.queryPages.length > 0) {
           return auditLike.searchData.queryPages;
+        }
+        if (Array.isArray(auditLike?.scores?.query_pages) && auditLike.scores.query_pages.length > 0) {
+          return auditLike.scores.query_pages;
         }
         if (Array.isArray(auditLike?.queryPages) && auditLike.queryPages.length > 0) {
           return auditLike.queryPages;
@@ -72759,8 +72759,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return [...urls].slice(0, 800);
     }
 
-    /** One bucket per page for GSC query-page rows: www/non-www and trailing-slash variants must match. */
+    /** One bucket per page for GSC query-page rows: www/non-www, trailing slash, and `/` vs `/home` (Squarespace-style) share one key. */
     function traditionalSeoGscMetricLookupKey(url, propertyUrl = '') {
+      const rollup = traditionalSeoLandingRollupGroupKey(url, propertyUrl);
+      if (rollup) return rollup;
       return (
         traditionalSeoToComparableUrl(url, propertyUrl)
         || traditionalSeoToComparableUrl(traditionalSeoNormalizeUrl(url, propertyUrl), propertyUrl)
@@ -72773,10 +72775,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (!lookup || typeof lookup.get !== 'function') return { clicks: 0, impressions: 0 };
       const u = String(url || '').trim();
       if (!u) return { clicks: 0, impressions: 0 };
+      const gscKey = traditionalSeoGscMetricLookupKey(u, propertyUrl);
       const cmp = traditionalSeoToComparableUrl(u, propertyUrl);
       const norm = traditionalSeoNormalizeUrl(u, propertyUrl);
       const hit =
-        (cmp ? lookup.get(cmp) : null)
+        (gscKey ? lookup.get(gscKey) : null)
+        || (cmp ? lookup.get(cmp) : null)
         || (norm ? lookup.get(norm) : null)
         || lookup.get(u)
         || null;

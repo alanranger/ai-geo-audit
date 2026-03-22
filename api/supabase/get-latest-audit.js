@@ -5,6 +5,13 @@
  * Used to restore dashboard state after page refresh when localStorage is cleared.
  */
 
+/** When capping query-page rows, keep highest-traffic rows so per-URL GSC totals stay representative. */
+function truncateQueryPagesByTraffic(rows, maxItems) {
+  if (!Array.isArray(rows) || rows.length <= maxItems) return rows;
+  const weight = (r) => (Number(r?.clicks) || 0) + (Number(r?.impressions) || 0);
+  return [...rows].sort((a, b) => weight(b) - weight(a)).slice(0, maxItems);
+}
+
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -791,10 +798,10 @@ export default async function handler(req, res) {
             parsed = qp;
           }
           if (Array.isArray(parsed)) {
-            // Truncate to 1000 items immediately to prevent large responses
-            if (parsed.length > 1000) {
-              console.warn(`[get-latest-audit] Truncating queryPages from ${parsed.length} to 1000 immediately`);
-              return parsed.slice(0, 1000);
+            const maxQueryPages = 2000;
+            if (parsed.length > maxQueryPages) {
+              console.warn(`[get-latest-audit] Truncating queryPages from ${parsed.length} to ${maxQueryPages} (traffic-prioritised)`);
+              return truncateQueryPagesByTraffic(parsed, maxQueryPages);
             }
             return parsed;
           }
@@ -1262,8 +1269,8 @@ export default async function handler(req, res) {
       
       // Truncate queryPages if too large
       if (auditData.searchData?.queryPages && auditData.searchData.queryPages.length > 2000) {
-        console.warn(`[get-latest-audit] Truncating queryPages from ${auditData.searchData.queryPages.length} to 2000`);
-        auditData.searchData.queryPages = auditData.searchData.queryPages.slice(0, 2000);
+        console.warn(`[get-latest-audit] Truncating queryPages from ${auditData.searchData.queryPages.length} to 2000 (traffic-prioritised)`);
+        auditData.searchData.queryPages = truncateQueryPagesByTraffic(auditData.searchData.queryPages, 2000);
       }
       
       // Truncate topQueries if too large
