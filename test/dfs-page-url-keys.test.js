@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   normalizeDfsPageUrl,
   dfsPageUrlWwwLiteralForQuery,
+  dfsPageUrlDbQueryVariants,
   expandUrlListForBacklinkCacheQuery,
   indexDfsCacheRowsByCanonical
 } from '../lib/dfs-page-url-keys.js';
@@ -26,6 +27,17 @@ test('expandUrlListForBacklinkCacheQuery includes canonical and www literal', ()
   const list = expandUrlListForBacklinkCacheQuery([c]);
   assert.ok(list.includes('https://alanranger.com/x'));
   assert.ok(list.some((u) => u.includes('www.')));
+});
+
+test('dfsPageUrlDbQueryVariants links root and /home for same host', () => {
+  const root = normalizeDfsPageUrl('https://www.alanranger.com/');
+  const home = normalizeDfsPageUrl('https://www.alanranger.com/home');
+  const vr = dfsPageUrlDbQueryVariants(root);
+  const vh = dfsPageUrlDbQueryVariants(home);
+  assert.ok(vr.includes('https://alanranger.com/'));
+  assert.ok(vr.includes('https://alanranger.com/home'));
+  assert.ok(vh.includes('https://alanranger.com/'));
+  assert.ok(vh.includes('https://alanranger.com/home'));
 });
 
 test('indexDfsCacheRowsByCanonical prefers row with more backlink_rows', () => {
