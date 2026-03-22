@@ -2,6 +2,11 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-03-26] - Docs: keyword/rank data scope across tabs (parked)
+
+### Added
+- **`Docs/KEYWORD_DATA_CROSS_TAB_SCOPE.md`** — Describes what Supabase already stores (`keyword_target_metrics_cache`, `keyword_rankings`, money-page GSC JSON, DFS backlink caches), why there is **no** full “every URL × every keyword” rank mirror today, rough DataForSEO expansion shape if we ever unify SERP across tabs, and KE smoke-test references. **Status: parked** (no implementation).
+
 ## [2026-03-25] - Traditional SEO: Supabase evaluation cache (cross-device)
 
 ### Added
