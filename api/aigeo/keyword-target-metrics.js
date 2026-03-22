@@ -136,6 +136,28 @@ function normalizeDomainHost(raw) {
   return s.replace(/:\d+$/, '');
 }
 
+/**
+ * KE often returns empty URL traffic / backlinks / URL-keyword lists for apex `https://domain/…`
+ * without `www` when the live site is `https://www.domain/…`. Prefer `www` for KE fetches when the
+ * hostname matches the audited property apex (`propertyDomain` from the dashboard).
+ */
+function kePreferredFetchUrl(rawUrl, propertyDomainHost) {
+  const s = String(rawUrl || '').trim();
+  if (!s || !/^https?:\/\//i.test(s)) return s;
+  const prop = normalizeDomainHost(propertyDomainHost || '');
+  if (!prop) return s;
+  try {
+    const u = new URL(s);
+    const h = u.hostname.toLowerCase();
+    const bare = h.replace(/^www\./, '');
+    if (bare !== prop) return s;
+    if (h.startsWith('www.')) return s;
+    return `${u.protocol}//www.${bare}${u.pathname || '/'}${u.search}`;
+  } catch {
+    return s;
+  }
+}
+
 function hostFromPageUrl(pageUrl) {
   const s = String(pageUrl || '').trim();
   if (!s) return '';
@@ -686,18 +708,24 @@ function urlTrafficFromKeRow(row) {
   return toNum(v, null);
 }
 
-async function fetchUrlTrafficMap(apiKey, urls, country) {
+async function fetchUrlTrafficMap(apiKey, urls, country, domainHost) {
   const map = new Map();
   const urlCountry = keCountryForUrlEndpoints(country);
   const batchSize = envInt('KE_URL_TRAFFIC_BATCH', 15, 1, 50);
-  const uniq = [
-    ...new Set(
-      urls
-        .map((u) => String(u || '').trim())
-        .filter((u) => /^https?:\/\//i.test(u))
-    )
-  ];
-  const parts = chunk(uniq, batchSize);
+  const expanded = [];
+  const seen = new Set();
+  (urls || []).forEach((raw) => {
+    const u = String(raw || '').trim();
+    if (!/^https?:\/\//i.test(u)) return;
+    const pref = kePreferredFetchUrl(u, domainHost);
+    [u, pref].forEach((x) => {
+      if (x && !seen.has(x)) {
+        seen.add(x);
+        expanded.push(x);
+      }
+    });
+  });
+  const parts = chunk(expanded, batchSize);
   for (let i = 0; i < parts.length; i += 1) {
     const { res, json, text } = await kePostJson(apiKey, KE_URL_TRAFFIC, {
       urls: parts[i],
@@ -1014,7 +1042,7 @@ export default async function handler(req, res) {
 
     if (stalePageUrls.length) {
       try {
-        const m = await fetchUrlTrafficMap(apiKey, stalePageUrls, country);
+        const m = await fetchUrlTrafficMap(apiKey, stalePageUrls, country, domainHost);
         m.forEach((v, k) => urlTrafficMap.set(k, v));
         spreadHomeAliasesToMap(urlTrafficMap);
       } catch (e) {
@@ -1023,16 +1051,17 @@ export default async function handler(req, res) {
 
       for (let i = 0; i < stalePageUrls.length; i += 1) {
         const pu = stalePageUrls[i];
+        const puKe = kePreferredFetchUrl(pu, domainHost);
         const canonical = normalizePageUrl(pu) || pu;
         try {
-          const list = await fetchUrlKeywordsForPage(apiKey, pu, country, urlKeywordsNum);
+          const list = await fetchUrlKeywordsForPage(apiKey, puKe, country, urlKeywordsNum);
           urlKeywordsMap.set(canonical, Array.isArray(list) ? list : []);
         } catch (e) {
           enrichNotes.push(`${canonical}: url keywords — ${String(e?.message || e)}`);
           urlKeywordsMap.set(canonical, []);
         }
         try {
-          const n = await fetchPageBacklinksSample(apiKey, pu, pageBlNum, disavowLists);
+          const n = await fetchPageBacklinksSample(apiKey, puKe, pageBlNum, disavowLists);
           pageBlMap.set(canonical, n);
         } catch (e) {
           enrichNotes.push(`${canonical}: page backlinks — ${String(e?.message || e)}`);
@@ -1078,6 +1107,9 @@ export default async function handler(req, res) {
       const canonical = normalizePageUrl(meta.page_url) || meta.page_url;
       const kwRows = urlKeywordsMap.get(canonical) || [];
       const kwHit = findUrlKeywordRow(kwRows, meta.keyword);
+      if (kwRows.length && !kwHit && normalizeKeyword(meta.keyword)) {
+        enrichNotes.push(`${canonical}: target keyword not in KE URL-keyword list (${kwRows.length} rows)`);
+      }
       const traffic = urlTrafficMap.get(canonical) || {};
       const est = kwHit ? estimatedTrafficFromUrlKeywordRow(kwHit) : null;
       const serp = kwHit ? serpPositionFromUrlKeywordRow(kwHit) : null;
@@ -1103,8 +1135,9 @@ export default async function handler(req, res) {
           ? Math.round(Number(domainMetricsForRows.moz_domain_authority))
           : row?.moz_domain_authority ?? null;
 
+      const pageUrlForStorage = row ? normalizePageUrl(row.page_url) : meta.page_url;
       upserts.push({
-        page_url: meta.page_url,
+        page_url: pageUrlForStorage,
         keyword:
           row?.keyword != null && String(row.keyword).trim()
             ? normalizeKeyword(row.keyword)
