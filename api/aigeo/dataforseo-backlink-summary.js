@@ -187,9 +187,16 @@ function referringPagesFromRaw(raw) {
   return n != null && Number.isFinite(n) ? Math.round(n) : null;
 }
 
+function pickRawInt(raw, key) {
+  if (!raw || typeof raw !== 'object') return null;
+  const n = toNum(raw[key], null);
+  return n != null && Number.isFinite(n) ? Math.round(n) : null;
+}
+
 function summaryPayload(row, nowMs) {
   if (!row) return null;
   const referring_pages = referringPagesFromRaw(row.raw_result);
+  const raw = row.raw_result;
   return {
     domain_host: row.domain_host,
     include_subdomains: row.include_subdomains !== false,
@@ -205,6 +212,11 @@ function summaryPayload(row, nowMs) {
     dofollow_backlinks: row.dofollow_backlinks ?? null,
     nofollow_backlinks: row.nofollow_backlinks ?? null,
     referring_pages,
+    referring_domains_nofollow: pickRawInt(raw, 'referring_domains_nofollow'),
+    referring_main_domains_nofollow: pickRawInt(raw, 'referring_main_domains_nofollow'),
+    referring_ips: pickRawInt(raw, 'referring_ips'),
+    referring_subnets: pickRawInt(raw, 'referring_subnets'),
+    referring_pages_nofollow: pickRawInt(raw, 'referring_pages_nofollow'),
     internal_links_count: row.internal_links_count ?? null,
     external_links_count: row.external_links_count ?? null,
     cost_last: row.cost_last ?? null,
