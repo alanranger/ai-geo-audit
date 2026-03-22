@@ -59,6 +59,67 @@ function normalizePageUrl(raw) {
   }
 }
 
+/** Same host: treat `/` and `/home` as one landing (matches dashboard rollup). */
+function homepagePathAliasesForCache(normalizedPageUrl) {
+  const c = normalizePageUrl(normalizedPageUrl);
+  if (!c) return [];
+  try {
+    const u = new URL(c);
+    const path = String(u.pathname || '/').replace(/\/+$/, '') || '/';
+    const low = path.toLowerCase();
+    if (low !== '/' && low !== '/home') return [c];
+    const host = String(u.hostname || '').toLowerCase().replace(/^www\./, '');
+    const proto = u.protocol === 'http:' ? 'http:' : 'https:';
+    const base = `${proto}//${host}`;
+    return [`${base}/`, `${base}/home`];
+  } catch {
+    return [c];
+  }
+}
+
+function spreadHomeAliasesToMap(map) {
+  if (!(map instanceof Map) || !map.size) return;
+  const entries = [...map.entries()];
+  for (let i = 0; i < entries.length; i += 1) {
+    const [k, v] = entries[i];
+    const alts = homepagePathAliasesForCache(k);
+    for (let j = 0; j < alts.length; j += 1) {
+      const a = alts[j];
+      if (!map.has(a)) map.set(a, v);
+    }
+  }
+}
+
+function dbRowForWant(db, pageUrl, keyword) {
+  const key = `${pageUrl}\n${keyword}`;
+  let row = db.get(key);
+  if (row) return row;
+  const kw = normalizeKeyword(keyword);
+  const alts = homepagePathAliasesForCache(pageUrl);
+  for (let i = 0; i < alts.length; i += 1) {
+    const a = alts[i];
+    if (a === pageUrl) continue;
+    row = db.get(`${a}\n${kw}`);
+    if (row) return row;
+  }
+  return undefined;
+}
+
+function existingRowForWant(existing, meta) {
+  const kw = normalizeKeyword(meta.keyword);
+  const pn = normalizePageUrl(meta.page_url);
+  if (!pn || !kw) return undefined;
+  let row = existing.find(
+    (r) => normalizePageUrl(r.page_url) === pn && normalizeKeyword(r.keyword) === kw
+  );
+  if (row) return row;
+  const alts = homepagePathAliasesForCache(pn);
+  return existing.find(
+    (r) =>
+      normalizeKeyword(r.keyword) === kw && alts.includes(normalizePageUrl(r.page_url))
+  );
+}
+
 function normalizeKeyword(raw) {
   return String(raw || '').replace(/\s+/g, ' ').trim();
 }
@@ -362,7 +423,7 @@ async function readCacheRows(supabase, pairs) {
     }))
     .filter((p) => p.page_url && p.keyword);
   if (!keys.length) return [];
-  const pageUrls = [...new Set(keys.map((k) => k.page_url))];
+  const pageUrls = [...new Set(keys.flatMap((k) => homepagePathAliasesForCache(k.page_url)))];
   const urlParts = chunk(pageUrls, PAGE_URL_IN_CHUNK);
   const rows = [];
   for (let i = 0; i < urlParts.length; i += 1) {
@@ -391,7 +452,7 @@ function buildByPageUrlMap(rows, pairs, nowMs) {
   });
   const byPageUrl = {};
   want.forEach((meta, key) => {
-    const row = db.get(key);
+    const row = dbRowForWant(db, meta.page_url, meta.keyword);
     const stale = !row || isStaleRow(row, nowMs);
     const displayUrl = meta.url || meta.page_url;
     byPageUrl[displayUrl] = {
@@ -888,8 +949,8 @@ export default async function handler(req, res) {
     const domainBlNum = envInt('KE_UNIQUE_DOMAIN_BACKLINKS_NUM', 80, 1, 1000);
 
     const toFetch = [];
-    want.forEach((meta, mapKey) => {
-      const row = existing.find((r) => `${r.page_url}\n${r.keyword}` === mapKey);
+    want.forEach((meta) => {
+      const row = existingRowForWant(existing, meta);
       if (force || !row || isStaleRow(row, nowMs)) {
         toFetch.push(meta.keyword);
       }
@@ -901,8 +962,8 @@ export default async function handler(req, res) {
     }
 
     const stalePageUrls = [];
-    want.forEach((meta, mapKey) => {
-      const row = existing.find((r) => `${r.page_url}\n${r.keyword}` === mapKey);
+    want.forEach((meta) => {
+      const row = existingRowForWant(existing, meta);
       const need =
         force || !row || isStaleRow(row, nowMs) || rowNeedsKeUrlEnrichment(row);
       if (!need) return;
@@ -924,6 +985,7 @@ export default async function handler(req, res) {
       try {
         const m = await fetchUrlTrafficMap(apiKey, stalePageUrls, country);
         m.forEach((v, k) => urlTrafficMap.set(k, v));
+        spreadHomeAliasesToMap(urlTrafficMap);
       } catch (e) {
         enrichNotes.push(String(e?.message || e));
       }
@@ -946,6 +1008,8 @@ export default async function handler(req, res) {
           pageBlMap.set(canonical, null);
         }
       }
+      spreadHomeAliasesToMap(urlKeywordsMap);
+      spreadHomeAliasesToMap(pageBlMap);
     }
 
     if (domainHost && domainNeedsKeFetch(domainRow, force, nowMs)) {
@@ -975,8 +1039,7 @@ export default async function handler(req, res) {
 
     const upserts = [];
     want.forEach((meta) => {
-      const key = `${meta.page_url}\n${meta.keyword}`;
-      const row = existing.find((r) => `${r.page_url}\n${r.keyword}` === key);
+      const row = existingRowForWant(existing, meta);
       const needUpsert =
         force || !row || isStaleRow(row, nowMs) || rowNeedsKeUrlEnrichment(row);
       if (!needUpsert) return;
