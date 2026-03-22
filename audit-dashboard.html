@@ -6164,9 +6164,12 @@
               <div style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;margin-top:0.65rem;font-size:0.76rem;color:var(--dark-text-muted);">
                 <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;">
                   <input type="checkbox" id="traditional-seo-dfs-disavow-toggle" checked />
-                  <span>Apply disavow filter in backlink modal lists</span>
+                  <span>Apply disavow filter to per-URL backlink counts &amp; modals</span>
                 </label>
                 <span id="traditional-seo-dfs-meta" style="margin-left:auto;">—</span>
+              </div>
+              <div style="margin-top:0.35rem;font-size:0.72rem;color:var(--dark-text-muted);line-height:1.35;">
+                Domain totals above (<strong>Total backlinks</strong>, <strong>Referring domains</strong>, etc.) come from DataForSEO’s full index — your disavow file does <strong>not</strong> change them. This toggle only affects <strong>Pg bl</strong>, <strong>DFS bl</strong>, and rows inside backlink modals.
               </div>
               <div id="traditional-seo-dfs-fetch-note" style="margin-top:0.45rem;font-size:0.72rem;color:var(--dark-text-muted);line-height:1.35;"></div>
             </div>
@@ -70793,6 +70796,43 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return out;
     }
 
+    function traditionalSeoDfsAliasPutAll(map, pageUrlKey, row, prop) {
+      const k0 = String(pageUrlKey || '').trim();
+      if (!k0) return;
+      if (row == null) {
+        map.set(k0, row);
+        return;
+      }
+      const keys = [];
+      const add = (k) => {
+        const s = String(k || '').trim();
+        if (s && !keys.includes(s)) keys.push(s);
+      };
+      add(k0);
+      add(traditionalSeoToComparableUrl(k0, prop));
+      add(traditionalSeoNormalizeUrl(k0, prop));
+      add(traditionalSeoOverridePageKey(k0));
+      add(traditionalSeoSignalMapKey(k0, prop));
+      try {
+        const parsed = new URL(k0);
+        const alt = new URL(k0);
+        if (parsed.protocol === 'https:') {
+          alt.protocol = 'http:';
+          add(alt.toString());
+          add(traditionalSeoToComparableUrl(alt.toString(), prop));
+        } else if (parsed.protocol === 'http:') {
+          alt.protocol = 'https:';
+          add(alt.toString());
+          add(traditionalSeoToComparableUrl(alt.toString(), prop));
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      for (let i = 0; i < keys.length; i += 1) {
+        map.set(keys[i], row);
+      }
+    }
+
     function traditionalSeoApplyDfsPagePayload(payload) {
       const by = payload && typeof payload.byPageUrl === 'object' ? payload.byPageUrl : {};
       const map =
@@ -70801,10 +70841,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           : new Map();
       const prop = traditionalSeoPropertyUrl();
       Object.keys(by).forEach((k) => {
-        const row = by[k];
-        map.set(k, row);
-        const cmp = traditionalSeoToComparableUrl(k, prop);
-        if (cmp && cmp !== k) map.set(cmp, row);
+        traditionalSeoDfsAliasPutAll(map, k, by[k], prop);
       });
       TRADITIONAL_SEO_STATE.dfsPageBacklinksByUrl = map;
     }
@@ -74184,16 +74221,16 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               !isSitewide &&
               mForBl &&
               (blArr.length > 0 || nBlCount > 0 || (blViewCount != null && Number(blViewCount) === 0));
+            const dfsHasPositive =
+              dfsItemsForUi.length > 0 ||
+              (dfsBlN != null && Number.isFinite(Number(dfsBlN)) && Number(dfsBlN) > 0);
             const dfsHas =
-              !isSitewide &&
-              traditionalSeoBacklinkIndexShowDfs() &&
-              (dfsItemsForUi.length > 0 ||
-                (dfsBlN != null && Number.isFinite(Number(dfsBlN)) && Number(dfsBlN) >= 0));
+              !isSitewide && traditionalSeoBacklinkIndexShowDfs() && dfsHasPositive;
             const blHasSample = keHas || dfsHas;
             const useDfsFirst =
               traditionalSeoBacklinkIndexShowDfs() &&
               (dfsItemsForUi.length > 0 ||
-                (dfsBlN != null && Number.isFinite(Number(dfsBlN))));
+                (dfsBlN != null && Number.isFinite(Number(dfsBlN)) && Number(dfsBlN) > 0));
             const nForBtn = useDfsFirst
               ? dfsBlN != null && Number.isFinite(Number(dfsBlN))
                 ? Math.round(Number(dfsBlN))
@@ -74969,6 +75006,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           TRADITIONAL_SEO_STATE.filterDisavowedBacklinkCounts = Boolean(filterDisavowedBl.checked);
           const dfsT = document.getElementById('traditional-seo-dfs-disavow-toggle');
           if (dfsT) dfsT.checked = filterDisavowedBl.checked;
+          renderTraditionalSeoDfsBacklinkTiles();
           renderTraditionalSeoResultsTable();
         });
       }
@@ -74979,6 +75017,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         dfsDisavowToggle.addEventListener('change', () => {
           TRADITIONAL_SEO_STATE.filterDisavowedBacklinkCounts = Boolean(dfsDisavowToggle.checked);
           if (filterDisavowedBl) filterDisavowedBl.checked = dfsDisavowToggle.checked;
+          renderTraditionalSeoDfsBacklinkTiles();
           renderTraditionalSeoResultsTable();
         });
       }
