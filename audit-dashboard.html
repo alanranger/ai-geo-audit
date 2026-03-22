@@ -65590,8 +65590,16 @@ Final Score: ${score}/100`;
 
       function getDashboardQueryPagesFromAudit(auditLike) {
         if (!auditLike || typeof auditLike !== 'object') return [];
-        if (Array.isArray(auditLike?.searchData?.queryPages)) return auditLike.searchData.queryPages;
-        if (Array.isArray(auditLike?.queryPages)) return auditLike.queryPages;
+        /* Same sources as Optimisation / Supabase merge: batch saves may leave pages only under scores.query_pages. */
+        if (Array.isArray(auditLike?.scores?.query_pages) && auditLike.scores.query_pages.length > 0) {
+          return auditLike.scores.query_pages;
+        }
+        if (Array.isArray(auditLike?.searchData?.queryPages) && auditLike.searchData.queryPages.length > 0) {
+          return auditLike.searchData.queryPages;
+        }
+        if (Array.isArray(auditLike?.queryPages) && auditLike.queryPages.length > 0) {
+          return auditLike.queryPages;
+        }
         return [];
       }
 

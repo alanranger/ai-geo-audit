@@ -645,6 +645,29 @@ function findUrlKeywordRow(items, targetKeyword) {
   );
 }
 
+/** KE get_url_keywords row shapes vary; read all aliases we have seen in production JSON. */
+function estimatedTrafficFromUrlKeywordRow(row) {
+  const v =
+    row?.estimated_monthly_traffic ??
+    row?.estimatedTraffic ??
+    row?.monthly_traffic ??
+    row?.organic_traffic ??
+    row?.traffic ??
+    row?.estimated_visits;
+  return toNum(v, null);
+}
+
+function serpPositionFromUrlKeywordRow(row) {
+  const v =
+    row?.serp_position ??
+    row?.position ??
+    row?.rank ??
+    row?.google_position ??
+    row?.avg_position ??
+    row?.average_position;
+  return toNum(v, null);
+}
+
 function urlTrafficFromKeRow(row) {
   const v =
     row?.estimated_monthly_traffic ??
@@ -1048,8 +1071,8 @@ export default async function handler(req, res) {
       const kwRows = urlKeywordsMap.get(canonical) || [];
       const kwHit = findUrlKeywordRow(kwRows, meta.keyword);
       const traffic = urlTrafficMap.get(canonical) || {};
-      const est = kwHit ? toNum(kwHit.estimated_monthly_traffic, null) : null;
-      const serp = kwHit ? toNum(kwHit.serp_position, null) : null;
+      const est = kwHit ? estimatedTrafficFromUrlKeywordRow(kwHit) : null;
+      const serp = kwHit ? serpPositionFromUrlKeywordRow(kwHit) : null;
       const urlEst = toNum(traffic.url_estimated_traffic, null);
       let pblCount = row?.page_backlinks_sample ?? null;
       let pblJson = Array.isArray(row?.page_backlinks_json)
