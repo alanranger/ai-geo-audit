@@ -135,15 +135,24 @@ async function handleDomainStatus(supabase, domainHost, src) {
 
 async function handleDomainFull(supabase, creds, domainHost, src) {
   const runId = randomUUID();
-  const { error: delErr } = await supabase.from('dfs_domain_backlink_rows').delete().eq('domain_host', domainHost);
-  throwIfSupabaseErr(delErr, 'delete_domain_rows');
-
-  const { rows, pages, totalCost, maxFirstSeen, truncated } = await paginateDomainBacklinks(
+  const { rows, pages, totalCost, maxFirstSeen, truncated, itemsFromApi } = await paginateDomainBacklinks(
     creds,
     domainHost,
     filtersFullSpamOnly(),
     runId
   );
+  if (!rows.length && itemsFromApi > 0) {
+    return {
+      status: 422,
+      body: {
+        status: 'error',
+        message: `DataForSEO returned ${itemsFromApi} item(s) but none mapped to rows (url/anchor field mismatch). Your Supabase index was not cleared.`
+      }
+    };
+  }
+
+  const { error: delErr } = await supabase.from('dfs_domain_backlink_rows').delete().eq('domain_host', domainHost);
+  throwIfSupabaseErr(delErr, 'delete_domain_rows');
   await insertChunks(supabase, rows);
 
   const cnt = await countRows(supabase, domainHost);
@@ -167,6 +176,7 @@ async function handleDomainFull(supabase, creds, domainHost, src) {
         domain: domainHost,
         action: 'full',
         rowsWritten: rows.length,
+        itemsFromApi,
         rowCount: cnt,
         pagesFetched: pages,
         approxCost: Number(totalCost.toFixed(6)),
@@ -197,12 +207,21 @@ async function handleDomainDelta(supabase, creds, domainHost, src) {
     return { status: 400, body: { status: 'error', message: 'Invalid delta_first_seen_floor in state.' } };
   }
   const runId = randomUUID();
-  const { rows, pages, totalCost, maxFirstSeen, truncated } = await paginateDomainBacklinks(
+  const { rows, pages, totalCost, maxFirstSeen, truncated, itemsFromApi } = await paginateDomainBacklinks(
     creds,
     domainHost,
     filters,
     runId
   );
+  if (!rows.length && itemsFromApi > 0) {
+    return {
+      status: 422,
+      body: {
+        status: 'error',
+        message: `DataForSEO returned ${itemsFromApi} item(s) but none mapped to rows (url/anchor field mismatch). No database changes.`
+      }
+    };
+  }
   await upsertChunks(supabase, rows);
 
   const nextFloor =
@@ -228,6 +247,7 @@ async function handleDomainDelta(supabase, creds, domainHost, src) {
         domain: domainHost,
         action: 'delta',
         rowsUpserted: rows.length,
+        itemsFromApi,
         rowCount: cnt,
         pagesFetched: pages,
         approxCost: Number(totalCost.toFixed(6)),
