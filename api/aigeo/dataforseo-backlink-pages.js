@@ -102,16 +102,29 @@ function isStaleRow(row, nowMs) {
 function pickStrength(it) {
   const keys = [
     'domain_from_rank',
+    'domainFromRank',
     'domain_from_platform_rank',
+    'domainFromPlatformRank',
     'page_from_rank',
+    'pageFromRank',
     'domain_rank',
+    'domainRank',
     'rank',
     'domain_from_rating',
-    'rank_score'
+    'domainFromRating',
+    'rank_score',
+    'rankScore'
   ];
   for (const k of keys) {
     const v = toNum(it?.[k], null);
     if (v != null && Number.isFinite(v)) return Math.round(v);
+  }
+  const nested = it?.domain_from && typeof it.domain_from === 'object' ? it.domain_from : null;
+  if (nested) {
+    for (const k of ['rank', 'domain_rank', 'domainRank']) {
+      const v = toNum(nested[k], null);
+      if (v != null && Number.isFinite(v)) return Math.round(v);
+    }
   }
   return null;
 }
