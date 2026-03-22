@@ -130,6 +130,16 @@ function mapGetPageBlPack(map, canonical) {
   return undefined;
 }
 
+/** True when KE fetch failed (null), or returned an empty capped sample (bare apex often yields 0 until www). */
+function pageBlPackIsEmpty(pack) {
+  if (pack == null) return true;
+  if (typeof pack !== 'object' || Array.isArray(pack)) return false;
+  const items = Array.isArray(pack.items) ? pack.items : [];
+  if (items.length > 0) return false;
+  const c = toNum(pack.count, null);
+  return c == null || c === 0;
+}
+
 function dbRowForWant(db, pageUrl, keyword) {
   const kk = keywordCacheKey(keyword);
   const key = `${pageUrl}\n${kk}`;
@@ -1207,7 +1217,7 @@ export default async function handler(req, res) {
       if (domainHost) {
         const apexCanon = normalizePageUrl(`https://${domainHost}/`);
         const apexPack = mapGetPageBlPack(pageBlMap, apexCanon);
-        if (apexPack == null) {
+        if (pageBlPackIsEmpty(apexPack)) {
           try {
             const puKe = kePreferredFetchUrl(`https://www.${domainHost}/`, domainHost);
             const n = await fetchPageBacklinksSample(apiKey, puKe, pageBlNum, disavowLists);
