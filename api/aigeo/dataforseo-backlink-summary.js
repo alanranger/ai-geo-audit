@@ -208,6 +208,10 @@ function summaryPayload(row, nowMs) {
     backlinks_spam_score: row.backlinks_spam_score ?? null,
     target_spam_score: row.target_spam_score ?? null,
     rank: row.rank ?? null,
+    rank_scale:
+      raw && typeof raw === 'object' && raw.rank_scale != null && raw.rank_scale !== ''
+        ? String(raw.rank_scale)
+        : null,
     crawled_pages: row.crawled_pages ?? null,
     dofollow_backlinks: row.dofollow_backlinks ?? null,
     nofollow_backlinks: row.nofollow_backlinks ?? null,

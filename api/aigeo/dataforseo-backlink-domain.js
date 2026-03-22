@@ -108,6 +108,25 @@ async function countRows(supabase, domainHost) {
   return count != null ? count : 0;
 }
 
+async function countDofollowSplit(supabase, domainHost) {
+  const base = () =>
+    supabase.from('dfs_domain_backlink_rows').select('*', { count: 'exact', head: true }).eq('domain_host', domainHost);
+  const [{ count: cTrue, error: eT }, { count: cFalse, error: eF }, { count: cNull, error: eN }] = await Promise.all([
+    base().eq('dofollow', true),
+    base().eq('dofollow', false),
+    base().is('dofollow', null)
+  ]);
+  const err = eT || eF || eN;
+  if (err && !String(err.message || '').includes('does not exist')) {
+    throw new Error(String(err.message || err));
+  }
+  return {
+    dofollow: cTrue != null ? cTrue : 0,
+    nofollow: cFalse != null ? cFalse : 0,
+    unknown: cNull != null ? cNull : 0
+  };
+}
+
 function throwIfSupabaseErr(err, label) {
   if (!err) return;
   if (String(err.message || '').includes('does not exist')) return;
@@ -117,6 +136,12 @@ function throwIfSupabaseErr(err, label) {
 async function handleDomainStatus(supabase, domainHost, src) {
   const st = await readState(supabase, domainHost);
   const cnt = await countRows(supabase, domainHost);
+  let dofollowSplit = { dofollow: 0, nofollow: 0, unknown: 0 };
+  try {
+    dofollowSplit = await countDofollowSplit(supabase, domainHost);
+  } catch {
+    dofollowSplit = { dofollow: 0, nofollow: 0, unknown: 0 };
+  }
   return {
     status: 200,
     body: {
@@ -124,6 +149,7 @@ async function handleDomainStatus(supabase, domainHost, src) {
       data: {
         domain: domainHost,
         rowCount: cnt,
+        dofollowSplit,
         state: st,
         filtersVersion: DFS_SPAM_FILTERS_VERSION,
         backlinkIndexSource: src
@@ -156,6 +182,12 @@ async function handleDomainFull(supabase, creds, domainHost, src) {
   await insertChunks(supabase, rows);
 
   const cnt = await countRows(supabase, domainHost);
+  let dofollowSplit = { dofollow: 0, nofollow: 0, unknown: 0 };
+  try {
+    dofollowSplit = await countDofollowSplit(supabase, domainHost);
+  } catch {
+    dofollowSplit = { dofollow: 0, nofollow: 0, unknown: 0 };
+  }
   const floor = maxFirstSeen || new Date().toISOString();
   await writeState(supabase, {
     domain_host: domainHost,
@@ -178,6 +210,7 @@ async function handleDomainFull(supabase, creds, domainHost, src) {
         rowsWritten: rows.length,
         itemsFromApi,
         rowCount: cnt,
+        dofollowSplit,
         pagesFetched: pages,
         approxCost: Number(totalCost.toFixed(6)),
         truncated,
@@ -228,6 +261,12 @@ async function handleDomainDelta(supabase, creds, domainHost, src) {
     maxFirstSeen && maxFirstSeen > String(st.delta_first_seen_floor) ? maxFirstSeen : st.delta_first_seen_floor;
 
   const cnt = await countRows(supabase, domainHost);
+  let dofollowSplit = { dofollow: 0, nofollow: 0, unknown: 0 };
+  try {
+    dofollowSplit = await countDofollowSplit(supabase, domainHost);
+  } catch {
+    dofollowSplit = { dofollow: 0, nofollow: 0, unknown: 0 };
+  }
   await writeState(supabase, {
     domain_host: domainHost,
     last_full_at: st.last_full_at,
@@ -249,6 +288,7 @@ async function handleDomainDelta(supabase, creds, domainHost, src) {
         rowsUpserted: rows.length,
         itemsFromApi,
         rowCount: cnt,
+        dofollowSplit,
         pagesFetched: pages,
         approxCost: Number(totalCost.toFixed(6)),
         truncated,

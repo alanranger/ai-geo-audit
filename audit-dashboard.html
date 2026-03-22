@@ -6090,15 +6090,14 @@
           </div>
           <div class="card" id="traditional-seo-dfs-rank-card">
             <div class="traditional-seo-strip-title">Domain rank (DataForSEO)</div>
-            <div class="traditional-seo-strip-sub" style="margin-top: -0.25rem;">backlinks/summary · 0–100 scale</div>
+            <div class="traditional-seo-strip-sub" style="margin-top: -0.25rem;">Summary signals that feed authority / risk (not your Traditional SEO score).</div>
             <div id="traditional-seo-dfs-rank-ring" class="dashboard-dial-ring traditional-seo-metric-placeholder" data-pct="0" data-rag="neutral" style="margin: 0 auto; width: 168px; height: 168px;">
               <div class="dashboard-dial-inner">
                 <div id="traditional-seo-dfs-rank-value" class="dashboard-dial-value" style="font-size: 1.05rem;">—</div>
                 <div id="traditional-seo-dfs-rank-delta" class="dashboard-dial-delta" data-dir="flat">—</div>
               </div>
             </div>
-            <div id="traditional-seo-dfs-rank-caption" class="traditional-seo-strip-sub" style="margin-bottom: 0.35rem;">Rank vs last summary snapshot on this device</div>
-            <div id="traditional-seo-dfs-rank-bars" style="width: 100%; margin-bottom: 0.5rem;"></div>
+            <div id="traditional-seo-dfs-rank-caption" class="traditional-seo-strip-sub" style="margin-bottom: 0.35rem;">Δ vs last snapshot on this device</div>
             <ul
               id="traditional-seo-dfs-rank-bullets"
               style="width: 100%; margin: 0 0 0.5rem 0; padding-left: 1.2rem; font-size: 0.78rem; color: var(--dark-text); line-height: 1.5;"
@@ -6140,16 +6139,13 @@
             </div>
             <div id="traditional-seo-dfs-fetch-note" style="margin-bottom: 0.65rem; font-size: 0.72rem; color: var(--dark-text-muted); line-height: 1.35; text-align: center;"></div>
             <div style="margin-top: 0.25rem; padding-top: 0.75rem; border-top: 1px solid rgba(255, 255, 255, 0.08);">
-              <div style="font-size: 0.74rem; color: var(--dark-text-muted); line-height: 1.4; max-width: 44rem; margin: 0 auto 0.55rem auto; text-align: center;">
-                Domain summary from DataForSEO <code>backlinks/summary/live</code> (bullets). The ring uses your <strong>spam-filtered</strong> row count in Supabase after <strong>DFS full index</strong> / <strong>DFS new links</strong>; until then it shows the summary API total. Per-URL <strong>DFS bl</strong> uses the Supabase index (cap <span id="traditional-seo-dfs-page-cap">50000</span>).
+              <div style="font-size: 0.72rem; color: var(--dark-text-muted); line-height: 1.35; max-width: 40rem; margin: 0 auto 0.55rem auto; text-align: center;">
+                Ring = spam-filtered rows in Supabase (cap <span id="traditional-seo-dfs-page-cap">50000</span> per URL in the table). Buttons rebuild that index.
               </div>
               <div style="display: flex; flex-wrap: wrap; gap: 0.45rem; justify-content: center;">
                 <button type="button" class="btn" id="traditional-seo-dfs-full-btn" style="flex-shrink: 0; padding: 0.42rem 0.85rem;" title="Monthly-style: rebuild filtered domain backlink index in Supabase, refresh summary, reload table.">DFS full index</button>
                 <button type="button" class="btn" id="traditional-seo-dfs-delta-btn" style="flex-shrink: 0; padding: 0.42rem 0.85rem;" title="Weekly-style: fetch only links with first_seen newer than the last ingest cursor (requires full index first).">DFS new links</button>
               </div>
-            </div>
-            <div style="margin-top: 0.55rem; font-size: 0.72rem; color: var(--dark-text-muted); line-height: 1.35; text-align: center;">
-              Summary API totals are the provider’s full index. Disavow does not change them. Use the results table <strong>Filter disavowed</strong> to hide disavowed URLs in per-URL counts and modals.
             </div>
           </div>
           <div class="card" style="display: flex; flex-direction: column; justify-content: flex-start;">
@@ -70372,6 +70368,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       dfsPageBacklinksLastNote: '',
       /** Rows in Supabase dfs_domain_backlink_rows after spam-filtered ingest; drives the tile ring when set. */
       dfsFilteredIndexRowCount: null,
+      /** { dofollow, nofollow, unknown } from domain index status / ingest. */
+      dfsFilteredDofollowSplit: null,
       dfsPageRefreshBatch: 10,
       /** Server: TRADITIONAL_SEO_BACKLINK_INDEX_SOURCE → ke | dataforseo | both */
       backlinkIndexSource: null,
@@ -70747,6 +70745,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const domain = traditionalSeoPropertyHostname();
       if (!domain || !traditionalSeoBacklinkIndexShowDfs()) {
         TRADITIONAL_SEO_STATE.dfsFilteredIndexRowCount = null;
+        TRADITIONAL_SEO_STATE.dfsFilteredDofollowSplit = null;
         return;
       }
       try {
@@ -70760,6 +70759,15 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const rc = json?.data?.rowCount;
         TRADITIONAL_SEO_STATE.dfsFilteredIndexRowCount =
           rc != null && Number.isFinite(Number(rc)) ? Math.round(Number(rc)) : null;
+        const sp = json?.data?.dofollowSplit;
+        TRADITIONAL_SEO_STATE.dfsFilteredDofollowSplit =
+          sp && typeof sp === 'object'
+            ? {
+                dofollow: traditionalSeoToNum(sp.dofollow, 0),
+                nofollow: traditionalSeoToNum(sp.nofollow, 0),
+                unknown: traditionalSeoToNum(sp.unknown, 0)
+              }
+            : null;
       } catch (e) {
         /* keep prior count */
       }
@@ -71015,6 +71023,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (d.rowCount != null && Number.isFinite(Number(d.rowCount))) {
           TRADITIONAL_SEO_STATE.dfsFilteredIndexRowCount = Math.round(Number(d.rowCount));
         }
+        const spIn = d.dofollowSplit;
+        if (spIn && typeof spIn === 'object') {
+          TRADITIONAL_SEO_STATE.dfsFilteredDofollowSplit = {
+            dofollow: traditionalSeoToNum(spIn.dofollow, 0),
+            nofollow: traditionalSeoToNum(spIn.nofollow, 0),
+            unknown: traditionalSeoToNum(spIn.unknown, 0)
+          };
+        }
         const cost = d.approxCost != null ? String(d.approxCost) : '—';
         const rc = d.rowsWritten != null ? d.rowsWritten : d.rowsUpserted;
         const apiN = d.itemsFromApi != null ? d.itemsFromApi : null;
@@ -71186,93 +71202,34 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           }
         }
       }
-      let df = s.dofollow_backlinks;
-      let nf = s.nofollow_backlinks;
-      const splitOk =
-        df != null && nf != null && Number.isFinite(Number(df)) && Number.isFinite(Number(nf));
-      if (!splitOk && traditionalSeoBacklinkIndexShowDfs()) {
-        const agg = traditionalSeoAggregateDfsFollowSplitFromCachedPages(s.domain_host || traditionalSeoPropertyHostname());
-        if (agg) {
-          df = agg.df;
-          nf = agg.nf;
-        }
-      }
-      const splitText =
-        df != null && nf != null && Number.isFinite(Number(df)) && Number.isFinite(Number(nf))
-          ? `${fmt(df)} / ${fmt(nf)}`
-          : '—';
-      const refPages = s.referring_pages;
-      const refPagesOk = refPages != null && Number.isFinite(Number(refPages));
-      const rank = s.rank != null && Number.isFinite(Number(s.rank)) ? String(Math.round(Number(s.rank))) : null;
-      const sp =
-        s.backlinks_spam_score != null && Number.isFinite(Number(s.backlinks_spam_score))
-          ? String(Math.round(Number(s.backlinks_spam_score)))
-          : null;
-      const tsp =
-        s.target_spam_score != null && Number.isFinite(Number(s.target_spam_score))
-          ? String(Math.round(Number(s.target_spam_score)))
-          : null;
-      const brk =
-        s.broken_backlinks != null && Number.isFinite(Number(s.broken_backlinks))
-          ? fmt(Math.round(Number(s.broken_backlinks)))
-          : null;
       const parts = [];
-      parts.push(`<li><strong>Referring unique domains:</strong> ${fmt(s.referring_domains)}</li>`);
-      parts.push(`<li><strong>Dofollow / Nofollow:</strong> ${splitText}</li>`);
-      parts.push(
-        `<li title="From DataForSEO summary payload when present (referring_pages)."><strong>URLs with backlinks (reported):</strong> ${
-          refPagesOk ? fmt(Math.round(Number(refPages))) : '—'
-        }</li>`
-      );
-      if (brk) parts.push(`<li><strong>Broken backlinks (domain):</strong> ${brk}</li>`);
-      const rmd = s.referring_main_domains;
-      if (rmd != null && Number.isFinite(Number(rmd))) {
-        parts.push(`<li><strong>Referring main domains:</strong> ${fmt(Math.round(Number(rmd)))}</li>`);
-      }
-      const cr = s.crawled_pages;
-      if (cr != null && Number.isFinite(Number(cr))) {
-        parts.push(`<li><strong>Crawled pages (DFS):</strong> ${fmt(Math.round(Number(cr)))}</li>`);
-      }
-      const ilc = s.internal_links_count;
-      const elc = s.external_links_count;
-      const ilOk = ilc != null && Number.isFinite(Number(ilc));
-      const elOk = elc != null && Number.isFinite(Number(elc));
-      parts.push(
-        `<li title="From DataForSEO domain summary (on-site link counts)."><strong>Internal / external links:</strong> ${
-          ilOk || elOk
-            ? `${ilOk ? fmt(Math.round(Number(ilc))) : '—'} / ${elOk ? fmt(Math.round(Number(elc))) : '—'}`
-            : '—'
-        }</li>`
-      );
-      const costN = traditionalSeoToNum(s.cost_last, NaN);
-      let costStr = '—';
-      if (Number.isFinite(costN)) {
-        const abs = Math.abs(costN);
-        const dec = abs > 0 && abs < 0.01 ? 5 : abs < 1 ? 4 : 3;
-        costStr = `$${costN.toFixed(dec).replace(/\.?0+$/, '')}`;
-      }
-      parts.push(
-        `<li title="DataForSEO charge for the last backlinks/summary/live refresh stored in cache."><strong>Last API cost (summary):</strong> ${escapeHtml(costStr)}</li>`
-      );
-      parts.push(
-        `<li><strong>Index freshness:</strong> ${
-          s.stale === true
-            ? '<span style="color:#fbbf24;">Stale</span> — refresh summary or run DFS ingest'
-            : '<span style="color:#86efac;">Fresh</span>'
-        }</li>`
-      );
-      if (rank || sp || tsp) {
-        const bits = [];
-        if (rank) bits.push(`DFS rank ${rank}`);
-        if (sp) bits.push(`BL spam ${sp}`);
-        if (tsp) bits.push(`Target spam ${tsp}`);
-        parts.push(`<li><strong>Quality / index:</strong> ${bits.join(' · ')}</li>`);
-      }
-      if (usingFiltered && Number.isFinite(summaryTotalN) && Math.round(summaryTotalN) !== Math.round(totalN)) {
+      if (usingFiltered) {
+        const spl = TRADITIONAL_SEO_STATE.dfsFilteredDofollowSplit;
+        const dfC = spl?.dofollow;
+        const nfC = spl?.nofollow;
+        const ukC = spl?.unknown;
+        let splitLine = '—';
+        if (
+          spl &&
+          dfC != null &&
+          nfC != null &&
+          Number.isFinite(Number(dfC)) &&
+          Number.isFinite(Number(nfC))
+        ) {
+          splitLine = `${fmt(Math.round(Number(dfC)))} / ${fmt(Math.round(Number(nfC)))}`;
+          if (ukC != null && Number(ukC) > 0) {
+            splitLine += ` · rel unknown ${fmt(Math.round(Number(ukC)))}`;
+          }
+        } else {
+          splitLine = '— (refresh page or run <strong>DFS full index</strong> to load split)';
+        }
+        parts.push(`<li><strong>Dofollow / Nofollow (filtered index):</strong> ${splitLine}</li>`);
         parts.push(
-          `<li title="DataForSEO backlinks/summary/live — full provider index; differs from spam-filtered ingest."><strong>Provider summary backlinks:</strong> ${fmt(
-            Math.round(summaryTotalN)
-          )} (not spam-filtered)</li>`
+          `<li style="color:var(--dark-text-muted);font-size:0.78rem;list-style:none;margin-left:0;">Every line in this tile is from the spam-filtered Supabase index, not the raw provider totals.</li>`
+        );
+      } else {
+        parts.push(
+          `<li style="color:var(--dark-text-muted);list-style:none;margin-left:0;">Run <strong>DFS full index</strong> to create the spam-filtered list. Until then the ring may show the unfiltered API total.</li>`
         );
       }
       bulletsEl.innerHTML = parts.join('');
@@ -71290,43 +71247,16 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (noteEl) noteEl.textContent = TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote || '';
     }
 
-    function traditionalSeoDomainRankStackHtml(label, a, b, leftLegend, rightLegend) {
-      const na = Math.max(0, traditionalSeoToNum(a, 0));
-      const nb = Math.max(0, traditionalSeoToNum(b, 0));
-      const tot = na + nb;
-      let gl = 1;
-      let gr = 1;
-      if (tot > 0) {
-        gl = Math.max(na, 1e-6);
-        gr = Math.max(nb, 1e-6);
-      }
-      const fmt = (v) => formatTraditionalSeoSearchVolume(Math.round(v));
-      return `<div style="margin:0.35rem 0 0 0;">
-        <div style="font-size:0.72rem;color:var(--dark-text-muted);margin-bottom:0.2rem;display:flex;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
-          <span>${label}</span>
-          <span style="text-align:right;"><span style="color:#93c5fd">${leftLegend}</span> ${fmt(na)} · <span style="color:#94a3b8">${rightLegend}</span> ${fmt(nb)}</span>
-        </div>
-        <div style="display:flex;height:10px;border-radius:6px;overflow:hidden;background:rgba(148,163,184,0.2);">
-          <div style="flex:${gl} 1 0;min-width:${na ? '3px' : '0'};background:rgba(59,130,246,0.78);"></div>
-          <div style="flex:${gr} 1 0;min-width:${nb ? '3px' : '0'};background:rgba(148,163,184,0.55);"></div>
-        </div>
-      </div>`;
-    }
-
     function renderTraditionalSeoDfsDomainRankTile() {
       const ring = document.getElementById('traditional-seo-dfs-rank-ring');
       const valueEl = document.getElementById('traditional-seo-dfs-rank-value');
       const deltaEl = document.getElementById('traditional-seo-dfs-rank-delta');
       const capEl = document.getElementById('traditional-seo-dfs-rank-caption');
-      const barsEl = document.getElementById('traditional-seo-dfs-rank-bars');
       const bulletsEl = document.getElementById('traditional-seo-dfs-rank-bullets');
       const metaEl = document.getElementById('traditional-seo-dfs-rank-meta');
-      if (!ring || !valueEl || !barsEl || !bulletsEl) return;
+      if (!ring || !valueEl || !bulletsEl) return;
       const fmt = (v) =>
         v != null && Number.isFinite(Number(v)) ? formatTraditionalSeoSearchVolume(Math.round(Number(v))) : '—';
-      const setBars = (html) => {
-        barsEl.innerHTML = html;
-      };
       const setBullets = (html) => {
         bulletsEl.innerHTML = html;
       };
@@ -71339,8 +71269,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           deltaEl.textContent = '—';
           deltaEl.dataset.dir = 'flat';
         }
-        if (capEl) capEl.textContent = 'Enable DataForSEO summary path for this tile.';
-        setBars('');
+        if (capEl) capEl.textContent = 'Δ vs last snapshot on this device';
         setBullets(
           '<li style="color:var(--dark-text-muted);list-style:none;margin-left:0;">Set <code>TRADITIONAL_SEO_BACKLINK_INDEX_SOURCE</code> to <strong>dataforseo</strong> or <strong>both</strong>.</li>'
         );
@@ -71357,8 +71286,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           deltaEl.textContent = '—';
           deltaEl.dataset.dir = 'flat';
         }
-        if (capEl) capEl.textContent = 'Rank vs last summary snapshot on this device';
-        setBars('');
+        if (capEl) capEl.textContent = 'Δ vs last snapshot on this device';
         setBullets(
           TRADITIONAL_SEO_STATE.dfsBacklinkApiConfigured === false
             ? '<li style="color:var(--dark-text-muted);list-style:none;margin-left:0;">Server: set <code>DATAFORSEO_API_LOGIN</code> and <code>DATAFORSEO_API_PASSWORD</code>.</li>'
@@ -71375,80 +71303,71 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           deltaEl.textContent = '—';
           deltaEl.dataset.dir = 'flat';
         }
-        if (capEl) capEl.textContent = 'Rank not present in cached summary.';
-        setBars('');
+        if (capEl) capEl.textContent = 'Δ vs last snapshot on this device';
         setBullets('<li style="color:var(--dark-text-muted);list-style:none;margin-left:0;">Summary loaded but <strong>rank</strong> is missing — refresh summary.</li>');
         if (metaEl) metaEl.textContent = '—';
         return;
       }
-      const score = Math.max(0, Math.min(100, Math.round(rankN)));
+      const scaleStr = String(s.rank_scale || '').toLowerCase();
+      const hundredScale = scaleStr.includes('one_hundred') || scaleStr.includes('100');
+      const treatAsPercent = rankN <= 100 && (hundredScale || !s.rank_scale);
+      let dialPct;
+      let centerText;
+      if (treatAsPercent) {
+        dialPct = Math.max(0, Math.min(100, Math.round(rankN)));
+        centerText = `${dialPct}/100`;
+      } else {
+        dialPct = Math.max(
+          0,
+          Math.min(100, Math.round((100 * Math.log1p(rankN)) / Math.log1p(500)))
+        );
+        centerText = fmt(Math.round(rankN));
+      }
       ring.classList.remove('traditional-seo-metric-placeholder');
-      ring.style.setProperty('--pct', `${score}`);
-      ring.dataset.rag = traditionalSeoRagFromScore(score);
-      valueEl.textContent = `${score}/100`;
-      if (capEl) capEl.textContent = 'Rank vs last summary snapshot on this device';
+      ring.style.setProperty('--pct', String(dialPct));
+      ring.dataset.rag = traditionalSeoRagFromScore(treatAsPercent ? dialPct : dialPct);
+      valueEl.textContent = centerText;
+      if (capEl) {
+        capEl.textContent = treatAsPercent
+          ? 'DataForSEO domain rank (0–100) · Δ vs last snapshot on this device'
+          : 'DataForSEO domain rank (provider scale; ring is a log visual, not “/100”) · Δ vs last snapshot';
+      }
       const base = traditionalSeoReadDfsRankBaseline();
       if (deltaEl) {
         if (base && Number.isFinite(base.rank)) {
-          const diff = Math.round(score - base.rank);
+          const diff = Math.round(rankN - base.rank);
           const ad = Math.abs(diff);
           const fdiff = formatTraditionalSeoSearchVolume(ad);
           deltaEl.textContent =
             diff === 0 ? '0 vs last snapshot' : `${diff > 0 ? '+' : '−'}${fdiff} vs last snapshot`;
           deltaEl.dataset.dir = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
         } else {
-          deltaEl.textContent = 'First summary on this device';
+          deltaEl.textContent = 'First snapshot on this device';
           deltaEl.dataset.dir = 'flat';
         }
       }
-      const il = s.internal_links_count;
-      const el = s.external_links_count;
-      const rd = s.referring_domains;
-      const rdn = s.referring_domains_nofollow;
-      const rmd = s.referring_main_domains;
-      const rmdn = s.referring_main_domains_nofollow;
-      const rp = s.referring_pages;
-      const rpn = s.referring_pages_nofollow;
-      const ri = s.referring_ips;
-      const rs = s.referring_subnets;
       const bb = s.broken_backlinks;
       const bp = s.broken_pages;
-      const stacks = [];
-      if (il != null && el != null && Number.isFinite(Number(il)) && Number.isFinite(Number(el))) {
-        stacks.push(traditionalSeoDomainRankStackHtml('On-site links', il, el, 'Internal', 'External'));
-      }
-      if (rd != null && rdn != null && Number.isFinite(Number(rd)) && Number.isFinite(Number(rdn))) {
-        const df = Math.max(0, Math.round(Number(rd) - Number(rdn)));
-        stacks.push(traditionalSeoDomainRankStackHtml('Referring domains', df, rdn, 'Dofollow est.', 'Nofollow'));
-      }
-      if (rmd != null && rmdn != null && Number.isFinite(Number(rmd)) && Number.isFinite(Number(rmdn))) {
-        const dfm = Math.max(0, Math.round(Number(rmd) - Number(rmdn)));
-        stacks.push(traditionalSeoDomainRankStackHtml('Referring main domains', dfm, rmdn, 'Dofollow est.', 'Nofollow'));
-      }
-      if (rp != null && rpn != null && Number.isFinite(Number(rp)) && Number.isFinite(Number(rpn))) {
-        const dfp = Math.max(0, Math.round(Number(rp) - Number(rpn)));
-        stacks.push(traditionalSeoDomainRankStackHtml('Referring pages', dfp, rpn, 'Dofollow est.', 'Nofollow'));
-      }
-      if (ri != null && rs != null && Number.isFinite(Number(ri)) && Number.isFinite(Number(rs))) {
-        stacks.push(traditionalSeoDomainRankStackHtml('IPs vs subnets', ri, rs, 'IPs', 'Subnets'));
-      }
-      if (bb != null && bp != null && Number.isFinite(Number(bb)) && Number.isFinite(Number(bp))) {
-        stacks.push(traditionalSeoDomainRankStackHtml('Broken (domain)', bb, bp, 'Backlinks', 'Pages'));
-      }
-      setBars(stacks.join(''));
+      const cr = s.crawled_pages;
+      const bsp =
+        s.backlinks_spam_score != null && Number.isFinite(Number(s.backlinks_spam_score))
+          ? String(Math.round(Number(s.backlinks_spam_score)))
+          : null;
+      const tsp =
+        s.target_spam_score != null && Number.isFinite(Number(s.target_spam_score))
+          ? String(Math.round(Number(s.target_spam_score)))
+          : null;
       const bl = [];
-      bl.push(`<li><strong>Internal links:</strong> ${fmt(il)}</li>`);
-      bl.push(`<li><strong>External links:</strong> ${fmt(el)}</li>`);
-      bl.push(`<li><strong>Broken backlinks:</strong> ${fmt(bb)}</li>`);
+      bl.push(
+        `<li><strong>Domain rank (provider):</strong> ${fmt(Math.round(rankN))}${
+          treatAsPercent ? ' / 100' : ''
+        }</li>`
+      );
+      if (bsp) bl.push(`<li><strong>Backlinks spam score:</strong> ${bsp}</li>`);
+      if (tsp) bl.push(`<li><strong>Target spam score:</strong> ${tsp}</li>`);
+      bl.push(`<li><strong>Broken backlinks (domain):</strong> ${fmt(bb)}</li>`);
       bl.push(`<li><strong>Broken pages:</strong> ${fmt(bp)}</li>`);
-      bl.push(`<li><strong>Referring domains:</strong> ${fmt(rd)}</li>`);
-      bl.push(`<li><strong>Referring domains (nofollow):</strong> ${fmt(rdn)}</li>`);
-      bl.push(`<li><strong>Referring main domains:</strong> ${fmt(rmd)}</li>`);
-      bl.push(`<li><strong>Referring main domains (nofollow):</strong> ${fmt(rmdn)}</li>`);
-      bl.push(`<li><strong>Referring IPs:</strong> ${fmt(ri)}</li>`);
-      bl.push(`<li><strong>Referring subnets:</strong> ${fmt(rs)}</li>`);
-      bl.push(`<li><strong>Referring pages:</strong> ${fmt(rp)}</li>`);
-      bl.push(`<li><strong>Referring pages (nofollow):</strong> ${fmt(rpn)}</li>`);
+      bl.push(`<li><strong>Crawled pages (DFS):</strong> ${fmt(cr)}</li>`);
       setBullets(bl.join(''));
       const t = s.fetched_at ? Date.parse(String(s.fetched_at)) : NaN;
       let ds = '—';
