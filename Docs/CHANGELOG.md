@@ -2,6 +2,21 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-03-21] - DataForSEO: domain backlink index (Option B) + spam filters
+
+### Added
+- **Supabase:** `dfs_domain_backlink_rows`, `dfs_backlink_ingest_state` (`migrations/20260321_dfs_domain_backlink_index.sql`, `sql/20260321_dfs_domain_backlink_index.sql`, `sql/SUPABASE_SCHEMA.sql`).
+- **`lib/dfs-spam-filters.js`**, **`lib/dfs-domain-backlink-ingest.js`:** shared spam filters + paginated `backlinks/live` ingest.
+- **`POST /api/aigeo/dataforseo-backlink-domain`:** `action` **`full`** | **`delta`** | **`status`** (filtered full rebuild, `first_seen`-based delta, read state).
+- **`dataforseo-backlink-pages` lookup:** when domain index rows exist, **overlays** per-URL payloads from `dfs_domain_backlink_rows`.
+- **Dashboard:** **DFS full index** + **DFS new links** (replaces single “Fetch DFS backlinks”).
+- **`test/dfs-spam-filters.test.js`**
+
+### Notes
+- Env: **`DFS_DOMAIN_INGEST_MAX_PAGES`**, **`DFS_DOMAIN_INGEST_PAGE_LIMIT`** (see `Docs/DATAFORSEO_BACKLINK_SPAM_FILTERS.md`).
+- **`scripts/dfs-backlink-filter-compare.mjs`** + **`npm run test:dfs-backlink-filters`:** A/B **unfiltered** vs **filtered** (`backlinks/live` = **one task per request**); filters from **`lib/dfs-spam-filters.js`**; `status_message` on failure.
+- **`Docs/DATAFORSEO_BACKLINK_SPAM_FILTERS.md`:** CSV rationale, filter JSON, Supabase + API details.
+
 ## [2026-03-20] - Keyword demand: fix Supabase 400 + KE request normalisation
 
 ### Fixed

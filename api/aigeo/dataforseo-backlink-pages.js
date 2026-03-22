@@ -5,6 +5,7 @@ import { dfsClientLimits, dfsPageBacklinksMax } from '../../lib/dfs-backlink-lim
 import {
   normalizeDfsPageUrl as normalizePageUrl,
   expandUrlListForBacklinkCacheQuery,
+  dfsPageUrlDbQueryVariants,
   indexDfsCacheRowsByCanonical
 } from '../../lib/dfs-page-url-keys.js';
 
@@ -244,6 +245,83 @@ async function fetchLiveForTargets(creds, targets, limit) {
   return json;
 }
 
+function domainIndexRowToBacklinkRow(r) {
+  if (!r || typeof r !== 'object') return null;
+  const src = String(r.url_from || '').trim();
+  const tgt = String(r.url_to || '').trim();
+  if (!src || !tgt) return null;
+  let domain_source = '';
+  try {
+    domain_source = normalizeDomainHost(new URL(src).hostname);
+  } catch {
+    domain_source = '';
+  }
+  const df = r.dofollow;
+  const dofollow = df === true || df === false ? df : null;
+  return {
+    source_url: src,
+    target_url: tgt,
+    anchor: String(r.anchor || '').trim(),
+    dofollow,
+    strength: null,
+    domain_source: domain_source || undefined
+  };
+}
+
+async function loadDomainIndexRows(supabase, domainHost, expandedKeys) {
+  if (!domainHost || !expandedKeys.length) return [];
+  const qchunk = 120;
+  const out = [];
+  for (let i = 0; i < expandedKeys.length; i += qchunk) {
+    const slice = expandedKeys.slice(i, i + qchunk);
+    const { data, error } = await supabase
+      .from('dfs_domain_backlink_rows')
+      .select('*')
+      .eq('domain_host', domainHost)
+      .in('url_to_key', slice);
+    if (error && !String(error.message || '').includes('does not exist')) throw error;
+    if (Array.isArray(data)) out.push(...data);
+  }
+  return out;
+}
+
+async function mergeDomainIndexIntoLookup(supabase, pageUrlsNorm, byPageUrl, nowMs) {
+  const dh = hostFromPageUrl(pageUrlsNorm[0]);
+  if (!dh) return;
+  const expanded = expandUrlListForBacklinkCacheQuery(pageUrlsNorm);
+  if (!expanded.length) return;
+  const all = await loadDomainIndexRows(supabase, dh, expanded);
+  if (!all.length) return;
+  const cap = dfsPageBacklinksMax();
+  const fetchedAt = new Date().toISOString();
+  for (let i = 0; i < pageUrlsNorm.length; i += 1) {
+    const u = pageUrlsNorm[i];
+    const canon = normalizePageUrl(u);
+    if (!canon) continue;
+    const keyset = new Set(dfsPageUrlDbQueryVariants(canon));
+    const matched = all.filter((r) => keyset.has(r.url_to_key));
+    if (!matched.length) continue;
+    const sliced = matched.slice(0, cap).map(domainIndexRowToBacklinkRow).filter(Boolean);
+    if (!sliced.length) continue;
+    const { dofollow_count, nofollow_count } = followCountsForRows(sliced);
+    const cacheLike = {
+      page_url: u,
+      domain_host: dh,
+      include_subdomains: true,
+      backlink_rows: sliced,
+      row_count: sliced.length,
+      dofollow_count,
+      nofollow_count,
+      api_total_count: matched.length,
+      cost_last: null,
+      raw_meta: { source: 'dfs_domain_index' },
+      fetched_at: fetchedAt,
+      updated_at: fetchedAt
+    };
+    byPageUrl[u] = payloadFromDbRow(cacheLike, nowMs);
+  }
+}
+
 async function runLookup(supabase, pageUrls, nowMs) {
   const byPageUrl = {};
   const chunk = 100;
@@ -256,6 +334,7 @@ async function runLookup(supabase, pageUrls, nowMs) {
       byPageUrl[u] = payloadFromDbRow(canonMap.get(u) || null, nowMs);
     }
   }
+  await mergeDomainIndexIntoLookup(supabase, pageUrls, byPageUrl, nowMs);
   return { status: 200, body: { status: 'ok', data: { byPageUrl, staleDays: pageStaleDays(), ...dfsClientLimits() }, meta: { generatedAt: new Date().toISOString() } } };
 }
 

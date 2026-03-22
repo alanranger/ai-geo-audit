@@ -58,7 +58,7 @@ For each evaluated URL, the modal should list **all backlinks returned for that 
 | Piece | Today | Target |
 |-------|--------|--------|
 | Domain summary | `POST /api/aigeo/dataforseo-backlink-summary` + `dfs_backlink_summary_cache` | UI reads `dofollow_backlinks` / `nofollow_backlinks` when present on summary row. |
-| Per-URL rows | KE `page_backlinks_json` + BL modal | **`POST /api/aigeo/dataforseo-backlink-pages`** (`lookup` \| `refresh`, `page_urls[]`, `force`) → `dfs_page_backlinks_cache`. Modal prefers DFS rows when loaded. |
+| Per-URL rows | KE `page_backlinks_json` + BL modal | **`POST /api/aigeo/dataforseo-backlink-pages`** `lookup` merges **`dfs_domain_backlink_rows`** (domain index) over **`dfs_page_backlinks_cache`**. Legacy **`refresh`** on that route still exists for page-target calls; primary ingest is **`POST /api/aigeo/dataforseo-backlink-domain`** (`full` \| `delta`). |
 | Tiles | Split KE + DFS DOM in `audit-dashboard.html` | **One** summary component; wire to cache + toggle. |
 | Disavow | Server filter on KE store; `GET /api/aigeo/disavow-list` | Reuse disavow list for **client** (and optional server) filter on DFS rows; toggle only changes **view**, not necessarily re-calling DFS. |
 
@@ -81,8 +81,10 @@ For each evaluated URL, the modal should list **all backlinks returned for that 
 |--------|---------|
 | `public.dfs_backlink_summary_cache` | Domain summary from `backlinks/summary/live` (existing). Columns **`dofollow_backlinks`**, **`nofollow_backlinks`** added when API maps them (nullable until populated). |
 | `public.dfs_page_backlinks_cache` | Per normalised **`page_url`**: **`backlink_rows`** (JSON array of link objects: anchor, follow type, strength fields), counts, **`cost_last`**, **`fetched_at`**. |
+| `public.dfs_domain_backlink_rows` | Domain-wide filtered index from **`backlinks/live`** + spam URL filters. Join audit URLs on **`url_to_key`**. |
+| `public.dfs_backlink_ingest_state` | Per **`domain_host`**: full/delta timestamps, **`delta_first_seen_floor`** for incremental ingest. |
 
-**Repo files:** `migrations/20260322_dfs_page_backlinks_cache.sql`, `sql/20260322_dfs_page_backlinks_cache.sql` (mirror for manual runs).
+**Repo files:** `migrations/20260322_dfs_page_backlinks_cache.sql`, `sql/20260322_dfs_page_backlinks_cache.sql`; **`migrations/20260321_dfs_domain_backlink_index.sql`**, **`sql/20260321_dfs_domain_backlink_index.sql`** (domain index).
 
 ---
 
@@ -90,3 +92,4 @@ For each evaluated URL, the modal should list **all backlinks returned for that 
 
 - **KE cache + disavow + Pg bl:** `Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md`
 - **Summary table SQL:** `sql/20260321_dfs_backlink_summary_cache.sql`
+- **Spam URL filters for `backlinks/live` (SEOSpace CSV analysis, 4 recommended `not_like` patterns, local A/B script, Supabase scope):** `Docs/DATAFORSEO_BACKLINK_SPAM_FILTERS.md`
