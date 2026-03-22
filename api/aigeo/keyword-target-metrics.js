@@ -90,6 +90,46 @@ function spreadHomeAliasesToMap(map) {
   }
 }
 
+function homepageAliasKeys(canonical) {
+  const c = normalizePageUrl(canonical);
+  if (!c) return [];
+  const alts = homepagePathAliasesForCache(c).filter((x) => x && x !== c);
+  return [c, ...alts];
+}
+
+function mapGetUrlTrafficBundle(map, canonical) {
+  if (!(map instanceof Map)) return {};
+  const keys = homepageAliasKeys(canonical);
+  for (let i = 0; i < keys.length; i += 1) {
+    const hit = map.get(keys[i]);
+    if (hit) return hit;
+  }
+  return {};
+}
+
+function mapGetUrlKeywordsList(map, canonical) {
+  if (!(map instanceof Map)) return [];
+  const keys = homepageAliasKeys(canonical);
+  for (let i = 0; i < keys.length; i += 1) {
+    const rows = map.get(keys[i]);
+    if (Array.isArray(rows) && rows.length) return rows;
+  }
+  for (let i = 0; i < keys.length; i += 1) {
+    const rows = map.get(keys[i]);
+    if (Array.isArray(rows)) return rows;
+  }
+  return [];
+}
+
+function mapGetPageBlPack(map, canonical) {
+  if (!(map instanceof Map)) return undefined;
+  const keys = homepageAliasKeys(canonical);
+  for (let i = 0; i < keys.length; i += 1) {
+    if (map.has(keys[i])) return map.get(keys[i]);
+  }
+  return undefined;
+}
+
 function dbRowForWant(db, pageUrl, keyword) {
   const kk = keywordCacheKey(keyword);
   const key = `${pageUrl}\n${kk}`;
@@ -708,7 +748,7 @@ function urlTrafficFromKeRow(row) {
   return toNum(v, null);
 }
 
-async function fetchUrlTrafficMap(apiKey, urls, country, domainHost) {
+async function fetchUrlTrafficMap(apiKey, urls, country, domainHost, enrichNotes) {
   const map = new Map();
   const urlCountry = keCountryForUrlEndpoints(country);
   const batchSize = envInt('KE_URL_TRAFFIC_BATCH', 15, 1, 50);
@@ -727,19 +767,25 @@ async function fetchUrlTrafficMap(apiKey, urls, country, domainHost) {
   });
   const parts = chunk(expanded, batchSize);
   for (let i = 0; i < parts.length; i += 1) {
-    const { res, json, text } = await kePostJson(apiKey, KE_URL_TRAFFIC, {
-      urls: parts[i],
-      country: urlCountry
-    });
-    if (!res.ok) throw keError(res, json, text);
-    extractKeItems(json).forEach((row) => {
-      const u = normalizePageUrl(row?.url);
-      if (!u) return;
-      map.set(u, {
-        url_estimated_traffic: urlTrafficFromKeRow(row),
-        total_ranking_keywords: toNum(row?.total_ranking_keywords, null)
+    try {
+      const { res, json, text } = await kePostJson(apiKey, KE_URL_TRAFFIC, {
+        urls: parts[i],
+        country: urlCountry
       });
-    });
+      if (!res.ok) throw keError(res, json, text);
+      extractKeItems(json).forEach((row) => {
+        const u = normalizePageUrl(row?.url);
+        if (!u) return;
+        map.set(u, {
+          url_estimated_traffic: urlTrafficFromKeRow(row),
+          total_ranking_keywords: toNum(row?.total_ranking_keywords, null)
+        });
+      });
+    } catch (e) {
+      const msg = String(e?.message || e);
+      const note = `get_url_traffic_metrics batch ${i + 1}/${parts.length} (${parts[i]?.length || 0} urls): ${msg}`;
+      if (Array.isArray(enrichNotes)) enrichNotes.push(note.slice(0, 500));
+    }
   }
   return map;
 }
@@ -1041,13 +1087,9 @@ export default async function handler(req, res) {
     const disavowLists = needDisavow ? loadDisavowForBacklinks() : { domains: new Set(), urls: new Set() };
 
     if (stalePageUrls.length) {
-      try {
-        const m = await fetchUrlTrafficMap(apiKey, stalePageUrls, country, domainHost);
-        m.forEach((v, k) => urlTrafficMap.set(k, v));
-        spreadHomeAliasesToMap(urlTrafficMap);
-      } catch (e) {
-        enrichNotes.push(String(e?.message || e));
-      }
+      const m = await fetchUrlTrafficMap(apiKey, stalePageUrls, country, domainHost, enrichNotes);
+      m.forEach((v, k) => urlTrafficMap.set(k, v));
+      spreadHomeAliasesToMap(urlTrafficMap);
 
       for (let i = 0; i < stalePageUrls.length; i += 1) {
         const pu = stalePageUrls[i];
@@ -1105,12 +1147,12 @@ export default async function handler(req, res) {
       if (!needUpsert) return;
       const hit = keMap.get(keywordCacheKey(meta.keyword));
       const canonical = normalizePageUrl(meta.page_url) || meta.page_url;
-      const kwRows = urlKeywordsMap.get(canonical) || [];
+      const kwRows = mapGetUrlKeywordsList(urlKeywordsMap, canonical);
       const kwHit = findUrlKeywordRow(kwRows, meta.keyword);
       if (kwRows.length && !kwHit && normalizeKeyword(meta.keyword)) {
         enrichNotes.push(`${canonical}: target keyword not in KE URL-keyword list (${kwRows.length} rows)`);
       }
-      const traffic = urlTrafficMap.get(canonical) || {};
+      const traffic = mapGetUrlTrafficBundle(urlTrafficMap, canonical);
       const est = kwHit ? estimatedTrafficFromUrlKeywordRow(kwHit) : null;
       const serp = kwHit ? serpPositionFromUrlKeywordRow(kwHit) : null;
       const urlEst = toNum(traffic.url_estimated_traffic, null);
@@ -1120,7 +1162,7 @@ export default async function handler(req, res) {
         : row?.page_backlinks_json && typeof row.page_backlinks_json === 'object'
           ? Object.values(row.page_backlinks_json)
           : null;
-      const pbPack = pageBlMap.get(canonical);
+      const pbPack = mapGetPageBlPack(pageBlMap, canonical);
       if (pbPack && typeof pbPack === 'object' && !Array.isArray(pbPack)) {
         pblCount = Number.isFinite(Number(pbPack.count)) ? Math.round(Number(pbPack.count)) : pblCount;
         pblJson = Array.isArray(pbPack.items) ? pbPack.items : pblJson;
