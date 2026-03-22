@@ -70837,37 +70837,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     function traditionalSeoDfsAliasPutAll(map, pageUrlKey, row, prop) {
       const k0 = String(pageUrlKey || '').trim();
       if (!k0) return;
+      const propResolved = prop != null ? String(prop).trim() : String(traditionalSeoPropertyUrl() || '').trim();
+      const keys = traditionalSeoPageBacklinkAliasKeys(k0, propResolved);
       if (row == null) {
-        map.set(k0, row);
+        for (let i = 0; i < keys.length; i += 1) map.set(keys[i], row);
         return;
       }
-      const keys = [];
-      const add = (k) => {
-        const s = String(k || '').trim();
-        if (s && !keys.includes(s)) keys.push(s);
-      };
-      add(k0);
-      add(traditionalSeoToComparableUrl(k0, prop));
-      add(traditionalSeoNormalizeUrl(k0, prop));
-      add(traditionalSeoOverridePageKey(k0));
-      add(traditionalSeoSignalMapKey(k0, prop));
-      try {
-        const parsed = new URL(k0);
-        const alt = new URL(k0);
-        if (parsed.protocol === 'https:') {
-          alt.protocol = 'http:';
-          add(alt.toString());
-          add(traditionalSeoToComparableUrl(alt.toString(), prop));
-        } else if (parsed.protocol === 'http:') {
-          alt.protocol = 'https:';
-          add(alt.toString());
-          add(traditionalSeoToComparableUrl(alt.toString(), prop));
-        }
-      } catch (e) {
-        /* ignore */
+      let chosen = row;
+      for (let i = 0; i < keys.length; i += 1) {
+        chosen = traditionalSeoDfsMergeRowsPreferRicher(map.get(keys[i]), chosen);
       }
       for (let i = 0; i < keys.length; i += 1) {
-        map.set(keys[i], row);
+        map.set(keys[i], chosen);
       }
     }
 
@@ -70890,21 +70871,19 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const u = String(urlRaw || '').trim();
       if (!u) return null;
       const prop = traditionalSeoPropertyUrl();
-      const keys = [];
-      const add = (k) => {
-        const s = String(k || '').trim();
-        if (s && !keys.includes(s)) keys.push(s);
-      };
-      add(u);
-      add(traditionalSeoToComparableUrl(u, prop));
-      add(traditionalSeoNormalizeUrl(u, prop));
-      add(traditionalSeoOverridePageKey(u));
-      add(traditionalSeoSignalMapKey(u, prop));
+      const keys = traditionalSeoPageBacklinkAliasKeys(u, prop);
+      let best = null;
+      let bestR = -1;
       for (let i = 0; i < keys.length; i += 1) {
         const hit = map.get(keys[i]);
-        if (hit) return hit;
+        if (!hit) continue;
+        const r = traditionalSeoDfsRowRichness(hit);
+        if (r > bestR) {
+          bestR = r;
+          best = hit;
+        }
       }
-      return null;
+      return best;
     }
 
     function traditionalSeoDfsPageRowPairCounts(row) {
@@ -71408,6 +71387,53 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return { score, weightedTotal, passW, warnW, failW };
     }
 
+    function traditionalSeoDedupeHitsByRuleWorst(hits) {
+      const byRule = new Map();
+      const order = { fail: 0, warn: 1, pass: 2 };
+      (Array.isArray(hits) ? hits : []).forEach((row) => {
+        if (String(row?.tier || '').toLowerCase() === 'sitewide') return;
+        const rk = String(row?.rule_key || '').trim();
+        if (!rk) return;
+        const prev = byRule.get(rk);
+        if (!prev) {
+          byRule.set(rk, row);
+          return;
+        }
+        const sa = order[String(prev?.status || 'fail').toLowerCase()] ?? 3;
+        const sb = order[String(row?.status || 'fail').toLowerCase()] ?? 3;
+        byRule.set(rk, sa <= sb ? prev : row);
+      });
+      return Array.from(byRule.values());
+    }
+
+    function traditionalSeoBuildPageScoreByUrlFromRows(rows) {
+      const prop = String(traditionalSeoPropertyUrl() || '').trim();
+      const hitsByUrl = new Map();
+      (Array.isArray(rows) ? rows : []).forEach((row) => {
+        if (String(row?.tier || '').toLowerCase() === 'sitewide') return;
+        const u = String(row?.url || '');
+        if (!u) return;
+        if (!hitsByUrl.has(u)) hitsByUrl.set(u, []);
+        hitsByUrl.get(u).push(row);
+      });
+      const pageScoreByUrl = new Map();
+      hitsByUrl.forEach((pageHits, u) => {
+        pageScoreByUrl.set(u, traditionalSeoPageScoreDetailFromHits(pageHits).score);
+      });
+      const rollupBuckets = new Map();
+      hitsByUrl.forEach((pageHits, u) => {
+        const rk = traditionalSeoLandingRollupGroupKey(u, prop);
+        const disp = traditionalSeoLandingRollupDisplayUrl(rk, prop);
+        if (!rollupBuckets.has(disp)) rollupBuckets.set(disp, []);
+        rollupBuckets.get(disp).push(...pageHits);
+      });
+      rollupBuckets.forEach((allHits, disp) => {
+        const merged = traditionalSeoDedupeHitsByRuleWorst(allHits);
+        pageScoreByUrl.set(disp, traditionalSeoPageScoreDetailFromHits(merged).score);
+      });
+      return pageScoreByUrl;
+    }
+
     function traditionalSeoDonutBackground(passW, warnW, failW) {
       const t = passW + warnW + failW;
       if (t <= 0) return 'conic-gradient(#334155 0deg 360deg)';
@@ -71592,20 +71618,32 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
       try {
         const propertyUrl = traditionalSeoPropertyUrl();
+        const seeds = new Set([url]);
+        traditionalSeoLandingComparableVariants(url, propertyUrl).forEach((s) => seeds.add(s));
+        const urlsPayload = [];
+        const seen = new Set();
+        seeds.forEach((s) => {
+          const n = traditionalSeoNormalizeUrl(s, propertyUrl) || String(s).trim();
+          if (n && !seen.has(n)) {
+            seen.add(n);
+            urlsPayload.push(n);
+          }
+        });
+        const urlsArg = urlsPayload.length ? urlsPayload : [url];
         const res = await fetch(traditionalSeoApiPath('/api/aigeo/content-extractability'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode: 'full', tier: 'all', urls: [url] })
+          body: JSON.stringify({ mode: 'full', tier: 'all', urls: urlsArg })
         });
         const payload = await res.json();
         if (!res.ok || String(payload?.status || '').toLowerCase() !== 'ok') {
           throw new Error(payload?.message || `HTTP ${res.status}`);
         }
-        await traditionalSeoMergeExtractabilityForUrl(propertyUrl, url, payload);
+        await traditionalSeoMergeExtractabilityForUrl(propertyUrl, urlsArg[0], payload);
         if (typeof window.showStatus === 'function') {
           window.showStatus('Page refreshed. Re-scoring this URL only…', 'info');
         }
-        await runTraditionalSeoEvaluation({ refreshAudit: false, onlyRescorePageUrls: [url] });
+        await runTraditionalSeoEvaluation({ refreshAudit: false, onlyRescorePageUrls: urlsArg });
         traditionalSeoOpenPageModal(url);
         if (typeof window.showStatus === 'function') {
           window.showStatus('Re-audit complete.', 'success');
@@ -71715,9 +71753,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         : new Map();
       const prop = traditionalSeoPropertyUrl();
       Object.keys(by).forEach((k) => {
-        map.set(k, by[k]);
-        const cmp = traditionalSeoToComparableUrl(k, prop);
-        if (cmp && cmp !== k) map.set(cmp, by[k]);
+        const row = by[k];
+        const keys = new Set([k, traditionalSeoToComparableUrl(k, prop)].filter(Boolean));
+        traditionalSeoLandingComparableVariants(k, prop).forEach((v) => keys.add(v));
+        keys.forEach((key) => map.set(key, row));
       });
       TRADITIONAL_SEO_STATE.keywordMetricsByUrl = map;
       const sd = traditionalSeoToNum(payload?.staleDays, 0);
@@ -71939,6 +71978,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       } catch (e) {
         /* ignore */
       }
+      const vars = traditionalSeoLandingComparableVariants(u, prop);
+      for (let i = 0; i < vars.length; i += 1) {
+        m = map.get(vars[i]);
+        if (m) return m;
+      }
       return null;
     }
 
@@ -72081,6 +72125,125 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         || String(rawUrl || '').trim();
     }
 
+    function traditionalSeoLandingComparableVariants(rawUrl, propertyUrl = '') {
+      const cmp = traditionalSeoToComparableUrl(rawUrl, propertyUrl) || String(rawUrl || '').trim();
+      if (!cmp || !URL.canParse(cmp)) return cmp ? [cmp] : [];
+      try {
+        const u = new URL(cmp);
+        const pathTrim = String(u.pathname || '/').replace(/\/+$/, '') || '/';
+        if (pathTrim !== '/' && pathTrim !== '/home') return [cmp];
+        const out = new Set();
+        [new URL('/', u.origin).toString(), new URL('/home', u.origin).toString(), cmp].forEach((x) => {
+          const t = traditionalSeoToComparableUrl(x, propertyUrl) || x;
+          if (t) out.add(t);
+        });
+        return [...out];
+      } catch (err) {
+        return [cmp];
+      }
+    }
+
+    function traditionalSeoLandingRollupGroupKey(rawUrl, propertyUrl = '') {
+      const cmp = traditionalSeoToComparableUrl(rawUrl, propertyUrl) || String(rawUrl || '').trim();
+      if (!cmp || !URL.canParse(cmp)) return cmp;
+      try {
+        const u = new URL(cmp);
+        const pathTrim = String(u.pathname || '/').replace(/\/+$/, '') || '/';
+        if (pathTrim !== '/' && pathTrim !== '/home') return cmp;
+        const root = new URL('/', u.origin).toString();
+        return traditionalSeoToComparableUrl(root, propertyUrl) || root;
+      } catch (err) {
+        return cmp;
+      }
+    }
+
+    function traditionalSeoLandingRollupDisplayUrl(rollupGroupKey, propertyUrl = '') {
+      const prop = String(propertyUrl || '').trim();
+      if (prop && URL.canParse(prop)) {
+        try {
+          const p = new URL(prop);
+          return `${p.protocol}//${p.host}/`;
+        } catch (err) {
+          /* fall through */
+        }
+      }
+      const rk = String(rollupGroupKey || '').trim();
+      if (rk && URL.canParse(rk)) {
+        try {
+          const u = new URL(rk);
+          return `${u.protocol}//${u.host}/`;
+        } catch (err) {
+          /* fall through */
+        }
+      }
+      return rk;
+    }
+
+    function traditionalSeoPickWorseStatusString(sa, sb) {
+      const order = { fail: 0, warn: 1, pass: 2 };
+      const a = order[String(sa || 'fail').toLowerCase()] ?? 3;
+      const b = order[String(sb || 'fail').toLowerCase()] ?? 3;
+      return a <= b ? sa : sb;
+    }
+
+    function traditionalSeoPickWorseRuleRow(prev, row) {
+      const order = { fail: 0, warn: 1, pass: 2 };
+      const sa = order[String(prev?.status || 'fail').toLowerCase()] ?? 3;
+      const sb = order[String(row?.status || 'fail').toLowerCase()] ?? 3;
+      return sa <= sb ? prev : row;
+    }
+
+    function traditionalSeoDfsRowRichness(row) {
+      if (!row || typeof row !== 'object') return -1;
+      const items = Array.isArray(row.backlink_rows) ? row.backlink_rows.length : 0;
+      const cap = traditionalSeoToNum(row.row_count, NaN);
+      const capN = Number.isFinite(cap) ? cap : 0;
+      return Math.max(items, capN);
+    }
+
+    function traditionalSeoDfsMergeRowsPreferRicher(prev, row) {
+      if (!row) return prev;
+      if (!prev) return row;
+      return traditionalSeoDfsRowRichness(prev) >= traditionalSeoDfsRowRichness(row) ? prev : row;
+    }
+
+    function traditionalSeoPageBacklinkAliasKeys(seedUrl, propertyUrl = '') {
+      const keys = [];
+      const add = (k) => {
+        const s = String(k || '').trim();
+        if (s && !keys.includes(s)) keys.push(s);
+      };
+      const k0 = String(seedUrl || '').trim();
+      if (!k0) return keys;
+      const prop = String(propertyUrl || '').trim();
+      add(k0);
+      add(traditionalSeoToComparableUrl(k0, prop));
+      add(traditionalSeoNormalizeUrl(k0, prop));
+      add(traditionalSeoOverridePageKey(k0));
+      add(traditionalSeoSignalMapKey(k0, prop));
+      try {
+        const parsed = new URL(k0);
+        const alt = new URL(k0);
+        if (parsed.protocol === 'https:') {
+          alt.protocol = 'http:';
+          add(alt.toString());
+          add(traditionalSeoToComparableUrl(alt.toString(), prop));
+        } else if (parsed.protocol === 'http:') {
+          alt.protocol = 'https:';
+          add(alt.toString());
+          add(traditionalSeoToComparableUrl(alt.toString(), prop));
+        }
+      } catch (err) {
+        /* ignore */
+      }
+      const snap = keys.slice();
+      for (let i = 0; i < snap.length; i += 1) {
+        const vars = traditionalSeoLandingComparableVariants(snap[i], prop);
+        for (let j = 0; j < vars.length; j += 1) add(vars[j]);
+      }
+      return keys;
+    }
+
     function traditionalSeoOverridePageKey(pageUrl) {
       const prop = String(TRADITIONAL_SEO_STATE.lastPropertyUrl || traditionalSeoPropertyUrl() || '').trim();
       return traditionalSeoToComparableUrl(pageUrl, prop) || traditionalSeoNormalizeUrl(pageUrl, prop) || String(pageUrl || '').trim();
@@ -72096,12 +72259,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     function traditionalSeoApplyBypassMapFromRows(overrideRows) {
       const prop = String(traditionalSeoPropertyUrl() || '').trim();
       const map = new Map();
-      (Array.isArray(overrideRows) ? overrideRows : []).forEach((o) => {
-        const pk = traditionalSeoToComparableUrl(o.page_url, prop) || String(o.page_url || '').trim();
-        const rk = String(o.rule_key || '').trim();
+      const addPk = (pageUrlStr, rk) => {
+        const pk = traditionalSeoToComparableUrl(pageUrlStr, prop) || String(pageUrlStr || '').trim();
         if (!pk || !rk) return;
         if (!map.has(pk)) map.set(pk, new Set());
         map.get(pk).add(rk);
+      };
+      (Array.isArray(overrideRows) ? overrideRows : []).forEach((o) => {
+        const rk = String(o.rule_key || '').trim();
+        const pu = String(o.page_url || '').trim();
+        if (!pu || !rk) return;
+        addPk(pu, rk);
+        traditionalSeoLandingComparableVariants(pu, prop).forEach((v) => addPk(v, rk));
       });
       TRADITIONAL_SEO_STATE.ruleBypassByPage = map;
       TRADITIONAL_SEO_STATE.ruleOverridesProperty = prop;
@@ -72153,19 +72322,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         row.status = bypass ? 'pass' : raw;
         row.bypassed = bypass && String(raw || '').toLowerCase() !== 'pass';
       });
-      const hitsByUrl = new Map();
-      rows.forEach((row) => {
-        if (String(row?.tier || '').toLowerCase() === 'sitewide') return;
-        const u = String(row?.url || '');
-        if (!u) return;
-        if (!hitsByUrl.has(u)) hitsByUrl.set(u, []);
-        hitsByUrl.get(u).push(row);
-      });
-      const pageScoreByUrl = new Map();
-      hitsByUrl.forEach((pageHits, u) => {
-        pageScoreByUrl.set(u, traditionalSeoPageScoreDetailFromHits(pageHits).score);
-      });
-      TRADITIONAL_SEO_STATE.pageScoreByUrl = pageScoreByUrl;
+      TRADITIONAL_SEO_STATE.pageScoreByUrl = traditionalSeoBuildPageScoreByUrlFromRows(rows);
     }
 
     function traditionalSeoRefreshRulesSummaryFromEvaluationRows() {
@@ -73941,7 +74098,23 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const target = String(pageUrl || '');
       TRADITIONAL_SEO_STATE.modalPageUrl = target;
       const all = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
-      const hits = all.filter((row) => String(row.url || '') === target);
+      const propModal = String(traditionalSeoPropertyUrl() || '').trim();
+      const rkTarget = traditionalSeoLandingRollupGroupKey(target, propModal);
+      const hitsRaw = all.filter((row) => {
+        if (String(row.url || '') === target) return true;
+        const u = String(row.url || '').trim();
+        if (!u) return false;
+        return traditionalSeoLandingRollupGroupKey(u, propModal) === rkTarget;
+      });
+      const byRuleKey = new Map();
+      hitsRaw.forEach((row) => {
+        const rkey = String(row.rule_key || '').trim();
+        if (!rkey) return;
+        const prev = byRuleKey.get(rkey);
+        if (!prev) byRuleKey.set(rkey, row);
+        else byRuleKey.set(rkey, traditionalSeoPickWorseRuleRow(prev, row));
+      });
+      const hits = Array.from(byRuleKey.values());
       const meta = traditionalSeoRuleMetaByKey();
       const order = { fail: 0, warn: 1, pass: 2 };
       hits.sort((a, b) => {
@@ -74093,51 +74266,89 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     function traditionalSeoPageSummaryRowsFromScopedRules(scopedRows) {
-      const map = new Map();
+      const prop = String(traditionalSeoPropertyUrl() || '').trim();
+      const byCmp = new Map();
       (Array.isArray(scopedRows) ? scopedRows : []).forEach((row) => {
         const u = String(row?.url || '').trim();
         if (!u) return;
-        const st = String(row?.status || 'fail').toLowerCase();
-        if (!map.has(u)) {
-          map.set(u, {
-            url: u,
-            tier: row.tier,
-            target_keyword: String(row.target_keyword || '').trim(),
+        const cmp = traditionalSeoToComparableUrl(u, prop) || u;
+        if (!byCmp.has(cmp)) {
+          byCmp.set(cmp, {
             clicks: traditionalSeoToNum(row.clicks, 0),
             impressions: traditionalSeoToNum(row.impressions, 0),
-            pass: 0,
-            warn: 0,
-            fail: 0
+            tier: row.tier,
+            target_keyword: String(row.target_keyword || '').trim()
           });
+          return;
         }
-        const g = map.get(u);
-        if (st === 'pass') g.pass += 1;
-        else if (st === 'warn') g.warn += 1;
-        else g.fail += 1;
+        const g = byCmp.get(cmp);
+        const rc = traditionalSeoToNum(row.clicks, 0);
+        const ri = traditionalSeoToNum(row.impressions, 0);
+        if (rc > g.clicks) g.clicks = rc;
+        if (ri > g.impressions) g.impressions = ri;
+        if (!g.target_keyword && String(row.target_keyword || '').trim()) g.target_keyword = String(row.target_keyword || '').trim();
+        if (!g.tier && row.tier) g.tier = row.tier;
       });
+      const gscRollup = new Map();
+      byCmp.forEach((g, cmp) => {
+        const rk = traditionalSeoLandingRollupGroupKey(cmp, prop);
+        if (!gscRollup.has(rk)) {
+          gscRollup.set(rk, { clicks: 0, impressions: 0, tier: g.tier, target_keyword: g.target_keyword });
+        }
+        const h = gscRollup.get(rk);
+        h.clicks += g.clicks;
+        h.impressions += g.impressions;
+        if (!h.target_keyword && g.target_keyword) h.target_keyword = g.target_keyword;
+        if (!h.tier && g.tier) h.tier = g.tier;
+      });
+      const ruleByRollup = new Map();
+      (Array.isArray(scopedRows) ? scopedRows : []).forEach((row) => {
+        const u = String(row?.url || '').trim();
+        if (!u) return;
+        const rk = traditionalSeoLandingRollupGroupKey(u, prop);
+        const rkey = String(row.rule_key || '').trim();
+        if (!rkey) return;
+        const st = String(row.status || 'fail').toLowerCase();
+        if (!ruleByRollup.has(rk)) ruleByRollup.set(rk, new Map());
+        const m = ruleByRollup.get(rk);
+        if (!m.has(rkey)) m.set(rkey, st);
+        else m.set(rkey, traditionalSeoPickWorseStatusString(m.get(rkey), st));
+      });
+      const rkUnion = new Set([...ruleByRollup.keys(), ...gscRollup.keys()]);
       const out = [];
-      map.forEach((g) => {
-        const worst = g.fail > 0 ? 'fail' : g.warn > 0 ? 'warn' : 'pass';
-        const total = g.pass + g.warn + g.fail;
+      rkUnion.forEach((rk) => {
+        const ruleMap = ruleByRollup.get(rk) || new Map();
+        let pass = 0;
+        let warn = 0;
+        let fail = 0;
+        ruleMap.forEach((st) => {
+          if (st === 'pass') pass += 1;
+          else if (st === 'warn') warn += 1;
+          else fail += 1;
+        });
+        const gsc = gscRollup.get(rk) || { clicks: 0, impressions: 0, tier: '', target_keyword: '' };
+        const worst = fail > 0 ? 'fail' : warn > 0 ? 'warn' : 'pass';
+        const total = pass + warn + fail;
         out.push({
           rule_key: '__page_summary__',
           rule_name: 'All checks (summary)',
           rule_category: 'summary',
-          url: g.url,
-          tier: g.tier,
-          target_keyword: g.target_keyword,
-          clicks: g.clicks,
-          impressions: g.impressions,
+          url: traditionalSeoLandingRollupDisplayUrl(rk, prop),
+          tier: gsc.tier,
+          target_keyword: gsc.target_keyword || '',
+          clicks: gsc.clicks,
+          impressions: gsc.impressions,
           status: worst,
           raw_status: worst,
           bypassed: false,
           rule_weight: 0,
-          summary_pass: g.pass,
-          summary_warn: g.warn,
-          summary_fail: g.fail,
+          summary_pass: pass,
+          summary_warn: warn,
+          summary_fail: fail,
           summary_total: total
         });
       });
+      out.sort((a, b) => String(a.url || '').localeCompare(String(b.url || '')));
       return out;
     }
 
@@ -74209,12 +74420,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         } else if (sortKey === 'clicks' || sortKey === 'impressions') {
           diff = traditionalSeoToNum(a?.[sortKey], 0) - traditionalSeoToNum(b?.[sortKey], 0);
         } else if (sortKey === 'kw_rank') {
-          const metricMap = TRADITIONAL_SEO_STATE.keywordMetricsByUrl instanceof Map
-            ? TRADITIONAL_SEO_STATE.keywordMetricsByUrl
-            : null;
           const serpTuple = (row) => {
             const url = String(row?.url || '').trim();
-            const m = metricMap && url ? metricMap.get(url) : null;
+            const m = url ? traditionalSeoGetKeywordMetricRow(url) : null;
             const r = m?.rank_position;
             const n = Number(r);
             const valid = Number.isFinite(n) && n > 0;
@@ -74237,12 +74445,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           sortKey === 'kw_page_bl' ||
           sortKey === 'kw_dfs_page_bl'
         ) {
-          const metricMap = TRADITIONAL_SEO_STATE.keywordMetricsByUrl instanceof Map
-            ? TRADITIONAL_SEO_STATE.keywordMetricsByUrl
-            : null;
           const pick = (row) => {
             const url = String(row?.url || '').trim();
-            const m = metricMap && url ? metricMap.get(url) : null;
+            const m = url ? traditionalSeoGetKeywordMetricRow(url) : null;
             if (sortKey === 'kw_volume') {
               const v = m?.search_volume;
               const n = Number(v);
@@ -74854,19 +75059,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           });
         }
 
-        const pageScoreByUrl = new Map();
-        const hitsByUrl = new Map();
-        rows.forEach((row) => {
-          if (String(row?.tier || '').toLowerCase() === 'sitewide') return;
-          const u = String(row?.url || '');
-          if (!u) return;
-          if (!hitsByUrl.has(u)) hitsByUrl.set(u, []);
-          hitsByUrl.get(u).push(row);
-        });
-        hitsByUrl.forEach((pageHits, u) => {
-          pageScoreByUrl.set(u, traditionalSeoPageScoreDetailFromHits(pageHits).score);
-        });
-        TRADITIONAL_SEO_STATE.pageScoreByUrl = pageScoreByUrl;
+        TRADITIONAL_SEO_STATE.pageScoreByUrl = traditionalSeoBuildPageScoreByUrlFromRows(rows);
 
         TRADITIONAL_SEO_STATE.evaluationRows = rows;
         traditionalSeoResetResultsPageIndex();

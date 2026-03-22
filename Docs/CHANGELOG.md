@@ -4,6 +4,9 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 
 ## [2026-03-21] - DataForSEO: domain backlink index (Option B) + spam filters
 
+### Changed
+- **Traditional SEO “By URL” table:** homepage-style paths **`/`** and **`/home`** (same origin) roll up to **one row** (display URL follows the property URL host, e.g. `https://www…/`). **Clicks / impressions** sum across those variants; **rule counts** dedupe by `rule_key` (worst status wins). **Page score**, **KE**, **DFS** lookups, **rule bypass** map, and the **page modal** use the same alias so metrics and drill-down stay consistent.
+
 ### Added
 - **Supabase:** `dfs_domain_backlink_rows`, `dfs_backlink_ingest_state` (`migrations/20260321_dfs_domain_backlink_index.sql`, `sql/20260321_dfs_domain_backlink_index.sql`, `sql/SUPABASE_SCHEMA.sql`).
 - **`lib/dfs-spam-filters.js`**, **`lib/dfs-domain-backlink-ingest.js`:** shared spam filters + paginated `backlinks/live` ingest.
