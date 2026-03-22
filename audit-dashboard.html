@@ -72245,25 +72245,29 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     function traditionalSeoLandingRollupDisplayUrl(rollupGroupKey, propertyUrl = '') {
-      const prop = String(propertyUrl || '').trim();
-      if (prop && URL.canParse(prop)) {
-        try {
-          const p = new URL(prop);
-          return `${p.protocol}//${p.host}/`;
-        } catch (err) {
-          /* fall through */
-        }
-      }
       const rk = String(rollupGroupKey || '').trim();
-      if (rk && URL.canParse(rk)) {
-        try {
-          const u = new URL(rk);
-          return `${u.protocol}//${u.host}/`;
-        } catch (err) {
-          /* fall through */
+      if (!rk) return rk;
+      if (!URL.canParse(rk)) return rk;
+      try {
+        const u = new URL(rk);
+        const pathTrim = String(u.pathname || '/').replace(/\/+$/, '') || '/';
+        const prop = String(propertyUrl || '').trim();
+        if (pathTrim === '/' || pathTrim === '/home') {
+          if (prop && URL.canParse(prop)) {
+            try {
+              const p = new URL(prop);
+              return `${p.protocol}//${p.host}/`;
+            } catch (err) {
+              /* fall through */
+            }
+          }
+          return traditionalSeoToComparableUrl(new URL('/', u.origin).toString(), propertyUrl)
+            || `${u.protocol}//${u.hostname}/`;
         }
+        return `${u.protocol}//${u.host}${pathTrim}`;
+      } catch (err) {
+        return rk;
       }
-      return rk;
     }
 
     function traditionalSeoRollupGscTotalsForPageRowUrl(urlRaw, allRows, propertyUrl) {

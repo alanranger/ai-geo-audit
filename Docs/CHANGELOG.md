@@ -6,6 +6,7 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 
 ### Fixed
 - **Traditional SEO tab:** Full page reload no longer **always** starts **②-style** scoring + full-site extractability when a saved snapshot exists. Results for the current **GSC property URL** are stored in **`localStorage`** (`gaio_traditional_seo_evaluation_v1`) after a successful run and **rehydrated** on load. Use **Refresh** / **Run ②** (or `renderTraditionalSeoTab(true)`) to force a new evaluation.
+- **Critical:** `traditionalSeoLandingRollupDisplayUrl` was returning **only** the property origin (`https://www…/`) for **every** URL. It now uses that canonical homepage **only** when the rollup key path is **`/`** or **`/home`**; all other paths keep their **full path** (blog, events, etc.).
 
 ## [2026-03-21] - DataForSEO: domain backlink index (Option B) + spam filters
 
