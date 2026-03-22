@@ -72029,14 +72029,21 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const rows = TRADITIONAL_SEO_STATE.evaluationRows;
       const pairs = traditionalSeoKeywordMetricPairsFromRows(rows);
       if (!pairs.length) {
+        const hasEvalRows = Array.isArray(rows) && rows.length > 0;
         traditionalSeoKwActivitySet({
           show: true,
           bar: false,
-          text:
-            'No URL rows loaded yet. Run ② Score Traditional SEO (or ① Full audit + Traditional SEO) first. Button ③ only fills keyword demand for URLs already in this table.'
+          text: hasEvalRows
+            ? 'Audit rows are loaded but no URL+target-keyword pairs (CSV 07 lookup empty or URL keys mismatch). Hard-refresh this page, then run ① or ② again so keywords reload from GitHub; then use ③.'
+            : 'No URL rows loaded yet. Run ② Score Traditional SEO (or ① Full audit + Traditional SEO) first. Button ③ only fills keyword demand for URLs already in this table.'
         });
         if (typeof window.showStatus === 'function') {
-          window.showStatus('No URL + target keyword pairs — run ② or ① first, then ③.', 'info');
+          window.showStatus(
+            hasEvalRows
+              ? 'No target keywords on rows — 07 CSV map failed or mismatched. Hard-refresh, then ① or ②, then ③.'
+              : 'No URL + target keyword pairs — run ② or ① first, then ③.',
+            'info'
+          );
         }
         renderTraditionalSeoResultsTable();
         return;
@@ -72988,7 +72995,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const requestedKey = String(options?.snapshotKey || window.__implTierSnapshotKey || '').trim();
         const activeKey = String(window.__traditionalSeoKeywordLookupKey || '').trim();
         if (!forceRefresh && window.__traditionalSeoKeywordLookup instanceof Map && activeKey === requestedKey) {
-          return window.__traditionalSeoKeywordLookup;
+          const cached = window.__traditionalSeoKeywordLookup;
+          // Never reuse an empty map: first fetch can fail (network/GitHub); caching it bricks ①②③ until hard refresh.
+          if (cached.size > 0) return cached;
         }
         if (forceRefresh) {
           window.__traditionalSeoKeywordLookup = null;
@@ -73038,8 +73047,20 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           const u = String(cols[urlIdx] || '').trim();
           const kw = String(cols[kwIdx] || '').trim();
           if (!u || !kw) continue;
-          const k = traditionalSeoSignalMapKey(u, prop) || traditionalSeoToComparableUrl(u, prop);
-          if (k) lookup.set(k, kw);
+          const keys = new Set();
+          const primary = traditionalSeoSignalMapKey(u, prop) || traditionalSeoToComparableUrl(u, prop);
+          if (primary) keys.add(primary);
+          try {
+            const variants = traditionalSeoLandingComparableVariants(u, prop);
+            for (let v = 0; v < variants.length; v += 1) {
+              const vk =
+                traditionalSeoSignalMapKey(variants[v], prop) || traditionalSeoToComparableUrl(variants[v], prop);
+              if (vk) keys.add(vk);
+            }
+          } catch (err) {
+            // ignore variant expansion failures
+          }
+          keys.forEach((k) => lookup.set(k, kw));
         }
         window.__traditionalSeoKeywordLookup = lookup;
         window.__traditionalSeoKeywordLookupKey = requestedKey;
