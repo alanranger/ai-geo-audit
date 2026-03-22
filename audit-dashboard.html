@@ -72751,15 +72751,39 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return [...urls].slice(0, 800);
     }
 
+    /** One bucket per page for GSC query-page rows: www/non-www and trailing-slash variants must match. */
+    function traditionalSeoGscMetricLookupKey(url, propertyUrl = '') {
+      return (
+        traditionalSeoToComparableUrl(url, propertyUrl)
+        || traditionalSeoToComparableUrl(traditionalSeoNormalizeUrl(url, propertyUrl), propertyUrl)
+        || traditionalSeoNormalizeUrl(url, propertyUrl)
+        || String(url || '').trim()
+      );
+    }
+
+    function traditionalSeoMetricLookupGet(lookup, url, propertyUrl = '') {
+      if (!lookup || typeof lookup.get !== 'function') return { clicks: 0, impressions: 0 };
+      const u = String(url || '').trim();
+      if (!u) return { clicks: 0, impressions: 0 };
+      const cmp = traditionalSeoToComparableUrl(u, propertyUrl);
+      const norm = traditionalSeoNormalizeUrl(u, propertyUrl);
+      const hit =
+        (cmp ? lookup.get(cmp) : null)
+        || (norm ? lookup.get(norm) : null)
+        || lookup.get(u)
+        || null;
+      return hit || { clicks: 0, impressions: 0 };
+    }
+
     function traditionalSeoBuildMetricsLookup(audit, propertyUrl = '') {
       const lookup = new Map();
       const put = (url, clicks, impressions) => {
-        const normalized = traditionalSeoNormalizeUrl(url, propertyUrl);
-        if (!normalized) return;
-        const current = lookup.get(normalized) || { clicks: 0, impressions: 0 };
+        const key = traditionalSeoGscMetricLookupKey(url, propertyUrl);
+        if (!key) return;
+        const current = lookup.get(key) || { clicks: 0, impressions: 0 };
         current.clicks += Math.max(0, traditionalSeoToNum(clicks, 0));
         current.impressions += Math.max(0, traditionalSeoToNum(impressions, 0));
-        lookup.set(normalized, current);
+        lookup.set(key, current);
       };
       const queryPages = (typeof window.getDashboardQueryPagesFromAudit === 'function')
         ? window.getDashboardQueryPagesFromAudit(audit)
@@ -75089,8 +75113,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           for (let i = 0; i < urls.length; i += 1) {
             const url = urls[i];
             const tier = String(resolveTier(url) || 'unmapped');
-            const norm = traditionalSeoNormalizeUrl(url, propertyUrl) || url;
-            const metric = metricLookup.get(url) || metricLookup.get(norm) || { clicks: 0, impressions: 0 };
+            const metric = traditionalSeoMetricLookupGet(metricLookup, url, propertyUrl);
             const kwKeySingle = traditionalSeoSignalMapKey(url, propertyUrl);
             const targetKeywordSingle = keywordLookupSingle instanceof Map
               ? String(keywordLookupSingle.get(kwKeySingle) || '').trim()
@@ -75256,8 +75279,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const pageRows = [];
         urlsToScore.forEach((url) => {
           const tier = String(resolveTier(url) || 'unmapped');
-          const norm = traditionalSeoNormalizeUrl(url, propertyUrl) || url;
-          const metric = metricLookup.get(url) || metricLookup.get(norm) || { clicks: 0, impressions: 0 };
+          const metric = traditionalSeoMetricLookupGet(metricLookup, url, propertyUrl);
           const kwKey = traditionalSeoSignalMapKey(url, propertyUrl);
           const targetKeyword = keywordLookup instanceof Map ? String(keywordLookup.get(kwKey) || '').trim() : '';
           pageRules.forEach((rule) => {
