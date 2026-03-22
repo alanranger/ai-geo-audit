@@ -115,6 +115,16 @@ function targetSpamFromSummaryRow(apiRow) {
   return nested != null && Number.isFinite(nested) ? Math.round(nested) : null;
 }
 
+/** 0–1000 internal `rank` → 0–100 dashboard scale (DataForSEO help center formula). */
+function dfsSummaryRankDisplayValue(apiRow) {
+  const n = toNum(apiRow?.rank, null);
+  if (n == null || !Number.isFinite(n) || n < 0) return null;
+  const scale = String(apiRow?.rank_scale || '').toLowerCase();
+  if (scale === 'one_hundred' && n <= 100) return Math.round(n);
+  if (n > 100) return Math.round(Math.sin(n / 636.62) * 100);
+  return Math.round(n);
+}
+
 function mapRowToCache(domainHost, includeSubdomains, apiRow, cost) {
   const pickInt = (k) => {
     const v = toNum(apiRow?.[k], null);
@@ -169,7 +179,7 @@ function mapRowToCache(domainHost, includeSubdomains, apiRow, cost) {
     broken_pages: pickInt('broken_pages'),
     backlinks_spam_score: pickInt('backlinks_spam_score'),
     target_spam_score: targetSpamFromSummaryRow(apiRow),
-    rank: pickInt('rank'),
+    rank: dfsSummaryRankDisplayValue(apiRow),
     crawled_pages: pickInt('crawled_pages'),
     internal_links_count: pickInt('internal_links_count'),
     external_links_count: pickInt('external_links_count'),
@@ -208,7 +218,7 @@ function summaryPayload(row, nowMs) {
     broken_pages: row.broken_pages ?? null,
     backlinks_spam_score: row.backlinks_spam_score ?? null,
     target_spam_score: row.target_spam_score ?? null,
-    rank: pickRawInt(raw, 'rank') ?? row.rank ?? null,
+    rank: (raw && typeof raw === 'object' ? dfsSummaryRankDisplayValue(raw) : null) ?? row.rank ?? null,
     rank_scale:
       raw && typeof raw === 'object' && raw.rank_scale != null && raw.rank_scale !== ''
         ? String(raw.rank_scale)
