@@ -326,12 +326,12 @@ async function runRefresh(supabase, pageUrlsNorm, force, nowMs) {
   let totalCost = 0;
   const byPageUrl = Object.create(null);
 
-  const existing = await readRows(supabase, pageUrlsNorm);
-  const existingMap = new Map(existing.map((r) => [r.page_url, r]));
+  const existingRows = await readRowsForUrls(supabase, pageUrlsNorm);
+  const existingByCanon = indexDfsCacheRowsByCanonical(existingRows);
 
   const batch = [];
   for (const u of pageUrlsNorm) {
-    const row = existingMap.get(u);
+    const row = existingByCanon.get(u);
     if (!force && row && !isStaleRow(row, nowMs)) {
       skippedFresh += 1;
       byPageUrl[u] = payloadFromDbRow(row, nowMs);
