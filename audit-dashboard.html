@@ -71403,27 +71403,33 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
       }
       const bb = s.broken_backlinks;
-      const bp = s.broken_pages;
-      const cr = s.crawled_pages;
+      const rd = s.referring_domains;
+      const btc = s.backlinks;
       const bsp =
         s.backlinks_spam_score != null && Number.isFinite(Number(s.backlinks_spam_score))
           ? String(Math.round(Number(s.backlinks_spam_score)))
           : null;
-      const tsp =
-        s.target_spam_score != null && Number.isFinite(Number(s.target_spam_score))
-          ? String(Math.round(Number(s.target_spam_score)))
-          : null;
+      const spamFv = s.spam_url_filters_version != null ? String(s.spam_url_filters_version) : '';
       const bl = [];
       bl.push(
-        `<li><strong>Domain rank (provider):</strong> ${fmt(Math.round(rankN))}${
+        `<li><strong>Domain rank:</strong> ${fmt(Math.round(rankN))}${
           treatAsPercent ? ' / 100' : ''
         }</li>`
       );
-      if (bsp) bl.push(`<li><strong>Backlinks spam score:</strong> ${bsp}</li>`);
-      if (tsp) bl.push(`<li><strong>Target spam score:</strong> ${tsp}</li>`);
-      bl.push(`<li><strong>Broken backlinks (domain):</strong> ${fmt(bb)}</li>`);
-      bl.push(`<li><strong>Broken pages:</strong> ${fmt(bp)}</li>`);
-      bl.push(`<li><strong>Crawled pages (DFS):</strong> ${fmt(cr)}</li>`);
+      if (rd != null && Number.isFinite(Number(rd))) {
+        bl.push(`<li><strong>Referring domains:</strong> ${fmt(Math.round(Number(rd)))}</li>`);
+      }
+      if (btc != null && Number.isFinite(Number(btc))) {
+        bl.push(`<li><strong>Total backlinks:</strong> ${fmt(Math.round(Number(btc)))}</li>`);
+      }
+      if (bsp) {
+        const spamNote =
+          '<span style="color:var(--dark-text-muted);font-size:0.78rem;display:block;margin-top:0.2rem;">Same <code>url_from</code> spam-network exclusions as DFS full index' +
+          (spamFv ? ` · <code>${escapeHtml(spamFv)}</code>` : '') +
+          '.</span>';
+        bl.push(`<li><strong>Backlinks spam score:</strong> ${bsp}${spamNote}</li>`);
+      }
+      bl.push(`<li><strong>Broken backlinks:</strong> ${fmt(bb)}</li>`);
       setBullets(bl.join(''));
       const t = s.fetched_at ? Date.parse(String(s.fetched_at)) : NaN;
       let ds = '—';

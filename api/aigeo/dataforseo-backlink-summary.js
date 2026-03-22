@@ -2,6 +2,7 @@ export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
 import { dfsClientLimits } from '../../lib/dfs-backlink-limits.js';
+import { dfsSpamUrlFilters, DFS_SPAM_FILTERS_VERSION } from '../../lib/dfs-spam-filters.js';
 
 const DFS_SUMMARY_URL = 'https://api.dataforseo.com/v3/backlinks/summary/live';
 
@@ -236,7 +237,8 @@ function summaryPayload(row, nowMs) {
     external_links_count: row.external_links_count ?? null,
     cost_last: row.cost_last ?? null,
     fetched_at: row.fetched_at || null,
-    stale: isStaleRow(row, nowMs)
+    stale: isStaleRow(row, nowMs),
+    spam_url_filters_version: DFS_SPAM_FILTERS_VERSION
   };
 }
 
@@ -263,7 +265,12 @@ async function fetchLiveSummary(login, password, domainHost, includeSubdomains) 
       'Content-Type': 'application/json'
     },
     body: JSON.stringify([
-      { target: domainHost, include_subdomains: !!includeSubdomains, rank_scale: 'one_hundred' }
+      {
+        target: domainHost,
+        include_subdomains: !!includeSubdomains,
+        rank_scale: 'one_hundred',
+        backlinks_filters: dfsSpamUrlFilters()
+      }
     ])
   });
   const text = await res.text();
