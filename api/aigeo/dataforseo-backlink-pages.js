@@ -1,7 +1,11 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
-import { dfsClientLimits, dfsPageBacklinksMax } from '../../lib/dfs-backlink-limits.js';
+import {
+  dfsBacklinksLiveRankScale,
+  dfsClientLimits,
+  dfsPageBacklinksMax
+} from '../../lib/dfs-backlink-limits.js';
 import {
   normalizeDfsPageUrl as normalizePageUrl,
   expandUrlListForBacklinkCacheQuery,
@@ -234,9 +238,11 @@ async function upsertRow(supabase, row) {
 }
 
 async function fetchLiveForTargets(creds, targets, limit) {
+  const scale = dfsBacklinksLiveRankScale();
   const body = targets.map((target) => ({
     target,
-    limit
+    limit,
+    rank_scale: scale
   }));
   const res = await fetch(DFS_BACKLINKS_LIVE, {
     method: 'POST',

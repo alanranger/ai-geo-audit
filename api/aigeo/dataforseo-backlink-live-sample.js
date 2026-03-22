@@ -1,3 +1,5 @@
+import { dfsBacklinksLiveRankScale } from '../../lib/dfs-backlink-limits.js';
+
 export const config = { runtime: 'nodejs' };
 
 const DFS_LIVE = 'https://api.dataforseo.com/v3/backlinks/backlinks/live';
@@ -70,7 +72,8 @@ export default async function handler(req, res) {
       target,
       mode: 'as_is',
       limit,
-      backlinks_status_type: 'live'
+      backlinks_status_type: 'live',
+      rank_scale: dfsBacklinksLiveRankScale()
     };
     const r = await fetch(DFS_LIVE, {
       method: 'POST',

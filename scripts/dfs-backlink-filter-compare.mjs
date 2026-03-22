@@ -15,6 +15,7 @@
 import { config as loadEnv } from 'dotenv';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { dfsBacklinksLiveRankScale } from '../lib/dfs-backlink-limits.js';
 import { dfsSpamUrlFilters } from '../lib/dfs-spam-filters.js';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -103,7 +104,13 @@ async function main() {
   const target = String(argVal('--target=', 'alanranger.com')).trim() || 'alanranger.com';
   const limit = Math.min(1000, Math.max(1, parseInt(String(argVal('--limit=', '100')), 10) || 100));
 
-  const base = { target, mode: 'as_is', limit, backlinks_status_type: 'live' };
+  const base = {
+    target,
+    mode: 'as_is',
+    limit,
+    backlinks_status_type: 'live',
+    rank_scale: dfsBacklinksLiveRankScale()
+  };
 
   const r1 = await postOneTask(login, password, { ...base });
   const r2 = await postOneTask(login, password, { ...base, filters: dfsSpamUrlFilters() });
