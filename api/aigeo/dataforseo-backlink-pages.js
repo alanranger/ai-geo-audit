@@ -101,15 +101,16 @@ function isStaleRow(row, nowMs) {
 
 function pickStrength(it) {
   const keys = [
+    'rank',
+    'backlink_rank',
+    'page_from_rank',
+    'pageFromRank',
     'domain_from_rank',
     'domainFromRank',
     'domain_from_platform_rank',
     'domainFromPlatformRank',
-    'page_from_rank',
-    'pageFromRank',
     'domain_rank',
     'domainRank',
-    'rank',
     'domain_from_rating',
     'domainFromRating',
     'rank_score',
