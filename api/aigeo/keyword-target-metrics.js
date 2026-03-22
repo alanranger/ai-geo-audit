@@ -91,37 +91,42 @@ function spreadHomeAliasesToMap(map) {
 }
 
 function dbRowForWant(db, pageUrl, keyword) {
-  const key = `${pageUrl}\n${keyword}`;
+  const kk = keywordCacheKey(keyword);
+  const key = `${pageUrl}\n${kk}`;
   let row = db.get(key);
   if (row) return row;
-  const kw = normalizeKeyword(keyword);
   const alts = homepagePathAliasesForCache(pageUrl);
   for (let i = 0; i < alts.length; i += 1) {
     const a = alts[i];
     if (a === pageUrl) continue;
-    row = db.get(`${a}\n${kw}`);
+    row = db.get(`${a}\n${kk}`);
     if (row) return row;
   }
   return undefined;
 }
 
 function existingRowForWant(existing, meta) {
-  const kw = normalizeKeyword(meta.keyword);
+  const kw = keywordCacheKey(meta.keyword);
   const pn = normalizePageUrl(meta.page_url);
   if (!pn || !kw) return undefined;
   let row = existing.find(
-    (r) => normalizePageUrl(r.page_url) === pn && normalizeKeyword(r.keyword) === kw
+    (r) => normalizePageUrl(r.page_url) === pn && keywordCacheKey(r.keyword) === kw
   );
   if (row) return row;
   const alts = homepagePathAliasesForCache(pn);
   return existing.find(
     (r) =>
-      normalizeKeyword(r.keyword) === kw && alts.includes(normalizePageUrl(r.page_url))
+      keywordCacheKey(r.keyword) === kw && alts.includes(normalizePageUrl(r.page_url))
   );
 }
 
 function normalizeKeyword(raw) {
   return String(raw || '').replace(/\s+/g, ' ').trim();
+}
+
+/** Stable cache / KE map key: avoids duplicate rows that differ only by keyword casing. */
+function keywordCacheKey(raw) {
+  return normalizeKeyword(raw).toLowerCase();
 }
 
 function normalizeDomainHost(raw) {
@@ -163,12 +168,13 @@ function rowHasBacklinksJsonPayload(row) {
 }
 
 /**
- * Rows that still need a KE pass: missing URL traffic, or Pg bl count without stored JSON
- * (e.g. shipped before page_backlinks_json column / UI).
+ * Rows that still need a KE pass: missing URL traffic, missing per-keyword URL metrics from
+ * get_url_keywords, or Pg bl count without stored JSON (e.g. before page_backlinks_json).
  */
 function rowNeedsKeUrlEnrichment(row) {
   if (!row) return false;
   if (row.url_estimated_traffic == null) return true;
+  if (row.estimated_traffic == null) return true;
   const n = toNum(row.page_backlinks_sample, null);
   if (n != null && n > 0 && !rowHasBacklinksJsonPayload(row)) return true;
   return false;
@@ -443,12 +449,14 @@ function buildByPageUrlMap(rows, pairs, nowMs) {
     const page_url = normalizePageUrl(p?.url);
     const keyword = normalizeKeyword(p?.keyword);
     if (!page_url || !keyword) return;
-    want.set(`${page_url}\n${keyword}`, { page_url, keyword, url: String(p.url || '').trim() });
+    want.set(`${page_url}\n${keywordCacheKey(keyword)}`, { page_url, keyword, url: String(p.url || '').trim() });
   });
   const db = new Map();
   (Array.isArray(rows) ? rows : []).forEach((r) => {
-    const k = `${String(r.page_url)}\n${String(r.keyword)}`;
-    db.set(k, r);
+    const pk = normalizePageUrl(r.page_url);
+    const kk = keywordCacheKey(r.keyword);
+    if (!pk || !kk) return;
+    db.set(`${pk}\n${kk}`, r);
   });
   const byPageUrl = {};
   want.forEach((meta, key) => {
@@ -978,7 +986,7 @@ export default async function handler(req, res) {
         toFetch.push(meta.keyword);
       }
     });
-    const uniqueKw = [...new Set(toFetch.map((k) => normalizeKeyword(k)).filter(Boolean))];
+    const uniqueKw = [...new Set(toFetch.map((k) => keywordCacheKey(k)).filter(Boolean))];
     let keMap = new Map();
     if (uniqueKw.length) {
       keMap = await fetchKeywordsEverywhereVolume(uniqueKw);
@@ -1066,7 +1074,7 @@ export default async function handler(req, res) {
       const needUpsert =
         force || !row || isStaleRow(row, nowMs) || rowNeedsKeUrlEnrichment(row);
       if (!needUpsert) return;
-      const hit = keMap.get(meta.keyword.toLowerCase());
+      const hit = keMap.get(keywordCacheKey(meta.keyword));
       const canonical = normalizePageUrl(meta.page_url) || meta.page_url;
       const kwRows = urlKeywordsMap.get(canonical) || [];
       const kwHit = findUrlKeywordRow(kwRows, meta.keyword);
@@ -1097,7 +1105,10 @@ export default async function handler(req, res) {
 
       upserts.push({
         page_url: meta.page_url,
-        keyword: meta.keyword,
+        keyword:
+          row?.keyword != null && String(row.keyword).trim()
+            ? normalizeKeyword(row.keyword)
+            : keywordCacheKey(meta.keyword),
         search_volume: hit?.search_volume ?? row?.search_volume ?? null,
         cpc: hit?.cpc ?? row?.cpc ?? null,
         competition: hit?.competition ?? row?.competition ?? null,
