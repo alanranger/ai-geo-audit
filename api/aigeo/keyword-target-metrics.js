@@ -757,13 +757,13 @@ async function fetchUrlTrafficMap(apiKey, urls, country, domainHost, enrichNotes
   (urls || []).forEach((raw) => {
     const u = String(raw || '').trim();
     if (!/^https?:\/\//i.test(u)) return;
+    /* KE get_url_traffic_metrics: sending BOTH apex non-www and www in one batch returns a truncated
+       `data` array (verified: 3 URLs requested → 1 row). Use a single preferred URL per page (www for apex). */
     const pref = kePreferredFetchUrl(u, domainHost);
-    [u, pref].forEach((x) => {
-      if (x && !seen.has(x)) {
-        seen.add(x);
-        expanded.push(x);
-      }
-    });
+    if (pref && !seen.has(pref)) {
+      seen.add(pref);
+      expanded.push(pref);
+    }
   });
   const parts = chunk(expanded, batchSize);
   for (let i = 0; i < parts.length; i += 1) {
