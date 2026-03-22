@@ -71314,6 +71314,50 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     const TRADITIONAL_SEO_BASELINE_LS_KEY = 'gaio_traditional_seo_baseline_v1';
+    const TRADITIONAL_SEO_EVAL_LS_KEY = 'gaio_traditional_seo_evaluation_v1';
+
+    function traditionalSeoPersistEvaluationSnapshot() {
+      try {
+        const prop = String(traditionalSeoPropertyUrl() || '').trim();
+        const rows = TRADITIONAL_SEO_STATE.evaluationRows;
+        if (!prop || !Array.isArray(rows) || !rows.length) return;
+        const payload = {
+          v: 1,
+          propertyUrl: prop,
+          lastPropertyUrl: String(TRADITIONAL_SEO_STATE.lastPropertyUrl || prop).trim(),
+          lastEvaluationAt: TRADITIONAL_SEO_STATE.lastEvaluationAt || null,
+          evaluationRows: rows
+        };
+        localStorage.setItem(TRADITIONAL_SEO_EVAL_LS_KEY, JSON.stringify(payload));
+      } catch (e) {
+        /* Quota / private mode */
+      }
+    }
+
+    function traditionalSeoHydrateEvaluationFromStorage() {
+      try {
+        const prop = String(traditionalSeoPropertyUrl() || '').trim();
+        if (!prop) return false;
+        const raw = localStorage.getItem(TRADITIONAL_SEO_EVAL_LS_KEY);
+        if (!raw) return false;
+        const o = JSON.parse(raw);
+        const sp = String(o?.propertyUrl || '').trim();
+        if (!sp || sp !== prop) return false;
+        const rows = Array.isArray(o?.evaluationRows) ? o.evaluationRows : [];
+        if (!rows.length) return false;
+        TRADITIONAL_SEO_STATE.evaluationRows = rows;
+        TRADITIONAL_SEO_STATE.lastEvaluationAt = o.lastEvaluationAt || null;
+        TRADITIONAL_SEO_STATE.lastPropertyUrl = String(o.lastPropertyUrl || sp).trim() || sp;
+        traditionalSeoReapplyBypassesToAllRows();
+        traditionalSeoRefreshRulesSummaryFromEvaluationRows();
+        traditionalSeoPopulateRuleFilter(TRADITIONAL_SEO_STATE.rules || []);
+        renderTraditionalSeoResultsTable();
+        void traditionalSeoKeywordMetricsLookupIfNeededForRun();
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
 
     function traditionalSeoReadBaselineFromStorage() {
       try {
@@ -75004,6 +75048,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           window.showStatus(`Re-audit complete for “${ruleLabel}” (${newRows.length} row${newRows.length === 1 ? '' : 's'}).`, 'success');
         }
         void traditionalSeoKeywordMetricsLookupIfNeededForRun();
+        traditionalSeoPersistEvaluationSnapshot();
       } catch (err) {
         traditionalSeoEvalProgressClose(false);
         if (typeof window.showStatus === 'function') {
@@ -75204,6 +75249,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           );
         }
         void traditionalSeoKeywordMetricsLookupIfNeededForRun();
+        traditionalSeoPersistEvaluationSnapshot();
       } catch (err) {
         traditionalSeoEvalProgressClose(false);
         if (typeof window.showStatus === 'function') {
@@ -75729,7 +75775,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           TRADITIONAL_SEO_STATE.sourceParity = await traditionalSeoComputeSourceParity(traditionalSeoPropertyUrl());
           renderTraditionalSeoSourceParity(TRADITIONAL_SEO_STATE.sourceParity);
         }
-        if (force || !Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) || TRADITIONAL_SEO_STATE.evaluationRows.length === 0) {
+        let hydrated = false;
+        if (!force) {
+          hydrated = traditionalSeoHydrateEvaluationFromStorage();
+        }
+        if (
+          !hydrated &&
+          (force || !Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) || TRADITIONAL_SEO_STATE.evaluationRows.length === 0)
+        ) {
           await runTraditionalSeoEvaluation({ refreshAudit: false });
         }
       } catch (err) {

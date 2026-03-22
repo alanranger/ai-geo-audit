@@ -2,6 +2,11 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-03-22] - Traditional SEO: restore last results on refresh (no auto-run)
+
+### Fixed
+- **Traditional SEO tab:** Full page reload no longer **always** starts **②-style** scoring + full-site extractability when a saved snapshot exists. Results for the current **GSC property URL** are stored in **`localStorage`** (`gaio_traditional_seo_evaluation_v1`) after a successful run and **rehydrated** on load. Use **Refresh** / **Run ②** (or `renderTraditionalSeoTab(true)`) to force a new evaluation.
+
 ## [2026-03-21] - DataForSEO: domain backlink index (Option B) + spam filters
 
 ### Changed
