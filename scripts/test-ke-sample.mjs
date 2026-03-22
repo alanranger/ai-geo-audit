@@ -1,16 +1,24 @@
 /**
- * Minimal Keywords Everywhere smoke test (no secrets in repo).
+ * Keywords Everywhere smoke test — mirrors dashboard columns (Est. traf, SERP, Pg bl, URL traf, Kw vol).
  *
  * Usage (repo root, PowerShell):
  *   $env:KEYWORDS_EVERYWHERE_API_KEY = "your-key"
- *   node scripts/test-ke-sample.mjs
+ *   npm run test:ke
+ *   node scripts/test-ke-sample.mjs --url=https://www.alanranger.com/ --kw="alan ranger photography"
  *
- * Optional: --url=... --kw=... --domain=...
+ * Optional:
+ *   --country=gb   (URL routes use uk when gb — same as api/aigeo/keyword-target-metrics.js)
+ *   --domain=alanranger.com
+ *   --save-json=./tmp-ke   (writes one JSON file per endpoint+url-variant; no secrets logged beyond API responses)
  *
- * Loads env from repo root: `.env` then `.env.local` (local overrides — same idea as Vercel).
+ * Why not only Supabase logging? A local run gives ground truth in one command without a migration,
+ * deploy, or filling a table with large third-party payloads. Use this first; add DB snapshots only if you need production history.
+ *
+ * Loads env from repo root: `.env` then `.env.local`.
  */
 import { config as loadEnv } from 'dotenv';
 import { dirname, resolve } from 'path';
+import { mkdir, writeFile } from 'fs/promises';
 import { fileURLToPath } from 'url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -47,10 +55,12 @@ function normalizePageUrl(raw) {
 }
 
 const sampleUrlRaw = argVal('--url=', 'https://www.alanranger.com/');
-const sampleUrl = normalizePageUrl(sampleUrlRaw) || sampleUrlRaw;
-const sampleKw = argVal('--kw=', 'photography courses');
+const sampleUrlNorm = normalizePageUrl(sampleUrlRaw) || sampleUrlRaw;
+const sampleKw = argVal('--kw=', 'alan ranger photography');
+const sampleKwAlt = argVal('--kw-alt=', 'Alan Ranger Photography');
 const domain = argVal('--domain=', 'alanranger.com');
 const country = argVal('--country=', 'gb');
+const saveJsonDir = argVal('--save-json=', '');
 /** Keyword volume uses `gb` for UK; URL traffic / URL keywords require `uk` (KE rejects `gb` there). */
 const kwCountry = country === 'uk' ? 'gb' : country;
 const urlCountry = country === 'gb' ? 'uk' : country;
@@ -108,6 +118,103 @@ function summarize(label, { ok, status, json }) {
   }
 }
 
+function normalizeDomainHost(raw) {
+  let s = String(raw || '').trim().toLowerCase();
+  s = s.replace(/^https?:\/\//i, '');
+  s = s.split('/')[0].replace(/^www\./, '');
+  return s.replace(/:\d+$/, '');
+}
+
+/** Same idea as api/aigeo/keyword-target-metrics.js kePreferredFetchUrl */
+function kePreferredFetchUrl(rawUrl, propertyDomainHost) {
+  const s = String(rawUrl || '').trim();
+  if (!s || !/^https?:\/\//i.test(s)) return s;
+  const prop = normalizeDomainHost(propertyDomainHost || '');
+  if (!prop) return s;
+  try {
+    const u = new URL(s);
+    const h = u.hostname.toLowerCase();
+    const bare = h.replace(/^www\./, '');
+    if (bare !== prop) return s;
+    if (h.startsWith('www.')) return s;
+    return `${u.protocol}//www.${bare}${u.pathname || '/'}${u.search}`;
+  } catch {
+    return s;
+  }
+}
+
+function extractKeItems(payload) {
+  const data = payload?.data;
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === 'object') return Object.values(data);
+  return [];
+}
+
+function normKwKey(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function findUrlKeywordRow(items, targetKeyword) {
+  const t = normKwKey(targetKeyword);
+  if (!t || !Array.isArray(items)) return null;
+  const exact = items.find((x) => normKwKey(x?.keyword) === t);
+  if (exact) return exact;
+  return (
+    items.find((x) => {
+      const k = normKwKey(x?.keyword);
+      return k && (k.includes(t) || t.includes(k));
+    }) || null
+  );
+}
+
+function estimatedTrafficFromUrlKeywordRow(row) {
+  const v =
+    row?.estimated_monthly_traffic ??
+    row?.estimatedTraffic ??
+    row?.monthly_traffic ??
+    row?.organic_traffic ??
+    row?.traffic ??
+    row?.estimated_visits;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function serpPositionFromUrlKeywordRow(row) {
+  const v =
+    row?.serp_position ??
+    row?.position ??
+    row?.rank ??
+    row?.google_position ??
+    row?.avg_position ??
+    row?.average_position;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function urlTrafficFromKeRow(row) {
+  const v =
+    row?.estimated_monthly_traffic ??
+    row?.estimatedTraffic ??
+    row?.monthly_traffic ??
+    row?.organic_traffic ??
+    row?.traffic;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+async function maybeSaveJson(label, body) {
+  if (!saveJsonDir) return;
+  const safe = label.replace(/[^a-z0-9_-]+/gi, '_').slice(0, 120);
+  const dir = resolve(repoRoot, saveJsonDir);
+  await mkdir(dir, { recursive: true });
+  const fp = resolve(dir, `${safe}.json`);
+  await writeFile(fp, JSON.stringify(body, null, 2), 'utf8');
+  console.log(`  saved: ${fp}`);
+}
+
 function numericLeaves(obj, maxKeys = 40) {
   const out = [];
   const walk = (o, prefix, depth) => {
@@ -133,13 +240,39 @@ function numericLeaves(obj, maxKeys = 40) {
 }
 
 async function main() {
-  console.log('KE sample:', { sampleUrlRaw, sampleUrl, sampleKw, domain, country, kwCountry, urlCountry });
+  const urlVariants = [];
+  const seen = new Set();
+  const add = (u) => {
+    const s = String(u || '').trim();
+    if (s && !seen.has(s)) {
+      seen.add(s);
+      urlVariants.push(s);
+    }
+  };
+  add(sampleUrlRaw);
+  add(sampleUrlNorm);
+  add(kePreferredFetchUrl(sampleUrlRaw, domain));
+  add(kePreferredFetchUrl(sampleUrlNorm, domain));
+
+  console.log('KE sample:', {
+    sampleUrlRaw,
+    sampleUrlNorm,
+    urlVariants,
+    sampleKw,
+    sampleKwAlt,
+    domain,
+    country,
+    kwCountry,
+    urlCountry,
+    saveJsonDir: saveJsonDir || '(none)'
+  });
 
   const kwForm = new URLSearchParams();
   kwForm.set('country', kwCountry);
   kwForm.set('currency', 'GBP');
   kwForm.set('dataSource', 'gkp');
   kwForm.append('kw[]', sampleKw);
+  kwForm.append('kw[]', sampleKwAlt);
   const kwRes = await fetch(`${BASE}/get_keyword_data`, {
     method: 'POST',
     headers: {
@@ -157,25 +290,57 @@ async function main() {
     kwJson = { _parseError: true };
   }
   summarize('get_keyword_data', { ok: kwRes.ok, status: kwRes.status, json: kwJson });
-
-  const traffic = await postJson(`${BASE}/get_url_traffic_metrics`, {
-    urls: [sampleUrl],
-    country: urlCountry
+  await maybeSaveJson('get_keyword_data', { status: kwRes.status, ok: kwRes.ok, json: kwJson });
+  const volItems = extractKeItems(kwJson);
+  console.log('\n--- Kw vol (from get_keyword_data rows) ---');
+  volItems.forEach((it, i) => {
+    const k = it?.keyword || it?.kw || it?.term || '';
+    const vol = it?.vol ?? it?.volume ?? it?.search_volume;
+    console.log(`  [${i}] keyword=${JSON.stringify(k)} vol=${vol}`);
   });
-  summarize('get_url_traffic_metrics', traffic);
 
-  const urlKw = await postForm(`${BASE}/get_url_keywords`, {
-    url: sampleUrl,
-    country: urlCountry,
-    num: 20
-  });
-  summarize('get_url_keywords', urlKw);
+  for (let vi = 0; vi < urlVariants.length; vi += 1) {
+    const u = urlVariants[vi];
+    const tag = `variant_${vi}_${u.replace(/^https?:\/\//i, '').replace(/[^\w.-]+/g, '_')}`;
 
-  const pbl = await postForm(`${BASE}/get_page_backlinks`, {
-    page: sampleUrl,
-    num: 10
-  });
-  summarize('get_page_backlinks', pbl);
+    const traffic = await postJson(`${BASE}/get_url_traffic_metrics`, {
+      urls: [u],
+      country: urlCountry
+    });
+    summarize(`get_url_traffic_metrics (${u})`, traffic);
+    await maybeSaveJson(`${tag}_url_traffic`, { url: u, ...traffic });
+    const tRows = extractKeItems(traffic.json);
+    const urlTraf = tRows.length ? urlTrafficFromKeRow(tRows[0]) : null;
+    console.log(`  → URL traf (derived): ${urlTraf != null ? urlTraf : '—'}`);
+
+    const urlKw = await postForm(`${BASE}/get_url_keywords`, {
+      url: u,
+      country: urlCountry,
+      num: 60
+    });
+    summarize(`get_url_keywords (${u})`, urlKw);
+    await maybeSaveJson(`${tag}_url_keywords`, { url: u, ...urlKw });
+    const kwRows = extractKeItems(urlKw.json);
+    const hit = findUrlKeywordRow(kwRows, sampleKw);
+    const est = hit ? estimatedTrafficFromUrlKeywordRow(hit) : null;
+    const serp = hit ? serpPositionFromUrlKeywordRow(hit) : null;
+    console.log(`  → url-keyword rows: ${kwRows.length}; match for "${sampleKw}": ${hit ? 'yes' : 'no'}`);
+    if (hit) {
+      console.log(`     matched keyword field: ${JSON.stringify(hit.keyword || hit.kw || '')}`);
+      console.log(`     → Est. traf (derived): ${est != null ? est : '—'}  SERP (derived): ${serp != null ? serp : '—'}`);
+    } else if (kwRows.length) {
+      console.log('     first 5 KE keywords:', kwRows.slice(0, 5).map((r) => r?.keyword || r?.kw || '').join(' | '));
+    }
+
+    const pbl = await postForm(`${BASE}/get_page_backlinks`, {
+      page: u,
+      num: 25
+    });
+    summarize(`get_page_backlinks (${u})`, pbl);
+    await maybeSaveJson(`${tag}_page_backlinks`, { url: u, ...pbl });
+    const pblRows = extractKeItems(pbl.json);
+    console.log(`  → Pg bl sample rows (derived count): ${Array.isArray(pblRows) ? pblRows.length : '—'}`);
+  }
 
   const dom = await postForm(`${BASE}/get_unique_domain_backlinks`, {
     domain,
