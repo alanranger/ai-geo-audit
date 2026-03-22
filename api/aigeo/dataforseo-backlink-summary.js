@@ -205,6 +205,9 @@ function summaryPayload(row, nowMs) {
     dofollow_backlinks: row.dofollow_backlinks ?? null,
     nofollow_backlinks: row.nofollow_backlinks ?? null,
     referring_pages,
+    internal_links_count: row.internal_links_count ?? null,
+    external_links_count: row.external_links_count ?? null,
+    cost_last: row.cost_last ?? null,
     fetched_at: row.fetched_at || null,
     stale: isStaleRow(row, nowMs)
   };

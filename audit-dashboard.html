@@ -71130,6 +71130,34 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (cr != null && Number.isFinite(Number(cr))) {
         parts.push(`<li><strong>Crawled pages (DFS):</strong> ${fmt(Math.round(Number(cr)))}</li>`);
       }
+      const ilc = s.internal_links_count;
+      const elc = s.external_links_count;
+      const ilOk = ilc != null && Number.isFinite(Number(ilc));
+      const elOk = elc != null && Number.isFinite(Number(elc));
+      parts.push(
+        `<li title="From DataForSEO domain summary (on-site link counts)."><strong>Internal / external links:</strong> ${
+          ilOk || elOk
+            ? `${ilOk ? fmt(Math.round(Number(ilc))) : '—'} / ${elOk ? fmt(Math.round(Number(elc))) : '—'}`
+            : '—'
+        }</li>`
+      );
+      const costN = traditionalSeoToNum(s.cost_last, NaN);
+      let costStr = '—';
+      if (Number.isFinite(costN)) {
+        const abs = Math.abs(costN);
+        const dec = abs > 0 && abs < 0.01 ? 5 : abs < 1 ? 4 : 3;
+        costStr = `$${costN.toFixed(dec).replace(/\.?0+$/, '')}`;
+      }
+      parts.push(
+        `<li title="DataForSEO charge for the last backlinks/summary/live refresh stored in cache."><strong>Last API cost (summary):</strong> ${escapeHtml(costStr)}</li>`
+      );
+      parts.push(
+        `<li><strong>Index freshness:</strong> ${
+          s.stale === true
+            ? '<span style="color:#fbbf24;">Stale</span> — refresh summary or run DFS ingest'
+            : '<span style="color:#86efac;">Fresh</span>'
+        }</li>`
+      );
       if (rank || sp || tsp) {
         const bits = [];
         if (rank) bits.push(`DFS rank ${rank}`);
