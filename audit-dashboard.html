@@ -71316,7 +71316,43 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     const TRADITIONAL_SEO_BASELINE_LS_KEY = 'gaio_traditional_seo_baseline_v1';
     const TRADITIONAL_SEO_EVAL_LS_KEY = 'gaio_traditional_seo_evaluation_v1';
 
-    function traditionalSeoPersistEvaluationSnapshot() {
+    function traditionalSeoNormalizeEvalCachePropertyKey(raw) {
+      const s = String(raw || '').trim();
+      if (!s) return '';
+      const low = s.toLowerCase();
+      if (low.startsWith('sc-domain:')) return low.replace(/\s+/g, '');
+      try {
+        if (URL.canParse(s)) {
+          const u = new URL(s);
+          const host = u.hostname.toLowerCase().replace(/^www\./, '');
+          const path = String(u.pathname || '/').replace(/\/+$/, '') || '/';
+          return `${u.protocol.toLowerCase()}//${host}${path}`;
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      return low;
+    }
+
+    function traditionalSeoEvalCachePropertyKeysMatch(a, b) {
+      const ka = traditionalSeoNormalizeEvalCachePropertyKey(a);
+      const kb = traditionalSeoNormalizeEvalCachePropertyKey(b);
+      return Boolean(ka && kb && ka === kb);
+    }
+
+    function traditionalSeoApplyHydratedEvaluationRows(rows, lastAt, lastProp) {
+      const prop = String(traditionalSeoPropertyUrl() || '').trim();
+      TRADITIONAL_SEO_STATE.evaluationRows = rows;
+      TRADITIONAL_SEO_STATE.lastEvaluationAt = lastAt || null;
+      TRADITIONAL_SEO_STATE.lastPropertyUrl = String(lastProp || prop).trim() || prop;
+      traditionalSeoReapplyBypassesToAllRows();
+      traditionalSeoRefreshRulesSummaryFromEvaluationRows();
+      traditionalSeoPopulateRuleFilter(TRADITIONAL_SEO_STATE.rules || []);
+      renderTraditionalSeoResultsTable();
+      void traditionalSeoKeywordMetricsLookupIfNeededForRun();
+    }
+
+    function traditionalSeoWriteEvaluationLocalStorage() {
       try {
         const prop = String(traditionalSeoPropertyUrl() || '').trim();
         const rows = TRADITIONAL_SEO_STATE.evaluationRows;
@@ -71324,6 +71360,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const payload = {
           v: 1,
           propertyUrl: prop,
+          propertyKey: traditionalSeoNormalizeEvalCachePropertyKey(prop),
           lastPropertyUrl: String(TRADITIONAL_SEO_STATE.lastPropertyUrl || prop).trim(),
           lastEvaluationAt: TRADITIONAL_SEO_STATE.lastEvaluationAt || null,
           evaluationRows: rows
@@ -71331,6 +71368,53 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         localStorage.setItem(TRADITIONAL_SEO_EVAL_LS_KEY, JSON.stringify(payload));
       } catch (e) {
         /* Quota / private mode */
+      }
+    }
+
+    async function traditionalSeoPersistEvaluationToServer() {
+      try {
+        const prop = String(traditionalSeoPropertyUrl() || '').trim();
+        const rows = TRADITIONAL_SEO_STATE.evaluationRows;
+        if (!prop || !Array.isArray(rows) || !rows.length) return;
+        await fetch(traditionalSeoApiPath('/api/aigeo/traditional-seo-evaluation-cache'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            propertyUrl: prop,
+            lastPropertyUrl: String(TRADITIONAL_SEO_STATE.lastPropertyUrl || prop).trim(),
+            lastEvaluationAt: TRADITIONAL_SEO_STATE.lastEvaluationAt || null,
+            evaluationRows: rows
+          })
+        });
+      } catch (e) {
+        /* Network / payload limits */
+      }
+    }
+
+    function traditionalSeoPersistEvaluationSnapshot() {
+      traditionalSeoWriteEvaluationLocalStorage();
+      void traditionalSeoPersistEvaluationToServer();
+    }
+
+    async function traditionalSeoHydrateEvaluationFromServer() {
+      try {
+        const prop = String(traditionalSeoPropertyUrl() || '').trim();
+        if (!prop) return false;
+        const params = new URLSearchParams();
+        params.set('propertyUrl', prop);
+        const res = await fetch(
+          traditionalSeoApiPath(`/api/aigeo/traditional-seo-evaluation-cache?${params.toString()}`),
+          { cache: 'no-store' }
+        );
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || String(json?.status || '').toLowerCase() !== 'ok') return false;
+        const rows = Array.isArray(json.evaluationRows) ? json.evaluationRows : [];
+        if (!rows.length) return false;
+        traditionalSeoApplyHydratedEvaluationRows(rows, json.lastEvaluationAt, json.lastPropertyUrl);
+        traditionalSeoWriteEvaluationLocalStorage();
+        return true;
+      } catch (e) {
+        return false;
       }
     }
 
@@ -71342,17 +71426,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (!raw) return false;
         const o = JSON.parse(raw);
         const sp = String(o?.propertyUrl || '').trim();
-        if (!sp || sp !== prop) return false;
+        const pkStored = String(o?.propertyKey || '').trim();
+        const pkCurrent = traditionalSeoNormalizeEvalCachePropertyKey(prop);
+        const keysOk =
+          (pkStored && pkCurrent && pkStored === pkCurrent) || traditionalSeoEvalCachePropertyKeysMatch(sp, prop) || sp === prop;
+        if (!keysOk) return false;
         const rows = Array.isArray(o?.evaluationRows) ? o.evaluationRows : [];
         if (!rows.length) return false;
-        TRADITIONAL_SEO_STATE.evaluationRows = rows;
-        TRADITIONAL_SEO_STATE.lastEvaluationAt = o.lastEvaluationAt || null;
-        TRADITIONAL_SEO_STATE.lastPropertyUrl = String(o.lastPropertyUrl || sp).trim() || sp;
-        traditionalSeoReapplyBypassesToAllRows();
-        traditionalSeoRefreshRulesSummaryFromEvaluationRows();
-        traditionalSeoPopulateRuleFilter(TRADITIONAL_SEO_STATE.rules || []);
-        renderTraditionalSeoResultsTable();
-        void traditionalSeoKeywordMetricsLookupIfNeededForRun();
+        traditionalSeoApplyHydratedEvaluationRows(rows, o.lastEvaluationAt, o.lastPropertyUrl || sp);
         return true;
       } catch (e) {
         return false;
@@ -75781,6 +75862,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
         let hydrated = false;
         if (!force) {
+          hydrated = await traditionalSeoHydrateEvaluationFromServer();
+        }
+        if (!hydrated && !force) {
           hydrated = traditionalSeoHydrateEvaluationFromStorage();
         }
         if (

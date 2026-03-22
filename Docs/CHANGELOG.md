@@ -2,6 +2,15 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-03-25] - Traditional SEO: Supabase evaluation cache (cross-device)
+
+### Added
+- **Supabase:** `traditional_seo_evaluation_cache` (`sql/20260325_traditional_seo_evaluation_cache.sql`, `sql/SUPABASE_SCHEMA.sql`) — stores the full **evaluation row matrix** per normalized property key.
+- **`GET/POST /api/aigeo/traditional-seo-evaluation-cache`** — load/save that snapshot (service role). Dashboard **hydrates from the server first**, then **`localStorage`**, then runs **②** only if both miss. Property matching uses a **normalized key** (www-insensitive, trailing-slash tolerant; `sc-domain:` passthrough) so refresh stops failing silently.
+
+### Notes
+- Run the SQL migration in Supabase before relying on server cache; until then the API returns an empty snapshot and behaviour matches prior **localStorage-only** fallback.
+
 ## [2026-03-22] - Traditional SEO: restore last results on refresh (no auto-run)
 
 ### Fixed
