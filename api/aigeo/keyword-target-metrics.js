@@ -1091,6 +1091,29 @@ export default async function handler(req, res) {
       m.forEach((v, k) => urlTrafficMap.set(k, v));
       spreadHomeAliasesToMap(urlTrafficMap);
 
+      /* Last-resort: bulk batches can still omit apex traffic for `/` vs `/home` rows. One www-root call fixes the homepage row. */
+      if (domainHost) {
+        const apexCanon = normalizePageUrl(`https://${domainHost}/`);
+        const est0 = toNum(mapGetUrlTrafficBundle(urlTrafficMap, apexCanon)?.url_estimated_traffic, null);
+        if (est0 == null) {
+          try {
+            const prime = await fetchUrlTrafficMap(
+              apiKey,
+              [`https://www.${domainHost}/`],
+              country,
+              domainHost,
+              enrichNotes
+            );
+            prime.forEach((v, k) => urlTrafficMap.set(k, v));
+            spreadHomeAliasesToMap(urlTrafficMap);
+          } catch (e) {
+            if (Array.isArray(enrichNotes)) {
+              enrichNotes.push(`prime www apex traffic: ${String(e?.message || e)}`.slice(0, 400));
+            }
+          }
+        }
+      }
+
       for (let i = 0; i < stalePageUrls.length; i += 1) {
         const pu = stalePageUrls[i];
         const puKe = kePreferredFetchUrl(pu, domainHost);
