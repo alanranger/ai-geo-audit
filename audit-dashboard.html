@@ -71308,9 +71308,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (metaEl) metaEl.textContent = '—';
         return;
       }
-      const scaleStr = String(s.rank_scale || '').toLowerCase();
-      const hundredScale = scaleStr.includes('one_hundred') || scaleStr.includes('100');
-      const treatAsPercent = rankN <= 100 && (hundredScale || !s.rank_scale);
+      // Same `rank` field as backlinks/summary/live: for normal domains it is 0–100 (see task data rank_scale = one_hundred).
+      // Always show values ≤100 as x/100 so e.g. 43 in the API payload matches the donut (we no longer require rank_scale on the row).
+      const treatAsPercent = rankN <= 100;
       let dialPct;
       let centerText;
       if (treatAsPercent) {
@@ -71325,12 +71325,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
       ring.classList.remove('traditional-seo-metric-placeholder');
       ring.style.setProperty('--pct', String(dialPct));
-      ring.dataset.rag = traditionalSeoRagFromScore(treatAsPercent ? dialPct : dialPct);
+      ring.dataset.rag = traditionalSeoRagFromScore(dialPct);
       valueEl.textContent = centerText;
       if (capEl) {
         capEl.textContent = treatAsPercent
-          ? 'DataForSEO domain rank (0–100) · Δ vs last snapshot on this device'
-          : 'DataForSEO domain rank (provider scale; ring is a log visual, not “/100”) · Δ vs last snapshot';
+          ? 'From cached backlinks/summary (same rank JSON as the API) · Δ vs last snapshot on this device'
+          : 'Rank > 100: provider scale — ring is a log visual only · Δ vs last snapshot';
       }
       const base = traditionalSeoReadDfsRankBaseline();
       if (deltaEl) {

@@ -91,7 +91,8 @@ function extractSummaryTaskRow(body) {
   if (sc !== 20000) return { err: String(task?.status_message || `DataForSEO task status ${sc}`) };
   const result = task?.result;
   if (!Array.isArray(result) || !result.length) return { err: 'Empty DataForSEO result' };
-  return { row: result[0], cost: toNum(task?.cost, null) };
+  const taskData = task?.data && typeof task.data === 'object' ? task.data : null;
+  return { row: result[0], cost: toNum(task?.cost, null), taskData };
 }
 
 function attrBucketCount(attrsObj, name) {
@@ -265,7 +266,13 @@ async function fetchLiveSummary(login, password, domainHost, includeSubdomains) 
   if (top !== 20000) throw new Error(String(json?.status_message || `DataForSEO status ${top}`));
   const ext = extractSummaryTaskRow(json);
   if (ext.err) throw new Error(ext.err);
-  return { apiRow: ext.row, cost: ext.cost };
+  const base = ext.row && typeof ext.row === 'object' ? { ...ext.row } : ext.row;
+  const td = ext.taskData;
+  if (base && td && typeof td === 'object') {
+    if (td.rank_scale != null && base.rank_scale == null) base.rank_scale = td.rank_scale;
+    if (td.include_subdomains != null && base.include_subdomains == null) base.include_subdomains = td.include_subdomains;
+  }
+  return { apiRow: base, cost: ext.cost };
 }
 
 async function runBacklinkSummary(req) {
