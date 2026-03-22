@@ -715,6 +715,74 @@ function findUrlKeywordRow(items, targetKeyword) {
   );
 }
 
+function kwMeaningfulTokens(s) {
+  return normKwKey(s)
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length > 1);
+}
+
+/** When KE omits the exact target phrase, pick the URL-keyword row that best covers the target tokens. */
+function findUrlKeywordRowBestOverlap(items, targetKeyword) {
+  const toks = kwMeaningfulTokens(targetKeyword);
+  if (!toks.length || !Array.isArray(items) || !items.length) return null;
+  const want = new Set(toks);
+  let best = null;
+  let bestScore = -1;
+  for (let i = 0; i < items.length; i += 1) {
+    const it = items[i];
+    const k = normKwKey(it?.keyword);
+    if (!k) continue;
+    let score = 0;
+    for (let j = 0; j < toks.length; j += 1) {
+      if (k.includes(toks[j])) score += 2;
+    }
+    if ([...want].every((w) => k.includes(w))) score += 3;
+    const est = estimatedTrafficFromUrlKeywordRow(it);
+    const ser = serpPositionFromUrlKeywordRow(it);
+    if (est != null && est > 0) score += 0.5;
+    if (ser != null && ser > 0 && ser <= 200) score += 0.5;
+    if (score > bestScore) {
+      bestScore = score;
+      best = it;
+    }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+function resolveUrlKeywordHit(items, targetKeyword) {
+  return findUrlKeywordRow(items, targetKeyword) || findUrlKeywordRowBestOverlap(items, targetKeyword);
+}
+
+function keywordTrafficRankFromVolumeItem(rawItem) {
+  const item = rawItem && typeof rawItem === 'object' ? rawItem : null;
+  if (!item) return { est: null, rank: null };
+  const est = toNum(
+    item.estimated_monthly_traffic ??
+      item.estimated_traffic ??
+      item.monthly_traffic ??
+      item.organic_traffic ??
+      item.traffic ??
+      item.estimated_visits,
+    null
+  );
+  const rank = toNum(
+    item.google_position ??
+      item.serp_position ??
+      item.position ??
+      item.rank ??
+      item.google_rank ??
+      item.avg_position ??
+      item.average_position,
+    null
+  );
+  const rankOk = rank != null && Number.isFinite(rank) && rank > 0 ? Math.round(rank) : null;
+  return {
+    est: est != null && Number.isFinite(est) ? est : null,
+    rank: rankOk
+  };
+}
+
 /** KE get_url_keywords row shapes vary; read all aliases we have seen in production JSON. */
 function estimatedTrafficFromUrlKeywordRow(row) {
   const v =
@@ -1135,6 +1203,21 @@ export default async function handler(req, res) {
       }
       spreadHomeAliasesToMap(urlKeywordsMap);
       spreadHomeAliasesToMap(pageBlMap);
+
+      if (domainHost) {
+        const apexCanon = normalizePageUrl(`https://${domainHost}/`);
+        const apexPack = mapGetPageBlPack(pageBlMap, apexCanon);
+        if (apexPack == null) {
+          try {
+            const puKe = kePreferredFetchUrl(`https://www.${domainHost}/`, domainHost);
+            const n = await fetchPageBacklinksSample(apiKey, puKe, pageBlNum, disavowLists);
+            pageBlMap.set(apexCanon, n);
+            spreadHomeAliasesToMap(pageBlMap);
+          } catch (e) {
+            enrichNotes.push(`prime apex page_backlinks: ${String(e?.message || e)}`.slice(0, 400));
+          }
+        }
+      }
     }
 
     if (domainHost && domainNeedsKeFetch(domainRow, force, nowMs)) {
@@ -1171,13 +1254,23 @@ export default async function handler(req, res) {
       const hit = keMap.get(keywordCacheKey(meta.keyword));
       const canonical = normalizePageUrl(meta.page_url) || meta.page_url;
       const kwRows = mapGetUrlKeywordsList(urlKeywordsMap, canonical);
-      const kwHit = findUrlKeywordRow(kwRows, meta.keyword);
+      const kwHit = resolveUrlKeywordHit(kwRows, meta.keyword);
       if (kwRows.length && !kwHit && normalizeKeyword(meta.keyword)) {
         enrichNotes.push(`${canonical}: target keyword not in KE URL-keyword list (${kwRows.length} rows)`);
       }
+      const volHit = keMap.get(keywordCacheKey(meta.keyword));
+      const volAux = keywordTrafficRankFromVolumeItem(volHit?.raw);
       const traffic = mapGetUrlTrafficBundle(urlTrafficMap, canonical);
-      const est = kwHit ? estimatedTrafficFromUrlKeywordRow(kwHit) : null;
-      const serp = kwHit ? serpPositionFromUrlKeywordRow(kwHit) : null;
+      let est = null;
+      let serp = null;
+      if (kwHit) {
+        const e0 = estimatedTrafficFromUrlKeywordRow(kwHit);
+        const s0 = serpPositionFromUrlKeywordRow(kwHit);
+        if (e0 != null && Number.isFinite(e0)) est = e0;
+        if (s0 != null && Number.isFinite(s0) && s0 > 0) serp = s0;
+      }
+      if (est == null && volAux.est != null) est = volAux.est;
+      if (serp == null && volAux.rank != null) serp = volAux.rank;
       const urlEst = toNum(traffic.url_estimated_traffic, null);
       let pblCount = row?.page_backlinks_sample ?? null;
       let pblJson = Array.isArray(row?.page_backlinks_json)
@@ -1210,7 +1303,7 @@ export default async function handler(req, res) {
         search_volume: hit?.search_volume ?? row?.search_volume ?? null,
         cpc: hit?.cpc ?? row?.cpc ?? null,
         competition: hit?.competition ?? row?.competition ?? null,
-        rank_position: serp != null && Number.isFinite(serp) ? serp : row?.rank_position ?? null,
+        rank_position: serp != null && Number.isFinite(serp) ? Math.round(serp) : row?.rank_position ?? null,
         estimated_traffic: est != null && Number.isFinite(est) ? Math.round(est) : row?.estimated_traffic ?? null,
         url_estimated_traffic: urlEst != null && Number.isFinite(urlEst) ? Math.round(urlEst) : row?.url_estimated_traffic ?? null,
         page_backlinks_sample:
