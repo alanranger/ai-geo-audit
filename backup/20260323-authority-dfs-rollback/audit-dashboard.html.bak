@@ -4891,28 +4891,33 @@
         </div>
       </div>
       
-      <!-- Authority backlinks: DFS Supabase index (replaces manual CSV) -->
-      <div class="csv-upload-section" id="backlinkCsvSection">
+      <!-- Backlink CSV Upload Section (Collapsible) -->
+      <div class="csv-upload-section collapsed" id="backlinkCsvSection">
         <div class="csv-section-header" onclick="toggleCsvSection('backlinkCsvSection')">
-          <h3>Authority backlinks (DFS / Supabase)</h3>
+          <h3>Backlink CSV Upload (Optional)</h3>
           <span class="csv-section-toggle" id="backlinkCsvToggle">▶</span>
         </div>
-        <div class="csv-section-content" id="backlinkCsvContentWrapper">
+        <div class="csv-section-content collapsed" id="backlinkCsvContentWrapper">
           <div class="form-group" style="margin-bottom: 0;">
-            <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.75rem;">
-              AI Health Scorecard <strong>Authority → Backlinks</strong> uses your <strong>spam-filtered DataForSEO domain index</strong> in Supabase (<code>dfs_domain_backlink_rows</code>), not a CSV. Refresh after <strong>Traditional SEO → DFS full index</strong>. Older audits used CSV — scores are not directly comparable.
+            <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">
+              Upload backlink data CSV file for Authority score calculation. Can be uploaded independently of site URLs CSV.
             </div>
-            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.5rem;">
-              <button type="button" class="btn btn-small" onclick="refreshAuthorityDfsBacklinkMetrics({})" style="padding: 0.5rem 1rem;" title="Load metrics from Supabase for the Property URL hostname">Refresh DFS metrics for Authority</button>
-              <button type="button" class="btn btn-small btn-secondary" onclick="clearAuthorityBacklinkCache()" style="padding: 0.5rem 1rem;" title="Clear cached metrics in this browser">Clear cached metrics</button>
+            <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+              <input type="file" id="backlinkCsvFile" accept=".csv" style="flex: 1; padding: 0.5rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem;">
+                  <button class="btn btn-small" onclick="loadBacklinkCsvFromFile()" style="padding: 0.5rem 1rem;" title="Load a CSV file containing backlink data. The CSV must have 'source_url' and 'target_url' columns in the header row. Backlinks will be used for Authority score calculation.">Load CSV</button>
+                  <button class="btn btn-small" onclick="clearBacklinkCsv()" style="padding: 0.5rem 1rem; background: #ef4444; color: white; border-color: #ef4444;" title="Clear the backlink CSV data">Clear</button>
             </div>
-            <div id="dfsAuthorityBacklinkStatus" style="margin-top: 0.5rem; font-size: 0.85rem;"></div>
+                <textarea id="backlinkCsvContent" placeholder="Or paste CSV content here (must include 'source_url' and 'target_url' columns in header row)..." style="width: 100%; min-height: 100px; padding: 0.75rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem; font-family: monospace; resize: vertical;"></textarea>
+            <div class="help-text">
+                  <strong>Required columns:</strong> <code>source_url</code> and <code>target_url</code> (case-insensitive). CSV must have a header row. Backlinks will be extracted from these columns.
+            </div>
+            <div id="backlinkCsvStatus" style="margin-top: 0.5rem; font-size: 0.85rem;"></div>
           </div>
         </div>
       </div>
           
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-top: 1.5rem;">
-        <button class="btn" onclick="runAudit()" title="GSC audit plus Authority backlinks from the DFS Supabase index (fails loudly if the index is empty for this property).">GSC & Backlink Audit</button>
+        <button class="btn" onclick="runAudit()" title="Start a GSC & Backlink audit scan. Fetches Google Search Console data and uses backlink data (if backlink CSV uploaded). Results will appear in the dashboard below.">GSC & Backlink Audit</button>
             <button class="btn btn-secondary" onclick="shareAudit()" title="Generate a shareable link to your current audit results. The link will allow others to view your audit data without running a new scan.">Share Audit</button>
         <button class="btn btn-secondary" onclick="saveConfig()" title="Save your current configuration (property URL and date range) to browser localStorage. Settings will be restored when you reload the page.">Save Configuration</button>
             <button class="btn btn-success" onclick="syncCsv()" title="Sync CSV data from the configured source. This will update your URL list and backlink data from the remote CSV file.">Sync CSV</button>
@@ -6494,7 +6499,7 @@
             This audit analyzes <strong>www.alanranger.com</strong> as a global entity using a five-pillar framework to assess AI-powered search visibility, entity recognition, and SERP behavior. Each pillar is scored 0-100 and assigned a RAG (Red/Amber/Green) status based on performance thresholds.
           </p>
           <p style="color: #555; line-height: 1.6; margin-bottom: 0.5rem;">
-            <strong>Data Sources:</strong> Scores are calculated using data from Google Search Console API (impressions, clicks, position, queries), Google Business Profile API (ratings, reviews, locations, service areas), schema markup validation, spam-filtered DFS backlink index (Supabase), and Trustpilot reviews snapshot.
+            <strong>Data Sources:</strong> Scores are calculated using data from Google Search Console API (impressions, clicks, position, queries), Google Business Profile API (ratings, reviews, locations, service areas), schema markup validation, backlink CSV upload, and Trustpilot reviews snapshot.
           </p>
           <p style="color: #555; line-height: 1.6; margin-bottom: 0;">
             <strong>Score Calculation:</strong> The GAIO score combines five weighted pillars: Authority (30%: Behaviour 40% + Ranking 20% + Backlinks 20% + Reviews 20%), Content/Schema (25%: Foundation schemas 30% + Rich Results 35% + Coverage 20% + Diversity 15%), Visibility (20%: average position mapping), Local Entity (15%: NAP consistency + knowledge panel + locations), and Service Area (10%: service areas count with NAP multiplier). Brand & Entity Overlay and AI Summary Likelihood are overlay metrics that do not affect the GAIO score but provide additional insights. Scores are normalized to 0-100 scale with thresholds: Green (≥70), Amber (40-69), Red (&lt;40). Money pages behaviour is tracked separately and stored per audit, so you can see whether Authority improvements are coming from better CTR on commercial pages or from broader site-wide changes.
@@ -6577,7 +6582,7 @@
             <li>Google Search Console API (CTR, position, impressions by position bucket)</li>
             <li>Google Business Profile API (ratings, review count)</li>
             <li>Trustpilot reviews (historic snapshot: rating 4.6, count 610)</li>
-            <li>DFS / Supabase backlink index for Authority (referring domains, follow ratio)</li>
+            <li>Backlink CSV upload (referring domains, quality metrics) - Phase 3</li>
           </ul>
           <p><strong>How to Improve Authority:</strong></p>
           <ul>
@@ -6708,7 +6713,7 @@
             <strong>✅ Fully Implemented:</strong><br>
             • Google Search Console API integration (real-time data) - Total clicks, Total impressions, Average position, CTR calculation, Top queries, Brand query classification<br>
             • Schema markup validation and analysis - Full site crawl, coverage analysis, type diversity, rich result eligibility (11 types), foundation schema detection<br>
-            • Backlink quality/quantity — spam-filtered DFS index (Supabase), referring domains, follow ratio<br>
+            • Backlink quality/quantity analysis - CSV upload support, domain rating, referring domains tracking<br>
             • Review aggregation - Trustpilot integration (snapshot), Google Business Profile reviews, review score calculation<br>
             • Knowledge panel tracking - Detection and scoring (part of Local Entity pillar)<br>
             • Local pack visibility metrics - Service Area pillar with NAP consistency, location coverage<br>
@@ -29547,20 +29552,30 @@
         }
       }
       
-      // Authority backlinks: refresh from DFS if cache empty (non-blocking; audit will hard-require)
-      try {
-        const cached = localStorage.getItem('backlink_metrics');
-        if (!cached) {
-          await refreshAuthorityDfsBacklinkMetrics({});
-        } else {
-          try {
-            window.latestBacklinkMetrics = JSON.parse(cached);
-          } catch (e) {
-            await refreshAuthorityDfsBacklinkMetrics({});
-          }
+      // Load backlink CSV content if saved
+      const savedBacklinkCsv = localStorage.getItem('backlink_csv_content');
+      if (savedBacklinkCsv) {
+        const textarea = document.getElementById('backlinkCsvContent');
+        if (textarea) {
+          textarea.value = savedBacklinkCsv;
         }
-      } catch (e) {
-        debugLog(`⚠ DFS backlink preload: ${e.message}`, 'warn');
+        // Check if backlink metrics are already uploaded
+        try {
+          const backlinkResponse = await fetch(apiUrl('/api/aigeo/backlink-metrics'));
+          if (backlinkResponse.ok) {
+            const backlinkData = await backlinkResponse.json();
+            if (backlinkData.status === 'ok' && backlinkData.data && backlinkData.data.totalBacklinks > 0) {
+              const metrics = backlinkData.data;
+              const statusDiv = document.getElementById('backlinkCsvStatus');
+              if (statusDiv) {
+                statusDiv.innerHTML = `<span style="color: #10b981;">✓ Backlink CSV loaded: ${metrics.referringDomains} domains, ${metrics.totalBacklinks} links</span>`;
+              }
+              debugLog(`✓ Backlink CSV already uploaded: ${metrics.referringDomains} domains`, 'success');
+            }
+          }
+        } catch (e) {
+          // Ignore errors - backlink metrics may not be uploaded yet
+        }
       }
       
       debugLog('=== Configuration load complete ===', 'info');
@@ -29881,121 +29896,183 @@
       showStatus('Manual URL list cleared', 'success');
     }
 
-    function getAuthorityBacklinkDomainHost() {
-      const raw = (
-        document.getElementById('propertyUrl')?.value ||
-        localStorage.getItem('gsc_property_url') ||
-        localStorage.getItem('last_property_url') ||
-        ''
-      ).trim();
-      if (!raw) return '';
-      try {
-        if (raw.includes('://')) {
-          return new URL(raw).hostname.replace(/^www\./i, '').toLowerCase();
-        }
-      } catch (e) {
-        /* fallback */
-      }
-      return raw
-        .replace(/^https?:\/\//i, '')
-        .replace(/^www\./i, '')
-        .split('/')[0]
-        .split(':')[0]
-        .toLowerCase();
-    }
-
-    async function refreshAuthorityDfsBacklinkMetrics(opts) {
-      const required = !!(opts && opts.required);
-      const domain = getAuthorityBacklinkDomainHost();
-      const statusDiv = document.getElementById('dfsAuthorityBacklinkStatus');
-      if (!domain) {
-        const msg = 'Set Property URL before loading DFS backlink metrics.';
-        if (typeof showStatus === 'function') showStatus(msg, 'error');
-        if (statusDiv) statusDiv.innerHTML = `<span style="color:#ef4444;">${msg}</span>`;
-        if (required) throw new Error(msg);
-        return null;
-      }
-      if (statusDiv && !required) statusDiv.innerHTML = '<span style="color:#64748b;">Loading DFS metrics…</span>';
-      const res = await fetch(apiUrl(`/api/aigeo/backlink-metrics?domain=${encodeURIComponent(domain)}`));
-      let json = {};
-      try {
-        json = await res.json();
-      } catch (e) {
-        json = {};
-      }
-      if (res.status === 422 || json.code === 'DFS_INDEX_EMPTY') {
-        const msg =
-          json.message ||
-          `No DFS index for ${domain}. Run Traditional SEO → DFS full index (DataForSEO path on).`;
-        if (typeof showStatus === 'function') showStatus(msg, 'error');
-        if (statusDiv) statusDiv.innerHTML = `<span style="color:#ef4444;">${msg}</span>`;
-        if (required) throw new Error(msg);
-        return null;
-      }
-      if (!res.ok || json.status !== 'ok' || !json.data) {
-        const msg = json.message || `Backlink metrics failed (HTTP ${res.status})`;
-        if (typeof showStatus === 'function') showStatus(msg, 'error');
-        if (statusDiv) statusDiv.innerHTML = `<span style="color:#ef4444;">${msg}</span>`;
-        if (required) throw new Error(msg);
-        return null;
-      }
-      const metrics = json.data;
-      window.latestBacklinkMetrics = metrics;
-      try {
-        localStorage.setItem('backlink_metrics', JSON.stringify(metrics));
-      } catch (e) {
-        /* ignore quota */
-      }
-      try {
-        localStorage.removeItem('backlink_csv_content');
-      } catch (e2) {
-        /* ignore */
-      }
-      if (statusDiv) {
-        statusDiv.innerHTML = `<span style="color:#10b981;">✓ DFS index · ${metrics.referringDomains} ref. domains · ${metrics.totalBacklinks} links · ${Math.round((metrics.followRatio || 0) * 100)}% follow (known rel)</span>`;
-      }
-      debugLog(
-        `DFS backlink metrics: domains=${metrics.referringDomains}, links=${metrics.totalBacklinks}`,
-        'success'
-      );
-      if (!required && typeof showStatus === 'function') {
-        showStatus(`DFS backlink metrics loaded for ${domain}.`, 'success');
-      }
-      return metrics;
-    }
-
-    window.refreshAuthorityDfsBacklinkMetrics = refreshAuthorityDfsBacklinkMetrics;
-
-    function clearAuthorityBacklinkCache() {
-      try {
-        localStorage.removeItem('backlink_metrics');
-      } catch (e) {
-        /* ignore */
-      }
-      try {
-        localStorage.removeItem('backlink_csv_content');
-      } catch (e2) {
-        /* ignore */
-      }
-      window.latestBacklinkMetrics = null;
-      const statusDiv = document.getElementById('dfsAuthorityBacklinkStatus');
-      if (statusDiv) statusDiv.innerHTML = '<span style="color:#64748b;">Cached metrics cleared</span>';
-      debugLog('Authority DFS backlink cache cleared', 'info');
-      showStatus('Cached backlink metrics cleared', 'success');
-    }
-
-    window.clearAuthorityBacklinkCache = clearAuthorityBacklinkCache;
-
+    // Load backlink CSV from file (wrapper for uploadBacklinkCsv)
     async function loadBacklinkCsvFromFile() {
-      return refreshAuthorityDfsBacklinkMetrics({});
+      return await uploadBacklinkCsv();
     }
 
+    // Upload backlink CSV file
     async function uploadBacklinkCsv() {
-      return refreshAuthorityDfsBacklinkMetrics({});
+      const fileInput = document.getElementById('backlinkCsvFile');
+      const statusDiv = document.getElementById('backlinkCsvStatus');
+      const textarea = document.getElementById('backlinkCsvContent');
+      
+      let csvContent = '';
+      
+      if (fileInput.files && fileInput.files.length > 0) {
+        const file = fileInput.files[0];
+        debugLog(`Uploading backlink CSV from file: ${file.name} (${file.size} bytes)`, 'info');
+        
+        try {
+          csvContent = await file.text();
+          // Also populate textarea with the CSV content
+          textarea.value = csvContent;
+        } catch (error) {
+          statusDiv.innerHTML = `<span style="color: #ef4444;">✗ Error reading file: ${error.message}</span>`;
+          debugLog(`✗ Backlink CSV file read error: ${error.message}`, 'error');
+          showStatus(`Backlink CSV error: ${error.message}`, 'error');
+          return;
+        }
+      } else {
+        // If no file, try to get from textarea
+        csvContent = textarea.value.trim();
+        if (!csvContent) {
+          statusDiv.innerHTML = '<span style="color: #ef4444;">⚠ Please select a CSV file or paste CSV content</span>';
+          return;
+        }
+      }
+
+      if (!csvContent) {
+        statusDiv.innerHTML = '<span style="color: #ef4444;">⚠ No CSV content to upload</span>';
+        return;
+      }
+
+      // Validate CSV has required columns
+      const lines = csvContent.split('\n').filter(line => line.trim());
+      if (lines.length === 0) {
+        statusDiv.innerHTML = '<span style="color: #ef4444;">✗ CSV is empty</span>';
+        return;
+      }
+
+      const headerLine = lines[0].trim();
+      const headers = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+      
+      // More flexible column matching - check for URL column (required) and Link Type (optional)
+      const hasUrlColumn = headers.some(h => {
+        const lower = h.toLowerCase();
+        return (lower.includes('linking') && lower.includes('url')) ||
+               lower.includes('url') ||
+               lower.includes('source url') ||
+               lower.includes('page url');
+      });
+      
+      const hasLinkType = headers.some(h => {
+        const lower = h.toLowerCase();
+        return lower.includes('link type') ||
+               lower.includes('type') ||
+               lower.includes('follow');
+      });
+      
+      if (!hasUrlColumn) {
+        statusDiv.innerHTML = `<span style="color: #ef4444;">✗ Missing URL column. Found columns: ${headers.join(', ')}. Need a column containing 'URL' or 'Linking Page + URL'</span>`;
+        debugLog(`✗ Backlink CSV missing URL column. Found: ${headers.join(', ')}`, 'error');
+        return;
+      }
+      
+      if (!hasLinkType) {
+        statusDiv.innerHTML = `<span style="color: #ef4444;">✗ Missing Link Type column. Found columns: ${headers.join(', ')}. The Link Type column is required to calculate the follow ratio for the Authority score.</span>`;
+        debugLog(`✗ Backlink CSV missing Link Type column. Found: ${headers.join(', ')}`, 'error');
+        return;
+      }
+
+      // Upload to API
+      try {
+        statusDiv.innerHTML = '<span style="color: #666;">⏳ Uploading and processing backlink CSV...</span>';
+        debugLog('Uploading backlink CSV to API...', 'info');
+        
+        // Send CSV as JSON since Vercel doesn't parse text/csv automatically
+        const response = await fetch(apiUrl('/api/aigeo/backlink-metrics'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ csv: csvContent })
+        });
+
+        if (!response.ok) {
+          let errorMessage = `HTTP ${response.status}`;
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.message || errorData.error || errorMessage;
+            debugLog(`API error response: ${JSON.stringify(errorData)}`, 'error');
+          } catch (e) {
+            // If response is not JSON, try to get text
+            try {
+              const errorText = await response.text();
+              if (errorText) {
+                errorMessage = errorText.substring(0, 200);
+              }
+            } catch (e2) {
+              // Ignore
+            }
+          }
+          throw new Error(errorMessage);
+        }
+
+        const result = await response.json();
+        debugLog(`API response: ${JSON.stringify(result).substring(0, 200)}...`, 'info');
+        
+        if (result.status === 'ok' && result.data) {
+          const metrics = result.data;
+          statusDiv.innerHTML = `<span style="color: #10b981;">✓ Backlink CSV uploaded successfully! Found ${metrics.referringDomains} referring domains, ${metrics.totalBacklinks} backlinks, ${Math.round(metrics.followRatio * 100)}% follow ratio</span>`;
+          debugLog(`✓ Backlink CSV uploaded: ${metrics.referringDomains} domains, ${metrics.totalBacklinks} links, ${(metrics.followRatio * 100).toFixed(1)}% follow`, 'success');
+          showStatus(`Backlink CSV uploaded! ${metrics.referringDomains} referring domains found.`, 'success');
+          
+          // Store in localStorage for persistence
+          localStorage.setItem('backlink_csv_content', csvContent);
+          localStorage.setItem('backlink_metrics', JSON.stringify(metrics));
+          window.latestBacklinkMetrics = metrics;
+          debugLog(`✓ Backlink metrics stored in localStorage`, 'success');
+        } else {
+          // Error response - log debug info to UI
+          const errorMsg = result.message || result.error || 'Upload failed - invalid response format';
+          statusDiv.innerHTML = `<span style="color: #ef4444;">✗ ${errorMsg}</span>`;
+          debugLog(`✗ Backlink CSV upload error: ${errorMsg}`, 'error');
+          
+          // Log debug info if available
+          if (result.debug) {
+            debugLog(`[DEBUG] CSV Length: ${result.debug.csvLength || 'N/A'}`, 'info');
+            debugLog(`[DEBUG] Logical Lines: ${result.debug.logicalLines || 'N/A'}`, 'info');
+            debugLog(`[DEBUG] Headers Found: ${result.debug.headers ? result.debug.headers.join(', ') : 'N/A'}`, 'info');
+            if (result.debug.firstChars) {
+              debugLog(`[DEBUG] First 500 chars: ${result.debug.firstChars}`, 'info');
+            }
+            if (result.debug.rowCount !== undefined) {
+              debugLog(`[DEBUG] Rows parsed: ${result.debug.rowCount}`, 'info');
+            }
+            if (result.debug.firstRowKeys) {
+              debugLog(`[DEBUG] First row keys: ${result.debug.firstRowKeys.join(', ')}`, 'info');
+            }
+            if (result.debug.error) {
+              debugLog(`[DEBUG] Error details: ${result.debug.error}`, 'error');
+            }
+          }
+          
+          // Also log full error response for debugging
+          debugLog(`[DEBUG] Full error response: ${JSON.stringify(result, null, 2)}`, 'error');
+          showStatus(`Backlink CSV error: ${errorMsg}`, 'error');
+        }
+      } catch (error) {
+        const errorMsg = error.message || error.toString() || 'Unknown error';
+        statusDiv.innerHTML = `<span style="color: #ef4444;">✗ ${errorMsg}</span>`;
+        debugLog(`✗ Backlink CSV upload error: ${errorMsg}`, 'error');
+        debugLog(`Error stack: ${error.stack || 'No stack trace'}`, 'error');
+        showStatus(`Backlink CSV error: ${errorMsg}`, 'error');
+      }
     }
 
+    // Clear backlink CSV
     function clearBacklinkCsv() {
-      clearAuthorityBacklinkCache();
+      const textarea = document.getElementById('backlinkCsvContent');
+      const fileInput = document.getElementById('backlinkCsvFile');
+      const statusDiv = document.getElementById('backlinkCsvStatus');
+      
+      textarea.value = '';
+      fileInput.value = '';
+      localStorage.removeItem('backlink_csv_content');
+      statusDiv.innerHTML = '<span style="color: #666;">Backlink CSV cleared</span>';
+      debugLog('Backlink CSV cleared', 'info');
+      showStatus('Backlink CSV cleared', 'success');
     }
 
     // Sync CSV from alan-shared-resources
@@ -30699,13 +30776,8 @@
         // Keep existing schema audit data (doesn't change with date range)
         // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
         const normalizedSiteReviews = getTrustpilotSnapshot(savedAudit.siteReviews || null);
-        let backlinkMetrics = savedAudit.backlinkMetrics || null;
-        try {
-          const freshBm = await refreshAuthorityDfsBacklinkMetrics({});
-          if (freshBm) backlinkMetrics = freshBm;
-        } catch (bmErr) {
-          debugLog(`⚠ DFS backlink refresh on date-range update: ${bmErr.message}`, 'warn');
-        }
+        // Get backlinkMetrics from savedAudit (it should be there from the last audit)
+        const backlinkMetrics = savedAudit.backlinkMetrics || null;
         const scores = await calculatePillarScores(searchData, savedAudit.schemaAudit, localSignals, normalizedSiteReviews, backlinkMetrics);
         const snippetReadiness = calculateSnippetReadiness(scores, searchData);
         
@@ -36010,16 +36082,52 @@
           debugLog('✓ Trustpilot snapshot verified (4.6, 610)', 'success');
         }
         
-        updateProgress(38, 'Loading DFS backlink metrics (Supabase)...');
-        debugLog('Loading DFS backlink metrics for Authority…', 'info');
+        updateProgress(38, 'Fetching backlink metrics data...');
+        debugLog('Fetching backlink metrics data...', 'info');
+        // Fetch backlink metrics - try localStorage first (from CSV upload), then API
+        
+        // First, try to get from localStorage (stored when CSV was uploaded)
         try {
-          backlinkMetrics = await refreshAuthorityDfsBacklinkMetrics({ required: true });
-        } catch (dfsErr) {
-          updateProgress(0, 'Stopped — DFS backlink index missing');
-          document.getElementById('loading')?.classList.remove('show');
-          showStatus(dfsErr.message || 'DFS backlink index missing — run DFS full index.', 'error');
-          debugLog(`✗ Audit stopped: ${dfsErr.message}`, 'error');
-          return;
+          const storedMetrics = localStorage.getItem('backlink_metrics');
+          if (storedMetrics) {
+            backlinkMetrics = JSON.parse(storedMetrics);
+            window.latestBacklinkMetrics = backlinkMetrics;
+            debugLog('✓ Backlink metrics loaded from localStorage', 'success');
+            debugLog(`Backlink metrics: domains=${backlinkMetrics.referringDomains}, links=${backlinkMetrics.totalBacklinks}, followRatio=${(backlinkMetrics.followRatio * 100).toFixed(1)}%`, 'info');
+          }
+        } catch (e) {
+          debugLog(`⚠ Error reading backlink metrics from localStorage: ${e.message}`, 'warn');
+        }
+        
+        // If not in localStorage, try API (for cases where metrics were uploaded via API directly)
+        if (!backlinkMetrics) {
+          try {
+            const backlinkResponse = await fetch(apiUrl('/api/aigeo/backlink-metrics'));
+            if (backlinkResponse.ok) {
+              const backlinkData = await backlinkResponse.json();
+              if (backlinkData.status === 'ok' && backlinkData.data && backlinkData.data.totalBacklinks > 0) {
+                backlinkMetrics = backlinkData.data;
+              window.latestBacklinkMetrics = backlinkMetrics;
+                // Store in localStorage for next time
+                localStorage.setItem('backlink_metrics', JSON.stringify(backlinkMetrics));
+                debugLog('✓ Backlink metrics data fetched from API and stored', 'success');
+                debugLog(`Backlink metrics: domains=${backlinkMetrics.referringDomains}, links=${backlinkMetrics.totalBacklinks}, followRatio=${(backlinkMetrics.followRatio * 100).toFixed(1)}%`, 'info');
+              } else {
+                debugLog('⚠ Backlink metrics returned empty/zero, using saved data if available', 'warn');
+              }
+            } else {
+              debugLog('⚠ Backlink metrics endpoint not available, using saved data if available', 'warn');
+            }
+          } catch (backlinkError) {
+            debugLog(`⚠ Backlink metrics error: ${backlinkError.message}, using saved data if available`, 'warn');
+          }
+        }
+        
+        // If fetch failed but we have saved data, keep using it
+        if (!backlinkMetrics && savedAudit?.backlinkMetrics) {
+          backlinkMetrics = savedAudit.backlinkMetrics;
+          window.latestBacklinkMetrics = backlinkMetrics;
+          debugLog('✓ Using saved backlink metrics data', 'info');
         }
         
         updateProgress(40, 'Fetching schema audit data...');
@@ -37873,7 +37981,7 @@ Final Score: ${score}/100`;
         const descriptions = {
           localEntity: localEntityDesc,
           serviceArea: serviceAreaDesc,
-          authority: 'E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Perceived expertise and trust in the topic space. <strong>Calculation:</strong> Behaviour (40%) + Ranking (20%) + Backlinks (20%) + Reviews (20%). <strong>Data Source:</strong> ✅ Live data from Google Search Console, Google Business Profile API, historic Trustpilot reviews snapshot, and spam-filtered DFS backlink index (Supabase).',
+          authority: 'E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Perceived expertise and trust in the topic space. <strong>Calculation:</strong> Behaviour (40%) + Ranking (20%) + Backlinks (20%) + Reviews (20%). <strong>Data Source:</strong> ✅ Live data from Google Search Console, Google Business Profile API, historic Trustpilot reviews snapshot, and backlink CSV upload.',
           visibility: 'How prominently your content appears in AI-powered search results and featured snippets. <strong>Data Source:</strong> ✅ Live data from Google Search Console (impressions, clicks, position, SERP features).',
           contentSchema: 'Quality and completeness of structured data markup across your domain. <strong>Data Source:</strong> ✅ Live data from schema audit. <strong>Calculation:</strong> Foundation schemas (30%) + Rich Results (35%) + Coverage (20%) + Diversity (15%).'
         };
@@ -49647,7 +49755,7 @@ Final Score: ${score}/100`;
                 const descriptions = {
                   localEntity: localEntityDesc,
                   serviceArea: serviceAreaDesc,
-                  authority: `E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Perceived expertise and trust in the topic space. Authority measures how much the outside world and searchers trust and choose you, not just content quality.<br><strong>AI Importance:</strong> E-A-T is critical for AI systems - they prioritize authoritative, trustworthy sources. Strong E-A-T signals help AI confidently feature your content in AI Overviews and answer boxes.<br><strong>Calculation:</strong> Behaviour Score (40%): CTR for ranking queries (position ≤20) + top-10 CTR. Ranking Score (20%): Average position + top-10 impression share. Backlink Score (20%): Referring domains + quality ratio. Review Score (20%): Combined ratings and counts from GBP + Trustpilot snapshot.<br><strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Search Console API, Google Business Profile API, historic Trustpilot reviews snapshot, and spam-filtered DFS backlink index (Supabase).<br><strong>Data Checked:</strong> CTR ${ctr.toFixed(1)}%, average position ${avgPosition.toFixed(1)}, clicks ${totalClicks.toLocaleString()}, impressions ${totalImpressions.toLocaleString()}, ranking query performance (position ≤20), backlink metrics (referring domains, follow ratio), review ratings and counts.`,
+                  authority: `E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Perceived expertise and trust in the topic space. Authority measures how much the outside world and searchers trust and choose you, not just content quality.<br><strong>AI Importance:</strong> E-A-T is critical for AI systems - they prioritize authoritative, trustworthy sources. Strong E-A-T signals help AI confidently feature your content in AI Overviews and answer boxes.<br><strong>Calculation:</strong> Behaviour Score (40%): CTR for ranking queries (position ≤20) + top-10 CTR. Ranking Score (20%): Average position + top-10 impression share. Backlink Score (20%): Referring domains + quality ratio. Review Score (20%): Combined ratings and counts from GBP + Trustpilot snapshot.<br><strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Search Console API, Google Business Profile API, historic Trustpilot reviews snapshot, and backlink CSV upload.<br><strong>Data Checked:</strong> CTR ${ctr.toFixed(1)}%, average position ${avgPosition.toFixed(1)}, clicks ${totalClicks.toLocaleString()}, impressions ${totalImpressions.toLocaleString()}, ranking query performance (position ≤20), backlink metrics (referring domains, follow ratio), review ratings and counts.`,
                   visibility: `Frequency and prominence in organic search, local pack, snippets and AI Overviews.<br><strong>AI Importance:</strong> AI systems learn from existing search performance. Higher visibility signals quality and relevance, making AI more likely to surface your content in AI-powered results and featured snippets.<br><strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Search Console API.<br><strong>Data Checked:</strong> Average position ${avgPosition.toFixed(1)}, CTR ${ctr.toFixed(1)}%, total clicks ${totalClicks.toLocaleString()}, total impressions ${totalImpressions.toLocaleString()}, SERP feature appearances.`,
                   contentSchema: contentSchemaDesc,
                   brandOverlay: brandDesc
@@ -49784,7 +49892,7 @@ Final Score: ${score}/100`;
                             if (backlinkMetrics && backlinkMetrics.referringDomains > 0) {
                               steps.push(`<strong>Backlink Score (${Math.round(authorityComponents.backlinks)}):</strong> Increase referring domains (current: ${backlinkMetrics.referringDomains}, target: 100+) and improve follow ratio (current: ${Math.round((backlinkMetrics.followRatio || 0) * 100)}%)`);
                             } else {
-                              steps.push(`<strong>Backlink Score (${Math.round(authorityComponents.backlinks)}):</strong> From spam-filtered DFS index — run Traditional SEO → DFS full index if empty`);
+                              steps.push(`<strong>Backlink Score (${Math.round(authorityComponents.backlinks)}):</strong> Upload backlink CSV to measure domain authority`);
                             }
                           }
                           
@@ -54233,7 +54341,7 @@ Final Score: ${score}/100`;
               const definitions = {
                 localEntity: localEntityDef,
                 serviceArea: serviceAreaDef,
-                authority: 'Evaluates your domain authority and trust signals. Calculated from four components: Behaviour Score (40%): CTR for ranking queries + top-10 CTR. Ranking Score (20%): Average position + top-10 impression share. Backlink Score (20%): Referring domains + follow ratio from spam-filtered DFS index (Supabase). Review Score (20%): Combined ratings and counts from Google Business Profile + on-site/Trustpilot reviews.',
+                authority: 'Evaluates your domain authority and trust signals. Calculated from four components: Behaviour Score (40%): CTR for ranking queries + top-10 CTR. Ranking Score (20%): Average position + top-10 impression share. Backlink Score (20%): Referring domains + quality from CSV upload. Review Score (20%): Combined ratings and counts from Google Business Profile + on-site/Trustpilot reviews.',
                 visibility: 'Tracks your search visibility and ranking performance. Based on average position from Google Search Console (1 = best, 40 = worst). Score ranges from 10 to 100.',
                 contentSchema: 'Measures schema markup quality and completeness. Weighted calculation: Foundation Schemas (30%), Rich Results (35%), Coverage (20%), Diversity (15%).'
               };

@@ -1,32 +1,25 @@
 /**
- * Backlink metrics for AI Health Scorecard (Authority → Backlinks).
- *
- * Default GET: aggregates `dfs_domain_backlink_rows` in Supabase (spam-filtered DFS index).
- * Legacy: env AUTHORITY_BACKLINK_METRICS_SOURCE=csv_legacy → file + GitHub CSV + POST CSV.
+ * Backlink Metrics API
+ * 
+ * Accepts CSV uploads of backlink data, computes metrics, and stores them as JSON.
+ * 
+ * GET: Returns stored backlink metrics from data/backlink-metrics.json
+ * POST: Accepts CSV body, parses it, computes metrics, and stores them
+ * 
+ * CSV Format:
+ * - "Linking Page + URL" column: Contains page title and URL (extract first http(s):// URL)
+ * - "Link Type" column: Values like DoFollow, Dofollow, Follow, Nofollow (case-insensitive)
  */
 
 import fs from 'fs/promises';
 import path from 'path';
-import { createClient } from '@supabase/supabase-js';
-import { aggregateDfsBacklinksForDomain } from '../../lib/authority-dfs-backlinks.js';
+// Use custom CSV parser (same as schema-audit.js) to avoid dependency issues
 
 const METRICS_FILE = path.join(process.cwd(), 'data', 'backlink-metrics.json');
 const DEFAULT_BACKLINK_CSV_URLS = [
   'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/alanranger.com_-backlink-data%20(2).csv',
   'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/alanranger.com_-backlink-data%20(2).csv'
 ];
-
-function authorityMetricsSource() {
-  const raw = String(process.env.AUTHORITY_BACKLINK_METRICS_SOURCE || 'dfs').trim().toLowerCase();
-  return raw === 'csv_legacy' || raw === 'csv' ? 'csv_legacy' : 'dfs';
-}
-
-function normalizeDomainHost(raw) {
-  let s = String(raw || '').trim().toLowerCase();
-  s = s.replace(/^https?:\/\//i, '');
-  s = s.split('/')[0].replace(/^www\./, '');
-  return s.replace(/:\d+$/, '');
-}
 
 /**
  * Parse CSV line with proper quote handling (same as schema-audit.js)
@@ -379,57 +372,9 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // GET: DFS Supabase aggregate (default) or legacy CSV/file
+  // GET: Return stored metrics
   if (req.method === 'GET') {
     try {
-      if (authorityMetricsSource() === 'dfs') {
-        const q = req.query && typeof req.query === 'object' ? req.query : {};
-        const domainHost = normalizeDomainHost(
-          q.domain || process.env.AI_GEO_DOMAIN || process.env.SITE_DOMAIN || 'alanranger.com'
-        );
-        const url = String(process.env.SUPABASE_URL || '').trim();
-        const key = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
-        if (!url || !key) {
-          return res.status(503).json({
-            status: 'error',
-            code: 'SUPABASE_NOT_CONFIGURED',
-            source: 'backlink-metrics',
-            message: 'SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing for DFS backlink metrics.',
-            data: null,
-            meta: { generatedAt: new Date().toISOString(), domainHost }
-          });
-        }
-        const supabase = createClient(url, key);
-        const metrics = await aggregateDfsBacklinksForDomain(supabase, domainHost);
-        if (!metrics) {
-          return res.status(422).json({
-            status: 'error',
-            code: 'DFS_INDEX_EMPTY',
-            source: 'backlink-metrics',
-            message: `No spam-filtered DFS rows for "${domainHost}". Run Traditional SEO → DFS full index (DataForSEO) for this property.`,
-            data: null,
-            meta: {
-              generatedAt: new Date().toISOString(),
-              domainHost,
-              methodologyNote:
-                'Authority backlinks use dfs_domain_backlink_rows only; older audits used CSV and are not comparable.'
-            }
-          });
-        }
-        return res.status(200).json({
-          status: 'ok',
-          source: 'backlink-metrics',
-          data: metrics,
-          meta: {
-            generatedAt: new Date().toISOString(),
-            backlinkMetricsSource: 'dfs_supabase',
-            domainHost: metrics.domainHost,
-            methodologyNote:
-              'Authority backlinks use spam-filtered DFS index in Supabase; older CSV-based audits differ.'
-          }
-        });
-      }
-
       let metrics = await readBacklinkMetrics();
       let source = 'file';
 
@@ -446,7 +391,7 @@ export default async function handler(req, res) {
         status: 'ok',
         source: 'backlink-metrics',
         data: metrics,
-        meta: { generatedAt: new Date().toISOString(), source, backlinkMetricsSource: 'csv_legacy' }
+        meta: { generatedAt: new Date().toISOString(), source }
       });
     } catch (error) {
       console.error('Error reading backlink metrics:', error);
@@ -459,20 +404,9 @@ export default async function handler(req, res) {
     }
   }
 
-  // POST: legacy CSV only
+  // POST: Accept CSV and compute metrics
   if (req.method === 'POST') {
     try {
-      if (authorityMetricsSource() !== 'csv_legacy') {
-        return res.status(400).json({
-          status: 'error',
-          source: 'backlink-metrics',
-          code: 'CSV_POST_DISABLED',
-          message:
-            'CSV backlink upload is disabled. Authority uses the DFS Supabase index. Set AUTHORITY_BACKLINK_METRICS_SOURCE=csv_legacy to re-enable.',
-          meta: { generatedAt: new Date().toISOString() }
-        });
-      }
-
       // Get CSV content from request body
       let csvContent;
       
