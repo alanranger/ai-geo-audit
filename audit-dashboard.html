@@ -8409,6 +8409,36 @@
             </div>
             <button type="button" class="btn" id="traditional-seo-backlinks-modal-close" style="flex-shrink:0;">Close</button>
           </div>
+          <div
+            id="traditional-seo-backlinks-modal-toolbar"
+            style="display:none;margin-top:0.65rem;flex-wrap:wrap;gap:0.55rem 0.85rem;align-items:center;font-size:0.78rem;color:#cbd5e1;"
+          >
+            <label style="display:inline-flex;align-items:center;gap:0.35rem;margin:0;cursor:pointer;">
+              <span style="color:#94a3b8;">Follow</span>
+              <select
+                id="traditional-seo-backlinks-modal-filter-follow"
+                style="max-width:11rem;padding:0.25rem 0.4rem;border-radius:6px;border:1px solid rgba(148,163,184,0.35);background:rgba(15,23,42,0.9);color:#e2e8f0;font-size:0.78rem;"
+              >
+                <option value="all">All</option>
+                <option value="dofollow">Dofollow</option>
+                <option value="nofollow">Nofollow</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:0.35rem;margin:0;cursor:pointer;">
+              <span style="color:#94a3b8;">DFS rank</span>
+              <select
+                id="traditional-seo-backlinks-modal-sort-rank"
+                style="max-width:12rem;padding:0.25rem 0.4rem;border-radius:6px;border:1px solid rgba(148,163,184,0.35);background:rgba(15,23,42,0.9);color:#e2e8f0;font-size:0.78rem;"
+                title="Sort by linking domain rank (DataForSEO strength field). Rows without a rank sort last."
+              >
+                <option value="default">Source order</option>
+                <option value="rank_desc">Rank high → low</option>
+                <option value="rank_asc">Rank low → high</option>
+              </select>
+            </label>
+            <span id="traditional-seo-backlinks-modal-toolbar-meta" style="margin-left:auto;color:#94a3b8;font-size:0.72rem;"></span>
+          </div>
           <div id="traditional-seo-backlinks-modal-list" style="margin-top:0.75rem;max-height:min(58vh,560px);overflow:auto;padding-right:0.25rem;"></div>
         </div>
       </div>
@@ -73170,6 +73200,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (!backdrop) return;
       backdrop.classList.remove('is-open');
       backdrop.setAttribute('aria-hidden', 'true');
+      TRADITIONAL_SEO_STATE.backlinksModalBuffer = null;
+      const tb = document.getElementById('traditional-seo-backlinks-modal-toolbar');
+      if (tb) tb.style.display = 'none';
     }
 
     function traditionalSeoDisavowNormalizeHost(raw) {
@@ -73442,6 +73475,84 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return '—';
     }
 
+    /** Numeric DataForSEO rank for modal sort (maps from stored `strength`). */
+    function traditionalSeoBacklinkDfsRankForSort(o) {
+      if (!o || typeof o !== 'object') return null;
+      const n = traditionalSeoToNum(o.strength, NaN);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function traditionalSeoApplyBacklinkModalFilterSort(rows) {
+      const followSel = document.getElementById('traditional-seo-backlinks-modal-filter-follow');
+      const sortSel = document.getElementById('traditional-seo-backlinks-modal-sort-rank');
+      const fv = followSel ? String(followSel.value || 'all') : 'all';
+      const sv = sortSel ? String(sortSel.value || 'default') : 'default';
+      let out = rows.slice();
+      if (fv !== 'all') {
+        out = out.filter((it) => {
+          const lab = traditionalSeoFollowLabelFromBacklinkObject(it);
+          if (fv === 'dofollow') return lab === 'Dofollow';
+          if (fv === 'nofollow') return lab === 'Nofollow';
+          if (fv === 'unknown') return lab === '—';
+          return true;
+        });
+      }
+      if (sv === 'rank_desc' || sv === 'rank_asc') {
+        const asc = sv === 'rank_asc';
+        out.sort((a, b) => {
+          const ra = traditionalSeoBacklinkDfsRankForSort(a);
+          const rb = traditionalSeoBacklinkDfsRankForSort(b);
+          const ma = ra == null;
+          const mb = rb == null;
+          if (ma && mb) return 0;
+          if (ma) return 1;
+          if (mb) return -1;
+          if (ra === rb) return 0;
+          return asc ? ra - rb : rb - ra;
+        });
+      }
+      return out;
+    }
+
+    function traditionalSeoRenderBacklinksModalList() {
+      const listEl = document.getElementById('traditional-seo-backlinks-modal-list');
+      const metaEl = document.getElementById('traditional-seo-backlinks-modal-toolbar-meta');
+      const buf = TRADITIONAL_SEO_STATE.backlinksModalBuffer;
+      if (!listEl || !Array.isArray(buf)) return;
+      const processed = traditionalSeoApplyBacklinkModalFilterSort(buf);
+      if (metaEl) {
+        metaEl.textContent =
+          buf.length > 0 ? `Showing ${processed.length} of ${buf.length}` : '';
+      }
+      if (!processed.length) {
+        listEl.innerHTML =
+          '<p style="color:#94a3b8;margin:0;">No rows match the current Follow filter.</p>';
+        return;
+      }
+      listEl.innerHTML = processed.map((it, i) => traditionalSeoFormatOneBacklinkBlock(it, i)).join('');
+    }
+
+    function traditionalSeoPrimeBacklinksModalRows(rows) {
+      const toolbar = document.getElementById('traditional-seo-backlinks-modal-toolbar');
+      const fs = document.getElementById('traditional-seo-backlinks-modal-filter-follow');
+      const ss = document.getElementById('traditional-seo-backlinks-modal-sort-rank');
+      TRADITIONAL_SEO_STATE.backlinksModalBuffer = Array.isArray(rows) ? rows.slice() : [];
+      if (fs) fs.value = 'all';
+      if (ss) ss.value = 'default';
+      if (toolbar) {
+        toolbar.style.display = TRADITIONAL_SEO_STATE.backlinksModalBuffer.length ? 'flex' : 'none';
+      }
+      traditionalSeoRenderBacklinksModalList();
+    }
+
+    function traditionalSeoHideBacklinksModalToolbar() {
+      const toolbar = document.getElementById('traditional-seo-backlinks-modal-toolbar');
+      if (toolbar) toolbar.style.display = 'none';
+      TRADITIONAL_SEO_STATE.backlinksModalBuffer = null;
+      const metaEl = document.getElementById('traditional-seo-backlinks-modal-toolbar-meta');
+      if (metaEl) metaEl.textContent = '';
+    }
+
     function traditionalSeoLinkingDomainMozDa(o) {
       if (!o || typeof o !== 'object') return null;
       const pick = (v) => {
@@ -73648,20 +73759,22 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (subEl) {
           subEl.innerHTML = `Up to <strong>${traditionalSeoToNum(TRADITIONAL_SEO_STATE.dfsPageBacklinksMax, 100)}</strong> rows per page from the Supabase domain index (DFS full / new links).`;
         }
+        traditionalSeoHideBacklinksModalToolbar();
         listEl.innerHTML = '<p style="color:#94a3b8;margin:0;">Applying disavow list…</p>';
         openBackdrop();
         traditionalSeoEnsureDisavowLoadedUi().then((pack) => {
           const filtered = traditionalSeoFilterBacklinksDisavow(dfsItems, pack);
           if (TRADITIONAL_SEO_STATE.filterDisavowedBacklinkCounts === false) {
-            listEl.innerHTML = dfsItems.map((it, i) => traditionalSeoFormatOneBacklinkBlock(it, i)).join('');
+            traditionalSeoPrimeBacklinksModalRows(dfsItems);
             return;
           }
           if (!filtered.length) {
+            traditionalSeoHideBacklinksModalToolbar();
             listEl.innerHTML =
               '<p style="color:#94a3b8;margin:0;">No rows left after applying your disavow file (every row matched a listed domain or URL).</p>';
             return;
           }
-          listEl.innerHTML = filtered.map((it, i) => traditionalSeoFormatOneBacklinkBlock(it, i)).join('');
+          traditionalSeoPrimeBacklinksModalRows(filtered);
         });
         return;
       }
@@ -73671,6 +73784,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           'Sample of backlinks Keywords Everywhere returned for this URL (capped each refresh) — not a full link index. Re-run <strong>③</strong> to refresh.';
       }
       if (!items.length) {
+        traditionalSeoHideBacklinksModalToolbar();
         if (sampleN > 0) {
           listEl.innerHTML =
             `<p style="color:#94a3b8;margin:0;line-height:1.5;">Keywords Everywhere reported <strong>${sampleN}</strong> row(s) in the last <strong>Pg bl</strong> sample for this page, but the detailed list is not in the database yet.</p>` +
@@ -73682,26 +73796,30 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         openBackdrop();
         return;
       }
+      traditionalSeoHideBacklinksModalToolbar();
       listEl.innerHTML = '<p style="color:#94a3b8;margin:0;">Applying disavow list…</p>';
       openBackdrop();
       traditionalSeoEnsureDisavowLoadedUi().then((pack) => {
         if (TRADITIONAL_SEO_STATE.filterDisavowedBacklinkCounts === false) {
-          listEl.innerHTML = items.map((it, i) => traditionalSeoFormatOneBacklinkBlock(it, i)).join('');
+          traditionalSeoPrimeBacklinksModalRows(items);
           return;
         }
         const filtered = traditionalSeoFilterBacklinksDisavow(items, pack);
         if (!filtered.length) {
+          traditionalSeoHideBacklinksModalToolbar();
           listEl.innerHTML =
             '<p style="color:#94a3b8;margin:0;">No rows left after applying your disavow file (every sample row matched a listed domain or URL).</p>';
           return;
         }
-        listEl.innerHTML = filtered.map((it, i) => traditionalSeoFormatOneBacklinkBlock(it, i)).join('');
+        traditionalSeoPrimeBacklinksModalRows(filtered);
       });
     }
 
     function wireTraditionalSeoBacklinksModal() {
       const backdrop = document.getElementById('traditional-seo-backlinks-modal');
       const closeBtn = document.getElementById('traditional-seo-backlinks-modal-close');
+      const followSel = document.getElementById('traditional-seo-backlinks-modal-filter-follow');
+      const rankSel = document.getElementById('traditional-seo-backlinks-modal-sort-rank');
       if (backdrop && !backdrop.dataset.wiredBacklinks) {
         backdrop.dataset.wiredBacklinks = '1';
         backdrop.addEventListener('click', (e) => {
@@ -73712,6 +73830,15 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         closeBtn.dataset.wiredBacklinks = '1';
         closeBtn.addEventListener('click', () => traditionalSeoCloseBacklinksModal());
       }
+      const wireSel = (el) => {
+        if (!el || el.dataset.wiredBlToolbar) return;
+        el.dataset.wiredBlToolbar = '1';
+        el.addEventListener('change', () => {
+          traditionalSeoRenderBacklinksModalList();
+        });
+      };
+      wireSel(followSel);
+      wireSel(rankSel);
     }
 
     function traditionalSeoModalNoteForRule(row, rule, pageUrl) {

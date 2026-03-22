@@ -263,7 +263,7 @@ function domainIndexRowToBacklinkRow(r) {
     target_url: tgt,
     anchor: String(r.anchor || '').trim(),
     dofollow,
-    strength: null,
+    strength: pickStrength(r),
     domain_source: domain_source || undefined
   };
 }
