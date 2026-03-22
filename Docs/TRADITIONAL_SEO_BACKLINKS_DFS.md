@@ -71,7 +71,7 @@ For each evaluated URL, the modal should list **all backlinks returned for that 
 | `BACKLINK_INDEX_ROLLBACK` | `1` / `true` / `yes` / `on` → **force KE-only** for backlink index behaviour; no DFS spend. |
 | `TRADITIONAL_SEO_BACKLINK_INDEX_SOURCE` | `ke` / `dataforseo` / `both` when rollback is off. |
 | `DATAFORSEO_API_LOGIN` / `DATAFORSEO_API_PASSWORD` | Basic auth for DFS (see existing summary route). |
-| `DFS_PAGE_BACKLINKS_MAX` | Optional. **Default `100`** — max backlink rows stored per page URL for the DFS page list (fetch + modal). Clamped **1–500**. Implemented in `lib/dfs-backlink-limits.js`; surfaced on `dataforseo-backlink-summary` responses as `data.dfsPageBacklinksMax`. |
+| `DFS_PAGE_BACKLINKS_MAX` | Optional. **Default `50000`** — max backlink rows merged per page URL from the domain index (modal + **DFS bl** count). Clamped **1–250000**. Per-page **`backlinks/live` refresh** is still capped at **1000 items per API task** (DataForSEO limit); use domain index for full coverage. See `dfsPageBacklinksLiveTaskLimit` in `lib/dfs-backlink-limits.js`. API responses may include `dfsPageBacklinksLiveTaskLimit`. |
 
 ---
 

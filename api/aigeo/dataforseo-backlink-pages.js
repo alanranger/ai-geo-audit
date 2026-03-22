@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import {
   dfsBacklinksLiveRankScale,
   dfsClientLimits,
+  dfsPageBacklinksLiveTaskLimit,
   dfsPageBacklinksMax
 } from '../../lib/dfs-backlink-limits.js';
 import {
@@ -418,7 +419,7 @@ async function runRefresh(supabase, pageUrlsNorm, force, nowMs) {
       }
     };
   }
-  const limit = dfsPageBacklinksMax();
+  const limit = dfsPageBacklinksLiveTaskLimit();
   let refreshed = 0;
   let skippedFresh = 0;
   let apiErrors = 0;
