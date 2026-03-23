@@ -6617,11 +6617,11 @@
 
         <div class="traditional-seo-ctr-top-grid" aria-live="polite">
           <div class="card traditional-seo-ctr-top-card">
-            <div class="traditional-seo-ctr-top-title">Top CTR gainers (Δ pp vs prior audit)</div>
+            <div class="traditional-seo-ctr-top-title">Top click gainers (Δ clicks)</div>
             <ul id="traditional-seo-ctr-gainers" class="traditional-seo-ctr-top-list"></ul>
           </div>
           <div class="card traditional-seo-ctr-top-card">
-            <div class="traditional-seo-ctr-top-title">Top CTR losers (Δ pp vs prior audit)</div>
+            <div class="traditional-seo-ctr-top-title">Top click losers (Δ clicks)</div>
             <ul id="traditional-seo-ctr-losers" class="traditional-seo-ctr-top-list"></ul>
           </div>
           <div id="traditional-seo-ctr-top-foot" class="traditional-seo-ctr-top-foot"></div>
@@ -75679,12 +75679,6 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return out;
     }
 
-    function traditionalSeoCtrPctFromClicksImpr(clicks, impressions) {
-      const im = traditionalSeoToNum(impressions, 0);
-      if (im <= 0) return null;
-      return (traditionalSeoToNum(clicks, 0) / im) * 100;
-    }
-
     function traditionalSeoCollectCtrTopUrlEntries(allRows, filt, propEff) {
       const seen = new Set();
       const out = [];
@@ -75701,16 +75695,40 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return out;
     }
 
-    function traditionalSeoCtrTopRowMarkup(d, dir) {
-      const href = traditionalSeoSafeExternalHref(d.disp);
-      const uInner = escapeHtml(d.disp);
+    function traditionalSeoClicksTopRowMarkup(dispUrl, deltaClicks, dir) {
+      const href = traditionalSeoSafeExternalHref(dispUrl);
+      const uInner = escapeHtml(dispUrl);
       const urlCell = href
         ? `<a class="traditional-seo-url-link" href="${traditionalSeoEscapeAttr(href)}" target="_blank" rel="noopener noreferrer">${uInner}</a>`
         : uInner;
-      const abs = Math.abs(d.delta);
-      const label = `${dir === 'up' ? '▲ +' : '▼ −'}${abs.toFixed(2)} pp`;
+      const n = Math.round(traditionalSeoToNum(deltaClicks, 0));
+      const abs = Math.abs(n);
+      const label = `${dir === 'up' ? '▲ +' : '▼ −'}${abs.toLocaleString()}`;
       const cls = dir === 'up' ? 'traditional-seo-ctr-top-val--up' : 'traditional-seo-ctr-top-val--down';
       return `<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url">${urlCell}</span><span class="traditional-seo-ctr-top-val ${cls}">${label}</span></li>`;
+    }
+
+    function traditionalSeoTopClicksAllowedComparableKeys(entries, propEff) {
+      const s = new Set();
+      (Array.isArray(entries) ? entries : []).forEach((e) => {
+        const d = traditionalSeoToComparableUrl(e.disp, propEff) || String(e.disp || '').trim().toLowerCase();
+        const r = traditionalSeoToComparableUrl(e.rk, propEff) || String(e.rk || '').trim().toLowerCase();
+        if (d) s.add(d);
+        if (r) s.add(r);
+      });
+      return s;
+    }
+
+    function traditionalSeoDispForComparablePageUrl(pageUrl, entries, propEff) {
+      const want = traditionalSeoToComparableUrl(pageUrl, propEff) || String(pageUrl || '').trim().toLowerCase();
+      if (!want) return String(pageUrl || '').trim();
+      const hit = (Array.isArray(entries) ? entries : []).find((e) => {
+        const d = traditionalSeoToComparableUrl(e.disp, propEff) || String(e.disp || '').trim().toLowerCase();
+        const r = traditionalSeoToComparableUrl(e.rk, propEff) || String(e.rk || '').trim().toLowerCase();
+        return want === d || want === r;
+      });
+      if (hit && hit.disp) return hit.disp;
+      return String(pageUrl || '').trim();
     }
 
     async function traditionalSeoRefreshCtrTopTenTiles() {
@@ -75740,6 +75758,49 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         return;
       }
 
+      const entries = traditionalSeoCollectCtrTopUrlEntries(allRows, filt, propEff);
+      const tierLbl = !filt.tier || filt.tier === 'all' ? 'All tiers' : String(filt.tier);
+      const propertyUrl = String(traditionalSeoPropertyUrl() || propEff).trim();
+      const allowedCmp = traditionalSeoTopClicksAllowedComparableKeys(entries, propEff);
+
+      const mapMoverToTile = (row) => {
+        const cmp =
+          traditionalSeoToComparableUrl(row.page_url, propEff) || String(row.page_url || '').trim().toLowerCase();
+        if (!cmp || !allowedCmp.has(cmp)) return null;
+        const disp = traditionalSeoDispForComparablePageUrl(row.page_url, entries, propEff);
+        return { disp, delta: traditionalSeoToNum(row.delta, 0) };
+      };
+
+      let usedSupabase = false;
+      try {
+        const q = new URLSearchParams();
+        q.set('siteUrl', propertyUrl);
+        const res = await fetch(traditionalSeoApiPath(`/api/supabase/get-gsc-csv40d-click-movers?${q.toString()}`), {
+          cache: 'no-store'
+        });
+        const json = await res.json().catch(() => ({}));
+        if (gen !== TRADITIONAL_SEO_STATE.ctrTopTenRenderGen) return;
+        if (res.ok && json && json.status === 'ok' && Array.isArray(json.gainers) && Array.isArray(json.losers)) {
+          const gainersSb = json.gainers.map(mapMoverToTile).filter(Boolean).slice(0, 10);
+          const losersSb = json.losers.map(mapMoverToTile).filter(Boolean).slice(0, 10);
+          if (gainersSb.length || losersSb.length) {
+            usedSupabase = true;
+            gainUl.innerHTML = gainersSb.length
+              ? gainersSb.map((d) => traditionalSeoClicksTopRowMarkup(d.disp, d.delta, 'up')).join('')
+              : '<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url" style="color:var(--dark-text-muted)">No positive click shifts in this segment.</span></li>';
+            loseUl.innerHTML = losersSb.length
+              ? losersSb.map((d) => traditionalSeoClicksTopRowMarkup(d.disp, d.delta, 'down')).join('')
+              : '<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url" style="color:var(--dark-text-muted)">No negative click shifts in this segment.</span></li>';
+            foot.textContent = `Window: 40d (06-site-urls / GSC) · Segment: ${tierLbl} · Compare: ${json.newer?.date_end || '—'} vs ${json.older?.date_end || '—'}`;
+          }
+        }
+      } catch (e) {
+        /* fall back to audit rollups */
+      }
+
+      if (usedSupabase) return;
+      if (gen !== TRADITIONAL_SEO_STATE.ctrTopTenRenderGen) return;
+
       let audit = null;
       try {
         audit = await traditionalSeoLoadAuditData(false);
@@ -75749,7 +75810,6 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const unwrap = typeof unwrapAuditPayload === 'function' ? unwrapAuditPayload : (o) => o;
       audit = unwrap(audit);
       const curDate = String(audit?.auditDate || audit?.audit_date || '').trim();
-      const propertyUrl = String(traditionalSeoPropertyUrl() || propEff).trim();
 
       let prevAudit = null;
       const fetchPrev = typeof window.fetchPreviousAuditForDeltas === 'function' ? window.fetchPreviousAuditForDeltas : null;
@@ -75765,40 +75825,39 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
       const curLookup = traditionalSeoBuildMetricsLookup(audit, propEff);
       const prevLookup = prevAudit ? traditionalSeoBuildMetricsLookup(prevAudit, propEff) : new Map();
-      const entries = traditionalSeoCollectCtrTopUrlEntries(allRows, filt, propEff);
       const minImpr = 80;
       const deltas = [];
 
       entries.forEach(({ rk, disp }) => {
-        const c = (curLookup && curLookup.get) ? (curLookup.get(rk) || { clicks: 0, impressions: 0 }) : { clicks: 0, impressions: 0 };
-        const p = (prevLookup && prevLookup.get) ? (prevLookup.get(rk) || { clicks: 0, impressions: 0 }) : { clicks: 0, impressions: 0 };
+        const c = curLookup && curLookup.get ? curLookup.get(rk) || { clicks: 0, impressions: 0 } : { clicks: 0, impressions: 0 };
+        const p = prevLookup && prevLookup.get ? prevLookup.get(rk) || { clicks: 0, impressions: 0 } : { clicks: 0, impressions: 0 };
         if (traditionalSeoToNum(c.impressions, 0) < minImpr) return;
-        const curCtr = traditionalSeoCtrPctFromClicksImpr(c.clicks, c.impressions);
-        const prevCtr = traditionalSeoCtrPctFromClicksImpr(p.clicks, p.impressions);
-        if (curCtr == null || prevCtr == null) return;
-        deltas.push({ disp, delta: curCtr - prevCtr, curCtr, prevCtr });
+        deltas.push({
+          disp,
+          delta: traditionalSeoToNum(c.clicks, 0) - traditionalSeoToNum(p.clicks, 0)
+        });
       });
 
-      const tierLbl = !filt.tier || filt.tier === 'all' ? 'All tiers' : String(filt.tier);
       const prevDateStr = String(prevAudit?.auditDate || prevAudit?.audit_date || '').trim() || 'prior audit';
 
       if (!prevAudit || !prevLookup.size) {
         if (gen !== TRADITIONAL_SEO_STATE.ctrTopTenRenderGen) return;
-        const msg =
-          '<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url" style="color:var(--dark-text-muted)">Need a comparable prior audit (~27d earlier) with GSC query+page rows.</span></li>';
+        const hint =
+          'No paired 40-day snapshots yet. Run the 06-site-urls GSC backfill twice on different days (see API backfill-gsc-csv-urls-40d), or rely on a prior audit with GSC query+page data.';
+        const msg = `<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url" style="color:var(--dark-text-muted)">${escapeHtml(hint)}</span></li>`;
         gainUl.innerHTML = msg;
         loseUl.innerHTML = msg;
-        foot.textContent = `Window ~28d · Segment: ${tierLbl} · Compare: ${curDate || 'current'}`;
+        foot.textContent = `Segment: ${tierLbl} · Compare: ${curDate || 'current'}`;
         return;
       }
 
       if (!deltas.length) {
         if (gen !== TRADITIONAL_SEO_STATE.ctrTopTenRenderGen) return;
         const msg =
-          '<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url" style="color:var(--dark-text-muted)">No URLs with enough impressions in both windows.</span></li>';
+          '<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url" style="color:var(--dark-text-muted)">No URLs with enough impressions in the current audit window.</span></li>';
         gainUl.innerHTML = msg;
         loseUl.innerHTML = msg;
-        foot.textContent = `Window ~28d · Segment: ${tierLbl} · Compare: ${curDate || 'current'} vs ${prevDateStr}`;
+        foot.textContent = `Window ~28d (audit GSC) · Segment: ${tierLbl} · Compare: ${curDate || 'current'} vs ${prevDateStr}`;
         return;
       }
 
@@ -75807,12 +75866,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
       if (gen !== TRADITIONAL_SEO_STATE.ctrTopTenRenderGen) return;
       gainUl.innerHTML = gainers.length
-        ? gainers.map((d) => traditionalSeoCtrTopRowMarkup(d, 'up')).join('')
-        : '<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url" style="color:var(--dark-text-muted)">No positive shifts in this segment.</span></li>';
+        ? gainers.map((d) => traditionalSeoClicksTopRowMarkup(d.disp, d.delta, 'up')).join('')
+        : '<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url" style="color:var(--dark-text-muted)">No positive click shifts in this segment.</span></li>';
       loseUl.innerHTML = losers.length
-        ? losers.map((d) => traditionalSeoCtrTopRowMarkup(d, 'down')).join('')
-        : '<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url" style="color:var(--dark-text-muted)">No negative shifts in this segment.</span></li>';
-      foot.textContent = `Window ~28d · Segment: ${tierLbl} · Compare: ${curDate || 'current'} vs ${prevDateStr}`;
+        ? losers.map((d) => traditionalSeoClicksTopRowMarkup(d.disp, d.delta, 'down')).join('')
+        : '<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url" style="color:var(--dark-text-muted)">No negative click shifts in this segment.</span></li>';
+      foot.textContent = `Window ~28d (audit GSC) · Segment: ${tierLbl} · Compare: ${curDate || 'current'} vs ${prevDateStr}`;
     }
 
     function renderTraditionalSeoResultsTable() {
