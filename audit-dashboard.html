@@ -1732,6 +1732,83 @@
       margin-bottom: 1rem;
     }
 
+    section[data-panel="traditional-seo"] .traditional-seo-ctr-top-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    @media (max-width: 900px) {
+      section[data-panel="traditional-seo"] .traditional-seo-ctr-top-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    section[data-panel="traditional-seo"] .traditional-seo-ctr-top-card {
+      text-align: left;
+    }
+
+    section[data-panel="traditional-seo"] .traditional-seo-ctr-top-title {
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: var(--dark-text-muted);
+      margin: 0 0 0.35rem 0;
+      line-height: 1.35;
+      text-align: left;
+    }
+
+    section[data-panel="traditional-seo"] .traditional-seo-ctr-top-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    section[data-panel="traditional-seo"] .traditional-seo-ctr-top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 0.75rem;
+      padding: 0.38rem 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+      font-size: 0.78rem;
+      line-height: 1.35;
+    }
+
+    section[data-panel="traditional-seo"] .traditional-seo-ctr-top-row:last-child {
+      border-bottom: none;
+    }
+
+    section[data-panel="traditional-seo"] .traditional-seo-ctr-top-url {
+      flex: 1;
+      min-width: 0;
+      word-break: break-all;
+      color: #e2e8f0;
+    }
+
+    section[data-panel="traditional-seo"] .traditional-seo-ctr-top-val {
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    section[data-panel="traditional-seo"] .traditional-seo-ctr-top-val--up {
+      color: #34d399;
+    }
+
+    section[data-panel="traditional-seo"] .traditional-seo-ctr-top-val--down {
+      color: #f87171;
+    }
+
+    section[data-panel="traditional-seo"] .traditional-seo-ctr-top-foot {
+      grid-column: 1 / -1;
+      font-size: 0.74rem;
+      color: var(--dark-text-muted);
+      line-height: 1.4;
+      margin: 0;
+    }
+
     section[data-panel="traditional-seo"] .traditional-seo-strip-title {
       font-size: 0.9rem;
       font-weight: 700;
@@ -6536,6 +6613,18 @@
             <div class="traditional-seo-strip-sub" style="margin-top: 0.15rem;">Current rule state mix for this property.</div>
             <div id="traditional-seo-drilldown-tiles" class="traditional-seo-drilldown-grid"></div>
           </div>
+        </div>
+
+        <div class="traditional-seo-ctr-top-grid" aria-live="polite">
+          <div class="card traditional-seo-ctr-top-card">
+            <div class="traditional-seo-ctr-top-title">Top CTR gainers (Δ pp vs prior audit)</div>
+            <ul id="traditional-seo-ctr-gainers" class="traditional-seo-ctr-top-list"></ul>
+          </div>
+          <div class="card traditional-seo-ctr-top-card">
+            <div class="traditional-seo-ctr-top-title">Top CTR losers (Δ pp vs prior audit)</div>
+            <ul id="traditional-seo-ctr-losers" class="traditional-seo-ctr-top-list"></ul>
+          </div>
+          <div id="traditional-seo-ctr-top-foot" class="traditional-seo-ctr-top-foot"></div>
         </div>
 
         <div class="card traditional-seo-rules-card">
@@ -69549,6 +69638,8 @@ Final Score: ${score}/100`;
         }
       }
 
+      window.fetchPreviousAuditForDeltas = fetchPreviousAuditForDeltas;
+
       window.renderDashboardTab = async function renderDashboardTab() {
         const renderToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         window.__dashboardRenderToken = renderToken;
@@ -71050,7 +71141,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       disavowUiLoaded: null,
       disavowUiPromise: null,
       /** When true (default), Pg bl + BL sample counts exclude disavowed / spam rows when JSON rows exist. */
-      filterDisavowedBacklinkCounts: true
+      filterDisavowedBacklinkCounts: true,
+      ctrTopTenRenderGen: 0
     };
 
     /** SPA rewrite sends most paths to audit-dashboard.html; load disavow via API so we get real text. */
@@ -75587,6 +75679,142 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return out;
     }
 
+    function traditionalSeoCtrPctFromClicksImpr(clicks, impressions) {
+      const im = traditionalSeoToNum(impressions, 0);
+      if (im <= 0) return null;
+      return (traditionalSeoToNum(clicks, 0) / im) * 100;
+    }
+
+    function traditionalSeoCollectCtrTopUrlEntries(allRows, filt, propEff) {
+      const seen = new Set();
+      const out = [];
+      (Array.isArray(allRows) ? allRows : []).forEach((row) => {
+        if (String(row?.tier || '').toLowerCase() === 'sitewide') return;
+        if (!traditionalSeoRowMatchesNonStatusFilters(row, filt)) return;
+        const urlRaw = String(row?.url || '').trim();
+        if (!urlRaw) return;
+        const rk = traditionalSeoLandingRollupGroupKey(urlRaw, propEff);
+        if (!rk || seen.has(rk)) return;
+        seen.add(rk);
+        out.push({ rk, disp: traditionalSeoLandingRollupDisplayUrl(rk, propEff) });
+      });
+      return out;
+    }
+
+    function traditionalSeoCtrTopRowMarkup(d, dir) {
+      const href = traditionalSeoSafeExternalHref(d.disp);
+      const uInner = escapeHtml(d.disp);
+      const urlCell = href
+        ? `<a class="traditional-seo-url-link" href="${traditionalSeoEscapeAttr(href)}" target="_blank" rel="noopener noreferrer">${uInner}</a>`
+        : uInner;
+      const abs = Math.abs(d.delta);
+      const label = `${dir === 'up' ? '▲ +' : '▼ −'}${abs.toFixed(2)} pp`;
+      const cls = dir === 'up' ? 'traditional-seo-ctr-top-val--up' : 'traditional-seo-ctr-top-val--down';
+      return `<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url">${urlCell}</span><span class="traditional-seo-ctr-top-val ${cls}">${label}</span></li>`;
+    }
+
+    async function traditionalSeoRefreshCtrTopTenTiles() {
+      const gainUl = document.getElementById('traditional-seo-ctr-gainers');
+      const loseUl = document.getElementById('traditional-seo-ctr-losers');
+      const foot = document.getElementById('traditional-seo-ctr-top-foot');
+      if (!gainUl || !loseUl || !foot) return;
+
+      TRADITIONAL_SEO_STATE.ctrTopTenRenderGen += 1;
+      const gen = TRADITIONAL_SEO_STATE.ctrTopTenRenderGen;
+      const waitRow =
+        '<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url" style="color:var(--dark-text-muted)">Loading…</span></li>';
+      gainUl.innerHTML = waitRow;
+      loseUl.innerHTML = waitRow;
+      foot.textContent = '';
+
+      const allRows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
+      const propEff = traditionalSeoEffectivePropertyUrl();
+      const filt = TRADITIONAL_SEO_STATE.filters || {};
+      if (!allRows.length || !propEff) {
+        if (gen !== TRADITIONAL_SEO_STATE.ctrTopTenRenderGen) return;
+        const empty =
+          '<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url" style="color:var(--dark-text-muted)">No Traditional SEO results yet.</span></li>';
+        gainUl.innerHTML = empty;
+        loseUl.innerHTML = empty;
+        foot.textContent = 'Run scoring after an audit with GSC query+page export.';
+        return;
+      }
+
+      let audit = null;
+      try {
+        audit = await traditionalSeoLoadAuditData(false);
+      } catch (e) {
+        audit = null;
+      }
+      const unwrap = typeof unwrapAuditPayload === 'function' ? unwrapAuditPayload : (o) => o;
+      audit = unwrap(audit);
+      const curDate = String(audit?.auditDate || audit?.audit_date || '').trim();
+      const propertyUrl = String(traditionalSeoPropertyUrl() || propEff).trim();
+
+      let prevAudit = null;
+      const fetchPrev = typeof window.fetchPreviousAuditForDeltas === 'function' ? window.fetchPreviousAuditForDeltas : null;
+      if (fetchPrev && propertyUrl && curDate) {
+        try {
+          prevAudit = unwrap(await fetchPrev(propertyUrl, curDate));
+        } catch (e) {
+          prevAudit = null;
+        }
+      }
+
+      if (gen !== TRADITIONAL_SEO_STATE.ctrTopTenRenderGen) return;
+
+      const curLookup = traditionalSeoBuildMetricsLookup(audit, propEff);
+      const prevLookup = prevAudit ? traditionalSeoBuildMetricsLookup(prevAudit, propEff) : new Map();
+      const entries = traditionalSeoCollectCtrTopUrlEntries(allRows, filt, propEff);
+      const minImpr = 80;
+      const deltas = [];
+
+      entries.forEach(({ rk, disp }) => {
+        const c = (curLookup && curLookup.get) ? (curLookup.get(rk) || { clicks: 0, impressions: 0 }) : { clicks: 0, impressions: 0 };
+        const p = (prevLookup && prevLookup.get) ? (prevLookup.get(rk) || { clicks: 0, impressions: 0 }) : { clicks: 0, impressions: 0 };
+        if (traditionalSeoToNum(c.impressions, 0) < minImpr) return;
+        const curCtr = traditionalSeoCtrPctFromClicksImpr(c.clicks, c.impressions);
+        const prevCtr = traditionalSeoCtrPctFromClicksImpr(p.clicks, p.impressions);
+        if (curCtr == null || prevCtr == null) return;
+        deltas.push({ disp, delta: curCtr - prevCtr, curCtr, prevCtr });
+      });
+
+      const tierLbl = !filt.tier || filt.tier === 'all' ? 'All tiers' : String(filt.tier);
+      const prevDateStr = String(prevAudit?.auditDate || prevAudit?.audit_date || '').trim() || 'prior audit';
+
+      if (!prevAudit || !prevLookup.size) {
+        if (gen !== TRADITIONAL_SEO_STATE.ctrTopTenRenderGen) return;
+        const msg =
+          '<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url" style="color:var(--dark-text-muted)">Need a comparable prior audit (~27d earlier) with GSC query+page rows.</span></li>';
+        gainUl.innerHTML = msg;
+        loseUl.innerHTML = msg;
+        foot.textContent = `Window ~28d · Segment: ${tierLbl} · Compare: ${curDate || 'current'}`;
+        return;
+      }
+
+      if (!deltas.length) {
+        if (gen !== TRADITIONAL_SEO_STATE.ctrTopTenRenderGen) return;
+        const msg =
+          '<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url" style="color:var(--dark-text-muted)">No URLs with enough impressions in both windows.</span></li>';
+        gainUl.innerHTML = msg;
+        loseUl.innerHTML = msg;
+        foot.textContent = `Window ~28d · Segment: ${tierLbl} · Compare: ${curDate || 'current'} vs ${prevDateStr}`;
+        return;
+      }
+
+      const gainers = deltas.filter((d) => d.delta > 0).sort((a, b) => b.delta - a.delta).slice(0, 10);
+      const losers = deltas.filter((d) => d.delta < 0).sort((a, b) => a.delta - b.delta).slice(0, 10);
+
+      if (gen !== TRADITIONAL_SEO_STATE.ctrTopTenRenderGen) return;
+      gainUl.innerHTML = gainers.length
+        ? gainers.map((d) => traditionalSeoCtrTopRowMarkup(d, 'up')).join('')
+        : '<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url" style="color:var(--dark-text-muted)">No positive shifts in this segment.</span></li>';
+      loseUl.innerHTML = losers.length
+        ? losers.map((d) => traditionalSeoCtrTopRowMarkup(d, 'down')).join('')
+        : '<li class="traditional-seo-ctr-top-row"><span class="traditional-seo-ctr-top-url" style="color:var(--dark-text-muted)">No negative shifts in this segment.</span></li>';
+      foot.textContent = `Window ~28d · Segment: ${tierLbl} · Compare: ${curDate || 'current'} vs ${prevDateStr}`;
+    }
+
     function renderTraditionalSeoResultsTable() {
       if (TRADITIONAL_SEO_STATE.filterDisavowedBacklinkCounts !== false && TRADITIONAL_SEO_STATE.disavowUiLoaded === null) {
         traditionalSeoEnsureDisavowLoadedUi().then(() => renderTraditionalSeoResultsTable());
@@ -75909,6 +76137,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       updateTraditionalSeoSortHeaderState();
       renderTraditionalSeoDfsBacklinkTiles();
       renderTraditionalSeoDfsDomainRankTile();
+      void traditionalSeoRefreshCtrTopTenTiles();
     }
 
     function traditionalSeoEvalProgressClearTimer() {
