@@ -537,11 +537,26 @@ export default async function handler(req, res) {
       // Debug: Log authority_by_segment structure for verification
       // (This will be stored as JSON in Supabase)
       
-      // GSC Data (for reference)
-      gsc_clicks: ensureNumber(searchData?.totalClicks),
-      gsc_impressions: ensureNumber(searchData?.totalImpressions),
-      gsc_avg_position: ensureNumber(searchData?.averagePosition),
-      gsc_ctr: ensureNumber(searchData?.ctr),
+      // GSC Data (for reference) — match client shapes: totals may live under searchData.overview only
+      gsc_clicks: ensureNumber(
+        searchData?.totalClicks ??
+          searchData?.overview?.totalClicks ??
+          searchData?.overview?.siteTotalClicks ??
+          searchData?.overview?.clicks
+      ),
+      gsc_impressions: ensureNumber(
+        searchData?.totalImpressions ??
+          searchData?.overview?.totalImpressions ??
+          searchData?.overview?.siteTotalImpressions ??
+          searchData?.overview?.impressions
+      ),
+      gsc_avg_position: ensureNumber(
+        searchData?.averagePosition ??
+          searchData?.avgPosition ??
+          searchData?.overview?.position ??
+          searchData?.overview?.avgPosition
+      ),
+      gsc_ctr: ensureNumber(searchData?.ctr ?? searchData?.overview?.ctr),
       
       // EEAT Score and Components (for EEAT tile delta calculations)
       // Note: Domain strength is fetched separately and should be passed from client or stored separately

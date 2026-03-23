@@ -32037,6 +32037,7 @@
     
     // Fetch the latest audit from Supabase
     async function fetchLatestAuditFromSupabase(propertyUrl, minimalOnly = false) {
+      let minimalData = null;
       try {
         if (!propertyUrl) {
           debugLog('⚠ Cannot fetch from Supabase: property URL not set', 'warn');
@@ -32054,9 +32055,31 @@
           const cleanPath = path.startsWith('/') ? path : `/${path}`;
           return `${baseUrl}${cleanPath}`;
         });
+
+        const mergeMinimalAuditFallback = (minimal) => {
+          if (!minimal || minimal._minimal !== true) return minimal;
+          try {
+            const raw = localStorage.getItem('last_audit_results');
+            const prev = raw ? JSON.parse(raw) : null;
+            const prevSd = prev?.searchData;
+            if (!prevSd || typeof prevSd !== 'object') return minimal;
+            const out = {
+              ...prev,
+              ...minimal,
+              scores: { ...(prev.scores || {}), ...(minimal.scores || {}) },
+              searchData: prevSd,
+              timestamp: minimal.timestamp || prev.timestamp,
+              auditDate: minimal.auditDate || prev.auditDate || prev.audit_date,
+            };
+            delete out._minimal;
+            debugLog('Merged minimal Supabase audit with existing local searchData (full fetch failed)', 'info');
+            return out;
+          } catch (e) {
+            return minimal;
+          }
+        };
         
         // Step 1: Try minimal request first to get timestamp (fast, unlikely to timeout)
-        let minimalData = null;
         if (!minimalOnly) {
           debugLog(`Fetching minimal audit data (timestamp + scores) from Supabase for ${propertyUrl}...`, 'info');
           try {
@@ -32157,7 +32180,7 @@
               // Return minimal data if available, otherwise null
               if (minimalData) {
                 debugLog(`⚠ Returning minimal data (timestamp + scores) as fallback`, 'info');
-                return minimalData;
+                return mergeMinimalAuditFallback(minimalData);
               }
               return null;
             }
@@ -32169,7 +32192,7 @@
               if (error.message && error.message.includes('FUNCTION_INVOCATION_FAILED')) {
                 debugLog(`⚠ Full data fetch failed due to timeout/size. Returning minimal data (timestamp + scores) as fallback.`, 'warn');
                 if (minimalData) {
-                  return minimalData;
+                  return mergeMinimalAuditFallback(minimalData);
                 }
               }
             } catch (parseError) {
@@ -32178,7 +32201,7 @@
             // Return minimal data if available, otherwise null
             if (minimalData) {
               debugLog(`⚠ Returning minimal data (timestamp + scores) as fallback after full request failure`, 'info');
-              return minimalData;
+              return mergeMinimalAuditFallback(minimalData);
             }
             return null;
           }
@@ -32186,7 +32209,7 @@
           if (error.name === 'AbortError' || error.name === 'TimeoutError' || error.message.includes('timeout')) {
             debugLog(`⚠ Supabase fetch timed out. Returning minimal data (timestamp + scores) as fallback.`, 'warn');
             if (minimalData) {
-              return minimalData;
+              return mergeMinimalAuditFallback(minimalData);
             }
           } else {
             debugLog(`⚠ Supabase fetch error: ${error.message}`, 'warn');
@@ -32194,7 +32217,7 @@
           // Return minimal data if available, otherwise null
           if (minimalData) {
             debugLog(`⚠ Returning minimal data (timestamp + scores) as fallback after error`, 'info');
-            return minimalData;
+            return mergeMinimalAuditFallback(minimalData);
           }
           return null;
         }
@@ -32202,7 +32225,7 @@
         // Catch any errors in the outer try block (shouldn't happen, but just in case)
         debugLog(`⚠ Outer error in fetchLatestAuditFromSupabase: ${outerError.message}`, 'warn');
         if (minimalData) {
-          return minimalData;
+          return mergeMinimalAuditFallback(minimalData);
         }
         return null;
       }
@@ -64490,13 +64513,23 @@ Final Score: ${score}/100`;
       }
 
       function computeAuditKpisFromAudit(audit) {
-        const sd = audit?.searchData || null;
-        if (!sd) return null;
+        const sd = audit?.searchData;
+        if (!sd || typeof sd !== 'object') return null;
+        const ov = sd.overview && typeof sd.overview === 'object' ? sd.overview : {};
+        const clicks = toNum(sd.totalClicks ?? ov.totalClicks ?? ov.siteTotalClicks ?? ov.clicks);
+        const impressions = toNum(sd.totalImpressions ?? ov.totalImpressions ?? ov.siteTotalImpressions ?? ov.impressions);
+        let avgPosition = toNum(sd.averagePosition ?? sd.avgPosition ?? ov.position ?? ov.avgPosition);
+        let ctrPct = toNum(sd.ctr ?? ov.ctr);
+        if (ctrPct == null && clicks != null && impressions != null && impressions > 0) {
+          ctrPct = (clicks / impressions) * 100;
+        }
+        const hasAny = clicks != null || impressions != null || avgPosition != null || ctrPct != null;
+        if (!hasAny) return null;
         return {
-          clicks: toNum(sd.totalClicks) ?? 0,
-          impressions: toNum(sd.totalImpressions) ?? 0,
-          avgPosition: toNum(sd.averagePosition),
-          ctrPct: toNum(sd.ctr),
+          clicks: clicks ?? 0,
+          impressions: impressions ?? 0,
+          avgPosition,
+          ctrPct,
         };
       }
 
@@ -68494,12 +68527,7 @@ Final Score: ${score}/100`;
           aiSummaryScore: scores.aiSummaryScore || (typeof auditData.ai_summary_score === 'number' ? auditData.ai_summary_score : null),
           aiSummaryComponents, // Added for AI Summary radar chart deltas
           pillars,
-          auditKpis: searchData.overview ? {
-            clicks: searchData.overview.clicks || searchData.totalClicks || 0,
-            impressions: searchData.overview.impressions || searchData.totalImpressions || 0,
-            avgPosition: searchData.overview.position || searchData.averagePosition || null,
-            ctrPct: searchData.overview.ctr || searchData.ctr || 0
-          } : null,
+          auditKpis: computeAuditKpisFromAudit(auditData),
           moneyCitations: moneyShare.money,
           totalCitations: moneyShare.total,
           moneySharePct: moneySharePct, // Calculated from ranking data (money citations / total citations)
