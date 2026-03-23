@@ -8,6 +8,7 @@ import {
   filtersDeltaAfter,
   paginateDomainBacklinks
 } from '../../lib/dfs-domain-backlink-ingest.js';
+import { aggregateDfsBacklinksForDomain } from '../../lib/authority-dfs-backlinks.js';
 import { DFS_SPAM_FILTERS_VERSION } from '../../lib/dfs-spam-filters.js';
 
 const sendJson = (res, status, body) => {
@@ -108,6 +109,29 @@ async function countRows(supabase, domainHost) {
   return count != null ? count : 0;
 }
 
+async function domainIndexAggregateStats(supabase, domainHost) {
+  let rowCount = 0;
+  let referringDomains = 0;
+  let dofollowSplit = { dofollow: 0, nofollow: 0, unknown: 0 };
+  try {
+    const agg = await aggregateDfsBacklinksForDomain(supabase, domainHost);
+    if (agg) {
+      rowCount = agg.totalBacklinks;
+      referringDomains = agg.referringDomains;
+      dofollowSplit = { dofollow: agg.dofollow, nofollow: agg.nofollow, unknown: agg.unknown };
+    }
+  } catch {
+    rowCount = await countRows(supabase, domainHost);
+    referringDomains = null;
+    try {
+      dofollowSplit = await countDofollowSplit(supabase, domainHost);
+    } catch {
+      dofollowSplit = { dofollow: 0, nofollow: 0, unknown: 0 };
+    }
+  }
+  return { rowCount, referringDomains, dofollowSplit };
+}
+
 async function countDofollowSplit(supabase, domainHost) {
   const base = () =>
     supabase.from('dfs_domain_backlink_rows').select('*', { count: 'exact', head: true }).eq('domain_host', domainHost);
@@ -145,20 +169,15 @@ function lastIngestFromState(st) {
 
 async function handleDomainStatus(supabase, domainHost, src) {
   const st = await readState(supabase, domainHost);
-  const cnt = await countRows(supabase, domainHost);
-  let dofollowSplit = { dofollow: 0, nofollow: 0, unknown: 0 };
-  try {
-    dofollowSplit = await countDofollowSplit(supabase, domainHost);
-  } catch {
-    dofollowSplit = { dofollow: 0, nofollow: 0, unknown: 0 };
-  }
+  const { rowCount, referringDomains, dofollowSplit } = await domainIndexAggregateStats(supabase, domainHost);
   return {
     status: 200,
     body: {
       status: 'ok',
       data: {
         domain: domainHost,
-        rowCount: cnt,
+        rowCount,
+        referringDomains,
         dofollowSplit,
         lastIngest: lastIngestFromState(st),
         state: st,
@@ -193,13 +212,10 @@ async function handleDomainFull(supabase, creds, domainHost, src) {
   throwIfSupabaseErr(delErr, 'delete_domain_rows');
   await insertChunks(supabase, rows);
 
-  const cnt = await countRows(supabase, domainHost);
-  let dofollowSplit = { dofollow: 0, nofollow: 0, unknown: 0 };
-  try {
-    dofollowSplit = await countDofollowSplit(supabase, domainHost);
-  } catch {
-    dofollowSplit = { dofollow: 0, nofollow: 0, unknown: 0 };
-  }
+  const { rowCount: cnt, referringDomains, dofollowSplit } = await domainIndexAggregateStats(
+    supabase,
+    domainHost
+  );
   const floor = maxFirstSeen || new Date().toISOString();
   const ingestedAt = new Date().toISOString();
   await writeState(supabase, {
@@ -228,6 +244,7 @@ async function handleDomainFull(supabase, creds, domainHost, src) {
         rowsWritten: rows.length,
         itemsFromApi,
         rowCount: cnt,
+        referringDomains,
         dofollowSplit,
         lastIngest: {
           action: 'full',
@@ -284,13 +301,10 @@ async function handleDomainDelta(supabase, creds, domainHost, src) {
   const nextFloor =
     maxFirstSeen && maxFirstSeen > String(st.delta_first_seen_floor) ? maxFirstSeen : st.delta_first_seen_floor;
 
-  const cnt = await countRows(supabase, domainHost);
-  let dofollowSplit = { dofollow: 0, nofollow: 0, unknown: 0 };
-  try {
-    dofollowSplit = await countDofollowSplit(supabase, domainHost);
-  } catch {
-    dofollowSplit = { dofollow: 0, nofollow: 0, unknown: 0 };
-  }
+  const { rowCount: cnt, referringDomains, dofollowSplit } = await domainIndexAggregateStats(
+    supabase,
+    domainHost
+  );
   const ingestedAt = new Date().toISOString();
   await writeState(supabase, {
     ...st,
@@ -318,6 +332,7 @@ async function handleDomainDelta(supabase, creds, domainHost, src) {
         rowsUpserted: rows.length,
         itemsFromApi,
         rowCount: cnt,
+        referringDomains,
         dofollowSplit,
         lastIngest: {
           action: 'delta',
