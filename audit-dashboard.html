@@ -6121,6 +6121,7 @@
             <div id="traditional-seo-domain-strength-meta" style="margin-top: 0.35rem; font-size: 0.76rem; color: var(--dark-text-muted); text-align: center; line-height: 1.35;">
               Loading domain strength…
             </div>
+            <div id="traditional-seo-domain-strength-drivers" style="width: 100%; margin-top: 0.25rem;" aria-live="polite"></div>
           </div>
           <div class="card" id="traditional-seo-dfs-tile-card">
             <div class="traditional-seo-strip-title traditional-seo-metric-heading">Backlinks (DataForSEO)</div>
@@ -70693,11 +70694,107 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return list.find((it) => it && it.isCompetitor === false && String(it?.searchEngine || '').toLowerCase() === 'google') || null;
     }
 
+    function traditionalSeoDsParseNum(v) {
+      const n = typeof v === 'number' ? v : (v == null || v === '' ? NaN : Number(v));
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function traditionalSeoDsFmtIntDash(v) {
+      const n = traditionalSeoDsParseNum(v);
+      if (n === null) return '—';
+      return Math.round(n).toLocaleString();
+    }
+
+    function traditionalSeoDsFmtEtvDash(v) {
+      const n = traditionalSeoDsParseNum(v);
+      if (n === null) return '—';
+      return '$' + Math.round(n).toLocaleString();
+    }
+
+    function traditionalSeoDsDriverPct(value, max) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || typeof max !== 'number' || !Number.isFinite(max) || max <= 0) return null;
+      return Math.max(0, Math.min(100, Math.round((value / max) * 100)));
+    }
+
+    /** Same caps as dashboard Domain Strength tile: scale bars to competitor set (or full set). */
+    function traditionalSeoComputeDomainStrengthDrivers(items, latest) {
+      const list = Array.isArray(items) ? items : [];
+      const competitorItems = list.filter(
+        (it) => it?.isCompetitor === true || it?.is_competitor === true || it?.domain_type === 'competitor'
+      );
+      const driverSet = competitorItems.length ? competitorItems : list;
+      const maxN = (x) => traditionalSeoDsParseNum(x) ?? 0;
+      const maxEtv = Math.max(0, ...driverSet.map((it) => maxN(it?.latest?.organicEtv)));
+      const maxKeywords = Math.max(0, ...driverSet.map((it) => maxN(it?.latest?.organicKeywordsTotal)));
+      const maxTop3 = Math.max(0, ...driverSet.map((it) => maxN(it?.latest?.top3Keywords)));
+      const maxTop10 = Math.max(0, ...driverSet.map((it) => maxN(it?.latest?.top10Keywords)));
+      const strongestDriver =
+        driverSet
+          .map((it) => ({
+            domain: String(it?.domain || '').replace(/^www\./, ''),
+            label: it?.label || it?.name || it?.domain,
+            score: traditionalSeoDsParseNum(it?.latest?.score ?? it?.score),
+          }))
+          .filter((it) => it.domain && typeof it.score === 'number' && Number.isFinite(it.score))
+          .sort((a, b) => b.score - a.score)[0] || null;
+      const pct = traditionalSeoDsDriverPct;
+      const etv = traditionalSeoDsParseNum(latest?.organicEtv);
+      const kw = traditionalSeoDsParseNum(latest?.organicKeywordsTotal);
+      const t3 = traditionalSeoDsParseNum(latest?.top3Keywords);
+      const t10 = traditionalSeoDsParseNum(latest?.top10Keywords);
+      return {
+        drivers: {
+          etv: { value: etv, pct: pct(etv, maxEtv) },
+          keywords: { value: kw, pct: pct(kw, maxKeywords) },
+          top3: { value: t3, pct: pct(t3, maxTop3) },
+          top10: { value: t10, pct: pct(t10, maxTop10) },
+        },
+        driverReference: strongestDriver
+          ? { label: strongestDriver.label || strongestDriver.domain, domain: strongestDriver.domain }
+          : null,
+      };
+    }
+
+    function traditionalSeoRenderDomainStrengthDriversHtml(ds) {
+      const drivers = ds?.drivers;
+      if (!drivers) {
+        return '<div style="margin-top:0.5rem;font-size:0.74rem;color:var(--dark-text-muted);text-align:center;">Score drivers appear after a Domain Strength snapshot.</div>';
+      }
+      const rows = [
+        { label: 'ETV (visibility)', pct: drivers.etv?.pct, display: traditionalSeoDsFmtEtvDash(drivers.etv?.value) },
+        { label: 'Total keywords', pct: drivers.keywords?.pct, display: traditionalSeoDsFmtIntDash(drivers.keywords?.value) },
+        { label: 'Top 3 keywords', pct: drivers.top3?.pct, display: traditionalSeoDsFmtIntDash(drivers.top3?.value) },
+        { label: 'Top 10 keywords', pct: drivers.top10?.pct, display: traditionalSeoDsFmtIntDash(drivers.top10?.value) },
+      ];
+      const rowsHtml = rows.map((row) => {
+        const safePct = typeof row.pct === 'number' ? row.pct : 0;
+        return `
+              <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.35rem;">
+                <div style="min-width:120px; font-size:0.78rem; color: var(--dark-text-muted);">${row.label}</div>
+                <div style="flex:1; height:8px; background: rgba(148,163,184,0.18); border-radius:999px; overflow:hidden;">
+                  <div style="height:100%; width:${safePct}%; background: rgba(96,165,250,0.85); border-radius:999px;"></div>
+                </div>
+                <div style="min-width:72px; text-align:right; font-size:0.78rem; font-weight:600; color: var(--dark-text);">${row.display}</div>
+              </div>`;
+      }).join('');
+      const driverLabel = ds?.driverReference?.label || ds?.driverReference?.domain;
+      const capsNote = driverLabel
+        ? `Scaled to strongest competitor: ${driverLabel}.`
+        : 'Scaled to strongest competitor in snapshot set.';
+      return `
+            <div style="margin-top:0.65rem; padding-top:0.5rem; border-top: 1px solid var(--dark-border);">
+              <div style="font-size:0.8rem; font-weight:600; color: var(--dark-text); margin-bottom:0.2rem;">Score drivers (trackable)</div>
+              <div style="font-size:0.75rem; color: var(--dark-text-muted); margin-bottom:0.35rem;">${capsNote}</div>
+              ${rowsHtml}
+            </div>`;
+    }
+
     async function refreshTraditionalSeoDomainCards() {
       const ring = document.getElementById('traditional-seo-domain-strength-ring');
       const valueEl = document.getElementById('traditional-seo-domain-strength-value');
       const deltaEl = document.getElementById('traditional-seo-domain-strength-delta');
       const metaEl = document.getElementById('traditional-seo-domain-strength-meta');
+      const driversEl = document.getElementById('traditional-seo-domain-strength-drivers');
       if (!ring || !valueEl) return;
       const host = traditionalSeoPropertyHostname();
       valueEl.textContent = '…';
@@ -70706,6 +70803,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         deltaEl.dataset.dir = 'flat';
       }
       if (metaEl) metaEl.textContent = host ? `Matching Labs snapshots to ${host}…` : 'Select a property URL to match domain.';
+      if (driversEl) driversEl.innerHTML = '';
       try {
         const res = await fetch(traditionalSeoApiPath('/api/domain-strength/overview'), { cache: 'no-store' });
         const data = await res.json().catch(() => ({}));
@@ -70725,6 +70823,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               ? `No Labs snapshot for ${host} yet. Run Domain Strength snapshot.`
               : 'No property URL — cannot match domain.';
           }
+          if (driversEl) driversEl.innerHTML = '';
           return;
         }
         const score = Math.max(0, Math.min(100, traditionalSeoToNum(latest.score, 0)));
@@ -70754,6 +70853,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           if (Number.isFinite(kw)) bits.push(`${kw.toFixed(0)} organic kw`);
           metaEl.textContent = bits.length ? bits.join(' · ') : 'Latest Labs row loaded.';
         }
+        if (driversEl) {
+          const ds = traditionalSeoComputeDomainStrengthDrivers(data.items, latest);
+          driversEl.innerHTML = traditionalSeoRenderDomainStrengthDriversHtml(ds);
+        }
       } catch (err) {
         ring.style.setProperty('--pct', '0');
         ring.dataset.rag = 'neutral';
@@ -70763,6 +70866,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           deltaEl.dataset.dir = 'flat';
         }
         if (metaEl) metaEl.textContent = String(err?.message || err);
+        if (driversEl) driversEl.innerHTML = '';
       }
     }
 
