@@ -2214,11 +2214,37 @@
     }
     section[data-panel="backlinks"] #dfs-backlinks-rank-bands-table th:nth-child(1),
     section[data-panel="backlinks"] #dfs-backlinks-rank-bands-table td:nth-child(1) {
-      width: 11%;
+      width: 34%;
+    }
+    section[data-panel="backlinks"] #dfs-backlinks-rank-bands-table .dfs-backlinks-band-row-label {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.2rem 0.55rem;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+    section[data-panel="backlinks"] #dfs-backlinks-rank-bands-table .dfs-backlinks-band-range {
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+    section[data-panel="backlinks"] #dfs-backlinks-rank-bands-table .dfs-backlinks-band-desc {
+      flex: 1 1 10rem;
+      min-width: 8rem;
+      font-size: 0.62rem;
+      line-height: 1.3;
+      font-weight: 500;
+      color: rgba(148, 163, 184, 0.92);
+      text-align: right;
     }
     section[data-panel="backlinks"] #dfs-backlinks-rank-bands-table .dfs-backlinks-rank-delta {
       font-size: 0.62rem;
       line-height: 1.2;
+    }
+    section[data-panel="backlinks"] .dfs-backlinks-dofollow-pie-host {
+      position: relative;
+      height: 240px;
+      max-width: 22rem;
+      margin: 0 auto;
     }
     section[data-panel="backlinks"] .traditional-seo-table {
       width: 100%;
@@ -6610,7 +6636,7 @@
             <table class="traditional-seo-table" id="dfs-backlinks-rank-bands-table">
               <thead>
                 <tr>
-                  <th scope="col" style="text-align:left;">Band</th>
+                  <th scope="col" style="text-align:left;">Band · ref. domain strength</th>
                   <th scope="col" style="text-align:right;">Total</th>
                   <th scope="col" style="text-align:right;">Dofollow</th>
                   <th scope="col" style="text-align:right;">Nofollow</th>
@@ -6619,6 +6645,13 @@
               </thead>
               <tbody id="dfs-backlinks-rank-bands-tbody"></tbody>
             </table>
+          </div>
+          <div id="dfs-backlinks-dofollow-pie-section" style="margin-top:1rem;padding-top:0.75rem;border-top:1px solid rgba(148,163,184,0.12);">
+            <div class="traditional-seo-strip-sub" style="margin-bottom:0.45rem;text-align:center;font-weight:700;color:#34d399;">Dofollow % by ref. domain rank band</div>
+            <div class="dfs-backlinks-dofollow-pie-host" id="dfs-backlinks-dofollow-pie-host" style="display:none;">
+              <canvas id="dfs-backlinks-dofollow-pie-canvas" aria-label="Dofollow backlinks percent by rank band"></canvas>
+            </div>
+            <p id="dfs-backlinks-dofollow-pie-empty" style="display:none;text-align:center;font-size:0.78rem;color:var(--dark-text-muted);margin:0.35rem 0 0;">No dofollow links in the index for this domain.</p>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;margin-top:0.75rem;padding-top:0.65rem;border-top:1px solid rgba(148,163,184,0.12);">
             <span id="dfs-backlinks-baseline-meta" style="font-size:0.78rem;color:var(--dark-text-muted);flex:1;min-width:14rem;">—</span>
@@ -76737,6 +76770,19 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       };
     }
 
+    const DFS_BACKLINKS_BAND_DESCRIPTORS = {
+      r80_100: 'Very strong ref. domains · high trust / authority signal',
+      r50_79: 'Strong · solid editorial / established sites',
+      r30_49: 'Moderate · useful but not top-tier authority',
+      r20_29: 'Weaker · long tail / lower authority sources',
+      r_lt20: 'Very weak · often scrapers, thin, or low-signal',
+      r_null: 'No ref. domain rank in index — strength unknown'
+    };
+
+    function dfsBacklinksBandDescriptorForKey(key) {
+      return DFS_BACKLINKS_BAND_DESCRIPTORS[key] || '';
+    }
+
     function dfsBacklinksBandMetricCell(curVal, prevVal, comparePhrase) {
       let c = 0;
       if (typeof curVal === 'number' && Number.isFinite(curVal)) c = curVal;
@@ -76763,8 +76809,16 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const pbd = prev?.rankBandsDofollow || {};
       const pbn = prev?.rankBandsNofollow || {};
       const pbu = prev?.rankBandsUnknown || {};
+      const desc = dfsBacklinksBandDescriptorForKey(key);
+      const descHtml = desc
+        ? `<span class="dfs-backlinks-band-desc">${dfsBacklinksEsc(desc)}</span>`
+        : '';
       return `<tr>
-        <th scope="row" style="text-align:left;font-weight:600;color:var(--dark-text-muted);white-space:nowrap;">${dfsBacklinksEsc(label)}</th>
+        <th scope="row" style="text-align:left;vertical-align:top;font-weight:600;color:var(--dark-text-muted);">
+          <div class="dfs-backlinks-band-row-label">
+            <span class="dfs-backlinks-band-range">${dfsBacklinksEsc(label)}</span>${descHtml}
+          </div>
+        </th>
         ${dfsBacklinksBandMetricCell(b[key], pb[key], comparePhrase)}
         ${dfsBacklinksBandMetricCell(bd[key], pbd[key], comparePhrase)}
         ${dfsBacklinksBandMetricCell(bn[key], pbn[key], comparePhrase)}
@@ -76788,6 +76842,107 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         rows.push(dfsBacklinksRankBandTableRow('No rank', 'r_null', cur, prev, phrase));
       }
       tbody.innerHTML = rows.join('');
+    }
+
+    function dfsBacklinksClearDofollowPie() {
+      try {
+        if (window.__dfsBacklinksDofollowPieChart) {
+          window.__dfsBacklinksDofollowPieChart.destroy();
+          window.__dfsBacklinksDofollowPieChart = null;
+        }
+      } catch (e) {
+        /* ignore */
+      }
+    }
+
+    function dfsBacklinksResetDofollowPiePlaceholders() {
+      dfsBacklinksClearDofollowPie();
+      const host = document.getElementById('dfs-backlinks-dofollow-pie-host');
+      const empty = document.getElementById('dfs-backlinks-dofollow-pie-empty');
+      if (host) host.style.display = 'none';
+      if (empty) empty.style.display = 'none';
+    }
+
+    function dfsBacklinksRenderDofollowBandPie(cur) {
+      dfsBacklinksClearDofollowPie();
+      const canvas = document.getElementById('dfs-backlinks-dofollow-pie-canvas');
+      const host = document.getElementById('dfs-backlinks-dofollow-pie-host');
+      const empty = document.getElementById('dfs-backlinks-dofollow-pie-empty');
+      if (!canvas || !host || !empty) return;
+      if (typeof Chart === 'undefined') {
+        host.style.display = 'none';
+        empty.textContent = 'Chart library not loaded.';
+        empty.style.display = 'block';
+        return;
+      }
+      const bd = cur?.rankBandsDofollow || {};
+      const meta = [
+        { key: 'r80_100', label: '80 – 100', color: '#059669' },
+        { key: 'r50_79', label: '50 – 79', color: '#10b981' },
+        { key: 'r30_49', label: '30 – 49', color: '#14b8a6' },
+        { key: 'r20_29', label: '20 – 29', color: '#0ea5e9' },
+        { key: 'r_lt20', label: '< 20', color: '#38bdf8' }
+      ];
+      if ((bd.r_null ?? 0) > 0) {
+        meta.push({ key: 'r_null', label: 'No rank', color: '#64748b' });
+      }
+      const labels = [];
+      const data = [];
+      const colors = [];
+      for (let i = 0; i < meta.length; i += 1) {
+        const m = meta[i];
+        const v = Math.max(0, Number(bd[m.key]) || 0);
+        if (v > 0) {
+          labels.push(m.label);
+          data.push(v);
+          colors.push(m.color);
+        }
+      }
+      const sumSlice = data.reduce((a, v) => a + v, 0);
+      const dofTotal = Math.max(0, Math.round(Number(cur?.dofollow) || 0));
+      const denom = dofTotal > 0 ? dofTotal : sumSlice;
+      if (sumSlice <= 0 || denom <= 0) {
+        host.style.display = 'none';
+        empty.textContent = 'No dofollow links in the index for this domain.';
+        empty.style.display = 'block';
+        return;
+      }
+      empty.style.display = 'none';
+      host.style.display = 'block';
+      const ctx = canvas.getContext('2d');
+      window.__dfsBacklinksDofollowPieChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+          labels,
+          datasets: [
+            {
+              data,
+              backgroundColor: colors,
+              borderColor: 'rgba(15,23,42,0.95)',
+              borderWidth: 2
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: '#cbd5e1', boxWidth: 11, padding: 10, font: { size: 10 } }
+            },
+            tooltip: {
+              callbacks: {
+                label(ctx) {
+                  const v = Number(ctx.raw) || 0;
+                  const pct = denom > 0 ? ((v / denom) * 100).toFixed(1) : '0.0';
+                  return ` ${ctx.label}: ${v.toLocaleString()} (${pct}% of dofollow)`;
+                }
+              }
+            }
+          }
+        }
+      });
     }
 
     async function dfsBacklinksFetchBaseline(domain) {
@@ -76854,6 +77009,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (unEl) unEl.textContent = un.toLocaleString();
       if (unDel) unDel.innerHTML = dfsBacklinksFormatDeltaHtml(prev?.unknown ?? null, un, phrase);
       dfsBacklinksRenderRankBandsTable(cur, prev, phrase);
+      dfsBacklinksRenderDofollowBandPie(cur);
       if (warnEl) warnEl.style.display = cur.truncated ? 'block' : 'none';
       dfsBacklinksUpdateDeltaFootnote(phrase);
     }
@@ -77107,6 +77263,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       });
       const bandsTbody = document.getElementById('dfs-backlinks-rank-bands-tbody');
       if (bandsTbody) bandsTbody.innerHTML = '';
+      dfsBacklinksResetDofollowPiePlaceholders();
       const warn = document.getElementById('dfs-backlinks-tile-warning');
       if (warn) warn.style.display = 'none';
       const meta = document.getElementById('dfs-backlinks-baseline-meta');
@@ -77189,6 +77346,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           bandsTbody.innerHTML =
             '<tr><td colspan="5" style="color:var(--dark-text-muted);">Unable to load rank bands.</td></tr>';
         }
+        dfsBacklinksResetDofollowPiePlaceholders();
         if (warnEl) warnEl.style.display = 'none';
         window.__DFS_BACKLINK_TILE_STATE__ = null;
         const meta = document.getElementById('dfs-backlinks-baseline-meta');
