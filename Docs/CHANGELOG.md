@@ -2,6 +2,17 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-03-23] - Backlinks tiles: follow split by rank band + DB baseline
+
+### Added
+- **Supabase:** `dfs_backlink_tile_baseline` (`sql/20260326_dfs_backlink_tile_baseline.sql`, `migrations/20260326_dfs_backlink_tile_baseline.sql`, `sql/SUPABASE_SCHEMA.sql`) — one JSON snapshot per `domain_host` for audit-to-audit deltas.
+- **`GET/POST/DELETE /api/aigeo/dfs-backlink-tile-baseline`** — read, save, or clear that baseline (service role).
+- **Tile scan:** per-band counts split by **dofollow / nofollow / unknown** (`rankBandsDofollow`, `rankBandsNofollow`, `rankBandsUnknown` in `aggregateDfsBacklinkTileStats` and `/api/aigeo/dfs-domain-backlink-tiles`).
+- **Dashboard (Backlinks):** band view toggles (All / Dofollow / Nofollow / Unknown), **Save baseline (audit)** and **Clear DB baseline**; Δ text prefers **saved baseline**, else last device tile snapshot; **Export CSV** (all rows matching current filters/sort, paginated, cap 120k) with UTF-8 BOM.
+
+### Notes
+- Run the new SQL in Supabase before **Save baseline** (or apply migration `dfs_backlink_tile_baseline` via Supabase); until the table exists, baseline API errors and the UI falls back to device snapshot only.
+
 ## [2026-03-26] - Docs: keyword/rank data scope across tabs (parked)
 
 ### Added

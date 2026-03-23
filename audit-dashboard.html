@@ -2253,6 +2253,10 @@
     section[data-panel="backlinks"] a.dfs-backlinks-source-link:hover {
       color: #ffffff;
     }
+    section[data-panel="backlinks"] .dfs-backlinks-band-mode-btn.is-active {
+      outline: 1px solid rgba(56, 189, 248, 0.75);
+      box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2);
+    }
 
     /* Dashboard: dials */
     section[data-panel="dashboard"] .dashboard-dials-grid {
@@ -6538,23 +6542,65 @@
             Spam-filtered DataForSEO domain backlink index stored in Supabase (<code style="color:#cbd5e1;">dfs_domain_backlink_rows</code>).
             Domain matches your configured property hostname (same as Traditional SEO). Use <strong>Traditional SEO → DFS full index / new links</strong> to refresh data.
           </p>
+          <p id="dfs-backlinks-tile-warning" style="display:none;margin:0.5rem 0 0;font-size:0.78rem;color:#fbbf24;">Tile scan capped — counts may be partial.</p>
         </div>
         <div class="traditional-seo-grid" style="margin-bottom: 1rem;">
           <div class="card">
             <div class="traditional-seo-strip-title traditional-seo-metric-heading">Indexed rows</div>
             <div id="dfs-backlinks-tile-rows" style="text-align:center;font-size:1.35rem;font-weight:800;color:#e2e8f0;">—</div>
+            <div id="dfs-backlinks-tile-rows-delta" class="traditional-seo-strip-sub" style="min-height:1.1rem;">—</div>
             <div class="traditional-seo-strip-sub">Total backlinks in index for this domain</div>
           </div>
           <div class="card">
             <div class="traditional-seo-strip-title traditional-seo-metric-heading">Referring domains</div>
             <div id="dfs-backlinks-tile-rd" style="text-align:center;font-size:1.35rem;font-weight:800;color:#e2e8f0;">—</div>
-            <div class="traditional-seo-strip-sub">Distinct source hosts (approx. from status API)</div>
+            <div id="dfs-backlinks-tile-rd-delta" class="traditional-seo-strip-sub" style="min-height:1.1rem;">—</div>
+            <div class="traditional-seo-strip-sub">Distinct source hosts (from same scan as tiles)</div>
           </div>
           <div class="card">
             <div class="traditional-seo-strip-title traditional-seo-metric-heading">Property domain</div>
             <div id="dfs-backlinks-tile-domain" style="text-align:center;font-size:0.95rem;font-weight:700;color:#93c5fd;word-break:break-all;">—</div>
             <div class="traditional-seo-strip-sub">From GSC / last property URL</div>
           </div>
+        </div>
+        <div class="traditional-seo-grid" style="margin-bottom: 1rem;">
+          <div class="card">
+            <div class="traditional-seo-strip-title traditional-seo-metric-heading">Dofollow</div>
+            <div id="dfs-backlinks-tile-df" style="text-align:center;font-size:1.35rem;font-weight:800;color:#34d399;">—</div>
+            <div id="dfs-backlinks-tile-df-delta" class="traditional-seo-strip-sub" style="min-height:1.1rem;">—</div>
+            <div class="traditional-seo-strip-sub">Links marked dofollow in the index</div>
+          </div>
+          <div class="card">
+            <div class="traditional-seo-strip-title traditional-seo-metric-heading">Nofollow</div>
+            <div id="dfs-backlinks-tile-nf" style="text-align:center;font-size:1.35rem;font-weight:800;color:#f87171;">—</div>
+            <div id="dfs-backlinks-tile-nf-delta" class="traditional-seo-strip-sub" style="min-height:1.1rem;">—</div>
+            <div class="traditional-seo-strip-sub">Links marked nofollow</div>
+          </div>
+          <div class="card">
+            <div class="traditional-seo-strip-title traditional-seo-metric-heading">Follow unknown</div>
+            <div id="dfs-backlinks-tile-un" style="text-align:center;font-size:1.35rem;font-weight:800;color:#94a3b8;">—</div>
+            <div id="dfs-backlinks-tile-un-delta" class="traditional-seo-strip-sub" style="min-height:1.1rem;">—</div>
+            <div class="traditional-seo-strip-sub">Missing / unclear follow flag</div>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom: 1rem;">
+          <div class="traditional-seo-strip-title traditional-seo-metric-heading" style="margin-bottom:0.65rem;">Ref. domain rank — link counts by band</div>
+          <div style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;margin-bottom:0.65rem;">
+            <span style="font-size:0.78rem;color:var(--dark-text-muted);">Show counts:</span>
+            <div style="display:inline-flex;gap:0.3rem;flex-wrap:wrap;">
+              <button type="button" class="btn dfs-backlinks-band-mode-btn" data-dfs-band-mode="all" id="dfs-backlinks-band-all" style="font-size:0.74rem;padding:0.22rem 0.5rem;">All links</button>
+              <button type="button" class="btn dfs-backlinks-band-mode-btn" data-dfs-band-mode="dofollow" id="dfs-backlinks-band-df" style="font-size:0.74rem;padding:0.22rem 0.5rem;">Dofollow</button>
+              <button type="button" class="btn dfs-backlinks-band-mode-btn" data-dfs-band-mode="nofollow" id="dfs-backlinks-band-nf" style="font-size:0.74rem;padding:0.22rem 0.5rem;">Nofollow</button>
+              <button type="button" class="btn dfs-backlinks-band-mode-btn" data-dfs-band-mode="unknown" id="dfs-backlinks-band-un" style="font-size:0.74rem;padding:0.22rem 0.5rem;">Unknown</button>
+            </div>
+          </div>
+          <div id="dfs-backlinks-rank-bands" style="display:flex;flex-direction:column;gap:0.35rem;font-size:0.88rem;color:#e2e8f0;max-width:40rem;margin:0 auto;width:100%;"></div>
+          <div style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;margin-top:0.75rem;padding-top:0.65rem;border-top:1px solid rgba(148,163,184,0.12);">
+            <span id="dfs-backlinks-baseline-meta" style="font-size:0.78rem;color:var(--dark-text-muted);flex:1;min-width:14rem;">—</span>
+            <button type="button" class="btn" id="dfs-backlinks-baseline-save" style="font-size:0.74rem;padding:0.28rem 0.6rem;">Save baseline (audit)</button>
+            <button type="button" class="btn" id="dfs-backlinks-baseline-reset" style="font-size:0.74rem;padding:0.28rem 0.6rem;background:rgba(30,41,59,0.9)!important;color:#e2e8f0!important;border:1px solid rgba(148,163,184,0.35);">Clear DB baseline</button>
+          </div>
+          <div id="dfs-backlinks-delta-footnote" class="traditional-seo-strip-sub" style="margin-top:0.55rem;">Δ compares each metric to the <strong>saved DB baseline</strong> when present; otherwise to the last successful tile load on this device.</div>
         </div>
         <div class="card">
           <div style="display:flex;flex-wrap:wrap;gap:0.65rem;align-items:flex-end;margin-bottom:0.75rem;">
@@ -6589,6 +6635,7 @@
             </div>
             <button type="button" class="btn" id="dfs-backlinks-apply">Apply filters</button>
             <button type="button" class="btn" id="dfs-backlinks-reset" style="background:rgba(30,41,59,0.9)!important;color:#e2e8f0!important;border:1px solid rgba(148,163,184,0.35);">Reset</button>
+            <button type="button" class="btn" id="dfs-backlinks-export-csv" title="Downloads all rows matching current filters and sort (paginated, up to 120k)." style="font-size:0.78rem;padding:0.35rem 0.65rem;">Export CSV</button>
           </div>
           <div id="dfs-backlinks-meta" style="font-size:0.8rem;color:var(--dark-text-muted);margin-bottom:0.5rem;">Loading…</div>
           <div class="traditional-seo-table-wrap">
@@ -76542,7 +76589,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       sort: 'domain_from_rank',
       dir: 'desc',
       offset: 0,
-      total: null
+      total: null,
+      bandMode: 'all'
     };
 
     function dfsBacklinksEsc(s) {
@@ -76599,6 +76647,194 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return j.data || null;
     }
 
+    const DFS_BACKLINKS_SNAP_KEY = 'gaio_dfs_backlink_tile_snap_v2:';
+
+    function dfsBacklinksReadSnap(domain) {
+      if (!domain) return null;
+      try {
+        const raw = localStorage.getItem(DFS_BACKLINKS_SNAP_KEY + domain);
+        if (!raw) return null;
+        return JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    }
+
+    function dfsBacklinksWriteSnap(domain, payload) {
+      if (!domain || !payload) return;
+      try {
+        localStorage.setItem(DFS_BACKLINKS_SNAP_KEY + domain, JSON.stringify(payload));
+      } catch {
+        /* ignore quota */
+      }
+    }
+
+    function dfsBacklinksFormatDeltaHtml(prevVal, currVal, comparePhrase) {
+      const phrase = comparePhrase || 'prior snapshot';
+      const phEsc = dfsBacklinksEsc(phrase);
+      if (typeof currVal !== 'number' || !Number.isFinite(currVal)) {
+        return '<span style="color:var(--dark-text-muted);">Δ —</span>';
+      }
+      if (prevVal == null || typeof prevVal !== 'number' || !Number.isFinite(prevVal)) {
+        return `<span style="color:var(--dark-text-muted);">First load — no ${phEsc}</span>`;
+      }
+      const d = Math.round(currVal - prevVal);
+      if (d === 0) {
+        return `<span style="color:rgba(148,163,184,0.95);">Δ 0 vs ${phEsc}</span>`;
+      }
+      const col = d > 0 ? '#34d399' : '#f87171';
+      const sign = d > 0 ? '+' : '';
+      return `<span style="color:${col};font-weight:700;">Δ ${sign}${d.toLocaleString()} vs ${phEsc}</span>`;
+    }
+
+    function dfsBacklinksCopyBandShape(src) {
+      const o = src && typeof src === 'object' ? src : {};
+      return {
+        r80_100: o.r80_100 ?? 0,
+        r50_79: o.r50_79 ?? 0,
+        r30_49: o.r30_49 ?? 0,
+        r20_29: o.r20_29 ?? 0,
+        r_lt20: o.r_lt20 ?? 0,
+        r_null: o.r_null ?? 0
+      };
+    }
+
+    function dfsBacklinksBuildSnapshotFromCur(cur) {
+      return {
+        totalBacklinks: cur.totalBacklinks ?? 0,
+        referringDomains: cur.referringDomains ?? 0,
+        dofollow: cur.dofollow ?? 0,
+        nofollow: cur.nofollow ?? 0,
+        unknown: cur.unknown ?? 0,
+        rankBands: dfsBacklinksCopyBandShape(cur.rankBands),
+        rankBandsDofollow: dfsBacklinksCopyBandShape(cur.rankBandsDofollow),
+        rankBandsNofollow: dfsBacklinksCopyBandShape(cur.rankBandsNofollow),
+        rankBandsUnknown: dfsBacklinksCopyBandShape(cur.rankBandsUnknown)
+      };
+    }
+
+    function dfsBacklinksPickBandMap(obj, mode) {
+      if (!obj) return {};
+      const m = String(mode || 'all');
+      if (m === 'dofollow') return obj.rankBandsDofollow || {};
+      if (m === 'nofollow') return obj.rankBandsNofollow || {};
+      if (m === 'unknown') return obj.rankBandsUnknown || {};
+      return obj.rankBands || {};
+    }
+
+    function dfsBacklinksBandRowHtml(label, key, curBands, prevBands, comparePhrase) {
+      const c = curBands?.[key] ?? 0;
+      const p = prevBands?.[key];
+      const prevNum = typeof p === 'number' && Number.isFinite(p) ? p : null;
+      const deltaHtml = dfsBacklinksFormatDeltaHtml(prevNum, c, comparePhrase);
+      return `<div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:0.35rem;align-items:baseline;border-bottom:1px solid rgba(148,163,184,0.12);padding-bottom:0.4rem;">
+        <span style="color:var(--dark-text-muted);font-weight:600;">${dfsBacklinksEsc(label)}</span>
+        <span style="text-align:right;"><strong style="color:#f8fafc;">${Number(c).toLocaleString()}</strong> <span style="font-size:0.76rem;display:inline-block;margin-left:0.35rem;">${deltaHtml}</span></span>
+      </div>`;
+    }
+
+    async function dfsBacklinksFetchBaseline(domain) {
+      const res = await fetch(
+        traditionalSeoApiPath(`/api/aigeo/dfs-backlink-tile-baseline?domain=${encodeURIComponent(domain)}`),
+        { cache: 'no-store' }
+      );
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.status !== 'ok') throw new Error(j.message || `HTTP ${res.status}`);
+      return j;
+    }
+
+    function dfsBacklinksSyncBandModeButtons() {
+      document.querySelectorAll('.dfs-backlinks-band-mode-btn').forEach((btn) => {
+        const m = String(btn.getAttribute('data-dfs-band-mode') || '');
+        btn.classList.toggle('is-active', m === (DFS_BACKLINKS_UI.bandMode || 'all'));
+      });
+    }
+
+    function dfsBacklinksUpdateBaselineMeta(state) {
+      const el = document.getElementById('dfs-backlinks-baseline-meta');
+      if (!el) return;
+      if (!state?.domain) {
+        el.textContent = '—';
+        return;
+      }
+      if (state.hasDbBaseline && state.baselineSavedAt) {
+        const dt = String(state.baselineSavedAt).replace('T', ' ').slice(0, 19);
+        el.textContent = `DB baseline: ${dt} UTC — deltas use this vs current scan.`;
+      } else {
+        el.textContent = 'No DB baseline — deltas use the last successful tile load on this device until you save one.';
+      }
+    }
+
+    function dfsBacklinksUpdateDeltaFootnote(comparePhrase) {
+      const el = document.getElementById('dfs-backlinks-delta-footnote');
+      if (!el) return;
+      const ph = dfsBacklinksEsc(comparePhrase || 'prior snapshot');
+      el.innerHTML = `Δ compares each metric to <strong>${ph}</strong>.`;
+    }
+
+    function dfsBacklinksApplyTilePaint(state) {
+      if (!state?.cur) return;
+      const cur = state.cur;
+      const prev = state.prev;
+      const phrase = state.comparePhrase || 'prior snapshot';
+      const rEl = document.getElementById('dfs-backlinks-tile-rows');
+      const rdEl = document.getElementById('dfs-backlinks-tile-rd');
+      const rDel = document.getElementById('dfs-backlinks-tile-rows-delta');
+      const rdDel = document.getElementById('dfs-backlinks-tile-rd-delta');
+      const dfEl = document.getElementById('dfs-backlinks-tile-df');
+      const dfDel = document.getElementById('dfs-backlinks-tile-df-delta');
+      const nfEl = document.getElementById('dfs-backlinks-tile-nf');
+      const nfDel = document.getElementById('dfs-backlinks-tile-nf-delta');
+      const unEl = document.getElementById('dfs-backlinks-tile-un');
+      const unDel = document.getElementById('dfs-backlinks-tile-un-delta');
+      const bandsEl = document.getElementById('dfs-backlinks-rank-bands');
+      const warnEl = document.getElementById('dfs-backlinks-tile-warning');
+      const tb = cur.totalBacklinks ?? 0;
+      const rd = cur.referringDomains ?? 0;
+      const df = cur.dofollow ?? 0;
+      const nf = cur.nofollow ?? 0;
+      const un = cur.unknown ?? 0;
+      if (rEl) rEl.textContent = tb.toLocaleString();
+      if (rDel) rDel.innerHTML = dfsBacklinksFormatDeltaHtml(prev?.totalBacklinks ?? null, tb, phrase);
+      if (rdEl) rdEl.textContent = rd.toLocaleString();
+      if (rdDel) rdDel.innerHTML = dfsBacklinksFormatDeltaHtml(prev?.referringDomains ?? null, rd, phrase);
+      if (dfEl) dfEl.textContent = df.toLocaleString();
+      if (dfDel) dfDel.innerHTML = dfsBacklinksFormatDeltaHtml(prev?.dofollow ?? null, df, phrase);
+      if (nfEl) nfEl.textContent = nf.toLocaleString();
+      if (nfDel) nfDel.innerHTML = dfsBacklinksFormatDeltaHtml(prev?.nofollow ?? null, nf, phrase);
+      if (unEl) unEl.textContent = un.toLocaleString();
+      if (unDel) unDel.innerHTML = dfsBacklinksFormatDeltaHtml(prev?.unknown ?? null, un, phrase);
+      const mode = DFS_BACKLINKS_UI.bandMode || 'all';
+      const cb = dfsBacklinksPickBandMap(cur, mode);
+      const pb = dfsBacklinksPickBandMap(prev, mode);
+      if (bandsEl) {
+        const rows = [
+          dfsBacklinksBandRowHtml('80 – 100', 'r80_100', cb, pb, phrase),
+          dfsBacklinksBandRowHtml('50 – 79', 'r50_79', cb, pb, phrase),
+          dfsBacklinksBandRowHtml('30 – 49', 'r30_49', cb, pb, phrase),
+          dfsBacklinksBandRowHtml('20 – 29', 'r20_29', cb, pb, phrase),
+          dfsBacklinksBandRowHtml('< 20', 'r_lt20', cb, pb, phrase)
+        ];
+        bandsEl.innerHTML = rows.join('');
+        if ((cb.r_null ?? 0) > 0) {
+          bandsEl.innerHTML += dfsBacklinksBandRowHtml('No rank', 'r_null', cb, pb, phrase);
+        }
+      }
+      if (warnEl) warnEl.style.display = cur.truncated ? 'block' : 'none';
+      dfsBacklinksSyncBandModeButtons();
+      dfsBacklinksUpdateDeltaFootnote(phrase);
+    }
+
+    async function dfsBacklinksFetchTileAggregates(domain) {
+      const res = await fetch(
+        traditionalSeoApiPath(`/api/aigeo/dfs-domain-backlink-tiles?domain=${encodeURIComponent(domain)}`),
+        { cache: 'no-store' }
+      );
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.status !== 'ok') throw new Error(j.message || `HTTP ${res.status}`);
+      return j.data || null;
+    }
+
     async function dfsBacklinksFetchRows(domain) {
       const f = dfsBacklinksReadFilters();
       const limEl = document.getElementById('dfs-backlinks-page-size');
@@ -76617,6 +76853,99 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const res = await fetch(traditionalSeoApiPath(`/api/aigeo/dfs-domain-backlink-rows?${params}`), { cache: 'no-store' });
       const j = await res.json().catch(() => ({}));
       return { res, j, f, limit };
+    }
+
+    function dfsBacklinksCsvCell(v) {
+      const s = String(v ?? '');
+      if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    }
+
+    function dfsBacklinksHostPlain(u) {
+      const t = String(u || '').trim();
+      if (!t) return '';
+      try {
+        return new URL(t.startsWith('http') ? t : `https://${t}`).hostname.replace(/^www\./i, '') || '';
+      } catch {
+        return '';
+      }
+    }
+
+    async function dfsBacklinksExportCsv() {
+      const domain = traditionalSeoPropertyHostname();
+      const meta = document.getElementById('dfs-backlinks-meta');
+      const btn = document.getElementById('dfs-backlinks-export-csv');
+      if (!domain) {
+        if (meta) meta.textContent = 'Set a property URL before exporting.';
+        return;
+      }
+      const pageLimit = 200;
+      const maxRows = 120000;
+      const f = dfsBacklinksReadFilters();
+      const header = 'ref_domain_rank,follow,source_url,target_url,anchor,source_host,target_host';
+      const lines = [header];
+      let offset = 0;
+      if (btn) {
+        btn.disabled = true;
+        btn.style.opacity = '0.55';
+      }
+      try {
+        while (offset < maxRows) {
+          if (meta) meta.textContent = `Exporting CSV… ${offset.toLocaleString()} rows fetched`;
+          const params = new URLSearchParams({
+            domain,
+            limit: String(pageLimit),
+            offset: String(offset),
+            sort: DFS_BACKLINKS_UI.sort,
+            dir: DFS_BACKLINKS_UI.dir,
+            follow: f.follow
+          });
+          if (f.q) params.set('q', f.q);
+          if (f.rankMin !== '') params.set('rankMin', f.rankMin);
+          if (f.rankMax !== '') params.set('rankMax', f.rankMax);
+          const res = await fetch(traditionalSeoApiPath(`/api/aigeo/dfs-domain-backlink-rows?${params}`), { cache: 'no-store' });
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok || j.status !== 'ok') throw new Error(j.message || `HTTP ${res.status}`);
+          const rows = j.data?.rows || [];
+          for (let i = 0; i < rows.length; i += 1) {
+            const r = rows[i];
+            const rk =
+              r.domain_from_rank != null && Number.isFinite(Number(r.domain_from_rank))
+                ? String(Math.round(Number(r.domain_from_rank)))
+                : '';
+            const foll = r.dofollow === true ? 'dofollow' : r.dofollow === false ? 'nofollow' : '';
+            const src = String(r.url_from || '');
+            const tgt = String(r.url_to || '');
+            const anc = String(r.anchor || '');
+            const sh = dfsBacklinksHostPlain(r.url_from);
+            const th = dfsBacklinksHostPlain(r.url_to);
+            lines.push([rk, foll, src, tgt, anc, sh, th].map(dfsBacklinksCsvCell).join(','));
+          }
+          if (rows.length < pageLimit) break;
+          offset += pageLimit;
+        }
+        const blob = new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' });
+        const a = document.createElement('a');
+        const safeDom = domain.replace(/[^\w.-]+/g, '_');
+        const href = URL.createObjectURL(blob);
+        a.href = href;
+        a.download = `dfs-backlinks-${safeDom}-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(href);
+        if (meta) {
+          meta.textContent = `Exported ${(lines.length - 1).toLocaleString()} row(s) with current filters & sort (cap ${maxRows.toLocaleString()}).`;
+        }
+      } catch (e) {
+        if (meta) meta.textContent = `Export failed: ${String(e?.message || e)}`;
+        window.debugLog?.(`[DFS CSV] ${e?.message || e}`, 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.style.opacity = '1';
+        }
+      }
     }
 
     function dfsBacklinksSyncSortButtons() {
@@ -76724,27 +77053,178 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
     }
 
+    function dfsBacklinksClearTileBoard() {
+      const ids = [
+        'dfs-backlinks-tile-rows',
+        'dfs-backlinks-tile-rows-delta',
+        'dfs-backlinks-tile-rd',
+        'dfs-backlinks-tile-rd-delta',
+        'dfs-backlinks-tile-df',
+        'dfs-backlinks-tile-df-delta',
+        'dfs-backlinks-tile-nf',
+        'dfs-backlinks-tile-nf-delta',
+        'dfs-backlinks-tile-un',
+        'dfs-backlinks-tile-un-delta',
+        'dfs-backlinks-rank-bands'
+      ];
+      ids.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (id === 'dfs-backlinks-rank-bands') el.innerHTML = '';
+        else if (id.endsWith('-delta')) el.innerHTML = '—';
+        else el.textContent = '—';
+      });
+      const warn = document.getElementById('dfs-backlinks-tile-warning');
+      if (warn) warn.style.display = 'none';
+      const meta = document.getElementById('dfs-backlinks-baseline-meta');
+      if (meta) meta.textContent = '—';
+      const foot = document.getElementById('dfs-backlinks-delta-footnote');
+      if (foot) {
+        foot.innerHTML =
+          'Δ compares each metric to the <strong>saved DB baseline</strong> when present; otherwise to the last successful tile load on this device.';
+      }
+      window.__DFS_BACKLINK_TILE_STATE__ = null;
+    }
+
     async function dfsBacklinksRefreshTiles(domain) {
       const rEl = document.getElementById('dfs-backlinks-tile-rows');
       const rdEl = document.getElementById('dfs-backlinks-tile-rd');
+      const bandsEl = document.getElementById('dfs-backlinks-rank-bands');
+      const warnEl = document.getElementById('dfs-backlinks-tile-warning');
+
       if (!domain) {
-        if (rEl) rEl.textContent = '—';
-        if (rdEl) rdEl.textContent = '—';
+        dfsBacklinksClearTileBoard();
         return;
       }
+
+      const snapAtOpen = dfsBacklinksReadSnap(domain);
+      let baselineJson = null;
       try {
-        const st = await dfsBacklinksFetchStatus(domain);
-        if (rEl) rEl.textContent = st?.rowCount != null ? Number(st.rowCount).toLocaleString() : '—';
-        if (rdEl) rdEl.textContent = st?.referringDomains != null ? Number(st.referringDomains).toLocaleString() : '—';
+        baselineJson = await dfsBacklinksFetchBaseline(domain);
       } catch {
-        if (rEl) rEl.textContent = '—';
-        if (rdEl) rdEl.textContent = '—';
+        baselineJson = null;
+      }
+      const baseRow = baselineJson?.data;
+      const baseSnap = baseRow?.snapshot && typeof baseRow.snapshot === 'object' ? baseRow.snapshot : null;
+      const prev = baseSnap || snapAtOpen;
+      const comparePhrase = baseSnap ? 'saved baseline' : 'prior device snapshot';
+
+      try {
+        const cur = await dfsBacklinksFetchTileAggregates(domain);
+        const snapPayload = dfsBacklinksBuildSnapshotFromCur(cur);
+        window.__DFS_BACKLINK_TILE_STATE__ = {
+          domain,
+          cur,
+          prev,
+          comparePhrase,
+          snapAtOpen,
+          baselineSavedAt: baseSnap ? baseRow?.savedAt || null : null,
+          hasDbBaseline: !!baseSnap
+        };
+        dfsBacklinksApplyTilePaint(window.__DFS_BACKLINK_TILE_STATE__);
+        dfsBacklinksUpdateBaselineMeta(window.__DFS_BACKLINK_TILE_STATE__);
+
+        dfsBacklinksWriteSnap(domain, {
+          ...snapPayload,
+          savedAt: new Date().toISOString()
+        });
+      } catch {
+        try {
+          const st = await dfsBacklinksFetchStatus(domain);
+          if (rEl) rEl.textContent = st?.rowCount != null ? Number(st.rowCount).toLocaleString() : '—';
+          if (rdEl) rdEl.textContent = st?.referringDomains != null ? Number(st.referringDomains).toLocaleString() : '—';
+          const rDel = document.getElementById('dfs-backlinks-tile-rows-delta');
+          const rdDel = document.getElementById('dfs-backlinks-tile-rd-delta');
+          if (rDel) rDel.innerHTML = '<span style="color:var(--dark-text-muted);">Δ — (tile API unavailable)</span>';
+          if (rdDel) rdDel.innerHTML = '<span style="color:var(--dark-text-muted);">Δ —</span>';
+        } catch {
+          dfsBacklinksClearTileBoard();
+        }
+        const dfEl = document.getElementById('dfs-backlinks-tile-df');
+        const dfDel = document.getElementById('dfs-backlinks-tile-df-delta');
+        const nfEl = document.getElementById('dfs-backlinks-tile-nf');
+        const nfDel = document.getElementById('dfs-backlinks-tile-nf-delta');
+        const unEl = document.getElementById('dfs-backlinks-tile-un');
+        const unDel = document.getElementById('dfs-backlinks-tile-un-delta');
+        if (dfEl) dfEl.textContent = '—';
+        if (dfDel) dfDel.innerHTML = '<span style="color:var(--dark-text-muted);">Δ —</span>';
+        if (nfEl) nfEl.textContent = '—';
+        if (nfDel) nfDel.innerHTML = '<span style="color:var(--dark-text-muted);">Δ —</span>';
+        if (unEl) unEl.textContent = '—';
+        if (unDel) unDel.innerHTML = '<span style="color:var(--dark-text-muted);">Δ —</span>';
+        if (bandsEl) bandsEl.innerHTML = '<div style="color:var(--dark-text-muted);">Unable to load rank bands.</div>';
+        if (warnEl) warnEl.style.display = 'none';
+        window.__DFS_BACKLINK_TILE_STATE__ = null;
+        const meta = document.getElementById('dfs-backlinks-baseline-meta');
+        if (meta) meta.textContent = '—';
       }
     }
 
     function dfsBacklinksWireOnce() {
       if (DFS_BACKLINKS_UI.wired) return;
       DFS_BACKLINKS_UI.wired = true;
+      document.querySelectorAll('.dfs-backlinks-band-mode-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const m = String(btn.getAttribute('data-dfs-band-mode') || 'all');
+          DFS_BACKLINKS_UI.bandMode = m;
+          if (window.__DFS_BACKLINK_TILE_STATE__?.cur) {
+            dfsBacklinksApplyTilePaint(window.__DFS_BACKLINK_TILE_STATE__);
+          } else {
+            dfsBacklinksSyncBandModeButtons();
+          }
+        });
+      });
+      document.getElementById('dfs-backlinks-baseline-save')?.addEventListener('click', async () => {
+        const st = window.__DFS_BACKLINK_TILE_STATE__;
+        if (!st?.domain || !st.cur) return;
+        const snap = dfsBacklinksBuildSnapshotFromCur(st.cur);
+        try {
+          const res = await fetch(traditionalSeoApiPath('/api/aigeo/dfs-backlink-tile-baseline'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain: st.domain, snapshot: snap })
+          });
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok || j.status !== 'ok') throw new Error(j.message || `HTTP ${res.status}`);
+          st.prev = snap;
+          st.comparePhrase = 'saved baseline';
+          st.hasDbBaseline = true;
+          st.baselineSavedAt = j.savedAt || new Date().toISOString();
+          dfsBacklinksApplyTilePaint(st);
+          dfsBacklinksUpdateBaselineMeta(st);
+        } catch (e) {
+          window.debugLog?.(`[DFS baseline save] ${e?.message || e}`, 'error');
+        }
+      });
+      document.getElementById('dfs-backlinks-baseline-reset')?.addEventListener('click', async () => {
+        const st = window.__DFS_BACKLINK_TILE_STATE__;
+        const domain = st?.domain || traditionalSeoPropertyHostname();
+        if (!domain) return;
+        try {
+          const res = await fetch(
+            traditionalSeoApiPath(`/api/aigeo/dfs-backlink-tile-baseline?domain=${encodeURIComponent(domain)}`),
+            { method: 'DELETE', cache: 'no-store' }
+          );
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok || j.status !== 'ok') throw new Error(j.message || `HTTP ${res.status}`);
+        } catch (e) {
+          window.debugLog?.(`[DFS baseline reset] ${e?.message || e}`, 'error');
+          return;
+        }
+        if (st) {
+          st.prev = st.snapAtOpen || null;
+          st.comparePhrase = 'prior device snapshot';
+          st.hasDbBaseline = false;
+          st.baselineSavedAt = null;
+          dfsBacklinksApplyTilePaint(st);
+          dfsBacklinksUpdateBaselineMeta(st);
+        } else {
+          void dfsBacklinksRefreshTiles(domain);
+        }
+      });
+      document.getElementById('dfs-backlinks-export-csv')?.addEventListener('click', () => {
+        void dfsBacklinksExportCsv();
+      });
       document.getElementById('dfs-backlinks-apply')?.addEventListener('click', () => {
         DFS_BACKLINKS_UI.offset = 0;
         void dfsBacklinksLoadTable();

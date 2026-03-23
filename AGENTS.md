@@ -6,6 +6,7 @@
 2. **`Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md`** — Traditional SEO **③** Keywords Everywhere cache, API, DB, deploy pitfalls.
 3. **`Docs/TRADITIONAL_SEO_BACKLINKS_DFS.md`** — Backlinks product spec: DFS summary tile, per-URL modal, disavow toggle, explicit fetch (no auto-spend on load).
 4. **`Docs/DATAFORSEO_BACKLINK_SPAM_FILTERS.md`** — Spam URL filters, domain index tables, **`POST /api/aigeo/dataforseo-backlink-domain`** (`full` / `delta` / `status`), `npm run test:dfs-backlink-filters`.
+5. **Backlinks tab tile aggregates:** **`GET /api/aigeo/dfs-domain-backlink-tiles`**; audit baseline **`GET` / `POST` / `DELETE /api/aigeo/dfs-backlink-tile-baseline`** + Supabase **`dfs_backlink_tile_baseline`** (see **`Docs/CHANGELOG.md` 2026-03-23**).
 
 ## Critical gotchas
 
