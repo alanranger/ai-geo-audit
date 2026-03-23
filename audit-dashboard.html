@@ -37960,7 +37960,8 @@ Final Score: ${score}/100`;
         // Note: hasLocalSignals and localSignalsData are already defined at function level (line 3688-3689), reuse them
         
         if (key === 'authority') {
-          const savedAudit = loadAuditResultsSync();
+          const savedAuditRaw = loadAuditResultsSync();
+          const savedAudit = unwrapAuditPayload(savedAuditRaw) || savedAuditRaw;
           // Try multiple sources for backlinkMetrics: savedAudit, then localStorage
           // Note: API call removed from here since forEach doesn't support async properly
           // Backlink metrics should be loaded during audit run and saved to savedAudit
@@ -37985,7 +37986,38 @@ Final Score: ${score}/100`;
           const localSignals = currentLocalSignals || savedAudit?.localSignals || null;
           // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
           const siteReviews = getTrustpilotSnapshot(savedAudit?.siteReviews);
-          const searchData = savedAudit?.searchData;
+          const pickLongestArray = (lists) => {
+            let best = [];
+            for (let i = 0; i < lists.length; i++) {
+              const a = lists[i];
+              if (Array.isArray(a) && a.length > best.length) best = a;
+            }
+            return best;
+          };
+          const liveAudit = unwrapAuditPayload(window.__gaioLatestAuditPayload);
+          const rankingObj = window.rankingAiData && typeof window.rankingAiData === 'object' && !Array.isArray(window.rankingAiData)
+            ? window.rankingAiData
+            : null;
+          card._queryPages = pickLongestArray([
+            data?.queryPages,
+            data?.searchData?.queryPages,
+            saved?.searchData?.queryPages,
+            saved?.scores?.query_pages,
+            savedAudit?.searchData?.queryPages,
+            savedAudit?.scores?.query_pages,
+            liveAudit?.searchData?.queryPages,
+            liveAudit?.scores?.query_pages,
+            scores?.query_pages,
+            rankingObj?.queryPages
+          ]);
+          card._topQueries = pickLongestArray([
+            data?.topQueries,
+            data?.searchData?.topQueries,
+            saved?.searchData?.topQueries,
+            savedAudit?.searchData?.topQueries,
+            liveAudit?.searchData?.topQueries
+          ]);
+          debugLog(`[Authority Card] GSC detail rows: queryPages=${card._queryPages.length}, topQueries=${card._topQueries.length}`, card._queryPages.length ? 'success' : 'warn');
           
           // Authority mode state (stored per card instance)
           const modeId = `authority-mode-${Date.now()}`;
@@ -38100,10 +38132,7 @@ Final Score: ${score}/100`;
           const detailsId = `authority-details-${Date.now()}`;
           const buttonId = `authority-details-btn-${Date.now()}`;
           
-          // Get GSC metrics for details (segment-aware)
-          // Store queryPages and searchData on card for access in update functions
-          card._queryPages = searchData?.queryPages || [];
-          card._topQueries = searchData?.topQueries || [];
+          // Get GSC metrics for details (segment-aware); queryPages/topQueries already merged above
           const queryPages = card._queryPages;
           const topQueries = card._topQueries;
           
@@ -38260,8 +38289,8 @@ Final Score: ${score}/100`;
                 <div id="${modeId}-gsc-metrics">
                   <div style="margin-bottom: 0.5rem;"><strong>Behaviour & Ranking:</strong></div>
                   <div style="margin-bottom: 0.25rem; font-size: 0.7rem; color: #999;">Segment: ${currentMode === 'all' ? 'All pages' : currentMode === 'nonEducation' ? 'Exclude education (blogs / free course)' : 'Money pages only'}</div>
-                  <div>Site CTR (ranking queries): ${(siteCtr != null && typeof siteCtr === 'number' && !isNaN(siteCtr)) ? siteCtr.toFixed(1) : 'N/A'}%</div>
-                  <div>Top-10 CTR: ${(top10Ctr != null && typeof top10Ctr === 'number' && !isNaN(top10Ctr)) ? top10Ctr.toFixed(1) : 'N/A'}%</div>
+                  <div>Site CTR (ranking queries): ${(siteCtr != null && typeof siteCtr === 'number' && !isNaN(siteCtr)) ? siteCtr.toFixed(2) : 'N/A'}%</div>
+                  <div>Top-10 CTR: ${(top10Ctr != null && typeof top10Ctr === 'number' && !isNaN(top10Ctr)) ? top10Ctr.toFixed(2) : 'N/A'}%</div>
                   <div>Avg position (ranking): ${(avgPosition != null && typeof avgPosition === 'number' && !isNaN(avgPosition)) ? avgPosition.toFixed(1) : 'N/A'}</div>
                   <div>Top-10 impression share: ${(top10ImpressionShare != null && typeof top10ImpressionShare === 'number' && !isNaN(top10ImpressionShare)) ? top10ImpressionShare.toFixed(1) : 'N/A'}%</div>
                 </div>
