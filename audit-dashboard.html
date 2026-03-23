@@ -49763,24 +49763,40 @@ Final Score: ${score}/100`;
                         const schemaAuditData = schemaData.data;
                         const { coverage, missingSchemaCount, totalPages, pagesWithSchema, schemaTypes, richEligible, missingTypes } = schemaAuditData;
                         
-                        // Collect all types for analysis - use allDetectedTypes if available (all types), otherwise use schemaTypes (all types, sorted by count)
+                        // Match scorecard description + pillar card: foundation flags first, then allDetectedTypes, then schemaTypes (same as lines ~49570–49605, ~38565–38602)
                         const allTypes = new Set();
+                        if (schemaAuditData.foundation && typeof schemaAuditData.foundation === 'object') {
+                          Object.keys(schemaAuditData.foundation).forEach((type) => {
+                            if (schemaAuditData.foundation[type] === true) allTypes.add(type);
+                          });
+                        }
                         if (schemaAuditData.allDetectedTypes && Array.isArray(schemaAuditData.allDetectedTypes)) {
-                          // Use all detected types for accurate calculation
-                          schemaAuditData.allDetectedTypes.forEach(type => {
+                          schemaAuditData.allDetectedTypes.forEach((type) => {
                             if (type) allTypes.add(type);
                           });
-                        } else if (schemaTypes && Array.isArray(schemaTypes)) {
-                          // Fallback: collect from schemaTypes array (contains all types, sorted by count)
-                          schemaTypes.forEach(item => {
-                            if (item.type) allTypes.add(item.type);
+                        }
+                        if (schemaTypes && Array.isArray(schemaTypes) && allTypes.size === 0) {
+                          schemaTypes.forEach((item) => {
+                            if (item && typeof item === 'object' && item.url) return;
+                            if (item && typeof item === 'object' && item.type && typeof item.type === 'string' && !item.url) {
+                              allTypes.add(item.type);
+                            } else if (typeof item === 'string') {
+                              allTypes.add(item);
+                            }
                           });
                         }
                         
-                        // 1. Foundation Schemas (30% weight)
+                        // 1. Foundation Schemas (30% weight) — prefer foundation map (authoritative), same as pillar details
                         const foundationTypes = ['Organization', 'Person', 'WebSite', 'BreadcrumbList'];
-                        const foundationPresent = foundationTypes.filter(type => allTypes.has(type)).length;
-                        const foundationMissing = foundationTypes.filter(type => !allTypes.has(type));
+                        let foundationPresent;
+                        let foundationMissing;
+                        if (schemaAuditData.foundation && typeof schemaAuditData.foundation === 'object') {
+                          foundationPresent = foundationTypes.filter((t) => schemaAuditData.foundation[t] === true).length;
+                          foundationMissing = foundationTypes.filter((t) => schemaAuditData.foundation[t] !== true);
+                        } else {
+                          foundationPresent = foundationTypes.filter((type) => allTypes.has(type)).length;
+                          foundationMissing = foundationTypes.filter((type) => !allTypes.has(type));
+                        }
                         
                         if (foundationPresent < 4) {
                           steps.push(`<strong>Foundation schemas (30%):</strong> ${foundationPresent}/4 present. Add: ${foundationMissing.join(', ')}`);
