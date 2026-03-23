@@ -65858,6 +65858,77 @@ Final Score: ${score}/100`;
         }, { clickPages: 0, impressionPages: 0 });
       }
 
+      /** Merge stored audit with in-memory Supabase fetch + window Money Pages so tier/KPI tables match top tiles. */
+      function enrichDashboardAuditForTables(storedAudit) {
+        const a0 = unwrapAuditPayload(storedAudit);
+        const live = unwrapAuditPayload(window.__gaioLatestAuditPayload);
+        let a = a0 && typeof a0 === 'object' ? { ...a0 } : null;
+        if (!a && live && typeof live === 'object') a = { ...live };
+        if (!a) return null;
+
+        if (live && typeof live === 'object') {
+          const sSd = a.searchData && typeof a.searchData === 'object' ? { ...a.searchData } : {};
+          const lSd = live.searchData && typeof live.searchData === 'object' ? { ...live.searchData } : {};
+          const pickLonger = (x, y) => {
+            const ax = Array.isArray(x) ? x : [];
+            const ay = Array.isArray(y) ? y : [];
+            return ay.length > ax.length ? ay : ax;
+          };
+          a.searchData = {
+            ...sSd,
+            ...lSd,
+            timeseries: pickLonger(sSd.timeseries, lSd.timeseries),
+            queryPages: pickLonger(sSd.queryPages, lSd.queryPages),
+            queryTotals: pickLonger(sSd.queryTotals, lSd.queryTotals),
+            topQueries: pickLonger(sSd.topQueries, lSd.topQueries),
+          };
+          a.scores = { ...(a.scores || {}), ...(live.scores || {}) };
+          const sMoney = a.scores?.moneyPagesMetrics || a.moneyPagesMetrics;
+          const lMoney = live.scores?.moneyPagesMetrics || live.moneyPagesMetrics;
+          const sN = Array.isArray(sMoney?.rows) ? sMoney.rows.length : 0;
+          const lN = Array.isArray(lMoney?.rows) ? lMoney.rows.length : 0;
+          if (lN > sN && lMoney) {
+            a.scores = { ...a.scores, moneyPagesMetrics: lMoney };
+          }
+        }
+
+        const wm = window.moneyPagesMetrics || window.currentMoneyPagesMetrics;
+        const cur = a.scores?.moneyPagesMetrics || a.moneyPagesMetrics;
+        const wn = Array.isArray(wm?.rows) ? wm.rows.length : 0;
+        const cn = Array.isArray(cur?.rows) ? cur.rows.length : 0;
+        if (wm && wn > cn) {
+          a.scores = { ...(a.scores || {}), moneyPagesMetrics: wm };
+        }
+        return a;
+      }
+
+      async function supplementDashboardAuditTimeseries(auditLike) {
+        if (!auditLike || typeof auditLike !== 'object') return auditLike;
+        if (getDashboardTimeseriesRowsFromAudit(auditLike).length > 0) return auditLike;
+        const propertyUrl = getAuditPropertyUrl(auditLike);
+        if (!propertyUrl) return auditLike;
+        const end = new Date();
+        end.setUTCDate(end.getUTCDate() - 2);
+        const start = new Date(end);
+        start.setUTCDate(start.getUTCDate() - 119);
+        const iso = (d) => d.toISOString().slice(0, 10);
+        try {
+          const q = new URLSearchParams({
+            propertyUrl,
+            startDate: iso(start),
+            endDate: iso(end),
+          });
+          const response = await fetch(apiUrl(`/api/supabase/get-gsc-timeseries?${q}`));
+          if (!response.ok) return auditLike;
+          const payload = await response.json();
+          if (payload?.status !== 'ok' || !Array.isArray(payload.data) || payload.data.length === 0) return auditLike;
+          const prevSd = auditLike.searchData && typeof auditLike.searchData === 'object' ? auditLike.searchData : {};
+          return { ...auditLike, searchData: { ...prevSd, timeseries: payload.data } };
+        } catch (e) {
+          return auditLike;
+        }
+      }
+
       async function renderDashboardGscPeriodTiles(currentAudit, options = {}) {
         const host = document.getElementById('dashboard-gsc-kpi-periods');
         if (!host) return;
@@ -69158,8 +69229,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           renderDashboardEeatRadar(metrics?.eeatSubscores || null, prevMetrics?.eeatSubscores || null);
         }
 
-        // Summary cards (use latest available data from localStorage/window)
-        const audit = unwrapAuditPayload(dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null));
+        // Summary cards + lower tables: merge localStorage, live Supabase cache, window Money Pages; load timeseries from DB if missing.
+        let audit = enrichDashboardAuditForTables(dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null));
+        audit = await supplementDashboardAuditTimeseries(audit);
         const rankingStore = dashboardSafeJsonParse(localStorage.getItem('rankingAiData'), null);
         const rankingRows = (rankingStore && Array.isArray(rankingStore.combinedRows)) ? rankingStore.combinedRows : [];
 
