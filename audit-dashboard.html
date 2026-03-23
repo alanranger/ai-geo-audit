@@ -32067,23 +32067,36 @@
           return `${baseUrl}${cleanPath}`;
         });
 
+        const cacheLatestAuditPayload = (p) => {
+          try {
+            if (p && typeof p === 'object') window.__gaioLatestAuditPayload = p;
+          } catch (e) { /* ignore */ }
+        };
+
         const mergeMinimalAuditFallback = (minimal) => {
           if (!minimal || minimal._minimal !== true) return minimal;
           try {
             const raw = localStorage.getItem('last_audit_results');
-            const prev = raw ? JSON.parse(raw) : null;
+            const prev = unwrapAuditPayload(raw ? JSON.parse(raw) : null);
             const prevSd = prev?.searchData;
-            if (!prevSd || typeof prevSd !== 'object') return minimal;
+            const minSd = minimal.searchData && typeof minimal.searchData === 'object' ? minimal.searchData : null;
+            if (!prev) {
+              const solo = { ...minimal };
+              delete solo._minimal;
+              return solo;
+            }
+            const baseSd = prevSd && typeof prevSd === 'object' ? prevSd : {};
+            const mergedSd = minSd ? { ...baseSd, ...minSd } : baseSd;
             const out = {
               ...prev,
               ...minimal,
               scores: { ...(prev.scores || {}), ...(minimal.scores || {}) },
-              searchData: prevSd,
+              searchData: Object.keys(mergedSd).length ? mergedSd : (minSd || prevSd || {}),
               timestamp: minimal.timestamp || prev.timestamp,
               auditDate: minimal.auditDate || prev.auditDate || prev.audit_date,
             };
             delete out._minimal;
-            debugLog('Merged minimal Supabase audit with existing local searchData (full fetch failed)', 'info');
+            debugLog('Merged minimal Supabase audit with prior local audit (full fetch failed)', 'info');
             return out;
           } catch (e) {
             return minimal;
@@ -32185,13 +32198,16 @@
                 updateAuditTimestamp(result.data.timestamp);
                 debugLog(`✓ Updated audit timestamp display from Supabase data`, 'success');
               }
+              cacheLatestAuditPayload(result.data);
               return result.data;
             } else {
               debugLog(`⚠ No audit found in Supabase - result.status=${result.status}, hasData=${!!result.data}, error=${result.message || 'none'}`, 'warn');
               // Return minimal data if available, otherwise null
               if (minimalData) {
                 debugLog(`⚠ Returning minimal data (timestamp + scores) as fallback`, 'info');
-                return mergeMinimalAuditFallback(minimalData);
+                const merged = mergeMinimalAuditFallback(minimalData);
+                cacheLatestAuditPayload(merged);
+                return merged;
               }
               return null;
             }
@@ -32203,7 +32219,9 @@
               if (error.message && error.message.includes('FUNCTION_INVOCATION_FAILED')) {
                 debugLog(`⚠ Full data fetch failed due to timeout/size. Returning minimal data (timestamp + scores) as fallback.`, 'warn');
                 if (minimalData) {
-                  return mergeMinimalAuditFallback(minimalData);
+                  const merged = mergeMinimalAuditFallback(minimalData);
+                  cacheLatestAuditPayload(merged);
+                  return merged;
                 }
               }
             } catch (parseError) {
@@ -32212,7 +32230,9 @@
             // Return minimal data if available, otherwise null
             if (minimalData) {
               debugLog(`⚠ Returning minimal data (timestamp + scores) as fallback after full request failure`, 'info');
-              return mergeMinimalAuditFallback(minimalData);
+              const merged = mergeMinimalAuditFallback(minimalData);
+              cacheLatestAuditPayload(merged);
+              return merged;
             }
             return null;
           }
@@ -32220,7 +32240,9 @@
           if (error.name === 'AbortError' || error.name === 'TimeoutError' || error.message.includes('timeout')) {
             debugLog(`⚠ Supabase fetch timed out. Returning minimal data (timestamp + scores) as fallback.`, 'warn');
             if (minimalData) {
-              return mergeMinimalAuditFallback(minimalData);
+              const merged = mergeMinimalAuditFallback(minimalData);
+              cacheLatestAuditPayload(merged);
+              return merged;
             }
           } else {
             debugLog(`⚠ Supabase fetch error: ${error.message}`, 'warn');
@@ -32228,7 +32250,9 @@
           // Return minimal data if available, otherwise null
           if (minimalData) {
             debugLog(`⚠ Returning minimal data (timestamp + scores) as fallback after error`, 'info');
-            return mergeMinimalAuditFallback(minimalData);
+            const merged = mergeMinimalAuditFallback(minimalData);
+            cacheLatestAuditPayload(merged);
+            return merged;
           }
           return null;
         }
@@ -32236,7 +32260,9 @@
         // Catch any errors in the outer try block (shouldn't happen, but just in case)
         debugLog(`⚠ Outer error in fetchLatestAuditFromSupabase: ${outerError.message}`, 'warn');
         if (minimalData) {
-          return mergeMinimalAuditFallback(minimalData);
+          const merged = mergeMinimalAuditFallback(minimalData);
+          cacheLatestAuditPayload(merged);
+          return merged;
         }
         return null;
       }
@@ -64807,7 +64833,17 @@ Final Score: ${score}/100`;
       }
 
       function computeDashboardSnapshot() {
-        const audit = unwrapAuditPayload(dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null));
+        let audit = unwrapAuditPayload(dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null));
+        const live = unwrapAuditPayload(window.__gaioLatestAuditPayload);
+        if (live && typeof live === 'object') {
+          const liveKpis = computeAuditKpisFromAudit(live);
+          const audKpis = computeAuditKpisFromAudit(audit);
+          const liveMs = typeof live.timestamp === 'number' ? live.timestamp : (live.timestamp ? new Date(live.timestamp).getTime() : 0);
+          const audMs = audit ? (typeof audit.timestamp === 'number' ? audit.timestamp : (audit.timestamp ? new Date(audit.timestamp).getTime() : 0)) : 0;
+          if (liveKpis && (!audKpis || liveMs >= audMs)) {
+            audit = live;
+          }
+        }
         if (audit && window.latestAuditScores) {
           audit.scores = { ...audit.scores, ...window.latestAuditScores };
         }

@@ -116,7 +116,19 @@ export default async function handler(req, res) {
           ? `&schema_pages_detail=not.is.null${partialFilter}`
           : partialFilter;
         if (isMinimalRequest) {
-          const selectFields = 'audit_date,updated_at,visibility_score,content_schema_score,authority_score,local_entity_score,service_area_score';
+          const selectFields = [
+            'audit_date',
+            'updated_at',
+            'visibility_score',
+            'content_schema_score',
+            'authority_score',
+            'local_entity_score',
+            'service_area_score',
+            'gsc_clicks',
+            'gsc_impressions',
+            'gsc_avg_position',
+            'gsc_ctr'
+          ].join(',');
           return `${base}${schemaFilter}&select=${encodeURIComponent(selectFields)}`;
         }
         return `${base}${schemaFilter}&select=*`;
@@ -253,7 +265,11 @@ export default async function handler(req, res) {
     // This prevents the function from processing large JSON fields that cause FUNCTION_INVOCATION_FAILED
     if (isMinimalRequest) {
       try {
-        console.log(`[get-latest-audit] Returning minimal response (timestamp + scores only)`);
+        console.log(`[get-latest-audit] Returning minimal response (timestamp + scores + headline GSC totals)`);
+        const gc = record.gsc_clicks != null ? Number(record.gsc_clicks) : 0;
+        const gi = record.gsc_impressions != null ? Number(record.gsc_impressions) : 0;
+        const gpos = record.gsc_avg_position != null && record.gsc_avg_position !== '' ? Number(record.gsc_avg_position) : null;
+        const gctr = record.gsc_ctr != null ? Number(record.gsc_ctr) : 0;
         const minimalData = {
           timestamp: record.updated_at ? new Date(record.updated_at).getTime() : (record.audit_date ? new Date(record.audit_date + 'T00:00:00').getTime() : Date.now()),
           auditDate: record.audit_date || null,
@@ -263,6 +279,22 @@ export default async function handler(req, res) {
             authority: record.authority_score ?? null,
             localEntity: record.local_entity_score ?? null,
             serviceArea: record.service_area_score ?? null
+          },
+          searchData: {
+            totalClicks: gc || 0,
+            totalImpressions: gi || 0,
+            averagePosition: Number.isFinite(gpos) ? gpos : null,
+            ctr: Number.isFinite(gctr) ? gctr : 0,
+            overview: {
+              clicks: gc || 0,
+              impressions: gi || 0,
+              ctr: Number.isFinite(gctr) ? gctr : 0,
+              position: Number.isFinite(gpos) ? gpos : null,
+              siteTotalClicks: gc || 0,
+              siteTotalImpressions: gi || 0,
+              totalClicks: gc || 0,
+              totalImpressions: gi || 0
+            }
           },
           _minimal: true
         };
