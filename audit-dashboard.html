@@ -9303,6 +9303,17 @@
       }
       return val;
     };
+
+    /** Unwrap get-latest-audit API envelope { status, data } for plain audit objects (localStorage + KPIs). */
+    function unwrapAuditPayload(obj) {
+      if (!obj || typeof obj !== 'object') return obj;
+      const inner = obj.data;
+      if (obj.status === 'ok' && inner && typeof inner === 'object' &&
+          (inner.scores !== undefined || inner.searchData !== undefined || inner.auditDate !== undefined || inner.timestamp !== undefined)) {
+        return inner;
+      }
+      return obj;
+    }
     
     // ======================
     // Optimisation Tracking Utilities (Phase 2)
@@ -20446,9 +20457,9 @@
             debugLog(`[Optimisation] fetchLatestAuditFromSupabase not available, fetching directly from API for ${propertyUrl}...`, 'info');
             try {
               const apiBase = window.apiUrl ? window.apiUrl('') : (window.location.origin.includes('localhost') ? 'http://localhost:3000' : 'https://ai-geo-audit.vercel.app');
-              const response = await fetch(`${apiBase}/api/supabase/get-latest-audit?property_url=${encodeURIComponent(propertyUrl)}`);
+                const response = await fetch(`${apiBase}/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
               if (response.ok) {
-                latestAuditFromSupabase = await response.json();
+                latestAuditFromSupabase = unwrapAuditPayload(await response.json());
                 debugLog(`[Optimisation] Successfully fetched latest audit from API`, 'success');
               } else {
                 debugLog(`[Optimisation] API returned ${response.status}: ${response.statusText}`, 'warn');
@@ -20461,7 +20472,7 @@
           if (latestAuditFromSupabase) {
             // Update localStorage with latest audit data to ensure bulk update uses it
             try {
-              localStorage.setItem('last_audit_results', JSON.stringify(latestAuditFromSupabase));
+              localStorage.setItem('last_audit_results', JSON.stringify(unwrapAuditPayload(latestAuditFromSupabase)));
               debugLog(`[Optimisation] Updated localStorage with latest audit from Supabase (audit_date: ${latestAuditFromSupabase.auditDate || latestAuditFromSupabase.audit_date || 'unknown'})`, 'success');
               // Also update window.moneyPagesMetrics if available
               if (latestAuditFromSupabase.scores?.moneyPagesMetrics || latestAuditFromSupabase.moneyPagesMetrics) {
@@ -32230,7 +32241,8 @@
         return null;
       }
     }
-    
+    window.fetchLatestAuditFromSupabase = fetchLatestAuditFromSupabase;
+
     function normalizePropertyHost(value) {
       if (!value || typeof value !== 'string') return '';
       const trimmed = value.trim();
@@ -64513,13 +64525,39 @@ Final Score: ${score}/100`;
       }
 
       function computeAuditKpisFromAudit(audit) {
-        const sd = audit?.searchData;
-        if (!sd || typeof sd !== 'object') return null;
+        const a = unwrapAuditPayload(audit);
+        let sd = a?.searchData;
+        if (typeof sd === 'string') {
+          try { sd = JSON.parse(sd); } catch (e) { sd = null; }
+        }
+        if (!sd || typeof sd !== 'object') sd = {};
         const ov = sd.overview && typeof sd.overview === 'object' ? sd.overview : {};
-        const clicks = toNum(sd.totalClicks ?? ov.totalClicks ?? ov.siteTotalClicks ?? ov.clicks);
-        const impressions = toNum(sd.totalImpressions ?? ov.totalImpressions ?? ov.siteTotalImpressions ?? ov.impressions);
-        let avgPosition = toNum(sd.averagePosition ?? sd.avgPosition ?? ov.position ?? ov.avgPosition);
-        let ctrPct = toNum(sd.ctr ?? ov.ctr);
+        let clicks = toNum(sd.totalClicks ?? ov.totalClicks ?? ov.siteTotalClicks ?? ov.clicks
+          ?? a?.gsc_clicks ?? a?.gscClicks);
+        let impressions = toNum(sd.totalImpressions ?? ov.totalImpressions ?? ov.siteTotalImpressions ?? ov.impressions
+          ?? a?.gsc_impressions ?? a?.gscImpressions);
+        let avgPosition = toNum(sd.averagePosition ?? sd.avgPosition ?? ov.position ?? ov.avgPosition
+          ?? a?.gsc_avg_position ?? a?.gscAvgPosition);
+        let ctrPct = toNum(sd.ctr ?? ov.ctr ?? a?.gsc_ctr ?? a?.gscCtr);
+        if (clicks == null && impressions == null && Array.isArray(sd.timeseries) && sd.timeseries.length > 0) {
+          let tc = 0;
+          let ti = 0;
+          let wPos = 0;
+          for (const p of sd.timeseries) {
+            const im = toNum(p?.impressions) ?? 0;
+            const cc = toNum(p?.clicks) ?? 0;
+            const pos = toNum(p?.position ?? p?.avgPosition);
+            tc += cc;
+            ti += im;
+            if (pos != null && im > 0) wPos += pos * im;
+          }
+          if (ti > 0) {
+            clicks = tc;
+            impressions = ti;
+            if (avgPosition == null) avgPosition = wPos / ti;
+            if (ctrPct == null) ctrPct = (tc / ti) * 100;
+          }
+        }
         if (ctrPct == null && clicks != null && impressions != null && impressions > 0) {
           ctrPct = (clicks / impressions) * 100;
         }
@@ -64769,7 +64807,7 @@ Final Score: ${score}/100`;
       }
 
       function computeDashboardSnapshot() {
-        const audit = dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null);
+        const audit = unwrapAuditPayload(dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null));
         if (audit && window.latestAuditScores) {
           audit.scores = { ...audit.scores, ...window.latestAuditScores };
         }
@@ -68415,6 +68453,7 @@ Final Score: ${score}/100`;
 
       // Helper function to compute dashboard snapshot from audit data
       function computeDashboardSnapshotFromAuditData(auditData) {
+        auditData = unwrapAuditPayload(auditData);
         if (!auditData) {
           debugLog(`[Dashboard] computeDashboardSnapshotFromAuditData: auditData is null/undefined`, 'warn');
           return null;
@@ -68823,9 +68862,9 @@ Final Score: ${score}/100`;
               // Fallback: fetch directly from API
               try {
                 const apiBase = window.apiUrl ? window.apiUrl('') : (window.location.origin.includes('localhost') ? 'http://localhost:3000' : 'https://ai-geo-audit.vercel.app');
-                const response = await fetch(`${apiBase}/api/supabase/get-latest-audit?property_url=${encodeURIComponent(propertyUrl)}`);
+                const response = await fetch(`${apiBase}/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
                 if (response.ok) {
-                  latestAuditFromSupabase = await response.json();
+                  latestAuditFromSupabase = unwrapAuditPayload(await response.json());
                 }
               } catch (apiErr) {
                 debugLog(`[Dashboard] Error fetching latest audit from API: ${apiErr.message || apiErr}`, 'warn');
@@ -68834,7 +68873,7 @@ Final Score: ${score}/100`;
             
             if (latestAuditFromSupabase) {
               // Update localStorage with latest audit data to ensure snapshot uses fresh data
-              safeSetLocalStorage('last_audit_results', latestAuditFromSupabase);
+              safeSetLocalStorage('last_audit_results', unwrapAuditPayload(latestAuditFromSupabase));
               debugLog(`[Dashboard] Updated localStorage with latest audit from Supabase (audit_date: ${latestAuditFromSupabase.auditDate || latestAuditFromSupabase.audit_date || 'unknown'})`, 'info');
               // Also update window.moneyPagesMetrics if available
               if (latestAuditFromSupabase.scores?.moneyPagesMetrics || latestAuditFromSupabase.moneyPagesMetrics) {
@@ -69084,7 +69123,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
 
         // Summary cards (use latest available data from localStorage/window)
-        const audit = dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null);
+        const audit = unwrapAuditPayload(dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null));
         const rankingStore = dashboardSafeJsonParse(localStorage.getItem('rankingAiData'), null);
         const rankingRows = (rankingStore && Array.isArray(rankingStore.combinedRows)) ? rankingStore.combinedRows : [];
 
@@ -69098,7 +69137,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           timestamp: lastGlobal?.timestamp || audit.timestamp || null,
           rag: gaioRag,
           ragLabel: (typeof metrics?.gaioScore === 'number') ? `${gaioRag.toUpperCase()} (${metrics.gaioScore}/100)` : 'Unknown',
-          kpis: audit.searchData ? {
+          kpis: (audit?.searchData || metrics?.auditKpis) ? {
             clicks: formatInt(metrics?.auditKpis?.clicks),
             impressions: formatInt(metrics?.auditKpis?.impressions),
             avgPosition: (typeof metrics?.auditKpis?.avgPosition === 'number') ? formatFixed(metrics.auditKpis.avgPosition, 1) : '—',
