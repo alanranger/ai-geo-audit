@@ -64,6 +64,7 @@ export default async function handler(req, res) {
       }
       const { error } = await supabase.from('dfs_backlink_tile_baseline').delete().eq('domain_host', domainHost);
       if (error) throw error;
+      await supabase.from('dfs_backlink_baseline_edges').delete().eq('domain_host', domainHost);
       return sendJson(res, 200, { status: 'ok', domainHost, meta: { generatedAt: new Date().toISOString() } });
     }
 
@@ -88,6 +89,12 @@ export default async function handler(req, res) {
     const row = { domain_host: domainHost, snapshot: snap, saved_at: now, updated_at: now };
     const { error } = await supabase.from('dfs_backlink_tile_baseline').upsert(row, { onConflict: 'domain_host' });
     if (error) throw error;
+    try {
+      const { error: rpcErr } = await supabase.rpc('dfs_refresh_backlink_baseline_edges', { p_domain: domainHost });
+      if (rpcErr) throw rpcErr;
+    } catch {
+      /* Migration not applied or RPC missing — tile snapshot still saved */
+    }
     return sendJson(res, 200, {
       status: 'ok',
       domainHost,
