@@ -997,7 +997,7 @@ export default async function handler(req, res) {
             const derivedTypes = parseSchemaTypes(record.schema_types);
             return buildSchemaFlags(
               derivedTypes.length > 0 ? derivedTypes : deriveSchemaTypesFromPages(schemaPagesDetailParsed || []),
-              ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'ImageObject', 'ItemList']
+              ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Review', 'HowTo', 'VideoObject', 'ImageObject', 'ItemList']
             );
           })(),
           missingTypes: (() => {

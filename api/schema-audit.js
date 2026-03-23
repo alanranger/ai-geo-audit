@@ -25,7 +25,6 @@ const RICH_RESULT_TYPES = [
   'FAQPage',
   'Product',
   'LocalBusiness',
-  'Course',
   'Review',
   'HowTo',
   'VideoObject',
