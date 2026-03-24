@@ -6825,7 +6825,7 @@
               <thead>
                 <tr>
                   <th style="width: 7%;"><button type="button" class="traditional-seo-sort-btn" data-sort="url">View <span class="sort-ind">↕</span></button></th>
-                  <th style="width: 8%;"><button type="button" class="traditional-seo-sort-btn" data-sort="page_score">Score <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 5%;"><button type="button" class="traditional-seo-sort-btn" data-sort="page_score">Score <span class="sort-ind">↕</span></button></th>
                   <th style="width: 10%;"><button type="button" class="traditional-seo-sort-btn" data-sort="tier">Tier <span class="sort-ind">↕</span></button></th>
                   <th style="width: 18%;"><button type="button" class="traditional-seo-sort-btn" data-sort="rule_name">Rule <span class="sort-ind">↕</span></button></th>
                   <th style="width: 10%;"><button type="button" class="traditional-seo-sort-btn" data-sort="status">Status <span class="sort-ind">↕</span></button></th>
@@ -6845,11 +6845,12 @@
                     </label>
                   </th>
                   <th style="width: 7%;"><button type="button" class="traditional-seo-sort-btn" data-sort="clicks" title="Google Search Console clicks from the saved audit’s query-page data (typically last 28 days ending near audit date).">Clicks <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 6%;"><button type="button" class="traditional-seo-sort-btn" data-sort="gsc_ctr" title="CTR from the same GSC totals as Clicks and Impr.: clicks ÷ impressions for this row’s rolled-up window.">CTR% <span class="sort-ind">↕</span></button></th>
                   <th style="width: 7%;"><button type="button" class="traditional-seo-sort-btn" data-sort="impressions" title="Google Search Console impressions from the saved audit’s query-page data (typically last 28 days ending near audit date).">Impr. <span class="sort-ind">↕</span></button></th>
                 </tr>
               </thead>
               <tbody id="traditional-seo-results-body">
-                <tr><td colspan="16" style="color: var(--dark-text-muted);">Run Traditional SEO Audit to populate this table.</td></tr>
+                <tr><td colspan="17" style="color: var(--dark-text-muted);">Run Traditional SEO Audit to populate this table.</td></tr>
               </tbody>
             </table>
           </div>
@@ -72938,6 +72939,20 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return String(v);
     }
 
+    function traditionalSeoGscCtrRatio(clicksRaw, impressionsRaw) {
+      const clicks = Number(clicksRaw);
+      const impr = Number(impressionsRaw);
+      if (!Number.isFinite(impr) || impr <= 0) return null;
+      if (!Number.isFinite(clicks) || clicks < 0) return null;
+      return clicks / impr;
+    }
+
+    function formatTraditionalSeoGscCtrPercent(clicksRaw, impressionsRaw) {
+      const r = traditionalSeoGscCtrRatio(clicksRaw, impressionsRaw);
+      if (r == null) return '—';
+      return `${(r * 100).toFixed(2)}%`;
+    }
+
     function traditionalSeoKeywordMetricPairsFromRows(rows) {
       const seen = new Set();
       const pairs = [];
@@ -76353,6 +76368,22 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             return traditionalSeoRollupGscTotalsForPageRowUrl(row.url, allRows, propEff)[gscKey];
           };
           diff = gscVal(a) - gscVal(b);
+        } else if (sortKey === 'gsc_ctr') {
+          const gscTotals = (row) => {
+            if (String(row?.tier || '').toLowerCase() === 'sitewide') {
+              return { clicks: row.clicks, impressions: row.impressions };
+            }
+            if (String(row?.rule_key || '') === '__page_summary__') {
+              return { clicks: row.clicks, impressions: row.impressions };
+            }
+            return traditionalSeoRollupGscTotalsForPageRowUrl(row.url, allRows, propEff);
+          };
+          const ctrSort = (row) => {
+            const g = gscTotals(row);
+            const r = traditionalSeoGscCtrRatio(g.clicks, g.impressions);
+            return r == null ? -1 : r;
+          };
+          diff = ctrSort(a) - ctrSort(b);
         } else if (sortKey === 'kw_rank') {
           const serpTuple = (row) => {
             const url =
@@ -76454,7 +76485,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           const emptyHint = !allRows.length
             ? 'No Traditional SEO results yet. Run <strong>② Score Traditional SEO</strong> or <strong>① Full audit + Traditional SEO</strong> first. Then use <strong>③</strong> to refresh keyword demand (Keywords Everywhere).'
             : 'No rows match current filters.';
-          body.innerHTML = `<tr><td colspan="16" style="color: var(--dark-text-muted);">${emptyHint}</td></tr>`;
+          body.innerHTML = `<tr><td colspan="17" style="color: var(--dark-text-muted);">${emptyHint}</td></tr>`;
         } else {
           const scoreMap = TRADITIONAL_SEO_STATE.pageScoreByUrl instanceof Map ? TRADITIONAL_SEO_STATE.pageScoreByUrl : null;
           const isSummaryRow = (r) => String(r?.rule_key || '') === '__page_summary__';
@@ -76495,6 +76526,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                   ? { clicks: row.clicks, impressions: row.impressions }
                   : traditionalSeoRollupGscTotalsForPageRowUrl(urlRaw, allRows, propEff);
             const clicksFmt = formatTraditionalSeoSearchVolume(gscForRow.clicks);
+            const ctrFmt = formatTraditionalSeoGscCtrPercent(gscForRow.clicks, gscForRow.impressions);
             const imprFmt = formatTraditionalSeoSearchVolume(gscForRow.impressions);
             const mForBl = !isSitewide ? traditionalSeoGetKeywordMetricRow(displayUrl) : null;
             const blArr = mForBl ? traditionalSeoBacklinkItemsFromMetric(mForBl) : [];
@@ -76554,6 +76586,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             <td class="traditional-seo-metric-cell">${escapeHtml(dfsBl)}</td>
             <td class="traditional-seo-metric-cell">${blSampleCell}</td>
             <td class="traditional-seo-metric-cell">${escapeHtml(clicksFmt)}</td>
+            <td class="traditional-seo-metric-cell">${escapeHtml(ctrFmt)}</td>
             <td class="traditional-seo-metric-cell">${escapeHtml(imprFmt)}</td>
           </tr>
         `;
