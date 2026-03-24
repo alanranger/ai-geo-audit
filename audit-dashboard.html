@@ -6592,6 +6592,7 @@
                 Coloured arc = log-scaled filtered row count (≈0–1M), not dofollow %. Δ vs last ingest on this device.
               </div>
             </div>
+            <div id="traditional-seo-dfs-radar-host" style="width: 100%; display: flex; flex-direction: column; align-items: center; margin: 0.35rem 0 0.65rem;" aria-label="Backlink mix radar"></div>
             <ul
               id="traditional-seo-dfs-bullets"
               style="width: 100%; margin: 0 0 0.75rem 0; padding-left: 1.2rem; font-size: 0.82rem; color: var(--dark-text); line-height: 1.55;"
@@ -6612,12 +6613,6 @@
                 </div>
               </div>
             </div>
-          </div>
-          <div class="card" id="traditional-seo-link-diversity-card">
-            <div class="traditional-seo-strip-title traditional-seo-metric-heading">Link distribution (samples)</div>
-            <div id="traditional-seo-link-diversity-value" style="text-align:center;font-size:1.35rem;font-weight:800;color:#e2e8f0;margin-top:0.35rem;">—</div>
-            <div id="traditional-seo-link-diversity-sub" class="traditional-seo-strip-sub" style="margin-top:0.45rem;min-height:2.4rem;line-height:1.35;">—</div>
-            <div id="traditional-seo-link-diversity-meta" class="traditional-seo-strip-sub" style="margin-top:0.35rem;font-size:0.72rem;color:var(--dark-text-muted);">—</div>
           </div>
           <div class="card" style="display: flex; flex-direction: column; justify-content: flex-start;">
             <div class="traditional-seo-strip-title">Pass / Warn / Fail</div>
@@ -71215,7 +71210,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       disavowUiPromise: null,
       /** When true (default), Pg bl + BL sample counts exclude disavowed / spam rows when JSON rows exist. */
       filterDisavowedBacklinkCounts: true,
-      ctrTopTenRenderGen: 0
+      ctrTopTenRenderGen: 0,
+      /** Cached GET dfs-domain-backlink-tiles for Traditional SEO radar (ref. rank bands). */
+      dfsTileAggregatesCur: null,
+      dfsTileAggregatesDomain: '',
+      dfsTileAggregatesFetching: false,
+      dfsTileAggregatesLoadAttempted: false
     };
 
     /** SPA rewrite sends most paths to audit-dashboard.html; load disavow via API so we get real text. */
@@ -71695,6 +71695,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         TRADITIONAL_SEO_STATE.dfsFilteredReferringDomains = null;
         TRADITIONAL_SEO_STATE.dfsFilteredDofollowSplit = null;
         TRADITIONAL_SEO_STATE.dfsLastIngest = null;
+        TRADITIONAL_SEO_STATE.dfsTileAggregatesCur = null;
+        TRADITIONAL_SEO_STATE.dfsTileAggregatesDomain = '';
+        TRADITIONAL_SEO_STATE.dfsTileAggregatesFetching = false;
+        TRADITIONAL_SEO_STATE.dfsTileAggregatesLoadAttempted = false;
         return;
       }
       try {
@@ -72190,6 +72194,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const bulletsEl = document.getElementById('traditional-seo-dfs-bullets');
       const m = document.getElementById('traditional-seo-dfs-meta');
       const noteEl = document.getElementById('traditional-seo-dfs-fetch-note');
+      const radarHost = document.getElementById('traditional-seo-dfs-radar-host');
       if (!ring || !valueEl || !bulletsEl) return;
       const s = TRADITIONAL_SEO_STATE.dfsBacklinkSummary;
       const fmt = (v) =>
@@ -72212,6 +72217,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         setEmptyBullets(
           'Set <code>TRADITIONAL_SEO_BACKLINK_INDEX_SOURCE</code> to <strong>dataforseo</strong> or <strong>both</strong> to enable this tile.'
         );
+        if (radarHost) radarHost.innerHTML = '';
         return;
       }
       if (!s) {
@@ -72234,6 +72240,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             ? 'Server: set <code>DATAFORSEO_API_LOGIN</code> and <code>DATAFORSEO_API_PASSWORD</code>.'
             : 'No domain summary yet — run <strong>DFS full index</strong> or <strong>DFS new links</strong>.'
         );
+        if (radarHost) radarHost.innerHTML = '';
         return;
       }
       const filteredN = TRADITIONAL_SEO_STATE.dfsFilteredIndexRowCount;
@@ -72277,6 +72284,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
       }
       const parts = [];
+      const cov = traditionalSeoBacklinkPageCoverageStats();
       if (usingFiltered) {
         const spl = TRADITIONAL_SEO_STATE.dfsFilteredDofollowSplit;
         const dfC = spl?.dofollow;
@@ -72338,7 +72346,36 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           `<li style="color:var(--dark-text-muted);list-style:none;margin-left:0;">Run <strong>DFS full index</strong> to create the spam-filtered list. Until then the ring may show the unfiltered API total.</li>`
         );
       }
+      if (cov.total > 0) {
+        parts.push(
+          `<li><strong>Page inbound coverage (this Traditional SEO run):</strong> ${cov.withL.toLocaleString()} / ${cov.total.toLocaleString()} URLs (${cov.pct}%) show ≥1 sampled <em>inbound</em> backlink (KE + DFS per‑URL samples — external sites linking in, not on-page internal links).</li>`
+        );
+      } else {
+        parts.push(
+          `<li style="color:var(--dark-text-muted);font-size:0.78rem;list-style:none;margin-left:0;">Page inbound coverage: run <strong>② Score Traditional SEO</strong> to roll up evaluated URLs.</li>`
+        );
+      }
       bulletsEl.innerHTML = parts.join('');
+      const splAll = TRADITIONAL_SEO_STATE.dfsFilteredDofollowSplit;
+      let followPctForRadar = null;
+      if (
+        splAll &&
+        splAll.dofollow != null &&
+        splAll.nofollow != null &&
+        Number.isFinite(Number(splAll.dofollow)) &&
+        Number.isFinite(Number(splAll.nofollow))
+      ) {
+        const dfnR = Math.max(0, Math.round(Number(splAll.dofollow)));
+        const nfnR = Math.max(0, Math.round(Number(splAll.nofollow)));
+        const knownR = dfnR + nfnR;
+        if (knownR > 0) followPctForRadar = Math.min(100, Math.max(0, Math.round((100 * dfnR) / knownR)));
+      }
+      if (radarHost) {
+        traditionalSeoKickDfsTileAggregatesForRadar();
+        const aggCur = TRADITIONAL_SEO_STATE.dfsTileAggregatesCur;
+        const spRadar = traditionalSeoDfsWeightedDofollowRefStrengthPct(aggCur?.rankBandsDofollow);
+        traditionalSeoPaintDfsBacklinkRadarHost(radarHost, followPctForRadar, cov, spRadar);
+      }
       const t = s.fetched_at ? Date.parse(String(s.fetched_at)) : NaN;
       let ds = '—';
       if (Number.isFinite(t) && t > 0) {
@@ -76592,11 +76629,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return Boolean(kePositive || dfsPositive);
     }
 
-    function renderTraditionalSeoLinkDiversityTile() {
-      const valEl = document.getElementById('traditional-seo-link-diversity-value');
-      const subEl = document.getElementById('traditional-seo-link-diversity-sub');
-      const metaEl = document.getElementById('traditional-seo-link-diversity-meta');
-      if (!valEl || !subEl) return;
+    function traditionalSeoBacklinkPageCoverageStats() {
       const allRows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
       const propEff = traditionalSeoEffectivePropertyUrl();
       const pages = new Set();
@@ -76608,25 +76641,87 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (disp) pages.add(disp);
       });
       const total = pages.size;
-      if (!total) {
-        valEl.textContent = '—';
-        subEl.textContent = 'Run ② or ① to load URL rows.';
-        if (metaEl) metaEl.textContent = '';
-        return;
-      }
+      if (total <= 0) return { withL: 0, total: 0, pct: null };
       let withL = 0;
       pages.forEach((disp) => {
         if (traditionalSeoDisplayUrlShowsPositiveInboundSample(disp)) withL += 1;
       });
       const pct = Math.round((withL / total) * 1000) / 10;
-      valEl.textContent = `${withL} / ${total}`;
-      subEl.textContent = `${pct}% of pages have ≥1 sampled inbound backlink (external sites linking in — not internal links)`;
-      if (metaEl) {
-        const dfsOn = traditionalSeoBacklinkIndexShowDfs();
-        metaEl.textContent = dfsOn
-          ? 'KE page backlink sample + DFS page rows — subset only, not your full backlink profile.'
-          : 'Keywords Everywhere page backlink sample only — subset only, not your full backlink profile.';
+      return { withL, total, pct };
+    }
+
+    function traditionalSeoDfsWeightedDofollowRefStrengthPct(rankBandsDofollow) {
+      const bd = rankBandsDofollow && typeof rankBandsDofollow === 'object' ? rankBandsDofollow : {};
+      const keys = ['r80_100', 'r50_79', 'r30_49', 'r20_29', 'r_lt20', 'r_null'];
+      const centers = { r80_100: 90, r50_79: 65, r30_49: 40, r20_29: 25, r_lt20: 10, r_null: 0 };
+      let w = 0;
+      let t = 0;
+      for (let i = 0; i < keys.length; i += 1) {
+        const k = keys[i];
+        const n = Math.max(0, Math.round(Number(bd[k]) || 0));
+        t += n;
+        w += n * (centers[k] ?? 0);
       }
+      if (t <= 0) return null;
+      return Math.round(Math.min(100, Math.max(0, w / t)));
+    }
+
+    function traditionalSeoPaintDfsBacklinkRadarHost(hostEl, followPct, cov, strengthPct) {
+      if (!hostEl) return;
+      const fp = followPct != null && Number.isFinite(Number(followPct)) ? Math.min(100, Math.max(0, Number(followPct))) : null;
+      const cp = cov && cov.pct != null && Number.isFinite(Number(cov.pct)) ? Math.min(100, Math.max(0, Number(cov.pct))) : null;
+      const sp = strengthPct != null && Number.isFinite(Number(strengthPct)) ? Math.min(100, Math.max(0, Number(strengthPct))) : null;
+      const wf = fp != null ? fp : 0;
+      const wc = cp != null ? cp : 0;
+      const ws = sp != null ? sp : 0;
+      const W = 200;
+      const H = 172;
+      const cx = W / 2;
+      const cy = H / 2 + 4;
+      const R = 56;
+      const rad = (deg) => (deg * Math.PI) / 180;
+      const pt = (deg, pctVal) => {
+        const r = R * Math.min(1, Math.max(0, pctVal / 100));
+        return `${cx + r * Math.cos(rad(deg))},${cy + r * Math.sin(rad(deg))}`;
+      };
+      const poly = `${pt(-90, wf)} ${pt(150, wc)} ${pt(30, ws)}`;
+      const axes = [
+        { deg: -90, lab: 'Dofollow %' },
+        { deg: 150, lab: 'Page coverage' },
+        { deg: 30, lab: 'Ref. strength' }
+      ];
+      const axisLines = axes
+        .map(({ deg }) => {
+          const x2 = cx + R * Math.cos(rad(deg));
+          const y2 = cy + R * Math.sin(rad(deg));
+          return `<line x1="${cx}" y1="${cy}" x2="${x2}" y2="${y2}" stroke="rgba(148,163,184,0.35)" stroke-width="1"/>`;
+        })
+        .join('');
+      const labels = axes
+        .map(({ deg, lab }) => {
+          const lr = R + 24;
+          const x = cx + lr * Math.cos(rad(deg));
+          const y = cy + lr * Math.sin(rad(deg));
+          const c = Math.cos(rad(deg));
+          const anchor = c > 0.25 ? 'start' : c < -0.25 ? 'end' : 'middle';
+          return `<text x="${x}" y="${y}" fill="#94a3b8" font-size="9" text-anchor="${anchor}" dominant-baseline="middle">${lab}</text>`;
+        })
+        .join('');
+      const fTxt = fp != null ? `${Math.round(fp)}%` : '—';
+      const cTxt =
+        cov && cov.total > 0 && cp != null
+          ? `${cov.pct}% (${cov.withL.toLocaleString()}/${cov.total.toLocaleString()})`
+          : '—';
+      const sTxt = sp != null ? `${sp}` : '…';
+      const leg = `Dofollow ${fTxt} · Coverage ${cTxt} · Ref. strength ${sTxt} <span style="color:var(--dark-text-muted);">(0–100, weighted by DFS dofollow rank band)</span>`;
+      hostEl.innerHTML = `<div style="text-align:center;width:100%;">
+        <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;margin:0 auto;">
+          ${axisLines}
+          <polygon points="${poly}" fill="rgba(245,158,11,0.28)" stroke="#f59e0b" stroke-width="1.5" stroke-linejoin="round"/>
+          ${labels}
+        </svg>
+        <div style="font-size:0.65rem;color:#cbd5e1;line-height:1.4;margin-top:0.2rem;max-width:19rem;">${leg}</div>
+      </div>`;
     }
 
     function renderTraditionalSeoResultsTable() {
@@ -76969,7 +77064,6 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       updateTraditionalSeoSortHeaderState();
       renderTraditionalSeoDfsBacklinkTiles();
       renderTraditionalSeoDfsDomainRankTile();
-      renderTraditionalSeoLinkDiversityTile();
       void traditionalSeoRefreshCtrTopTenTiles();
     }
 
@@ -78446,6 +78540,30 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.status !== 'ok') throw new Error(j.message || `HTTP ${res.status}`);
       return j.data || null;
+    }
+
+    function traditionalSeoKickDfsTileAggregatesForRadar() {
+      const domain = traditionalSeoPropertyHostname();
+      if (!domain || !traditionalSeoBacklinkIndexShowDfs()) return;
+      if (TRADITIONAL_SEO_STATE.dfsTileAggregatesDomain !== domain) {
+        TRADITIONAL_SEO_STATE.dfsTileAggregatesCur = null;
+        TRADITIONAL_SEO_STATE.dfsTileAggregatesDomain = domain;
+        TRADITIONAL_SEO_STATE.dfsTileAggregatesLoadAttempted = false;
+      }
+      if (TRADITIONAL_SEO_STATE.dfsTileAggregatesLoadAttempted || TRADITIONAL_SEO_STATE.dfsTileAggregatesFetching) return;
+      TRADITIONAL_SEO_STATE.dfsTileAggregatesFetching = true;
+      TRADITIONAL_SEO_STATE.dfsTileAggregatesLoadAttempted = true;
+      dfsBacklinksFetchTileAggregates(domain)
+        .then((cur) => {
+          TRADITIONAL_SEO_STATE.dfsTileAggregatesCur = cur || null;
+        })
+        .catch(() => {
+          TRADITIONAL_SEO_STATE.dfsTileAggregatesCur = null;
+        })
+        .finally(() => {
+          TRADITIONAL_SEO_STATE.dfsTileAggregatesFetching = false;
+          renderTraditionalSeoDfsBacklinkTiles();
+        });
     }
 
     async function dfsBacklinksFetchRows(domain) {
