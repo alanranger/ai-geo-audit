@@ -1732,6 +1732,10 @@
       margin-bottom: 1rem;
     }
 
+    section[data-panel="traditional-seo"] .traditional-seo-grid > .card {
+      min-width: 0;
+    }
+
     section[data-panel="traditional-seo"] .traditional-seo-ctr-top-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6581,18 +6585,7 @@
           </div>
           <div class="card" id="traditional-seo-dfs-tile-card">
             <div class="traditional-seo-strip-title traditional-seo-metric-heading">Backlinks (DataForSEO)</div>
-            <div style="width: 100%; display: flex; flex-direction: column; align-items: center; margin-bottom: 0.85rem;">
-              <div id="traditional-seo-dfs-total-ring" class="dashboard-dial-ring traditional-seo-metric-placeholder" data-pct="0" data-rag="neutral" style="width: 168px; height: 168px;">
-                <div class="dashboard-dial-inner">
-                  <div id="traditional-seo-dfs-total-value" class="dashboard-dial-value" style="font-size: 1.05rem;">—</div>
-                  <div id="traditional-seo-dfs-total-delta" class="dashboard-dial-delta" data-dir="flat">—</div>
-                </div>
-              </div>
-              <div id="traditional-seo-dfs-total-caption" style="margin-top: 0.45rem; font-size: 0.8rem; color: var(--dark-text-muted); text-align: center; max-width: 22rem; line-height: 1.4;">
-                Coloured arc = log-scaled filtered row count (≈0–1M), not dofollow %. Δ vs last ingest on this device.
-              </div>
-            </div>
-            <div id="traditional-seo-dfs-radar-host" style="width: 100%; display: flex; flex-direction: column; align-items: center; margin: 0.45rem 0 0.75rem;" aria-label="Backlink mix radar"></div>
+            <div id="traditional-seo-dfs-radar-host" style="width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; margin: 0.2rem 0 0.65rem;" aria-label="Backlink mix radar"></div>
             <ul
               id="traditional-seo-dfs-bullets"
               style="width: 100%; margin: 0 0 0.75rem 0; padding-left: 1.2rem; font-size: 0.92rem; color: var(--dark-text); line-height: 1.55;"
@@ -72187,15 +72180,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     function renderTraditionalSeoDfsBacklinkTiles() {
       traditionalSeoRefreshDfsLastFetchedLabels();
-      const ring = document.getElementById('traditional-seo-dfs-total-ring');
-      const valueEl = document.getElementById('traditional-seo-dfs-total-value');
-      const deltaEl = document.getElementById('traditional-seo-dfs-total-delta');
-      const captionEl = document.getElementById('traditional-seo-dfs-total-caption');
       const bulletsEl = document.getElementById('traditional-seo-dfs-bullets');
       const m = document.getElementById('traditional-seo-dfs-meta');
       const noteEl = document.getElementById('traditional-seo-dfs-fetch-note');
       const radarHost = document.getElementById('traditional-seo-dfs-radar-host');
-      if (!ring || !valueEl || !bulletsEl) return;
+      if (!bulletsEl) return;
       const s = TRADITIONAL_SEO_STATE.dfsBacklinkSummary;
       const fmt = (v) =>
         v != null && Number.isFinite(Number(v)) ? formatTraditionalSeoSearchVolume(Math.round(Number(v))) : '—';
@@ -72203,17 +72192,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         bulletsEl.innerHTML = msg ? `<li style="color:var(--dark-text-muted);list-style:none;margin-left:0;">${msg}</li>` : '';
       };
       if (!traditionalSeoBacklinkIndexShowDfs()) {
-        ring.style.setProperty('--pct', '0');
-        ring.dataset.rag = 'neutral';
-        ring.classList.add('traditional-seo-metric-placeholder');
-        valueEl.textContent = '—';
-        if (deltaEl) {
-          deltaEl.textContent = '—';
-          deltaEl.dataset.dir = 'flat';
-        }
         if (m) m.textContent = '—';
         if (noteEl) noteEl.textContent = '';
-        if (captionEl) captionEl.textContent = '—';
         setEmptyBullets(
           'Set <code>TRADITIONAL_SEO_BACKLINK_INDEX_SOURCE</code> to <strong>dataforseo</strong> or <strong>both</strong> to enable this tile.'
         );
@@ -72221,20 +72201,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         return;
       }
       if (!s) {
-        ring.style.setProperty('--pct', '0');
-        ring.dataset.rag = 'neutral';
-        ring.classList.add('traditional-seo-metric-placeholder');
-        valueEl.textContent = '—';
-        if (deltaEl) {
-          deltaEl.textContent = '—';
-          deltaEl.dataset.dir = 'flat';
-        }
         if (m) m.textContent = '—';
         if (noteEl) noteEl.textContent = TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote || '';
-        if (captionEl) {
-          captionEl.textContent =
-            'Coloured arc = log-scaled filtered row count (≈0–1M), not dofollow %. Δ vs last ingest on this device.';
-        }
         setEmptyBullets(
           TRADITIONAL_SEO_STATE.dfsBacklinkApiConfigured === false
             ? 'Server: set <code>DATAFORSEO_API_LOGIN</code> and <code>DATAFORSEO_API_PASSWORD</code>.'
@@ -72247,41 +72215,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const usingFiltered = filteredN != null && Number.isFinite(Number(filteredN)) && Number(filteredN) >= 0;
       const summaryTotalN = traditionalSeoToNum(s.backlinks, NaN);
       const totalN = usingFiltered ? Number(filteredN) : summaryTotalN;
-      if (!Number.isFinite(totalN) || totalN < 0) {
-        ring.classList.add('traditional-seo-metric-placeholder');
-        valueEl.textContent = '—';
-        if (deltaEl) {
-          deltaEl.textContent = '—';
-          deltaEl.dataset.dir = 'flat';
-        }
-        if (captionEl) captionEl.textContent = '—';
-      } else {
-        ring.classList.remove('traditional-seo-metric-placeholder');
-        const pct = Math.max(0, Math.min(100, Math.round((Math.log10(totalN + 1) / Math.log10(1000001)) * 100)));
-        ring.style.setProperty('--pct', String(pct));
-        ring.dataset.rag = traditionalSeoRagFromScore(pct);
-        valueEl.textContent = fmt(totalN);
-        if (captionEl) {
-          captionEl.textContent = usingFiltered
-            ? 'Coloured arc = log-scaled filtered row count (≈0–1M), not dofollow %. Δ vs last ingest on this device.'
-            : 'API summary total (unfiltered): arc is log-scaled count (not dofollow %). Run DFS full index for filtered rows.';
-        }
+      let indexHeadline = null;
+      if (Number.isFinite(totalN) && totalN >= 0) {
         const base = traditionalSeoReadDfsBacklinkBaseline();
-        if (deltaEl) {
-          if (base && Number.isFinite(base.backlinks)) {
-            const diff = Math.round(totalN - base.backlinks);
-            const ad = Math.abs(diff);
-            const label =
-              diff === 0
-                ? '0 vs last ingest'
-                : `${diff > 0 ? '+' : '−'}${fmt(ad)} vs last ingest`;
-            deltaEl.textContent = label;
-            deltaEl.dataset.dir = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
-          } else {
-            deltaEl.textContent = 'First ingest on this device';
-            deltaEl.dataset.dir = 'flat';
-          }
+        let sub = usingFiltered ? 'Filtered index rows' : 'API total (run full index for filtered rows)';
+        if (base && Number.isFinite(base.backlinks)) {
+          const diff = Math.round(totalN - base.backlinks);
+          if (diff === 0) sub += ' · same vs last ingest';
+          else sub += ` · ${diff > 0 ? '+' : '−'}${fmt(Math.abs(diff))} vs last ingest`;
+        } else {
+          sub += ' · first ingest on this device';
         }
+        indexHeadline = { total: fmt(totalN), sub };
       }
       const parts = [];
       const cov = traditionalSeoBacklinkPageCoverageStats();
@@ -72289,8 +72234,6 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const spl = TRADITIONAL_SEO_STATE.dfsFilteredDofollowSplit;
         const dfC = spl?.dofollow;
         const nfC = spl?.nofollow;
-        const ukC = spl?.unknown;
-        let splitLine = '—';
         if (
           spl &&
           dfC != null &&
@@ -72303,23 +72246,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           const known = dfn + nfn;
           const pctFollow =
             known > 0 ? Math.min(100, Math.max(0, Math.round((100 * dfn) / known))) : null;
-          splitLine =
+          const line =
             pctFollow != null
-              ? `<strong>${pctFollow}% follow</strong> · ${fmt(dfn)} dofollow / ${fmt(nfn)} nofollow`
-              : `${fmt(dfn)} / ${fmt(nfn)}`;
-          if (ukC != null && Number(ukC) > 0) {
-            splitLine += ` · rel unknown ${fmt(Math.round(Number(ukC)))}`;
-          }
+              ? `<strong>${pctFollow}%</strong> follow · ${fmt(dfn)} df / ${fmt(nfn)} nf`
+              : `${fmt(dfn)} df / ${fmt(nfn)} nf`;
+          parts.push(`<li><strong>Follow:</strong> ${line}</li>`);
         } else {
-          splitLine = '— (refresh page or run <strong>DFS full index</strong> to load split)';
+          parts.push('<li><strong>Follow:</strong> — <span style="color:var(--dark-text-muted)">refresh or DFS full index</span></li>');
         }
-        parts.push(`<li><strong>Dofollow / Nofollow (filtered index):</strong> ${splitLine}</li>`);
         const rdN = TRADITIONAL_SEO_STATE.dfsFilteredReferringDomains;
-        const refLine =
-          rdN != null && Number.isFinite(Number(rdN))
-            ? `${fmt(Math.round(Number(rdN)))} <span style="color:var(--dark-text-muted);font-weight:400;">unique hosts from <code>url_from</code></span>`
-            : '—';
-        parts.push(`<li><strong>Referring domains (filtered index):</strong> ${refLine}</li>`);
+        if (rdN != null && Number.isFinite(Number(rdN))) {
+          parts.push(`<li><strong>Ref. domains:</strong> ${fmt(Math.round(Number(rdN)))}</li>`);
+        }
         const ing = TRADITIONAL_SEO_STATE.dfsLastIngest;
         if (
           ing &&
@@ -72331,28 +72269,22 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           const apiN = Math.max(0, Math.round(Number(ing.apiItems)));
           const kept = Math.max(0, Math.round(Number(ing.rowsStored)));
           const drop = Math.max(0, apiN - kept);
-          const pctKept = apiN > 0 ? Math.min(100, Math.max(0, Math.round((100 * kept) / apiN))) : null;
           parts.push(
-            `<li><strong>Last ${escapeHtml(String(ing.action || 'ingest'))}:</strong> ${fmt(apiN)} fetched from API · ${fmt(
-              drop
-            )} not stored (unmapped) · ${fmt(kept)} in filtered index${pctKept != null ? ` · <strong>${pctKept}%</strong> counted of fetched` : ''}</li>`
+            `<li><strong>Ingest:</strong> ${fmt(apiN)} in → ${fmt(kept)} kept${drop > 0 ? ` · ${fmt(drop)} dropped` : ''}</li>`
           );
         }
-        parts.push(
-          `<li style="color:var(--dark-text-muted);font-size:0.86rem;list-style:none;margin-left:0;">Counts are from the spam-filtered Supabase index (plus the last ingest line above).</li>`
-        );
       } else {
         parts.push(
-          `<li style="color:var(--dark-text-muted);list-style:none;margin-left:0;">Run <strong>DFS full index</strong> to create the spam-filtered list. Until then the ring may show the unfiltered API total.</li>`
+          '<li style="color:var(--dark-text-muted);list-style:none;margin-left:0;"><strong>DFS full index</strong> for filtered stats (totals above may be API-wide).</li>'
         );
       }
       if (cov.total > 0) {
         parts.push(
-          `<li><strong>Page inbound coverage (this Traditional SEO run):</strong> ${cov.withL.toLocaleString()} / ${cov.total.toLocaleString()} URLs (${cov.pct}%) show ≥1 sampled <em>inbound</em> backlink (KE + DFS per‑URL samples — external sites linking in, not on-page internal links).</li>`
+          `<li><strong>Coverage:</strong> ${cov.withL.toLocaleString()}/${cov.total.toLocaleString()} URLs (${cov.pct}%) · inbound sample (KE+DFS)</li>`
         );
       } else {
         parts.push(
-          `<li style="color:var(--dark-text-muted);font-size:0.86rem;list-style:none;margin-left:0;">Page inbound coverage: run <strong>② Score Traditional SEO</strong> to roll up evaluated URLs.</li>`
+          '<li style="color:var(--dark-text-muted);font-size:0.86rem;list-style:none;margin-left:0;"><strong>Coverage:</strong> run <strong>②</strong> to roll up URLs.</li>'
         );
       }
       bulletsEl.innerHTML = parts.join('');
@@ -72374,7 +72306,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         traditionalSeoKickDfsTileAggregatesForRadar();
         const aggCur = TRADITIONAL_SEO_STATE.dfsTileAggregatesCur;
         const spRadar = traditionalSeoDfsWeightedDofollowRefStrengthPct(aggCur?.rankBandsDofollow);
-        traditionalSeoPaintDfsBacklinkRadarHost(radarHost, followPctForRadar, cov, spRadar);
+        traditionalSeoPaintDfsBacklinkRadarHost(radarHost, followPctForRadar, cov, spRadar, indexHeadline);
       }
       const t = s.fetched_at ? Date.parse(String(s.fetched_at)) : NaN;
       let ds = '—';
@@ -76666,7 +76598,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return Math.round(Math.min(100, Math.max(0, w / t)));
     }
 
-    function traditionalSeoPaintDfsBacklinkRadarHost(hostEl, followPct, cov, strengthPct) {
+    function traditionalSeoPaintDfsBacklinkRadarHost(hostEl, followPct, cov, strengthPct, indexHeadline) {
       if (!hostEl) return;
       const fp = followPct != null && Number.isFinite(Number(followPct)) ? Math.min(100, Math.max(0, Number(followPct))) : null;
       const cp = cov && cov.pct != null && Number.isFinite(Number(cov.pct)) ? Math.min(100, Math.max(0, Number(cov.pct))) : null;
@@ -76674,11 +76606,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const wf = fp != null ? fp : 0;
       const wc = cp != null ? cp : 0;
       const ws = sp != null ? sp : 0;
-      const W = 300;
-      const H = 260;
+      const W = 336;
+      const H = 276;
       const cx = W / 2;
-      const cy = H / 2 + 8;
-      const R = 82;
+      const cy = H / 2 + 4;
+      const R = 70;
       const rad = (deg) => (deg * Math.PI) / 180;
       const pt = (deg, pctVal) => {
         const r = R * Math.min(1, Math.max(0, pctVal / 100));
@@ -76686,44 +76618,45 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       };
       const poly = `${pt(-90, wf)} ${pt(150, wc)} ${pt(30, ws)}`;
       const axes = [
-        { deg: -90, lab: 'Dofollow %' },
-        { deg: 150, lab: 'Page coverage' },
-        { deg: 30, lab: 'Ref. strength' }
+        { deg: -90, lab: 'Dofollow' },
+        { deg: 150, lab: 'Coverage' },
+        { deg: 30, lab: 'Ref. rank' }
       ];
       const axisLines = axes
         .map(({ deg }) => {
           const x2 = cx + R * Math.cos(rad(deg));
           const y2 = cy + R * Math.sin(rad(deg));
-          return `<line x1="${cx}" y1="${cy}" x2="${x2}" y2="${y2}" stroke="rgba(148,163,184,0.45)" stroke-width="1.35"/>`;
+          return `<line x1="${cx}" y1="${cy}" x2="${x2}" y2="${y2}" stroke="rgba(148,163,184,0.45)" stroke-width="1.25"/>`;
         })
         .join('');
       const labels = axes
         .map(({ deg, lab }) => {
-          const lr = R + 38;
+          const lr = R + 30;
           const x = cx + lr * Math.cos(rad(deg));
           const y = cy + lr * Math.sin(rad(deg));
           const c = Math.cos(rad(deg));
           const anchor = c > 0.25 ? 'start' : c < -0.25 ? 'end' : 'middle';
-          return `<text x="${x}" y="${y}" fill="#cbd5e1" font-size="14" font-weight="600" font-family="system-ui,Segoe UI,sans-serif" text-anchor="${anchor}" dominant-baseline="middle">${lab}</text>`;
+          return `<text x="${x}" y="${y}" fill="#cbd5e1" font-size="12" font-weight="600" font-family="system-ui,Segoe UI,sans-serif" text-anchor="${anchor}" dominant-baseline="middle">${lab}</text>`;
         })
         .join('');
-      const fTxt = fp != null ? `${Math.round(fp)}%` : '—';
-      const cTxt =
-        cov && cov.total > 0 && cp != null
-          ? `${cov.pct}% (${cov.withL.toLocaleString()}/${cov.total.toLocaleString()})`
-          : '—';
-      const sTxt = sp != null ? `${sp}` : '…';
-      hostEl.innerHTML = `<div style="text-align:center;width:100%;max-width:26rem;margin:0 auto;">
-        <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;margin:0 auto;max-width:100%;height:auto;">
+      const head =
+        indexHeadline && String(indexHeadline.total || '').trim()
+          ? `<div style="text-align:center;margin:0 0 0.35rem;min-width:0;padding:0 0.15rem;">
+               <div style="font-size:1.05rem;font-weight:800;color:#f8fafc;line-height:1.2;">${String(indexHeadline.total)}</div>
+               ${
+                 String(indexHeadline.sub || '').trim()
+                   ? `<div style="font-size:0.76rem;color:var(--dark-text-muted);line-height:1.35;margin-top:0.2rem;">${String(indexHeadline.sub)}</div>`
+                   : ''
+               }
+             </div>`
+          : '';
+      hostEl.innerHTML = `<div style="width:100%;max-width:100%;min-width:0;box-sizing:border-box;">
+        ${head}
+        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Backlink mix" style="display:block;width:100%;max-width:100%;height:auto;min-width:0;">
           ${axisLines}
-          <polygon points="${poly}" fill="rgba(245,158,11,0.28)" stroke="#f59e0b" stroke-width="2.25" stroke-linejoin="round"/>
+          <polygon points="${poly}" fill="rgba(245,158,11,0.28)" stroke="#f59e0b" stroke-width="2" stroke-linejoin="round"/>
           ${labels}
         </svg>
-        <div style="font-size:0.9rem;color:#e2e8f0;line-height:1.5;margin-top:0.45rem;text-align:left;padding:0 0.25rem;">
-          <div><strong style="color:#f8fafc;">Dofollow</strong> ${fTxt}</div>
-          <div style="margin-top:0.2rem;"><strong style="color:#f8fafc;">Page coverage</strong> ${cTxt}</div>
-          <div style="margin-top:0.2rem;"><strong style="color:#f8fafc;">Ref. strength</strong> ${sTxt} <span style="color:var(--dark-text-muted);font-size:0.82rem;font-weight:400;">(0–100, DFS dofollow weighted by ref. domain rank band)</span></div>
-        </div>
       </div>`;
     }
 
