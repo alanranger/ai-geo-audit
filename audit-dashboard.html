@@ -76701,7 +76701,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const vRank = sp != null ? sp : 0;
       const vCov = cp != null ? cp : 0;
       const valFollow = fp != null ? `${Math.round(fp)}%` : '—';
-      const valRank = sp != null ? `${Math.round(sp)}` : '—';
+      const valRank = sp != null ? `${Math.round(sp)}/100` : '—';
       const valCov =
         cov && cov.total > 0 && cp != null
           ? `${cov.pct}% (${cov.withL}/${cov.total})`
@@ -76719,8 +76719,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           : '';
       hostEl.innerHTML = `<div style="width:100%;max-width:100%;min-width:0;box-sizing:border-box;">
         ${head}
-        <div style="width:100%;height:240px;min-width:0;max-width:100%;position:relative;">
-          <canvas id="traditional-seo-dfs-radar-canvas" aria-label="Backlink mix radar" style="display:block;width:100%;height:100%;"></canvas>
+        <div style="width:100%;height:min(360px,48vh);min-height:300px;min-width:0;max-width:100%;position:relative;">
+          <canvas id="traditional-seo-dfs-radar-canvas" aria-label="Backlink mix: dofollow share, referrer strength from DFS rank bands, and URL coverage" style="display:block;width:100%;height:100%;"></canvas>
         </div>
       </div>`;
 
@@ -76735,7 +76735,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const labels = ['Dofollow', 'Ref. rank', 'Coverage'];
+      const labels = ['Dofollow', 'Ref. strength / DFS rank mix', 'Coverage'];
       const values = [vFollow, vRank, vCov];
       const valueTexts = [valFollow, valRank, valCov];
       const deltaColors = valueTexts.map(() => 'rgba(226,232,240,0.9)');
@@ -76760,14 +76760,22 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           options: {
             responsive: true,
             maintainAspectRatio: false,
-            layout: { padding: 18 },
+            layout: { padding: 10 },
             plugins: {
               legend: { display: false },
               tooltip: {
                 callbacks: {
                   label(c) {
                     const i = c.dataIndex;
-                    return `${labels[i]}: ${valueTexts[i]} (0–100 axis: ${Math.round(values[i])})`;
+                    const v = Math.round(values[i]);
+                    const line = `${labels[i]}: ${valueTexts[i]} (axis ${v}/100)`;
+                    if (i === 1) {
+                      return [
+                        line,
+                        'Dofollow backlinks only: weighted average across DFS referrer rank buckets (higher = stronger referrers).'
+                      ];
+                    }
+                    return line;
                   }
                 }
               },
@@ -76777,8 +76785,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                 deltaColors,
                 lineGap: 12,
                 deltaGap: 8,
-                labelPadding: 22,
-                edgePadding: 4
+                labelPadding: 16,
+                edgePadding: 2
               }
             },
             scales: {
@@ -76792,7 +76800,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                   display: true,
                   color: 'rgba(0,0,0,0)',
                   font: { size: 11, weight: '700' },
-                  padding: 22
+                  padding: 16
                 }
               }
             }
