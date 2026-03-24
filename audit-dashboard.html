@@ -73919,6 +73919,90 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       };
     }
 
+    function traditionalSeoQaGateRowCount(schemaAuditBody) {
+      const rows = schemaAuditBody?.data?.qaGate?.rows;
+      return Array.isArray(rows) ? rows.length : 0;
+    }
+
+    function traditionalSeoQaPayloadNeedsSupabaseFallback(qaPayload, evaluatedUrlCount) {
+      const n = traditionalSeoQaGateRowCount(qaPayload);
+      const target = Math.max(0, traditionalSeoToNum(evaluatedUrlCount, 0));
+      if (n === 0) return true;
+      if (!qaPayload || String(qaPayload.status || '').toLowerCase() !== 'ok') return true;
+      if (target < 30) return false;
+      return n < Math.floor(target * 0.85);
+    }
+
+    function traditionalSeoNormalizePropertyUrlForSnapshots(raw) {
+      const value = String(raw || '').trim();
+      if (!value) return 'https://www.alanranger.com';
+      try {
+        const parsed = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+        parsed.hash = '';
+        const combined = `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '') || parsed.origin;
+        return combined;
+      } catch (err) {
+        return value;
+      }
+    }
+
+    function traditionalSeoPropertyCandidatesForImplSnapshots(propertyUrl) {
+      const base = traditionalSeoNormalizePropertyUrlForSnapshots(propertyUrl);
+      const out = [];
+      const add = (u) => {
+        const s = String(u || '').trim();
+        if (s && !out.includes(s)) out.push(s);
+      };
+      add(base);
+      try {
+        const p = new URL(/^https?:\/\//i.test(base) ? base : `https://${base}`);
+        const host = String(p.hostname || '').toLowerCase();
+        if (host.startsWith('www.')) {
+          add(traditionalSeoNormalizePropertyUrlForSnapshots(`${p.protocol}//${host.slice(4)}`));
+        } else if (host) {
+          add(traditionalSeoNormalizePropertyUrlForSnapshots(`${p.protocol}//www.${host}`));
+        }
+      } catch (err) {
+        /* ignore */
+      }
+      if (typeof getImplementationPropertyUrl === 'function') {
+        add(traditionalSeoNormalizePropertyUrlForSnapshots(getImplementationPropertyUrl()));
+      }
+      return out;
+    }
+
+    async function traditionalSeoFetchQaPayloadFromSupabase(propertyUrl) {
+      const candidates = traditionalSeoPropertyCandidatesForImplSnapshots(propertyUrl);
+      for (let i = 0; i < candidates.length; i += 1) {
+        const snapMap = await fetchImplementationSnapshotsFromSupabase(candidates[i]);
+        if (!snapMap || typeof snapMap !== 'object') continue;
+        const payload = choosePreferredSupabaseSnapshot(snapMap.qa);
+        if (payload && String(payload.status || '').toLowerCase() === 'ok'
+            && traditionalSeoQaGateRowCount(payload) > 0) {
+          return payload;
+        }
+      }
+      return null;
+    }
+
+    async function traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl, evaluatedUrlCount) {
+      const payloads = traditionalSeoLoadImplementationPayloads();
+      const qa = payloads.qa;
+      if (!traditionalSeoQaPayloadNeedsSupabaseFallback(qa, evaluatedUrlCount)) {
+        return payloads;
+      }
+      const remote = await traditionalSeoFetchQaPayloadFromSupabase(propertyUrl);
+      const localN = traditionalSeoQaGateRowCount(qa);
+      const remoteN = traditionalSeoQaGateRowCount(remote);
+      if (!remote || remoteN <= localN) {
+        return payloads;
+      }
+      if (typeof saveImplementationAuditCache === 'function' && IMPL_AUDIT_CACHE_KEYS?.qa) {
+        saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.qa, remote, { syncRemote: false });
+      }
+      return { ...payloads, qa: remote };
+    }
+
     /** Normalize cached technical-foundation API body (or bare `data`) for Traditional SEO + signal maps. */
     function traditionalSeoReadTechFoundation(techPayload) {
       if (!techPayload || typeof techPayload !== 'object') {
@@ -74190,7 +74274,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const extractSignal = traditionalSeoSignalMapGet(maps.extractability, url, propertyUrl);
       const qaSignal = traditionalSeoSignalMapGet(maps.qaGate, url, propertyUrl);
       const qaIssues = Array.isArray(qaSignal?.issues) ? qaSignal.issues : [];
-      const qaIssueText = qaIssues.map((issue) => `${issue?.code || ''} ${issue?.detail || ''}`.toLowerCase()).join(' | ');
+      const qaDetails = Array.isArray(qaSignal?.issueDetails) ? qaSignal.issueDetails : [];
+      const qaIssueText = qaIssues
+        .concat(qaDetails)
+        .map((issue) => `${issue?.code || ''} ${issue?.detail || ''}`.toLowerCase())
+        .join(' | ');
       const schemaTypes = Array.isArray(schemaSignal?.schemaTypes)
         ? schemaSignal.schemaTypes.map((type) => String(type || '').toLowerCase())
         : [];
@@ -74250,7 +74338,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           if (schemaTypes.length >= 1) return 'warn';
           return 'fail';
         }
-        if (qaSignal && qaSignal.pass === false && qaIssueText.includes('missing_jsonld')) return 'fail';
+        const qaCodes = Array.isArray(qaSignal?.issueCodes)
+          ? qaSignal.issueCodes.map((c) => String(c || '').toLowerCase())
+          : [];
+        if (qaSignal && String(qaSignal.status || '').toLowerCase() === 'block_deploy'
+            && (qaCodes.includes('missing_jsonld') || qaIssueText.includes('missing_jsonld'))) {
+          return 'fail';
+        }
         if (schemaScore >= 75) return 'pass';
         if (schemaScore >= 45) return 'warn';
         return 'fail';
@@ -74390,7 +74484,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (key === 'schema_qa_gate_page') {
         if (traditionalSeoShouldExcludeUrlFromTraditionalAudit(url)) return 'pass';
         if (!qaSignal) return 'warn';
-        if (qaSignal.pass === false) return 'fail';
+        const qaSt = String(qaSignal.status || '').toLowerCase();
+        if (qaSt === 'block_deploy') return 'fail';
+        if (qaSt === 'warning') return 'warn';
         return 'pass';
       }
       if (key === 'service_schema_product_page') {
@@ -76361,7 +76457,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
 
         traditionalSeoEvalProgressStage('Building signals and loading overrides…', 78);
-        const implPayloads = traditionalSeoLoadImplementationPayloads();
+        const implPayloads = await traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl, urls.length);
         const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
         TRADITIONAL_SEO_STATE.lastSignalMaps = signalMaps;
         TRADITIONAL_SEO_STATE.lastPropertyUrl = propertyUrl;
@@ -76542,7 +76638,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           await new Promise((resolve) => setTimeout(resolve, 0));
         }
         traditionalSeoEvalProgressStage('Building signals and loading overrides…', 86);
-        const implPayloads = traditionalSeoLoadImplementationPayloads();
+        const implPayloads = await traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl, urls.length);
         const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
         TRADITIONAL_SEO_STATE.lastSignalMaps = signalMaps;
         TRADITIONAL_SEO_STATE.lastPropertyUrl = propertyUrl;
