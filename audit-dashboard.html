@@ -36812,7 +36812,19 @@
               } else {
                 debugLog('  Source: CSV (GitHub/hosted)', 'info');
               }
-              
+              try {
+                if (typeof IMPL_AUDIT_CACHE_KEYS === 'object' && IMPL_AUDIT_CACHE_KEYS?.qa
+                    && typeof saveImplementationAuditCache === 'function') {
+                  saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.qa, schemaAudit);
+                  if (typeof implLatestAuditPayloads === 'object' && implLatestAuditPayloads) {
+                    implLatestAuditPayloads.qa = schemaAudit;
+                  }
+                  debugLog('✓ Synced schema audit → Implementation QA cache (Traditional SEO reads impl_schema_qa_last_payload_v1)', 'success');
+                }
+              } catch (qaSyncErr) {
+                debugLog(`⚠ Could not sync Implementation QA cache: ${qaSyncErr.message}`, 'warn');
+              }
+
               // Log comprehensive diagnostic info if available
               if (schemaAudit.meta && schemaAudit.meta.diagnostic) {
                 const diag = schemaAudit.meta.diagnostic;
@@ -74266,17 +74278,29 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     function traditionalSeoMergeSchemaQaBodies(localBody, remoteBody, propertyUrl = '') {
       const rowsL = Array.isArray(localBody?.data?.qaGate?.rows) ? localBody.data.qaGate.rows : [];
       const rowsR = Array.isArray(remoteBody?.data?.qaGate?.rows) ? remoteBody.data.qaGate.rows : [];
+      const freshMs = (body) => {
+        if (!body || typeof body !== 'object') return 0;
+        const c = Number(body.__cacheSavedAt || 0);
+        if (Number.isFinite(c) && c > 0) return c;
+        const g = Date.parse(String(body.meta?.generatedAt || ''));
+        return Number.isFinite(g) ? g : 0;
+      };
+      const tL = freshMs(localBody);
+      const tR = freshMs(remoteBody);
+      const preferLocal = tL >= tR;
       const byKey = new Map();
       const put = (row) => {
         const k = traditionalSeoSignalMapKey(row?.url, propertyUrl);
         if (!k) return;
         byKey.set(k, row);
       };
-      rowsL.forEach(put);
-      rowsR.forEach(put);
-      const base = (remoteBody && String(remoteBody.status || '').toLowerCase() === 'ok')
-        ? remoteBody
-        : localBody;
+      (preferLocal ? rowsR : rowsL).forEach(put);
+      (preferLocal ? rowsL : rowsR).forEach(put);
+      const localOk = localBody && String(localBody.status || '').toLowerCase() === 'ok';
+      const remoteOk = remoteBody && String(remoteBody.status || '').toLowerCase() === 'ok';
+      const base = preferLocal
+        ? (localOk ? localBody : remoteOk ? remoteBody : localBody || remoteBody)
+        : (remoteOk ? remoteBody : localOk ? localBody : localBody || remoteBody);
       if (!base || typeof base !== 'object') {
         return localBody || remoteBody || null;
       }
