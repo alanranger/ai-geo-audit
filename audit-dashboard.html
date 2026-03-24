@@ -8504,7 +8504,7 @@
           display: flex;
         }
         .traditional-seo-page-modal {
-          width: min(920px, 96vw);
+          width: min(1240px, 98vw);
           max-height: 92vh;
           overflow: hidden;
           border-radius: 14px;
@@ -8958,6 +8958,14 @@
             <div style="min-width:0;flex:1 1 220px;">
               <h3 id="traditional-seo-page-modal-title" style="margin:0 0 0.35rem;font-size:1.05rem;">All rules for this URL</h3>
               <p id="traditional-seo-page-modal-url" class="traditional-seo-modal-url-wrap" style="margin:0;font-size:0.84rem;word-break:break-all;"></p>
+              <div id="traditional-seo-page-modal-keyword-row" style="margin:0.5rem 0 0;">
+                <label for="traditional-seo-page-modal-keyword" style="display:block;font-size:0.72rem;color:#94a3b8;margin:0 0 0.25rem;">Target keyword (Supabase override; merged with CSV 07 from GitHub)</label>
+                <div style="display:flex;flex-wrap:wrap;gap:0.45rem;align-items:center;">
+                  <input type="text" id="traditional-seo-page-modal-keyword" autocomplete="off" placeholder="e.g. camera exposure mistakes" style="flex:1 1 260px;min-width:0;max-width:100%;padding:0.38rem 0.55rem;border-radius:8px;border:1px solid rgba(148,163,184,0.35);background:#1e293b;color:#f1f5f9;font-size:0.82rem;" />
+                  <button type="button" class="btn" id="traditional-seo-modal-save-keyword" style="padding:0.38rem 0.75rem;font-size:0.78rem;flex-shrink:0;">Save keyword</button>
+                </div>
+                <p id="traditional-seo-modal-keyword-hint" style="margin:0.35rem 0 0;font-size:0.7rem;color:#64748b;">Clears override if you save empty. After save, keyword scores refresh for this URL.</p>
+              </div>
             </div>
             <div style="display:flex;align-items:center;gap:0.85rem;flex-wrap:wrap;justify-content:flex-end;flex:0 0 auto;">
               <div style="display:flex;align-items:center;gap:0.65rem;">
@@ -8983,11 +8991,11 @@
             <table class="traditional-seo-table" style="margin:0;" id="traditional-seo-page-modal-table">
               <thead>
                 <tr>
-                  <th style="width:24%;">Rule</th>
-                  <th style="width:12%;">Factor</th>
-                  <th style="width:11%;">Status</th>
-                  <th style="width:15%;">Bypass rule</th>
-                  <th>Note</th>
+                  <th style="width:34%;min-width:280px;">Rule</th>
+                  <th style="width:11%;">Factor</th>
+                  <th style="width:10%;">Status</th>
+                  <th style="width:13%;">Bypass rule</th>
+                  <th style="min-width:200px;">Note</th>
                 </tr>
               </thead>
               <tbody id="traditional-seo-page-modal-body">
@@ -71108,6 +71116,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       },
       ruleBypassByPage: null,
       ruleOverridesProperty: '',
+      targetKeywordOverridesByPage: null,
+      targetKeywordOverridesProperty: '',
       seoEvalInFlight: false,
       /** Cached keyword demand (Supabase); filled via lookup only — no KE on page load. */
       keywordMetricsByUrl: null,
@@ -72842,7 +72852,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           window.showStatus('Page refreshed. Re-scoring this URL only…', 'info');
         }
         await runTraditionalSeoEvaluation({ refreshAudit: false, onlyRescorePageUrls: urlsArg });
-        traditionalSeoOpenPageModal(url);
+        await traditionalSeoOpenPageModal(url);
         if (typeof window.showStatus === 'function') {
           window.showStatus('Re-audit complete.', 'success');
         }
@@ -73589,6 +73599,94 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       traditionalSeoApplyBypassMapFromRows(json.overrides);
     }
 
+    function traditionalSeoApplyTargetKeywordOverrideRows(rows) {
+      const prop = traditionalSeoEffectivePropertyUrl();
+      const map = new Map();
+      const addPk = (pageUrlStr, kw) => {
+        const pk = traditionalSeoToComparableUrl(pageUrlStr, prop) || String(pageUrlStr || '').trim();
+        const k = String(kw || '').trim();
+        if (!pk || !k) return;
+        map.set(pk, k);
+      };
+      (Array.isArray(rows) ? rows : []).forEach((o) => {
+        const kw = String(o.target_keyword || '').trim();
+        const pu = String(o.page_url || '').trim();
+        if (!pu || !kw) return;
+        addPk(pu, kw);
+        traditionalSeoLandingComparableVariants(pu, prop).forEach((v) => addPk(v, kw));
+      });
+      TRADITIONAL_SEO_STATE.targetKeywordOverridesByPage = map;
+      TRADITIONAL_SEO_STATE.targetKeywordOverridesProperty = String(traditionalSeoPropertyUrl() || '').trim();
+    }
+
+    async function traditionalSeoEnsureTargetKeywordOverridesLoaded(options = {}) {
+      const prop = String(traditionalSeoPropertyUrl() || '').trim();
+      const force = options.forceRefresh === true;
+      if (!force
+          && TRADITIONAL_SEO_STATE.targetKeywordOverridesProperty === prop
+          && TRADITIONAL_SEO_STATE.targetKeywordOverridesByPage instanceof Map) {
+        return;
+      }
+      const params = new URLSearchParams();
+      if (prop) params.set('propertyUrl', prop);
+      const url = traditionalSeoApiPath(`/api/aigeo/traditional-seo-target-keyword-overrides?${params.toString()}`);
+      const res = await fetch(url, { cache: 'no-store' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || String(json?.status || '').toLowerCase() !== 'ok') {
+        TRADITIONAL_SEO_STATE.targetKeywordOverridesByPage = new Map();
+        TRADITIONAL_SEO_STATE.targetKeywordOverridesProperty = prop;
+        return;
+      }
+      traditionalSeoApplyTargetKeywordOverrideRows(json.overrides);
+    }
+
+    async function traditionalSeoMergeTargetKeywordOverridesIntoLookup(lookup) {
+      await traditionalSeoEnsureTargetKeywordOverridesLoaded();
+      const prop = String(traditionalSeoPropertyUrl() || '').trim();
+      if (!(lookup instanceof Map)) return lookup;
+      const ov = TRADITIONAL_SEO_STATE.targetKeywordOverridesByPage;
+      if (!(ov instanceof Map) || ov.size === 0) return lookup;
+      ov.forEach((keyword, pageKey) => {
+        const kw = String(keyword || '').trim();
+        if (!kw) return;
+        const u = String(pageKey || '').trim();
+        if (!u) return;
+        const keys = new Set();
+        const primary = traditionalSeoSignalMapKey(u, prop) || traditionalSeoToComparableUrl(u, prop);
+        if (primary) keys.add(primary);
+        try {
+          const variants = traditionalSeoLandingComparableVariants(u, prop);
+          for (let v = 0; v < variants.length; v += 1) {
+            const vk = traditionalSeoSignalMapKey(variants[v], prop)
+              || traditionalSeoToComparableUrl(variants[v], prop);
+            if (vk) keys.add(vk);
+          }
+        } catch (err) {
+          /* ignore */
+        }
+        keys.forEach((k) => lookup.set(k, kw));
+      });
+      return lookup;
+    }
+
+    async function traditionalSeoSavePageTargetKeyword(pageUrl, rawKeyword) {
+      const propertyUrl = String(traditionalSeoPropertyUrl() || '').trim();
+      const pageKey = traditionalSeoOverridePageKey(pageUrl);
+      const targetKeyword = String(rawKeyword ?? '').trim();
+      const res = await fetch(traditionalSeoApiPath('/api/aigeo/traditional-seo-target-keyword-overrides'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ propertyUrl, pageUrl: pageKey, targetKeyword })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || String(json?.status || '').toLowerCase() !== 'ok') {
+        throw new Error(json?.message || `HTTP ${res.status}`);
+      }
+      traditionalSeoApplyTargetKeywordOverrideRows(json.overrides);
+      window.__traditionalSeoKeywordLookup = null;
+      window.__traditionalSeoKeywordLookupKey = '';
+    }
+
     function traditionalSeoReapplyBypassesToAllRows() {
       const rows = TRADITIONAL_SEO_STATE.evaluationRows;
       if (!Array.isArray(rows)) return;
@@ -74224,7 +74322,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (!forceRefresh && window.__traditionalSeoKeywordLookup instanceof Map && activeKey === requestedKey) {
           const cached = window.__traditionalSeoKeywordLookup;
           // Never reuse an empty map: first fetch can fail (network/GitHub); caching it bricks ①②③ until hard refresh.
-          if (cached.size > 0) return cached;
+          if (cached.size > 0) {
+            await traditionalSeoMergeTargetKeywordOverridesIntoLookup(cached);
+            return cached;
+          }
         }
         if (forceRefresh) {
           window.__traditionalSeoKeywordLookup = null;
@@ -74252,12 +74353,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (!csvText || !csvText.trim()) {
           window.__traditionalSeoKeywordLookup = lookup;
           window.__traditionalSeoKeywordLookupKey = requestedKey;
+          await traditionalSeoMergeTargetKeywordOverridesIntoLookup(lookup);
           return lookup;
         }
         const lines = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
         if (lines.length < 2) {
           window.__traditionalSeoKeywordLookup = lookup;
           window.__traditionalSeoKeywordLookupKey = requestedKey;
+          await traditionalSeoMergeTargetKeywordOverridesIntoLookup(lookup);
           return lookup;
         }
         const headers = parseDashboardCsvLine(lines[0]).map((h) => String(h || '').trim().toLowerCase());
@@ -74267,6 +74370,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (urlIdx < 0 || kwIdx < 0) {
           window.__traditionalSeoKeywordLookup = lookup;
           window.__traditionalSeoKeywordLookupKey = requestedKey;
+          await traditionalSeoMergeTargetKeywordOverridesIntoLookup(lookup);
           return lookup;
         }
         for (let i = 1; i < lines.length; i += 1) {
@@ -74291,9 +74395,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
         window.__traditionalSeoKeywordLookup = lookup;
         window.__traditionalSeoKeywordLookupKey = requestedKey;
+        await traditionalSeoMergeTargetKeywordOverridesIntoLookup(lookup);
         return lookup;
       } catch (err) {
-        return new Map();
+        const fallback = new Map();
+        await traditionalSeoMergeTargetKeywordOverridesIntoLookup(fallback);
+        return fallback;
       }
     }
 
@@ -74393,15 +74500,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
       if (key === 'sitemap_declared' || key === 'robots_fetchable') {
         const tf = context?.techFoundation || traditionalSeoReadTechFoundation(context?.payloads?.tech);
+        const blockers = Array.isArray(tf?.data?.overall?.blockers)
+          ? tf.data.overall.blockers.map((b) => String(b || ''))
+          : [];
         if (key === 'sitemap_declared') {
           const sm = tf?.sitemap;
           if (sm && typeof sm.pass === 'boolean') return sm.pass ? 'pass' : 'fail';
-          if (tf?.data && !sm) return 'warn';
+          if (blockers.some((b) => /sitemap\.xml/i.test(b))) return 'fail';
         }
         if (key === 'robots_fetchable') {
           const rb = tf?.robots;
           if (rb && typeof rb.exists === 'boolean') return rb.exists ? 'pass' : 'fail';
-          if (tf?.data && !rb) return 'warn';
+          if (blockers.some((b) => /robots\.txt/i.test(b) && /inaccessible/i.test(b))) return 'fail';
         }
         if (techScore >= 75) return 'pass';
         if (techScore >= 45) return 'warn';
@@ -75567,7 +75677,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
       if (rk === 'keyword_in_title' || rk === 'keyword_in_meta' || rk === 'keyword_in_h1' || rk === 'keyword_slug_tokens' || rk === 'keyword_in_intro') {
         const tk = String(row?.target_keyword || '').trim();
-        if (!tk) return 'No target keyword mapped for this URL (CSV 07). Rule scores WARN.';
+        if (!tk) return 'No target keyword mapped for this URL (GitHub CSV 07 or Supabase override). Rule scores WARN.';
         if (rk === 'keyword_slug_tokens') return `Target keyword: “${tk}”. K4 checks meaningful tokens vs final URL slug segment.`;
         if (rk === 'keyword_in_intro') {
           const intro = traditionalSeoNormalizeSnippetText(ex?.seoIntroSnippet || '');
@@ -75587,7 +75697,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return base;
     }
 
-    function traditionalSeoOpenPageModal(pageUrl) {
+    async function traditionalSeoOpenPageModal(pageUrl) {
       const backdrop = document.getElementById('traditional-seo-page-modal');
       const urlEl = document.getElementById('traditional-seo-page-modal-url');
       const bodyEl = document.getElementById('traditional-seo-page-modal-body');
@@ -75598,6 +75708,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (!backdrop || !urlEl || !bodyEl) return;
       const target = String(pageUrl || '');
       TRADITIONAL_SEO_STATE.modalPageUrl = target;
+      await traditionalSeoEnsureTargetKeywordOverridesLoaded();
       const all = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
       const propModal = traditionalSeoEffectivePropertyUrl();
       const rkTarget = traditionalSeoLandingRollupGroupKey(target, propModal);
@@ -75659,13 +75770,35 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           const notePrefix = row.bypassed ? 'Admin bypass active (raw was not pass). ' : '';
           return `
             <tr>
-              <td>${escapeHtml(String(row.rule_name || rk))}</td>
+              <td style="min-width:260px;">${escapeHtml(String(row.rule_name || rk))}</td>
               <td>${escapeHtml(String(row.rule_category || rule.category || 'general'))}</td>
               <td>${traditionalSeoStatusPill(row.status)}</td>
               ${bypassCell}
               <td style="font-size:0.76rem;color:#94a3b8;">${escapeHtml(notePrefix)}${escapeHtml(note)}</td>
             </tr>`;
         }).join('');
+      }
+      const kwInput = document.getElementById('traditional-seo-page-modal-keyword');
+      const kwHint = document.getElementById('traditional-seo-modal-keyword-hint');
+      if (kwHint) {
+        kwHint.textContent = 'Clears override if you save empty. After save, keyword scores refresh for this URL.';
+      }
+      if (kwInput) {
+        const pk = traditionalSeoOverridePageKey(target);
+        const ov = TRADITIONAL_SEO_STATE.targetKeywordOverridesByPage;
+        let val = '';
+        if (ov instanceof Map) {
+          const direct = String(ov.get(pk) || '').trim();
+          if (direct) val = direct;
+        }
+        if (!val) {
+          const row = (TRADITIONAL_SEO_STATE.evaluationRows || []).find((r) => {
+            if (String(r?.tier || '').toLowerCase() === 'sitewide') return false;
+            return traditionalSeoOverridePageKey(r.url) === pk && String(r.target_keyword || '').trim();
+          });
+          val = String(row?.target_keyword || '').trim();
+        }
+        kwInput.value = val;
       }
       backdrop.classList.add('is-open');
       backdrop.setAttribute('aria-hidden', 'false');
@@ -75702,11 +75835,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             .filter(Boolean);
           saveBypassBtn.disabled = true;
           Promise.resolve(traditionalSeoSavePageBypasses(pageUrl, keys))
-            .then(() => {
+            .then(async () => {
               traditionalSeoReapplyBypassesToAllRows();
               traditionalSeoRefreshRulesSummaryFromEvaluationRows();
               renderTraditionalSeoResultsTable();
-              traditionalSeoOpenPageModal(pageUrl);
+              await traditionalSeoOpenPageModal(pageUrl);
               if (typeof window.showStatus === 'function') window.showStatus('Admin bypasses saved for this URL.', 'success');
             })
             .catch((err) => {
@@ -75716,6 +75849,38 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             })
             .finally(() => {
               saveBypassBtn.disabled = false;
+            });
+        });
+      }
+      const saveKwBtn = document.getElementById('traditional-seo-modal-save-keyword');
+      if (saveKwBtn && !saveKwBtn.dataset.wired) {
+        saveKwBtn.dataset.wired = '1';
+        saveKwBtn.addEventListener('click', () => {
+          const pageUrl = String(TRADITIONAL_SEO_STATE.modalPageUrl || '').trim();
+          const input = document.getElementById('traditional-seo-page-modal-keyword');
+          const hint = document.getElementById('traditional-seo-modal-keyword-hint');
+          if (!pageUrl || !input) return;
+          saveKwBtn.disabled = true;
+          Promise.resolve(traditionalSeoSavePageTargetKeyword(pageUrl, input.value))
+            .then(() => runTraditionalSeoEvaluation({
+              refreshAudit: false,
+              onlyRescorePageUrls: pageUrl,
+              refreshExtractability: false
+            }))
+            .then(() => traditionalSeoOpenPageModal(pageUrl))
+            .then(() => {
+              if (typeof window.showStatus === 'function') {
+                window.showStatus('Target keyword saved and page rules re-scored.', 'success');
+              }
+            })
+            .catch((err) => {
+              if (typeof window.showStatus === 'function') {
+                window.showStatus(`Save keyword failed: ${err?.message || err}`, 'error');
+              }
+              if (hint) hint.textContent = String(err?.message || err);
+            })
+            .finally(() => {
+              saveKwBtn.disabled = false;
             });
         });
       }
@@ -77305,7 +77470,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           const btn = event.target instanceof Element ? event.target.closest('.traditional-seo-page-view-btn') : null;
           if (!btn) return;
           const pageUrl = String(btn.getAttribute('data-page-url') || '');
-          if (pageUrl) traditionalSeoOpenPageModal(pageUrl);
+          if (pageUrl) void traditionalSeoOpenPageModal(pageUrl);
         });
       }
     }
@@ -78310,6 +78475,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         wireTraditionalSeoButtons();
         void refreshTraditionalSeoDomainCards();
         void traditionalSeoEnsureRuleOverridesLoaded()
+          .then(() => traditionalSeoEnsureTargetKeywordOverridesLoaded())
           .then(() => {
             if (Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) && TRADITIONAL_SEO_STATE.evaluationRows.length) {
               traditionalSeoReapplyBypassesToAllRows();
@@ -78327,6 +78493,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const payload = await fetchTraditionalSeoRules();
         applyTraditionalSeoPayload(payload || {});
         await traditionalSeoEnsureRuleOverridesLoaded();
+        await traditionalSeoEnsureTargetKeywordOverridesLoaded();
         if (!TRADITIONAL_SEO_STATE.sourceParity) {
           TRADITIONAL_SEO_STATE.sourceParity = await traditionalSeoComputeSourceParity(traditionalSeoPropertyUrl());
           renderTraditionalSeoSourceParity(TRADITIONAL_SEO_STATE.sourceParity);
