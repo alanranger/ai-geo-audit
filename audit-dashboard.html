@@ -73788,6 +73788,38 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return '';
     }
 
+    /** Tier from URL path for parity only; keep in sync with dashboard classifyDashboardSubsegment path rules. */
+    function traditionalSeoPathTierGuessForParity(url) {
+      if (typeof window.classifyDashboardSubsegment === 'function') {
+        try {
+          const seg = String(window.classifyDashboardSubsegment(url || '') || '').toLowerCase();
+          if (seg && seg !== 'unmapped') return seg;
+        } catch (e) {
+          /* ignore */
+        }
+      }
+      const raw = String(url || '').trim();
+      if (!raw) return 'unmapped';
+      let path = '';
+      try {
+        const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, '')}`;
+        path = String(new URL(href).pathname || '/').toLowerCase();
+      } catch (err) {
+        path = raw.toLowerCase();
+      }
+      if (!path) return 'unmapped';
+      if (path.includes('/workshops') || path.includes('/event') || path.includes('/webinar')) return 'event';
+      if (path.includes('/academy') || path.includes('/free-online-photography-course')) return 'academy';
+      if (path.includes('/blog') || path.includes('/article') || path.includes('/guides')) return 'blog';
+      if (path.includes('/photography-services-near-me/')
+        || path.includes('/product')
+        || path.includes('/courses')
+        || path.includes('/mentoring')
+        || path.includes('/subscription')) return 'product';
+      if (path.split('/').filter(Boolean).length <= 1) return 'landing';
+      return 'unmapped';
+    }
+
     async function traditionalSeoComputeSourceParity(propertyUrl = '') {
       const parity = {
         ready: false,
@@ -73796,6 +73828,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         overlap: 0,
         onlyInSource: [],
         onlyInSegmentation: [],
+        onlyInSourcePathInferredCount: 0,
         error: null
       };
       try {
@@ -73812,13 +73845,15 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const sourceList = [...sourceSet];
         const segmentationList = [...segmentationSet];
         const overlap = sourceList.filter((url) => segmentationSet.has(url));
-        const onlyInSource = sourceList.filter((url) => !segmentationSet.has(url));
+        const onlyInSourceRaw = sourceList.filter((url) => !segmentationSet.has(url));
+        const onlyInSource = onlyInSourceRaw.filter((url) => traditionalSeoPathTierGuessForParity(url) === 'unmapped');
         const onlyInSegmentation = segmentationList.filter((url) => !sourceSet.has(url));
 
         parity.ready = true;
         parity.sourceCount = sourceSet.size;
         parity.segmentationCount = segmentationSet.size;
         parity.overlap = overlap.length;
+        parity.onlyInSourcePathInferredCount = Math.max(0, onlyInSourceRaw.length - onlyInSource.length);
         parity.onlyInSourceCount = onlyInSource.length;
         parity.onlyInSegmentationCount = onlyInSegmentation.length;
         parity.onlyInSource = onlyInSource.slice(0, 6);
@@ -73849,8 +73884,22 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const mismatchCount = (Number.isFinite(missA) ? missA : (parity?.onlyInSource || []).length)
         + (Number.isFinite(missB) ? missB : (parity?.onlyInSegmentation || []).length);
       if (mismatchCount === 0) {
-        target.textContent = `URL source parity: synced (${parity.sourceCount} = ${parity.segmentationCount})`;
-        if (panel) panel.textContent = `Synced: 06-site-urls.csv (${parity.sourceCount}) matches segmentation CSV (${parity.segmentationCount}).`;
+        const inferred = Number(parity?.onlyInSourcePathInferredCount);
+        const countsMatch = parity.sourceCount === parity.segmentationCount;
+        if (countsMatch) {
+          target.textContent = `URL source parity: synced (${parity.sourceCount} = ${parity.segmentationCount})`;
+          if (panel) {
+            panel.textContent = Number.isFinite(inferred) && inferred > 0
+              ? `Synced: lists align; ${inferred} URL(s) in 06 are not listed in segmentation but map to a tier by URL pattern (same rules as scoring fallback).`
+              : `Synced: 06-site-urls.csv (${parity.sourceCount}) matches segmentation CSV (${parity.segmentationCount}).`;
+          }
+        } else {
+          target.textContent = `URL source parity: OK (${parity.sourceCount} in 06 · ${parity.segmentationCount} in segmentation)`;
+          if (panel) {
+            const inf = Number.isFinite(inferred) && inferred > 0 ? ` ${inferred} extra 06 URL(s) use path-based tier rules.` : '';
+            panel.textContent = `No CSV gaps to fix: 06 has ${parity.sourceCount} URLs; segmentation CSV has ${parity.segmentationCount}.${inf} Counts can differ when new pages match /blog, /workshops, etc. without a segmentation row.`;
+          }
+        }
         return;
       }
       const cntA = Number.isFinite(missA) ? missA : (parity?.onlyInSource || []).length;
