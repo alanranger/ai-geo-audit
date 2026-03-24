@@ -75855,6 +75855,26 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (tot < 0) return base;
         return `Images: ${tot}; missing alt: ${miss}.`;
       }
+      if (rk === 'schema_qa_gate_page') {
+        const qa = traditionalSeoSignalMapGetWithUrlAliases(maps.qaGate, pageUrl, prop);
+        if (!qa || typeof qa !== 'object') {
+          return 'No Schema QA row for this URL in the cached schema/Implementation payload — run ① or refresh the schema audit, then ② Score Traditional SEO.';
+        }
+        const st = traditionalSeoQaGateRowStatus(qa) || 'unknown';
+        const sm = String(qa.summary || '').trim();
+        const codes = Array.isArray(qa.issueCodes) && qa.issueCodes.length
+          ? ` Issue codes: ${qa.issueCodes.slice(0, 8).join(', ')}${qa.issueCodes.length > 8 ? '…' : ''}.`
+          : '';
+        let det = '';
+        if (Array.isArray(qa.issueDetails) && qa.issueDetails.length) {
+          const d0 = qa.issueDetails[0];
+          const line = String(d0?.detail || d0?.code || '').trim();
+          if (line) det = ` Detail: ${line.length > 240 ? `${line.slice(0, 240)}…` : line}.`;
+        }
+        const head = `Derived QA: ${st}.`;
+        const body = sm ? ` ${sm}` : '';
+        return `${head}${body}${codes}${det}`;
+      }
       if (rk === 'keyword_in_title' || rk === 'keyword_in_meta' || rk === 'keyword_in_h1' || rk === 'keyword_slug_tokens' || rk === 'keyword_in_intro') {
         const tk = String(row?.target_keyword || '').trim();
         if (!tk) return 'No target keyword mapped for this URL (GitHub CSV 07 or Supabase override). Rule scores WARN.';

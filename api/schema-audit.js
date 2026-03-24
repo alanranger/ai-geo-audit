@@ -799,7 +799,8 @@ const QA_REQUIRED_FIELDS_BY_TYPE = {
   Service: ['name', 'provider']
 };
 const QA_SUPPORTED_TYPES = new Set(Object.keys(QA_REQUIRED_FIELDS_BY_TYPE));
-const QA_OPTIONAL_ID_TYPES = new Set(['FAQPage']);
+/* FAQPage: mainEntity is the anchor. Organization: sitewide/publisher blocks often omit @id or use fragments — still require name/url via QA_REQUIRED_FIELDS_BY_TYPE. */
+const QA_OPTIONAL_ID_TYPES = new Set(['FAQPage', 'Organization']);
 const ISO_DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_DATE_TIME_PREFIX_PATTERN = /^\d{4}-\d{2}-\d{2}T/;
 const QA_MAX_ISSUES_PER_ROW = 50;
