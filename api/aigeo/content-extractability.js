@@ -378,7 +378,27 @@ function evaluateExtractability(html, jsonLdBlocks = [], pageUrl = '') {
   const hasUpdatedDate = updatedIsoDateRegex.test(html)
     || updatedMonthDayYearRegex.test(html)
     || updatedDayMonthYearRegex.test(html);
-  checks.hasLastUpdated = modifiedMetaRegex.test(html) || (updatedLabelRegex.test(html) && hasUpdatedDate);
+
+  let lastUpdatedRaw = '';
+  const metaHit = html.match(modifiedMetaRegex);
+  if (metaHit && metaHit[1]) {
+    checks.hasLastUpdated = true;
+    lastUpdatedRaw = String(metaHit[1]).trim();
+  } else if (updatedLabelRegex.test(html) && hasUpdatedDate) {
+    checks.hasLastUpdated = true;
+    const isoHit = html.match(/\b(\d{4}-\d{2}-\d{2}(?:T[\d:+.Z-]{1,24})?)\b/);
+    if (isoHit) lastUpdatedRaw = isoHit[1];
+    else {
+      const mdyHit = html.match(/\b([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})\b/);
+      if (mdyHit) lastUpdatedRaw = mdyHit[1];
+      else {
+        const dmyHit = html.match(/\b(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\b/);
+        if (dmyHit) lastUpdatedRaw = dmyHit[1];
+      }
+    }
+  } else {
+    checks.hasLastUpdated = false;
+  }
 
   const passCount = Object.values(checks).filter(Boolean).length;
   const score = Math.round((passCount / 4) * 100);
@@ -390,6 +410,7 @@ function evaluateExtractability(html, jsonLdBlocks = [], pageUrl = '') {
 
   return {
     ...checks,
+    lastUpdatedRaw,
     score,
     pass: passCount >= 3,
     issues
@@ -667,6 +688,7 @@ async function checkUrl(url, tierLookup = null) {
         hasDirectAnswer: false,
         hasFaq: false,
         hasLastUpdated: false,
+        lastUpdatedRaw: '',
         issues: [`HTTP ${response.status}: ${response.statusText}`],
         excludedFromAudit: Boolean(preflightExclusionReason),
         exclusionReason: preflightExclusionReason || '',
@@ -691,6 +713,7 @@ async function checkUrl(url, tierLookup = null) {
         hasDirectAnswer: false,
         hasFaq: false,
         hasLastUpdated: false,
+        lastUpdatedRaw: '',
         issues: [],
         excludedFromAudit: true,
         exclusionReason: preflightExclusionReason,
@@ -711,6 +734,7 @@ async function checkUrl(url, tierLookup = null) {
         hasDirectAnswer: false,
         hasFaq: false,
         hasLastUpdated: false,
+        lastUpdatedRaw: '',
         issues: [],
         excludedFromAudit: true,
         exclusionReason: 'Meta/X-Robots noindex page (excluded from actionable extractability scope)',
@@ -734,6 +758,7 @@ async function checkUrl(url, tierLookup = null) {
       hasDirectAnswer: result.hasDirectAnswer,
       hasFaq: result.hasFaq,
       hasLastUpdated: result.hasLastUpdated,
+      lastUpdatedRaw: String(result.lastUpdatedRaw || '').trim(),
       issues: result.issues || [],
       textLength: plainText.length,
       excludedFromAudit: false,
@@ -753,6 +778,7 @@ async function checkUrl(url, tierLookup = null) {
       hasDirectAnswer: false,
       hasFaq: false,
       hasLastUpdated: false,
+      lastUpdatedRaw: '',
       issues: [error?.message || 'Request failed'],
       excludedFromAudit: Boolean(preflightExclusionReason),
       exclusionReason: preflightExclusionReason || '',

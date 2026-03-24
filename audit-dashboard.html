@@ -75995,9 +75995,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           return 'Extractability row missing or fetch failed — run Re-audit page or full Extractability.';
         }
         if (ex.excludedFromAudit) return 'Page excluded from extractability scope.';
-        return ex.hasLastUpdated
-          ? 'Last-updated signal detected (meta article:modified_time / og:updated_time or visible “updated” + date).'
-          : 'No last-updated signal detected in HTML (meta or visible updated label + date).';
+        const raw = String(ex.lastUpdatedRaw || '').trim();
+        if (ex.hasLastUpdated) {
+          return raw
+            ? `Signal found. Value from page/meta: ${raw.length > 140 ? `${raw.slice(0, 140)}…` : raw}.`
+            : 'Last-updated signal detected (visible “updated” + date pattern; no single captured value). Re-run Extractability after deploy for meta timestamps in the note.';
+        }
+        return 'No last-updated signal detected in HTML (meta or visible updated label + date).';
       }
       if (rk === 'schema_qa_gate_page') {
         const qa = traditionalSeoSignalMapGetWithUrlAliases(maps.qaGate, pageUrl, prop);
@@ -76096,8 +76100,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const modalLastTxt = traditionalSeoEvalRunSpanText(TRADITIONAL_SEO_STATE.lastEvaluationAt);
       const reauditLastEl = document.getElementById('traditional-seo-page-modal-reaudit-last');
       const closeLastEl = document.getElementById('traditional-seo-page-modal-close-last');
-      if (reauditLastEl) reauditLastEl.textContent = modalLastTxt;
-      if (closeLastEl) closeLastEl.textContent = modalLastTxt;
+      if (reauditLastEl) {
+        reauditLastEl.textContent = modalLastTxt;
+        reauditLastEl.style.display = '';
+      }
+      if (closeLastEl) {
+        closeLastEl.textContent = '';
+        closeLastEl.style.display = 'none';
+      }
       if (!hits.length) {
         if (ringEl) ringEl.style.background = traditionalSeoDonutBackground(0, 0, 0);
         if (centerEl) centerEl.textContent = '—';
@@ -76610,12 +76620,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       });
       const pct = Math.round((withL / total) * 1000) / 10;
       valEl.textContent = `${withL} / ${total}`;
-      subEl.textContent = `${pct}% of evaluated pages show at least one sampled inbound link`;
+      subEl.textContent = `${pct}% of pages have ≥1 sampled inbound backlink (external sites linking in — not internal links)`;
       if (metaEl) {
-        const parts = [];
-        if (traditionalSeoBacklinkIndexShowDfs()) parts.push('DFS');
-        parts.push('KE');
-        metaEl.textContent = `Sources: ${parts.join(' + ')} page samples · diversity proxy (not a full link graph).`;
+        const dfsOn = traditionalSeoBacklinkIndexShowDfs();
+        metaEl.textContent = dfsOn
+          ? 'KE page backlink sample + DFS page rows — subset only, not your full backlink profile.'
+          : 'Keywords Everywhere page backlink sample only — subset only, not your full backlink profile.';
       }
     }
 
