@@ -72197,6 +72197,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         setEmptyBullets(
           'Set <code>TRADITIONAL_SEO_BACKLINK_INDEX_SOURCE</code> to <strong>dataforseo</strong> or <strong>both</strong> to enable this tile.'
         );
+        traditionalSeoDestroyDfsRadarChart();
         if (radarHost) radarHost.innerHTML = '';
         return;
       }
@@ -72208,6 +72209,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             ? 'Server: set <code>DATAFORSEO_API_LOGIN</code> and <code>DATAFORSEO_API_PASSWORD</code>.'
             : 'No domain summary yet — run <strong>DFS full index</strong> or <strong>DFS new links</strong>.'
         );
+        traditionalSeoDestroyDfsRadarChart();
         if (radarHost) radarHost.innerHTML = '';
         return;
       }
@@ -76598,47 +76600,112 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return Math.round(Math.min(100, Math.max(0, w / t)));
     }
 
+    function traditionalSeoDestroyDfsRadarChart() {
+      try {
+        if (window.__traditionalSeoDfsRadarChart) {
+          window.__traditionalSeoDfsRadarChart.destroy();
+          window.__traditionalSeoDfsRadarChart = null;
+        }
+      } catch (e) {
+        /* ignore */
+      }
+    }
+
+    /** Same label + value drawing pattern as AI Health (GAIO) radar (`dashboardRadarLabelPlugin`). */
+    const traditionalSeoDfsRadarLabelPlugin = {
+      id: 'traditionalSeoDfsRadarLabels',
+      afterDraw(chart) {
+        const opts = chart.options.plugins?.traditionalSeoDfsRadarLabels || {};
+        const labels = (chart?.data?.labels && chart.data.labels.length)
+          ? chart.data.labels
+          : (opts.labels || []);
+        const deltas = opts.deltaTexts || [];
+        const deltaColors = opts.deltaColors || [];
+        const scale = chart?.scales?.r;
+        if (!scale || labels.length === 0) return;
+        const count = labels.length;
+        const lineGap = typeof opts.lineGap === 'number' ? opts.lineGap : 12;
+        const deltaGap = typeof opts.deltaGap === 'number' ? opts.deltaGap : 10;
+        const labelPadding = typeof opts.labelPadding === 'number' ? opts.labelPadding : 0;
+        const edgePadding = typeof opts.edgePadding === 'number' ? opts.edgePadding : 4;
+        const ctx = chart.ctx;
+        ctx.save();
+        for (let i = 0; i < labels.length; i += 1) {
+          const label = labels[i] || '';
+          const deltaRaw = deltas[i];
+          const deltaText = (deltaRaw == null || deltaRaw === '') ? '—' : String(deltaRaw);
+          const pos = (typeof scale.getPointLabelPosition === 'function')
+            ? scale.getPointLabelPosition(i)
+            : null;
+          const angle = (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y))
+            ? Math.atan2(pos.y - (scale.yCenter || 0), pos.x - (scale.xCenter || 0))
+            : ((Math.PI * 2) / count) * i - (Math.PI / 2);
+          const baseX = (pos && Number.isFinite(pos.x)) ? pos.x : (scale.xCenter || 0) + Math.cos(angle) * (scale.drawingArea || 0);
+          const baseY = (pos && Number.isFinite(pos.y)) ? pos.y : (scale.yCenter || 0) + Math.sin(angle) * (scale.drawingArea || 0);
+          let x = baseX + Math.cos(angle) * labelPadding;
+          let y = baseY + Math.sin(angle) * labelPadding;
+
+          const labelLines = (() => {
+            if (label.includes(' / ')) {
+              const parts = label.split(' / ').filter(Boolean);
+              if (parts.length >= 2) return [parts[0], parts.slice(1).join(' / ')];
+            }
+            const words = label.split(' ').filter(Boolean);
+            if (words.length === 2) return words;
+            return [label];
+          })();
+
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.font = '600 11px system-ui, -apple-system, Segoe UI, sans-serif';
+          const labelWidths = labelLines.map((line) => ctx.measureText(line).width);
+          let maxWidth = labelWidths.length ? Math.max(...labelWidths) : 0;
+          ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
+          const deltaWidth = ctx.measureText(deltaText).width;
+          if (deltaWidth > maxWidth) maxWidth = deltaWidth;
+          const totalHeight = (labelLines.length * lineGap) + deltaGap + lineGap;
+          const halfW = maxWidth / 2;
+          const minX = edgePadding + halfW;
+          const maxX = (chart.width ?? 0) - edgePadding - halfW;
+          const minY = edgePadding + (totalHeight / 2);
+          const maxY = (chart.height ?? 0) - edgePadding - (totalHeight / 2);
+          x = Math.max(minX, Math.min(maxX, x));
+          y = Math.max(minY, Math.min(maxY, y));
+
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.font = '600 11px system-ui, -apple-system, Segoe UI, sans-serif';
+          ctx.fillStyle = 'rgba(226,232,240,0.9)';
+          const startY = y - ((labelLines.length - 1) * lineGap) / 2;
+          for (let j = 0; j < labelLines.length; j += 1) {
+            ctx.fillText(labelLines[j], x, startY + (j * lineGap));
+          }
+
+          ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
+          ctx.fillStyle = (deltaRaw === '—' || deltaRaw == null || deltaRaw === '')
+            ? 'rgba(226,232,240,0.6)'
+            : (deltaColors[i] || 'rgba(226,232,240,0.9)');
+          ctx.fillText(deltaText, x, startY + (labelLines.length * lineGap) + deltaGap);
+        }
+        ctx.restore();
+      }
+    };
+
     function traditionalSeoPaintDfsBacklinkRadarHost(hostEl, followPct, cov, strengthPct, indexHeadline) {
       if (!hostEl) return;
+      traditionalSeoDestroyDfsRadarChart();
       const fp = followPct != null && Number.isFinite(Number(followPct)) ? Math.min(100, Math.max(0, Number(followPct))) : null;
       const cp = cov && cov.pct != null && Number.isFinite(Number(cov.pct)) ? Math.min(100, Math.max(0, Number(cov.pct))) : null;
       const sp = strengthPct != null && Number.isFinite(Number(strengthPct)) ? Math.min(100, Math.max(0, Number(strengthPct))) : null;
-      const wf = fp != null ? fp : 0;
-      const wc = cp != null ? cp : 0;
-      const ws = sp != null ? sp : 0;
-      const W = 336;
-      const H = 276;
-      const cx = W / 2;
-      const cy = H / 2 + 4;
-      const R = 70;
-      const rad = (deg) => (deg * Math.PI) / 180;
-      const pt = (deg, pctVal) => {
-        const r = R * Math.min(1, Math.max(0, pctVal / 100));
-        return `${cx + r * Math.cos(rad(deg))},${cy + r * Math.sin(rad(deg))}`;
-      };
-      const poly = `${pt(-90, wf)} ${pt(150, wc)} ${pt(30, ws)}`;
-      const axes = [
-        { deg: -90, lab: 'Dofollow' },
-        { deg: 150, lab: 'Coverage' },
-        { deg: 30, lab: 'Ref. rank' }
-      ];
-      const axisLines = axes
-        .map(({ deg }) => {
-          const x2 = cx + R * Math.cos(rad(deg));
-          const y2 = cy + R * Math.sin(rad(deg));
-          return `<line x1="${cx}" y1="${cy}" x2="${x2}" y2="${y2}" stroke="rgba(148,163,184,0.45)" stroke-width="1.25"/>`;
-        })
-        .join('');
-      const labels = axes
-        .map(({ deg, lab }) => {
-          const lr = R + 30;
-          const x = cx + lr * Math.cos(rad(deg));
-          const y = cy + lr * Math.sin(rad(deg));
-          const c = Math.cos(rad(deg));
-          const anchor = c > 0.25 ? 'start' : c < -0.25 ? 'end' : 'middle';
-          return `<text x="${x}" y="${y}" fill="#cbd5e1" font-size="12" font-weight="600" font-family="system-ui,Segoe UI,sans-serif" text-anchor="${anchor}" dominant-baseline="middle">${lab}</text>`;
-        })
-        .join('');
+      const vFollow = fp != null ? fp : 0;
+      const vRank = sp != null ? sp : 0;
+      const vCov = cp != null ? cp : 0;
+      const valFollow = fp != null ? `${Math.round(fp)}%` : '—';
+      const valRank = sp != null ? `${Math.round(sp)}` : '—';
+      const valCov =
+        cov && cov.total > 0 && cp != null
+          ? `${cov.pct}% (${cov.withL}/${cov.total})`
+          : '—';
       const head =
         indexHeadline && String(indexHeadline.total || '').trim()
           ? `<div style="text-align:center;margin:0 0 0.35rem;min-width:0;padding:0 0.15rem;">
@@ -76652,12 +76719,89 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           : '';
       hostEl.innerHTML = `<div style="width:100%;max-width:100%;min-width:0;box-sizing:border-box;">
         ${head}
-        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Backlink mix" style="display:block;width:100%;max-width:100%;height:auto;min-width:0;">
-          ${axisLines}
-          <polygon points="${poly}" fill="rgba(245,158,11,0.28)" stroke="#f59e0b" stroke-width="2" stroke-linejoin="round"/>
-          ${labels}
-        </svg>
+        <div style="width:100%;height:240px;min-width:0;max-width:100%;position:relative;">
+          <canvas id="traditional-seo-dfs-radar-canvas" aria-label="Backlink mix radar" style="display:block;width:100%;height:100%;"></canvas>
+        </div>
       </div>`;
+
+      const canvas = document.getElementById('traditional-seo-dfs-radar-canvas');
+      if (!canvas || typeof Chart === 'undefined') {
+        if (canvas && canvas.parentElement) {
+          canvas.parentElement.innerHTML =
+            '<p style="font-size:0.8rem;color:var(--dark-text-muted);text-align:center;padding:0.5rem 0;">Chart.js not available for radar.</p>';
+        }
+        return;
+      }
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const labels = ['Dofollow', 'Ref. rank', 'Coverage'];
+      const values = [vFollow, vRank, vCov];
+      const valueTexts = [valFollow, valRank, valCov];
+      const deltaColors = valueTexts.map(() => 'rgba(226,232,240,0.9)');
+
+      try {
+        window.__traditionalSeoDfsRadarChart = new Chart(ctx, {
+          type: 'radar',
+          data: {
+            labels,
+            datasets: [{
+              label: 'Backlinks',
+              data: values,
+              borderColor: 'rgba(59, 130, 246, 0.85)',
+              backgroundColor: 'rgba(59, 130, 246, 0.18)',
+              borderWidth: 2,
+              pointBackgroundColor: '#ffffff',
+              pointBorderColor: 'rgba(59, 130, 246, 0.85)',
+              pointRadius: 3,
+              pointHoverRadius: 4
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: { padding: 18 },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label(c) {
+                    const i = c.dataIndex;
+                    return `${labels[i]}: ${valueTexts[i]} (0–100 axis: ${Math.round(values[i])})`;
+                  }
+                }
+              },
+              traditionalSeoDfsRadarLabels: {
+                labels,
+                deltaTexts: valueTexts,
+                deltaColors,
+                lineGap: 12,
+                deltaGap: 8,
+                labelPadding: 22,
+                edgePadding: 4
+              }
+            },
+            scales: {
+              r: {
+                min: 0,
+                max: 100,
+                ticks: { display: false },
+                grid: { color: 'rgba(148, 163, 184, 0.20)' },
+                angleLines: { color: 'rgba(148, 163, 184, 0.20)' },
+                pointLabels: {
+                  display: true,
+                  color: 'rgba(0,0,0,0)',
+                  font: { size: 11, weight: '700' },
+                  padding: 22
+                }
+              }
+            }
+          },
+          plugins: [traditionalSeoDfsRadarLabelPlugin]
+        });
+      } catch (e) {
+        /* ignore */
+      }
     }
 
     function renderTraditionalSeoResultsTable() {
