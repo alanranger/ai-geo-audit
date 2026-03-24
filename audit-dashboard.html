@@ -6860,16 +6860,22 @@
       <!-- Backlinks (DFS domain index from Supabase) -->
       <section class="aigeo-panel" data-panel="backlinks">
         <div class="card--section-header" style="margin-bottom: 1rem;">
-          <h2 style="margin: 0 0 0.35rem 0; color: var(--dark-brand);">Backlinks</h2>
+          <div style="display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:0.75rem;margin-bottom:0.35rem;">
+            <h2 style="margin:0;color:var(--dark-brand);">Backlinks</h2>
+            <div style="display:flex;flex-wrap:wrap;gap:0.45rem;flex-shrink:0;">
+              <button type="button" class="btn" id="backlinks-dfs-full-btn" style="flex-shrink:0;padding:0.42rem 0.85rem;" title="Monthly-style: rebuild filtered domain backlink index in Supabase, refresh summary, reload table.">DFS full index</button>
+              <button type="button" class="btn" id="backlinks-dfs-delta-btn" style="flex-shrink:0;padding:0.42rem 0.85rem;" title="Weekly-style: fetch only links with first_seen newer than the last ingest cursor (requires full index first).">DFS new links</button>
+            </div>
+          </div>
           <p style="margin: 0; color: var(--dark-text-muted); max-width: 52rem;">
             Spam-filtered DataForSEO domain backlink index stored in Supabase (<code style="color:#cbd5e1;">dfs_domain_backlink_rows</code>).
-            Domain matches your configured property hostname (same as Traditional SEO). Use <strong>Traditional SEO → DFS full index / new links</strong> to refresh data.
+            Domain matches your configured property hostname (same as Traditional SEO). Use the buttons above or <strong>Traditional SEO</strong> to run the same <strong>DFS full index</strong> / <strong>DFS new links</strong> ingests.
           </p>
           <p id="dfs-backlinks-tile-warning" style="display:none;margin:0.5rem 0 0;font-size:0.78rem;color:#fbbf24;">Tile scan capped — counts may be partial.</p>
         </div>
         <div class="traditional-seo-grid" style="margin-bottom: 1rem;">
           <div class="card">
-            <div class="traditional-seo-strip-title traditional-seo-metric-heading">Indexed rows</div>
+            <div class="traditional-seo-strip-title traditional-seo-metric-heading">Total Backlinks</div>
             <div id="dfs-backlinks-tile-rows" style="text-align:center;font-size:1.35rem;font-weight:800;color:#e2e8f0;">—</div>
             <div id="dfs-backlinks-tile-rows-delta" class="traditional-seo-strip-sub" style="min-height:1.1rem;">—</div>
             <div class="traditional-seo-strip-sub">Total backlinks in index for this domain</div>
@@ -71887,7 +71893,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         document.getElementById('traditional-seo-dfs-full-btn'),
         document.getElementById('traditional-seo-dfs-delta-btn'),
         document.getElementById('traditional-seo-dfs-full-btn-controls'),
-        document.getElementById('traditional-seo-dfs-delta-btn-controls')
+        document.getElementById('traditional-seo-dfs-delta-btn-controls'),
+        document.getElementById('backlinks-dfs-full-btn'),
+        document.getElementById('backlinks-dfs-delta-btn')
       ].filter(Boolean);
       TRADITIONAL_SEO_STATE.dfsPageBacklinksFetchInFlight = true;
       TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote = '';
@@ -72017,6 +72025,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           const rk = TRADITIONAL_SEO_STATE.dfsBacklinkSummary?.rank;
           if (rk != null && Number.isFinite(Number(rk))) traditionalSeoWriteDfsRankBaseline(Number(rk));
         }
+        const dfsDom = traditionalSeoPropertyHostname();
+        if (dfsDom) void dfsBacklinksRefreshTiles(dfsDom);
+        void dfsBacklinksLoadTable();
         renderTraditionalSeoResultsTable();
         setTimeout(() => traditionalSeoDfsActivitySet({ show: false }), dfsFetchHadErrors ? 5000 : 2800);
       }
@@ -77482,6 +77493,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       wireDfs('traditional-seo-dfs-delta-btn', 'delta');
       wireDfs('traditional-seo-dfs-full-btn-controls', 'full');
       wireDfs('traditional-seo-dfs-delta-btn-controls', 'delta');
+      wireDfs('backlinks-dfs-full-btn', 'full');
+      wireDfs('backlinks-dfs-delta-btn', 'delta');
       const onStatusDrill = (event) => {
         const target = event.target instanceof Element ? event.target.closest('[data-filter-status]') : null;
         if (!target) return;
@@ -78534,6 +78547,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     window.renderBacklinksTab = async function renderBacklinksTab() {
+      wireTraditionalSeoButtons();
       dfsBacklinksWireOnce();
       const domain = traditionalSeoPropertyHostname();
       await dfsBacklinksRefreshTiles(domain);
