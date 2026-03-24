@@ -9157,6 +9157,20 @@
           </div>
         </div>
       </div>
+      <div id="traditional-seo-dfs-progress-modal" class="impl-progress-modal-backdrop" aria-hidden="true" style="z-index:10003;">
+        <div class="impl-progress-modal" role="status" aria-live="polite">
+          <h4 id="traditional-seo-dfs-progress-title" class="impl-progress-modal-title">DataForSEO backlink ingest</h4>
+          <p id="traditional-seo-dfs-progress-subtitle" class="impl-progress-modal-subtitle">Starting…</p>
+          <p id="traditional-seo-dfs-progress-counts" class="impl-progress-modal-subtitle" style="margin-top:-0.4rem;margin-bottom:0.65rem;font-size:0.82rem;color:#94a3b8;line-height:1.35;">—</p>
+          <div class="impl-progress-modal-track">
+            <div id="traditional-seo-dfs-progress-fill" class="impl-progress-modal-fill"></div>
+          </div>
+          <div class="impl-progress-modal-meta">
+            <span id="traditional-seo-dfs-progress-percent">0%</span>
+            <span id="traditional-seo-dfs-progress-elapsed">Elapsed: 0s</span>
+          </div>
+        </div>
+      </div>
 
       <!-- Local & Reviews Panel -->
       <section class="aigeo-panel" data-panel="local">
@@ -71208,6 +71222,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       floorPct: 5
     };
 
+    const TRADITIONAL_SEO_DFS_PROGRESS = {
+      timer: null,
+      startedAt: 0
+    };
+
     const TRADITIONAL_SEO_SEGMENTATION_SOURCES = [
       'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/page%20segmentation%20by%20tier.csv',
       'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/page%20segmentation%20by%20tier.csv'
@@ -71990,6 +72009,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
         return;
       }
+      const dfsProgTitle = m === 'full' ? 'DataForSEO — Full domain index' : 'DataForSEO — New links (delta)';
+      const dfsFmtN = (v) =>
+        v != null && Number.isFinite(Number(v)) ? Math.round(Number(v)).toLocaleString() : '—';
+      const dfsUrlN = urls.length;
+      const dfsCountsBase = () => `Domain: ${domain} · Page URLs in scope: ${dfsFmtN(dfsUrlN)}`;
       const btns = [
         document.getElementById('traditional-seo-dfs-full-btn'),
         document.getElementById('traditional-seo-dfs-delta-btn'),
@@ -72009,10 +72033,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         show: true,
         bar: true,
         pct: 6,
+        title: dfsProgTitle,
+        counts: dfsCountsBase(),
         text:
           m === 'full'
-            ? `DataForSEO: full domain index (${domain}) — filtered ingest to Supabase…`
-            : `DataForSEO: new links since cursor (${domain})…`
+            ? `Step 1/4: POST ingest — filtered domain index to Supabase for ${domain}…`
+            : `Step 1/4: POST ingest — delta (new links since cursor) for ${domain}…`
       });
       let dfsFetchHadErrors = false;
       try {
@@ -72060,17 +72086,24 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const dbN = d.rowCount != null ? d.rowCount : '—';
         const trunc = d.truncated ? ' (hit page cap — raise DFS_DOMAIN_INGEST_MAX_PAGES or re-run).' : '';
         TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote = `~$${cost} · wrote ${rc != null ? rc : '—'} · DB ${dbN}${apiPart}${trunc}`;
+        const dfsCountsIngest = `${dfsCountsBase()} · Rows written/upserted: ${dfsFmtN(rc)} · API items: ${dfsFmtN(apiN)} · DB row count: ${dfsFmtN(d.rowCount)} · Est. cost: ~$${cost}`;
         traditionalSeoDfsActivitySet({
           show: true,
           bar: true,
           pct: 55,
-          text: `DataForSEO: ${TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote}`
+          title: dfsProgTitle,
+          counts: dfsCountsIngest,
+          text: `Step 2/4: Ingest OK — ${TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote}`
         });
         traditionalSeoDfsActivitySet({
           show: true,
           bar: true,
           pct: 62,
-          text: 'DataForSEO: refreshing domain summary…'
+          title: dfsProgTitle,
+          counts: dfsCountsIngest,
+          text: m === 'full'
+            ? 'Step 3/4: Refreshing domain summary from DataForSEO (forced refresh)…'
+            : 'Step 3/4: Looking up cached domain summary…'
         });
         if (m === 'full') {
           // Must force summary fetch: otherwise a still-“fresh” cache skips the API and leaves stale rank (e.g. 283 vs 0–100 scale).
@@ -72082,17 +72115,21 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           show: true,
           bar: true,
           pct: 82,
-          text: 'DataForSEO: loading per-URL rows from Supabase…'
+          title: dfsProgTitle,
+          counts: dfsCountsIngest,
+          text: `Step 4/4: Loading per-URL backlink rows from Supabase (${dfsFmtN(dfsUrlN)} pages)…`
         });
         await traditionalSeoDfsPagesLookupSilently();
         const okMsg =
           m === 'full'
-            ? `DataForSEO: full index updated for ${domain}. ${TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote}`
-            : `DataForSEO: delta ingest done for ${domain}. ${TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote}`;
+            ? `Done: full index updated for ${domain}. ${TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote}`
+            : `Done: delta ingest finished for ${domain}. ${TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote}`;
         traditionalSeoDfsActivitySet({
           show: true,
           bar: true,
           pct: 100,
+          title: dfsProgTitle,
+          counts: dfsCountsIngest,
           text: okMsg
         });
         if (typeof window.showStatus === 'function') {
@@ -72107,6 +72144,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           show: true,
           bar: true,
           pct: 100,
+          title: dfsProgTitle,
+          counts: dfsCountsBase(),
           text: `Failed — ${TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote}`
         });
         if (typeof window.showStatus === 'function') {
@@ -73185,23 +73224,79 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (bar) bar.style.display = on && opts && opts.bar !== false ? 'block' : 'none';
     }
 
+    function traditionalSeoDfsProgressClearTimer() {
+      if (TRADITIONAL_SEO_DFS_PROGRESS.timer) {
+        clearInterval(TRADITIONAL_SEO_DFS_PROGRESS.timer);
+        TRADITIONAL_SEO_DFS_PROGRESS.timer = null;
+      }
+    }
+
     function traditionalSeoDfsActivitySet(opts) {
       const wrap = document.getElementById('traditional-seo-dfs-activity');
       const msg = document.getElementById('traditional-seo-dfs-activity-msg');
       const barWrap = document.getElementById('traditional-seo-dfs-activity-bar-wrap');
       const fill = document.getElementById('traditional-seo-dfs-activity-bar-fill');
+      const modal = document.getElementById('traditional-seo-dfs-progress-modal');
+      const mTitle = document.getElementById('traditional-seo-dfs-progress-title');
+      const mSub = document.getElementById('traditional-seo-dfs-progress-subtitle');
+      const mCounts = document.getElementById('traditional-seo-dfs-progress-counts');
+      const mFill = document.getElementById('traditional-seo-dfs-progress-fill');
+      const mPct = document.getElementById('traditional-seo-dfs-progress-percent');
+      const mElapsed = document.getElementById('traditional-seo-dfs-progress-elapsed');
       if (!wrap || !msg) return;
       const on = !!(opts && opts.show);
       wrap.style.display = on ? 'block' : 'none';
       if (opts && opts.text != null) msg.textContent = String(opts.text);
       const showBar = on && opts && opts.bar !== false;
       if (barWrap) barWrap.style.display = showBar ? 'block' : 'none';
+      const pctVal =
+        opts && opts.pct != null ? Math.max(0, Math.min(100, Math.round(Number(opts.pct) || 0))) : null;
       if (fill) {
-        if (opts && opts.pct != null) {
-          const p = Math.max(0, Math.min(100, Math.round(Number(opts.pct) || 0)));
-          fill.style.width = `${p}%`;
+        if (pctVal != null) {
+          fill.style.width = `${pctVal}%`;
         } else if (!on) {
           fill.style.width = '0%';
+        }
+      }
+      if (modal && mTitle && mSub && mFill && mPct) {
+        if (on) {
+          if (!TRADITIONAL_SEO_DFS_PROGRESS.timer) {
+            TRADITIONAL_SEO_DFS_PROGRESS.startedAt = Date.now();
+            TRADITIONAL_SEO_DFS_PROGRESS.timer = setInterval(() => {
+              if (mElapsed && TRADITIONAL_SEO_DFS_PROGRESS.startedAt) {
+                const s = Math.max(0, Math.floor((Date.now() - TRADITIONAL_SEO_DFS_PROGRESS.startedAt) / 1000));
+                mElapsed.textContent = `Elapsed: ${s}s`;
+              }
+            }, 400);
+          }
+          modal.classList.add('is-open');
+          modal.setAttribute('aria-hidden', 'false');
+          if (opts.title != null) mTitle.textContent = String(opts.title);
+          if (opts.text != null) mSub.textContent = String(opts.text);
+          if (mCounts) {
+            if (opts.counts != null) {
+              mCounts.textContent = String(opts.counts);
+            } else if (!mCounts.textContent || mCounts.textContent === '—') {
+              mCounts.textContent = '—';
+            }
+          }
+          if (pctVal != null) {
+            mFill.style.width = `${pctVal}%`;
+            mPct.textContent = `${pctVal}%`;
+          }
+          if (mElapsed && TRADITIONAL_SEO_DFS_PROGRESS.startedAt) {
+            const s = Math.max(0, Math.floor((Date.now() - TRADITIONAL_SEO_DFS_PROGRESS.startedAt) / 1000));
+            mElapsed.textContent = `Elapsed: ${s}s`;
+          }
+        } else {
+          traditionalSeoDfsProgressClearTimer();
+          TRADITIONAL_SEO_DFS_PROGRESS.startedAt = 0;
+          modal.classList.remove('is-open');
+          modal.setAttribute('aria-hidden', 'true');
+          if (mFill) mFill.style.width = '0%';
+          if (mPct) mPct.textContent = '0%';
+          if (mElapsed) mElapsed.textContent = 'Elapsed: 0s';
+          if (mCounts) mCounts.textContent = '—';
         }
       }
     }
