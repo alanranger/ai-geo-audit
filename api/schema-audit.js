@@ -685,8 +685,12 @@ function isServiceIntentUrl(url) {
   try {
     const pathname = new URL(url).pathname.toLowerCase();
     if (!pathname || pathname === '/') return false;
-    // Tier B Product pages (aligned with Ranking & AI classifier)
-    return pathname.includes('/photo-workshops-uk') || pathname.includes('/photography-services-near-me');
+    // Tier B Product pages (aligned with tier-segmentation product heuristics + workshop PDP slugs)
+    return (
+      pathname.includes('/photo-workshops-uk')
+      || pathname.includes('/macro-workshops-uk')
+      || pathname.includes('/photography-services-near-me')
+    );
   } catch {
     return false;
   }

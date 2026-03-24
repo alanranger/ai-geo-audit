@@ -73633,6 +73633,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return null;
     }
 
+    function traditionalSeoSignalMapGetWithUrlAliases(map, rawUrl, propertyUrl = '') {
+      const direct = traditionalSeoSignalMapGet(map, rawUrl, propertyUrl);
+      if (direct) return direct;
+      if (!map || typeof map.get !== 'function') return null;
+      const aliases = traditionalSeoCollectQaGateAliasKeys(rawUrl, propertyUrl);
+      for (let i = 0; i < aliases.length; i += 1) {
+        const hit = map.get(aliases[i]);
+        if (hit) return hit;
+      }
+      return null;
+    }
+
     function traditionalSeoExtractUrlsFromCsvText(csvText, propertyUrl = '') {
       const out = new Set();
       const lines = String(csvText || '').split(/\r?\n/);
@@ -74145,15 +74157,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
       const servicePages = Array.isArray(payloads?.service?.data?.pages) ? payloads.service.data.pages : [];
       servicePages.forEach((page) => {
-        const key = toKey(page?.url);
-        if (!key) return;
+        const aliases = traditionalSeoCollectQaGateAliasKeys(page?.url, propertyUrl);
+        if (!aliases.length) return;
         const types = Array.isArray(page?.schemaTypes) ? page.schemaTypes.map((t) => String(t || '').toLowerCase()) : [];
         const statusCode = Number.isFinite(page?.statusCode) ? Number(page.statusCode) : NaN;
         const rateLimited = statusCode === 429 || String(page?.errorType || '').toLowerCase().includes('rate limited');
-        maps.serviceSchema.set(key, {
+        const row = {
           hasService: types.includes('service'),
           rateLimited
-        });
+        };
+        for (let i = 0; i < aliases.length; i += 1) {
+          maps.serviceSchema.set(aliases[i], row);
+        }
       });
       return maps;
     }
@@ -74330,10 +74345,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const techScore = traditionalSeoToNum(context?.techScore, 70);
       const schemaScore = traditionalSeoToNum(context?.schemaScore, 70);
       const maps = context?.signalMaps || {};
-      const schemaSignal = traditionalSeoSignalMapGet(maps.schemaPage, url, propertyUrl);
+      const schemaSignal = traditionalSeoSignalMapGetWithUrlAliases(maps.schemaPage, url, propertyUrl);
       const techSignal = traditionalSeoSignalMapGet(maps.techIndexability, url, propertyUrl);
       const extractSignal = traditionalSeoSignalMapGet(maps.extractability, url, propertyUrl);
-      const qaSignal = traditionalSeoSignalMapGet(maps.qaGate, url, propertyUrl);
+      const qaSignal = traditionalSeoSignalMapGetWithUrlAliases(maps.qaGate, url, propertyUrl);
       const qaIssues = Array.isArray(qaSignal?.issues) ? qaSignal.issues : [];
       const qaDetails = Array.isArray(qaSignal?.issueDetails) ? qaSignal.issueDetails : [];
       const qaIssueText = qaIssues
@@ -74552,10 +74567,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
       if (key === 'service_schema_product_page') {
         if (String(tier || '').toLowerCase() !== 'product') return 'pass';
-        const svc = traditionalSeoSignalMapGet(maps.serviceSchema, url, propertyUrl);
-        if (!svc) return 'warn';
-        if (svc.rateLimited) return 'warn';
-        return svc.hasService ? 'pass' : 'fail';
+        const svc = traditionalSeoSignalMapGetWithUrlAliases(maps.serviceSchema, url, propertyUrl);
+        if (svc?.rateLimited) return 'warn';
+        if (svc?.hasService) return 'pass';
+        if (schemaTypes.includes('service')) return 'pass';
+        if (svc && svc.hasService === false) return 'fail';
+        return 'warn';
       }
       if (key === 'localbusiness_schema_page') {
         const row = traditionalSeoSignalMapGet(maps.localBusiness, url, propertyUrl);
