@@ -73927,10 +73927,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     function traditionalSeoQaPayloadNeedsSupabaseFallback(qaPayload, evaluatedUrlCount) {
       const n = traditionalSeoQaGateRowCount(qaPayload);
       const target = Math.max(0, traditionalSeoToNum(evaluatedUrlCount, 0));
-      if (n === 0) return true;
       if (!qaPayload || String(qaPayload.status || '').toLowerCase() !== 'ok') return true;
-      if (target < 30) return false;
-      return n < Math.floor(target * 0.85);
+      if (n === 0) return true;
+      if (target <= 0) return false;
+      if (n < target) return true;
+      if (target >= 30 && n < Math.floor(target * 0.98)) return true;
+      return false;
     }
 
     function traditionalSeoNormalizePropertyUrlForSnapshots(raw) {
@@ -73985,22 +73987,79 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return null;
     }
 
+    function traditionalSeoMergeSchemaQaBodies(localBody, remoteBody, propertyUrl = '') {
+      const rowsL = Array.isArray(localBody?.data?.qaGate?.rows) ? localBody.data.qaGate.rows : [];
+      const rowsR = Array.isArray(remoteBody?.data?.qaGate?.rows) ? remoteBody.data.qaGate.rows : [];
+      const byKey = new Map();
+      const put = (row) => {
+        const k = traditionalSeoSignalMapKey(row?.url, propertyUrl);
+        if (!k) return;
+        if (!byKey.has(k)) byKey.set(k, row);
+      };
+      rowsL.forEach(put);
+      rowsR.forEach(put);
+      const base = (remoteBody && String(remoteBody.status || '').toLowerCase() === 'ok')
+        ? remoteBody
+        : localBody;
+      if (!base || typeof base !== 'object') {
+        return localBody || remoteBody || null;
+      }
+      const next = { ...base, status: 'ok', data: { ...(base.data || {}) } };
+      next.data.qaGate = { ...(base.data?.qaGate || {}), rows: [...byKey.values()] };
+      return next;
+    }
+
+    function traditionalSeoCollectQaGateAliasKeys(rawUrl, propertyUrl = '') {
+      const keys = new Set();
+      const addRaw = (v) => {
+        const s = String(v || '').trim();
+        if (!s) return;
+        const k = traditionalSeoSignalMapKey(s, propertyUrl);
+        if (k) keys.add(k);
+        const leg = traditionalSeoNormalizeUrl(s, propertyUrl);
+        if (leg) keys.add(leg);
+      };
+      const raw = String(rawUrl || '').trim();
+      if (!raw) return [];
+      addRaw(raw);
+      try {
+        const parsed = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+        const flip = new URL(parsed.toString());
+        if (parsed.protocol === 'https:') {
+          flip.protocol = 'http:';
+          addRaw(flip.toString());
+        } else if (parsed.protocol === 'http:') {
+          flip.protocol = 'https:';
+          addRaw(flip.toString());
+        }
+      } catch (err) {
+        /* ignore */
+      }
+      try {
+        const vars = traditionalSeoLandingComparableVariants(raw, propertyUrl);
+        for (let i = 0; i < vars.length; i += 1) addRaw(vars[i]);
+      } catch (err2) {
+        /* ignore */
+      }
+      return [...keys];
+    }
+
     async function traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl, evaluatedUrlCount) {
       const payloads = traditionalSeoLoadImplementationPayloads();
-      const qa = payloads.qa;
-      if (!traditionalSeoQaPayloadNeedsSupabaseFallback(qa, evaluatedUrlCount)) {
-        return payloads;
+      let qa = payloads.qa;
+      const needRemote = traditionalSeoQaPayloadNeedsSupabaseFallback(qa, evaluatedUrlCount);
+      const remote = needRemote ? await traditionalSeoFetchQaPayloadFromSupabase(propertyUrl) : null;
+      if (remote && String(remote.status || '').toLowerCase() === 'ok'
+          && traditionalSeoQaGateRowCount(remote) > 0) {
+        qa = traditionalSeoMergeSchemaQaBodies(qa, remote, propertyUrl);
       }
-      const remote = await traditionalSeoFetchQaPayloadFromSupabase(propertyUrl);
-      const localN = traditionalSeoQaGateRowCount(qa);
-      const remoteN = traditionalSeoQaGateRowCount(remote);
-      if (!remote || remoteN <= localN) {
-        return payloads;
+      if (qa && qa !== payloads.qa) {
+        if (typeof saveImplementationAuditCache === 'function' && IMPL_AUDIT_CACHE_KEYS?.qa) {
+          saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.qa, qa, { syncRemote: false });
+        }
+        return { ...payloads, qa };
       }
-      if (typeof saveImplementationAuditCache === 'function' && IMPL_AUDIT_CACHE_KEYS?.qa) {
-        saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.qa, remote, { syncRemote: false });
-      }
-      return { ...payloads, qa: remote };
+      return payloads;
     }
 
     /** Normalize cached technical-foundation API body (or bare `data`) for Traditional SEO + signal maps. */
@@ -74068,9 +74127,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         ? payloads.qa.data.qaGate.rows
         : [];
       qaRows.forEach((row) => {
-        const key = toKey(row?.url);
-        if (!key) return;
-        maps.qaGate.set(key, row);
+        const aliases = traditionalSeoCollectQaGateAliasKeys(row?.url, propertyUrl);
+        if (!aliases.length) return;
+        for (let i = 0; i < aliases.length; i += 1) {
+          maps.qaGate.set(aliases[i], row);
+        }
       });
 
       const localRows = Array.isArray(payloads?.local?.data?.localBusinessSchemaScan?.results)
