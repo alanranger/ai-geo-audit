@@ -6613,6 +6613,12 @@
               </div>
             </div>
           </div>
+          <div class="card" id="traditional-seo-link-diversity-card">
+            <div class="traditional-seo-strip-title traditional-seo-metric-heading">Link distribution (samples)</div>
+            <div id="traditional-seo-link-diversity-value" style="text-align:center;font-size:1.35rem;font-weight:800;color:#e2e8f0;margin-top:0.35rem;">—</div>
+            <div id="traditional-seo-link-diversity-sub" class="traditional-seo-strip-sub" style="margin-top:0.45rem;min-height:2.4rem;line-height:1.35;">—</div>
+            <div id="traditional-seo-link-diversity-meta" class="traditional-seo-strip-sub" style="margin-top:0.35rem;font-size:0.72rem;color:var(--dark-text-muted);">—</div>
+          </div>
           <div class="card" style="display: flex; flex-direction: column; justify-content: flex-start;">
             <div class="traditional-seo-strip-title">Pass / Warn / Fail</div>
             <div id="traditional-seo-pwf" class="traditional-seo-pwf-stack">—</div>
@@ -71367,6 +71373,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       { rule_key: 'localbusiness_schema_page', rule_name: 'LocalBusiness schema (scanned URLs)', description: 'When URL appears in LocalBusiness scanner results: expect LocalBusiness JSON-LD.', category: 'schema', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 102 },
       { rule_key: 'internal_links_minimum', rule_name: 'Minimum internal links', description: 'Flags unmapped tier or very low visibility; GSC-only does not fail.', category: 'architecture', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 105 },
       { rule_key: 'thin_content_guardrail', rule_name: 'Thin content guardrail', description: 'Content Extractability pass/score; excluded/noindex rows pass.', category: 'content', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 115 },
+      { rule_key: 'content_freshness_last_updated', rule_name: 'Freshness — last-updated signal (blog/event)', description: 'Blog and event tiers only: pass when Extractability finds a last-updated signal (article:modified_time, og:updated_time, or visible “updated” + date). Other tiers pass (N/A). Utility URLs excluded.', category: 'content', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 118 },
       { rule_key: 'image_alt_coverage', rule_name: 'Image alt attributes', description: 'All img tags should have a non-empty alt (Extractability HTML parse). Zero images on the page passes.', category: 'content', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 125 },
       { rule_key: 'external_links_new_tab', rule_name: 'External links open in new tab', description: 'Outbound links to other hosts should use target=_blank (parsed from Extractability HTML).', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 130 },
       { rule_key: 'broken_links_no_404', rule_name: 'Broken links (404)', description: 'Reserved: full-site link crawl not wired yet — keep disabled until checker ships.', category: 'crawlability', severity: 'high', scope: 'page', current_status: 'pass', enabled: false, weight: 1.2, sort_order: 135 }
@@ -74846,6 +74853,15 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (impressions > 0 && impressions < 8) return 'warn';
         return 'pass';
       }
+      if (key === 'content_freshness_last_updated') {
+        const tl = String(tier || '').toLowerCase();
+        if (tl !== 'blog' && tl !== 'event') return 'pass';
+        if (traditionalSeoShouldExcludeUrlFromTraditionalAudit(url)) return 'pass';
+        if (extractSignal?.excludedFromAudit === true) return 'pass';
+        if (!extractSignal || extractSignal.requestOk === false) return 'warn';
+        if (extractSignal.hasLastUpdated === true) return 'pass';
+        return 'warn';
+      }
       if (key === 'internal_links_minimum') {
         if (tier === 'unmapped') return 'warn';
         if (impressions === 0 && clicks === 0) return 'pass';
@@ -75974,6 +75990,15 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (tot < 0) return base;
         return `Images: ${tot}; missing alt: ${miss}.`;
       }
+      if (rk === 'content_freshness_last_updated') {
+        if (!ex || ex.requestOk === false) {
+          return 'Extractability row missing or fetch failed — run Re-audit page or full Extractability.';
+        }
+        if (ex.excludedFromAudit) return 'Page excluded from extractability scope.';
+        return ex.hasLastUpdated
+          ? 'Last-updated signal detected (meta article:modified_time / og:updated_time or visible “updated” + date).'
+          : 'No last-updated signal detected in HTML (meta or visible updated label + date).';
+      }
       if (rk === 'schema_qa_gate_page') {
         const qa = traditionalSeoSignalMapGetWithUrlAliases(maps.qaGate, pageUrl, prop);
         if (!qa || typeof qa !== 'object') {
@@ -76537,6 +76562,63 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       foot.textContent = `Window ~28d (audit GSC) · Segment: ${tierLbl} · Compare: ${curDate || 'current'} vs ${prevDateStr}`;
     }
 
+    function traditionalSeoDisplayUrlShowsPositiveInboundSample(displayUrl) {
+      const u = String(displayUrl || '').trim();
+      if (!u) return false;
+      const mForBl = traditionalSeoGetKeywordMetricRow(u);
+      const blArr = mForBl ? traditionalSeoBacklinkItemsFromMetric(mForBl) : [];
+      const nBlCount = traditionalSeoToNum(mForBl?.page_backlinks_sample, 0);
+      const blViewCount = mForBl ? traditionalSeoPageBlDisplayNumberForMetric(mForBl) : null;
+      const kePositive =
+        mForBl &&
+        (blArr.length > 0 || nBlCount > 0 || (blViewCount != null && Number(blViewCount) > 0));
+      const dfsRowForUi = traditionalSeoGetDfsPageRow(u);
+      const dfsItemsForUi = Array.isArray(dfsRowForUi?.backlink_rows) ? dfsRowForUi.backlink_rows : [];
+      const dfsBlN = traditionalSeoDfsPageBlDisplayNumberForUrl(u);
+      const dfsPositive =
+        traditionalSeoBacklinkIndexShowDfs() &&
+        (dfsItemsForUi.length > 0 ||
+          (dfsBlN != null && Number.isFinite(Number(dfsBlN)) && Number(dfsBlN) > 0));
+      return Boolean(kePositive || dfsPositive);
+    }
+
+    function renderTraditionalSeoLinkDiversityTile() {
+      const valEl = document.getElementById('traditional-seo-link-diversity-value');
+      const subEl = document.getElementById('traditional-seo-link-diversity-sub');
+      const metaEl = document.getElementById('traditional-seo-link-diversity-meta');
+      if (!valEl || !subEl) return;
+      const allRows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
+      const propEff = traditionalSeoEffectivePropertyUrl();
+      const pages = new Set();
+      allRows.forEach((row) => {
+        if (String(row?.tier || '').toLowerCase() === 'sitewide') return;
+        const urlRaw = String(row?.url || '').trim();
+        if (!urlRaw) return;
+        const disp = traditionalSeoLandingRollupDisplayUrl(traditionalSeoLandingRollupGroupKey(urlRaw, propEff), propEff);
+        if (disp) pages.add(disp);
+      });
+      const total = pages.size;
+      if (!total) {
+        valEl.textContent = '—';
+        subEl.textContent = 'Run ② or ① to load URL rows.';
+        if (metaEl) metaEl.textContent = '';
+        return;
+      }
+      let withL = 0;
+      pages.forEach((disp) => {
+        if (traditionalSeoDisplayUrlShowsPositiveInboundSample(disp)) withL += 1;
+      });
+      const pct = Math.round((withL / total) * 1000) / 10;
+      valEl.textContent = `${withL} / ${total}`;
+      subEl.textContent = `${pct}% of evaluated pages show at least one sampled inbound link`;
+      if (metaEl) {
+        const parts = [];
+        if (traditionalSeoBacklinkIndexShowDfs()) parts.push('DFS');
+        parts.push('KE');
+        metaEl.textContent = `Sources: ${parts.join(' + ')} page samples · diversity proxy (not a full link graph).`;
+      }
+    }
+
     function renderTraditionalSeoResultsTable() {
       if (TRADITIONAL_SEO_STATE.filterDisavowedBacklinkCounts !== false && TRADITIONAL_SEO_STATE.disavowUiLoaded === null) {
         traditionalSeoEnsureDisavowLoadedUi().then(() => renderTraditionalSeoResultsTable());
@@ -76878,6 +76960,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       updateTraditionalSeoSortHeaderState();
       renderTraditionalSeoDfsBacklinkTiles();
       renderTraditionalSeoDfsDomainRankTile();
+      renderTraditionalSeoLinkDiversityTile();
       void traditionalSeoRefreshCtrTopTenTiles();
     }
 
@@ -76983,6 +77066,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         || k === 'keyword_in_h1'
         || k === 'keyword_in_intro'
         || k === 'thin_content_guardrail'
+        || k === 'content_freshness_last_updated'
         || k === 'image_alt_coverage'
         || k === 'external_links_new_tab'
       );
