@@ -6585,11 +6585,12 @@
           </div>
           <div class="card" id="traditional-seo-dfs-tile-card">
             <div class="traditional-seo-strip-title traditional-seo-metric-heading">Backlinks (DataForSEO)</div>
-            <div id="traditional-seo-dfs-radar-host" style="width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; margin: 0.2rem 0 0.65rem;" aria-label="Backlink mix radar"></div>
+            <div id="traditional-seo-dfs-radar-host" style="width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; margin: 0.2rem 0 0.65rem;" aria-label="Backlink mix radar"></div>
             <ul
               id="traditional-seo-dfs-bullets"
               style="width: 100%; margin: 0 0 0.75rem 0; padding-left: 1.2rem; font-size: 0.92rem; color: var(--dark-text); line-height: 1.55;"
             ></ul>
+            <div id="traditional-seo-dfs-index-foot" class="traditional-seo-strip-sub" style="width:100%;text-align:center;line-height:1.45;margin:0 0 0.45rem;padding:0 0.35rem;"></div>
             <div style="font-size: 0.82rem; color: var(--dark-text-muted); text-align: center; line-height: 1.45; margin-bottom: 0.5rem;">
               <span id="traditional-seo-dfs-meta">—</span>
             </div>
@@ -72183,6 +72184,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const bulletsEl = document.getElementById('traditional-seo-dfs-bullets');
       const m = document.getElementById('traditional-seo-dfs-meta');
       const noteEl = document.getElementById('traditional-seo-dfs-fetch-note');
+      const indexFootEl = document.getElementById('traditional-seo-dfs-index-foot');
       const radarHost = document.getElementById('traditional-seo-dfs-radar-host');
       if (!bulletsEl) return;
       const s = TRADITIONAL_SEO_STATE.dfsBacklinkSummary;
@@ -72194,6 +72196,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (!traditionalSeoBacklinkIndexShowDfs()) {
         if (m) m.textContent = '—';
         if (noteEl) noteEl.textContent = '';
+        if (indexFootEl) indexFootEl.textContent = '';
         setEmptyBullets(
           'Set <code>TRADITIONAL_SEO_BACKLINK_INDEX_SOURCE</code> to <strong>dataforseo</strong> or <strong>both</strong> to enable this tile.'
         );
@@ -72204,6 +72207,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (!s) {
         if (m) m.textContent = '—';
         if (noteEl) noteEl.textContent = TRADITIONAL_SEO_STATE.dfsPageBacklinksLastNote || '';
+        if (indexFootEl) indexFootEl.textContent = '';
         setEmptyBullets(
           TRADITIONAL_SEO_STATE.dfsBacklinkApiConfigured === false
             ? 'Server: set <code>DATAFORSEO_API_LOGIN</code> and <code>DATAFORSEO_API_PASSWORD</code>.'
@@ -72290,6 +72294,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         );
       }
       bulletsEl.innerHTML = parts.join('');
+      if (indexFootEl) {
+        indexFootEl.textContent = (indexHeadline && String(indexHeadline.sub || '').trim()) ? String(indexHeadline.sub) : '';
+      }
       const splAll = TRADITIONAL_SEO_STATE.dfsFilteredDofollowSplit;
       let followPctForRadar = null;
       if (
@@ -72307,8 +72314,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (radarHost) {
         traditionalSeoKickDfsTileAggregatesForRadar();
         const aggCur = TRADITIONAL_SEO_STATE.dfsTileAggregatesCur;
-        const spRadar = traditionalSeoDfsWeightedDofollowRefStrengthPct(aggCur?.rankBandsDofollow);
-        traditionalSeoPaintDfsBacklinkRadarHost(radarHost, followPctForRadar, cov, spRadar, indexHeadline);
+        const strongShareRadar = traditionalSeoDfsDofollowStrongBandSharePct(aggCur?.rankBandsDofollow);
+        traditionalSeoPaintDfsBacklinkRadarHost(radarHost, followPctForRadar, cov, strongShareRadar, indexHeadline);
       }
       const t = s.fetched_at ? Date.parse(String(s.fetched_at)) : NaN;
       let ds = '—';
@@ -76584,20 +76591,20 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return { withL, total, pct };
     }
 
-    function traditionalSeoDfsWeightedDofollowRefStrengthPct(rankBandsDofollow) {
+    /** % of dofollow backlinks in ref. domain rank bands 50–100 (same buckets as the “by band” pie). */
+    function traditionalSeoDfsDofollowStrongBandSharePct(rankBandsDofollow) {
       const bd = rankBandsDofollow && typeof rankBandsDofollow === 'object' ? rankBandsDofollow : {};
       const keys = ['r80_100', 'r50_79', 'r30_49', 'r20_29', 'r_lt20', 'r_null'];
-      const centers = { r80_100: 90, r50_79: 65, r30_49: 40, r20_29: 25, r_lt20: 10, r_null: 0 };
-      let w = 0;
+      let strong = 0;
       let t = 0;
       for (let i = 0; i < keys.length; i += 1) {
         const k = keys[i];
         const n = Math.max(0, Math.round(Number(bd[k]) || 0));
         t += n;
-        w += n * (centers[k] ?? 0);
+        if (k === 'r80_100' || k === 'r50_79') strong += n;
       }
       if (t <= 0) return null;
-      return Math.round(Math.min(100, Math.max(0, w / t)));
+      return Math.round(Math.min(100, Math.max(0, (100 * strong) / t)));
     }
 
     function traditionalSeoDestroyDfsRadarChart() {
@@ -76691,36 +76698,33 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
     };
 
-    function traditionalSeoPaintDfsBacklinkRadarHost(hostEl, followPct, cov, strengthPct, indexHeadline) {
+    function traditionalSeoPaintDfsBacklinkRadarHost(hostEl, followPct, cov, strongBandSharePct, indexHeadline) {
       if (!hostEl) return;
       traditionalSeoDestroyDfsRadarChart();
       const fp = followPct != null && Number.isFinite(Number(followPct)) ? Math.min(100, Math.max(0, Number(followPct))) : null;
       const cp = cov && cov.pct != null && Number.isFinite(Number(cov.pct)) ? Math.min(100, Math.max(0, Number(cov.pct))) : null;
-      const sp = strengthPct != null && Number.isFinite(Number(strengthPct)) ? Math.min(100, Math.max(0, Number(strengthPct))) : null;
+      const sp = strongBandSharePct != null && Number.isFinite(Number(strongBandSharePct))
+        ? Math.min(100, Math.max(0, Number(strongBandSharePct)))
+        : null;
       const vFollow = fp != null ? fp : 0;
-      const vRank = sp != null ? sp : 0;
+      const vStrong = sp != null ? sp : 0;
       const vCov = cp != null ? cp : 0;
       const valFollow = fp != null ? `${Math.round(fp)}%` : '—';
-      const valRank = sp != null ? `${Math.round(sp)}/100` : '—';
+      const valStrong = sp != null ? `${Math.round(sp)}%` : '—';
       const valCov =
         cov && cov.total > 0 && cp != null
           ? `${cov.pct}% (${cov.withL}/${cov.total})`
           : '—';
       const head =
         indexHeadline && String(indexHeadline.total || '').trim()
-          ? `<div style="text-align:center;margin:0 0 0.35rem;min-width:0;padding:0 0.15rem;">
+          ? `<div style="text-align:center;margin:0 0 0.5rem;min-width:0;padding:0 0.15rem;width:100%;">
                <div style="font-size:1.05rem;font-weight:800;color:#f8fafc;line-height:1.2;">${String(indexHeadline.total)}</div>
-               ${
-                 String(indexHeadline.sub || '').trim()
-                   ? `<div style="font-size:0.76rem;color:var(--dark-text-muted);line-height:1.35;margin-top:0.2rem;">${String(indexHeadline.sub)}</div>`
-                   : ''
-               }
              </div>`
           : '';
-      hostEl.innerHTML = `<div style="width:100%;max-width:100%;min-width:0;box-sizing:border-box;">
+      hostEl.innerHTML = `<div style="width:100%;max-width:100%;min-width:0;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;">
         ${head}
-        <div style="width:100%;height:min(360px,48vh);min-height:300px;min-width:0;max-width:100%;position:relative;">
-          <canvas id="traditional-seo-dfs-radar-canvas" aria-label="Backlink mix: dofollow share, referrer strength from DFS rank bands, and URL coverage" style="display:block;width:100%;height:100%;"></canvas>
+        <div style="width:100%;max-width:min(100%,460px);height:min(440px,56vh);min-height:340px;min-width:0;position:relative;margin:0 auto;flex-shrink:0;">
+          <canvas id="traditional-seo-dfs-radar-canvas" aria-label="Backlink mix: dofollow share, strong ref. rank bands (50–100), URL coverage" style="display:block;width:100%;height:100%;"></canvas>
         </div>
       </div>`;
 
@@ -76735,9 +76739,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const labels = ['Dofollow', 'Ref. strength / DFS rank mix', 'Coverage'];
-      const values = [vFollow, vRank, vCov];
-      const valueTexts = [valFollow, valRank, valCov];
+      const labels = ['Dofollow', 'Strong ref. bands / (50–100 dfs)', 'Coverage'];
+      const values = [vFollow, vStrong, vCov];
+      const valueTexts = [valFollow, valStrong, valCov];
       const deltaColors = valueTexts.map(() => 'rgba(226,232,240,0.9)');
 
       try {
@@ -76772,7 +76776,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                     if (i === 1) {
                       return [
                         line,
-                        'Dofollow backlinks only: weighted average across DFS referrer rank buckets (higher = stronger referrers).'
+                        'Share of dofollow backlinks in ref. domain rank bands 80–100 and 50–79 (same breakdown as the band pie).'
                       ];
                     }
                     return line;
