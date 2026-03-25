@@ -1,7 +1,10 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
-import { dfsBacklinkPageTierFromTargetUrl } from '../../lib/dfs-backlink-page-tier.js';
+import {
+  dfsBacklinkPageTierFromTargetUrl,
+  dfsBacklinkPageTierSortIndex
+} from '../../lib/dfs-backlink-page-tier.js';
 
 const sendJson = (res, status, body) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -43,7 +46,8 @@ const SORT_COLS = new Set([
   'domain_from_rank',
   'page_from_rank',
   'first_seen',
-  'last_seen'
+  'last_seen',
+  'page_tier'
 ]);
 
 const PAGE_TIER_SET = new Set(['landing', 'product', 'event', 'blog', 'academy', 'unmapped']);
@@ -80,6 +84,102 @@ function applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search }) {
 
 const ROW_SELECT =
   'url_from,url_to,anchor,dofollow,domain_from_rank,page_from_rank,first_seen,last_seen,domain_host';
+
+function enrichBacklinkRow(row) {
+  const r = row && typeof row === 'object' ? { ...row } : {};
+  r.page_tier = dfsBacklinkPageTierFromTargetUrl(r.url_to);
+  return r;
+}
+
+function compareRowsForPageTierSort(a, b, tierAscending) {
+  const ia = dfsBacklinkPageTierSortIndex(a.page_tier);
+  const ib = dfsBacklinkPageTierSortIndex(b.page_tier);
+  if (ia !== ib) return tierAscending ? ia - ib : ib - ia;
+  const ra = Number(a.domain_from_rank);
+  const rb = Number(b.domain_from_rank);
+  const fa = Number.isFinite(ra) ? ra : -1;
+  const fb = Number.isFinite(rb) ? rb : -1;
+  if (fa !== fb) return fb - fa;
+  return String(a.url_to || '').localeCompare(String(b.url_to || ''));
+}
+
+/**
+ * Load matching rows (optional tier filter), enrich with page_tier, cap at MAX_ROWS_SCAN DB rows read.
+ */
+async function collectRowsForPageTierSort(supabase, { domainHost, follow, rankMin, rankMax, search, tierFilter }) {
+  const all = [];
+  let dbFrom = 0;
+  let rowsScanned = 0;
+  let exhausted = false;
+
+  while (rowsScanned < MAX_ROWS_SCAN) {
+    let query = supabase.from('dfs_domain_backlink_rows').select(ROW_SELECT).eq('domain_host', domainHost);
+    query = applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search });
+    query = query.order('domain_from_rank', { ascending: false, nullsFirst: false });
+    query = query.range(dbFrom, dbFrom + DB_PAGE - 1);
+
+    const { data, error } = await query;
+    if (error) throw new Error(String(error.message || error));
+    const batch = Array.isArray(data) ? data : [];
+    if (batch.length === 0) {
+      exhausted = true;
+      break;
+    }
+
+    for (let i = 0; i < batch.length; i += 1) {
+      rowsScanned += 1;
+      const er = enrichBacklinkRow(batch[i]);
+      if (tierFilter && er.page_tier !== tierFilter) continue;
+      all.push(er);
+      if (rowsScanned >= MAX_ROWS_SCAN) break;
+    }
+
+    dbFrom += DB_PAGE;
+    if (batch.length < DB_PAGE) {
+      exhausted = true;
+      break;
+    }
+    if (rowsScanned >= MAX_ROWS_SCAN) break;
+  }
+
+  const scanCapped = rowsScanned >= MAX_ROWS_SCAN;
+  return { rows: all, scanCapped, exhausted };
+}
+
+async function fetchRowsPageTierSort(supabase, opts) {
+  const {
+    domainHost,
+    follow,
+    rankMin,
+    rankMax,
+    search,
+    tierFilter,
+    ascending,
+    limit,
+    offset
+  } = opts;
+
+  const { rows: collected, scanCapped, exhausted } = await collectRowsForPageTierSort(supabase, {
+    domainHost,
+    follow,
+    rankMin,
+    rankMax,
+    search,
+    tierFilter
+  });
+
+  collected.sort((a, b) => compareRowsForPageTierSort(a, b, ascending));
+  const page = collected.slice(offset, offset + limit);
+  const total = !scanCapped && exhausted ? collected.length : null;
+
+  return {
+    rows: page,
+    total,
+    tierFiltered: Boolean(tierFilter),
+    tier: tierFilter || null,
+    tierScanCapped: scanCapped
+  };
+}
 
 /**
  * Tier is derived from target URL path (same rules as Backlinks tile). Scan DB in order until
@@ -123,7 +223,7 @@ async function fetchRowsWithPageTierFilter(supabase, opts) {
         tierSkipped += 1;
         continue;
       }
-      collected.push(row);
+      collected.push(enrichBacklinkRow(row));
       if (collected.length >= limit) break;
     }
 
@@ -154,7 +254,7 @@ export default async function handler(req, res) {
 
     const limit = toInt(q.limit, 50, 1, 200);
     const offset = toInt(q.offset, 0, 0, 500000);
-    const sort = SORT_COLS.has(String(q.sort || '').trim()) ? String(q.sort).trim() : 'domain_from_rank';
+    const sortCol = SORT_COLS.has(String(q.sort || '').trim()) ? String(q.sort).trim() : 'domain_from_rank';
     const dirRaw = String(q.dir || 'desc').toLowerCase();
     const ascending = dirRaw === 'asc';
 
@@ -164,18 +264,50 @@ export default async function handler(req, res) {
     let search = String(q.q || q.search || '').trim().slice(0, 240);
     search = search.replace(/,/g, ' ').trim();
 
-    const pageTier = normalizePageTierParam(q.tier);
+    const pageTierFilter = normalizePageTierParam(q.tier);
+    const sortByPageTier = sortCol === 'page_tier';
 
-    if (pageTier) {
+    if (sortByPageTier) {
+      const r = await fetchRowsPageTierSort(supabase, {
+        domainHost,
+        follow,
+        rankMin,
+        rankMax,
+        search,
+        tierFilter: pageTierFilter || null,
+        ascending,
+        limit,
+        offset
+      });
+
+      return sendJson(res, 200, {
+        status: 'ok',
+        data: {
+          domain: domainHost,
+          rows: r.rows,
+          total: r.total,
+          limit,
+          offset,
+          sort: 'page_tier',
+          dir: ascending ? 'asc' : 'desc',
+          tierFiltered: r.tierFiltered,
+          pageTier: pageTierFilter || null,
+          tierScanCapped: r.tierScanCapped
+        },
+        meta: { generatedAt: new Date().toISOString() }
+      });
+    }
+
+    if (pageTierFilter) {
       const tierResult = await fetchRowsWithPageTierFilter(supabase, {
         domainHost,
         follow,
         rankMin,
         rankMax,
         search,
-        sort,
+        sort: sortCol,
         ascending,
-        tier: pageTier,
+        tier: pageTierFilter,
         limit,
         offset
       });
@@ -188,10 +320,10 @@ export default async function handler(req, res) {
           total: null,
           limit,
           offset,
-          sort,
+          sort: sortCol,
           dir: ascending ? 'asc' : 'desc',
           tierFiltered: true,
-          pageTier,
+          pageTier: pageTierFilter,
           tierScanCapped: tierResult.tierScanCapped
         },
         meta: { generatedAt: new Date().toISOString() }
@@ -205,7 +337,7 @@ export default async function handler(req, res) {
 
     query = applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search });
 
-    query = query.order(sort, { ascending, nullsFirst: false });
+    query = query.order(sortCol, { ascending, nullsFirst: false });
     query = query.range(offset, offset + limit - 1);
 
     const { data, error, count } = await query;
@@ -213,15 +345,17 @@ export default async function handler(req, res) {
       return sendJson(res, 500, { status: 'error', message: String(error.message || error) });
     }
 
+    const rows = Array.isArray(data) ? data.map(enrichBacklinkRow) : [];
+
     return sendJson(res, 200, {
       status: 'ok',
       data: {
         domain: domainHost,
-        rows: Array.isArray(data) ? data : [],
+        rows,
         total: typeof count === 'number' ? count : null,
         limit,
         offset,
-        sort,
+        sort: sortCol,
         dir: ascending ? 'asc' : 'desc',
         tierFiltered: false,
         pageTier: null,

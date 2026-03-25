@@ -7128,12 +7128,13 @@
                   <th style="width:7rem;"><button type="button" class="traditional-seo-sort-btn" data-sort="dofollow">Follow <span class="sort-ind">↕</span></button></th>
                   <th style="min-width:14rem;"><button type="button" class="traditional-seo-sort-btn" data-sort="url_from">Source page <span class="sort-ind">↕</span></button></th>
                   <th style="min-width:14rem;"><button type="button" class="traditional-seo-sort-btn" data-sort="url_to">Target page <span class="sort-ind">↕</span></button></th>
+                  <th style="width:10.75rem;"><button type="button" class="traditional-seo-sort-btn" data-sort="page_tier">Page tier <span class="sort-ind">↕</span></button></th>
                   <th style="min-width:9rem;"><button type="button" class="traditional-seo-sort-btn" data-sort="anchor">Anchor <span class="sort-ind">↕</span></button></th>
                   <th style="min-width:11rem;">Domains</th>
                 </tr>
               </thead>
               <tbody id="dfs-backlinks-tbody">
-                <tr><td colspan="6" style="color: var(--dark-text-muted);">Open this tab after setting a property URL to load backlinks.</td></tr>
+                <tr><td colspan="7" style="color: var(--dark-text-muted);">Open this tab after setting a property URL to load backlinks.</td></tr>
               </tbody>
             </table>
           </div>
@@ -78291,6 +78292,19 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return `<a class="traditional-seo-url-link" href="${href}" target="_blank" rel="noopener noreferrer">${href}</a>`;
     }
 
+    function dfsBacklinksPageTierTableLabel(key) {
+      const k = String(key || 'unmapped').toLowerCase();
+      const m = {
+        landing: 'Tier A · Landing',
+        product: 'Tier B · Product',
+        event: 'Tier C · Event',
+        blog: 'Tier D · Blog',
+        academy: 'Tier E · Academy',
+        unmapped: 'Tier F · Unmapped'
+      };
+      return m[k] || m.unmapped;
+    }
+
     function dfsBacklinksReadFilters() {
       const q = document.getElementById('dfs-backlinks-filter-q');
       const follow = document.getElementById('dfs-backlinks-filter-follow');
@@ -78897,6 +78911,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const pageLimit = 200;
       const maxRows = 120000;
       const f = dfsBacklinksReadFilters();
+      const uiSort = DFS_BACKLINKS_UI.sort;
+      const uiDir = DFS_BACKLINKS_UI.dir;
+      const exportSort = uiSort === 'page_tier' ? 'domain_from_rank' : uiSort;
+      const exportDir = uiSort === 'page_tier' ? 'desc' : uiDir;
       const header = 'ref_domain_rank,follow,source_url,target_url,anchor,source_host,target_host';
       const lines = [header];
       let offset = 0;
@@ -78911,8 +78929,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             domain,
             limit: String(pageLimit),
             offset: String(offset),
-            sort: DFS_BACKLINKS_UI.sort,
-            dir: DFS_BACKLINKS_UI.dir,
+            sort: exportSort,
+            dir: exportDir,
             follow: f.follow
           });
           if (f.q) params.set('q', f.q);
@@ -78951,7 +78969,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         a.remove();
         URL.revokeObjectURL(href);
         if (meta) {
-          meta.textContent = `Exported ${(lines.length - 1).toLocaleString()} row(s) with current filters & sort (cap ${maxRows.toLocaleString()}).`;
+          const csvNote =
+            uiSort === 'page_tier'
+              ? ' CSV used ref. domain rank (desc) because page-tier sort is table-only.'
+              : '';
+          meta.textContent = `Exported ${(lines.length - 1).toLocaleString()} row(s) with current filters & sort (cap ${maxRows.toLocaleString()}).${csvNote}`;
         }
       } catch (e) {
         if (meta) meta.textContent = `Export failed: ${String(e?.message || e)}`;
@@ -78987,7 +79009,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (!tbody) return;
       if (!domain) {
         tbody.innerHTML =
-          '<tr><td colspan="6" style="color:var(--dark-text-muted);">Set a GSC property URL (Configuration) so we can match your domain.</td></tr>';
+          '<tr><td colspan="7" style="color:var(--dark-text-muted);">Set a GSC property URL (Configuration) so we can match your domain.</td></tr>';
         if (meta) meta.textContent = 'No property hostname.';
         if (pager) pager.textContent = '';
         if (prev) {
@@ -79009,9 +79031,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const tierFiltered = j.data?.tierFiltered === true;
         const tierCap = j.data?.tierScanCapped === true;
         const pageTier = j.data?.pageTier ? String(j.data.pageTier) : '';
+        const sortPageTier = j.data?.sort === 'page_tier';
         if (!rows.length) {
           tbody.innerHTML =
-            '<tr><td colspan="6" style="color:var(--dark-text-muted);">No rows for this domain/filters. Run a DFS full index ingest (Traditional SEO) if the index is empty.</td></tr>';
+            '<tr><td colspan="7" style="color:var(--dark-text-muted);">No rows for this domain/filters. Run a DFS full index ingest (Traditional SEO) if the index is empty.</td></tr>';
         } else {
           tbody.innerHTML = rows
             .map((r) => {
@@ -79023,6 +79046,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                 r.domain_from_rank != null && Number.isFinite(Number(r.domain_from_rank))
                   ? String(Math.round(Number(r.domain_from_rank)))
                   : '—';
+              const tierLab = dfsBacklinksEsc(dfsBacklinksPageTierTableLabel(r.page_tier));
               const anchorCell =
                 r.anchor && String(r.anchor).trim()
                   ? dfsBacklinksEsc(String(r.anchor).trim())
@@ -79032,6 +79056,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                 <td>${dfsBacklinksEsc(foll)}</td>
                 <td>${dfsBacklinksSourceLinkCell(r.url_from)}</td>
                 <td>${dfsBacklinksLinkCell(r.url_to)}</td>
+                <td style="font-size:0.76rem;color:#e2e8f0;white-space:nowrap;" title="From target URL path (same rules as tier filter tile)">${tierLab}</td>
                 <td>${anchorCell}</td>
                 <td style="font-size:0.82rem;color:var(--dark-text-muted);">${domPair}</td>
               </tr>`;
@@ -79042,19 +79067,23 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (meta) {
           const fq = f.q ? ` · search “${dfsBacklinksEsc(f.q)}”` : '';
           const ft = tierFiltered && pageTier ? ` · page tier “${dfsBacklinksEsc(pageTier)}” (target URL path)` : '';
-          const cap = tierFiltered && tierCap ? ' · scan hit 120k row cap — narrow Follow/Rank/Search if results look incomplete' : '';
+          const st = sortPageTier ? ' · sorted by page tier (A→F), then ref. rank' : '';
+          const cap =
+            (tierFiltered || sortPageTier) && tierCap
+              ? ' · scan hit 120k row cap — narrow Follow/Rank/Search if results look incomplete'
+              : '';
           if (total != null) {
             meta.textContent = rows.length
-              ? `Showing ${DFS_BACKLINKS_UI.offset + 1}–${DFS_BACKLINKS_UI.offset + rows.length} of ${total.toLocaleString()} · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${cap}`
-              : `No rows on this page (total in index ${total.toLocaleString()}) · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${cap}`;
+              ? `Showing ${DFS_BACKLINKS_UI.offset + 1}–${DFS_BACKLINKS_UI.offset + rows.length} of ${total.toLocaleString()} · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${st}${cap}`
+              : `No rows on this page (total in index ${total.toLocaleString()}) · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${st}${cap}`;
           } else if (tierFiltered) {
             meta.textContent = rows.length
-              ? `Showing tier-filtered rows ${DFS_BACKLINKS_UI.offset + 1}–${DFS_BACKLINKS_UI.offset + rows.length} (index total not computed) · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${cap}`
-              : `No tier matches in the scanned range · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${cap}`;
+              ? `Showing tier-filtered rows ${DFS_BACKLINKS_UI.offset + 1}–${DFS_BACKLINKS_UI.offset + rows.length} (index total not computed) · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${st}${cap}`
+              : `No tier matches in the scanned range · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${st}${cap}`;
           } else {
             meta.textContent = rows.length
-              ? `Loaded ${rows.length} row(s) · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}`
-              : `No rows returned · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}`;
+              ? `Loaded ${rows.length} row(s) · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${st}${cap}`
+              : `No rows returned · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${st}${cap}`;
           }
         }
         if (pager) {
@@ -79062,8 +79091,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           pager.textContent =
             pages != null
               ? `Page ${Math.floor(DFS_BACKLINKS_UI.offset / limit) + 1} / ${pages}`
-              : tierFiltered
-                ? `Tier page · offset ${DFS_BACKLINKS_UI.offset}`
+              : tierFiltered || sortPageTier
+                ? `Tier sort · offset ${DFS_BACKLINKS_UI.offset}`
                 : `Offset ${DFS_BACKLINKS_UI.offset}`;
         }
         if (prev) {
@@ -79073,14 +79102,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (next) {
           let canNext;
           if (total != null) canNext = DFS_BACKLINKS_UI.offset + limit < total;
-          else if (tierFiltered) canNext = rows.length >= limit && !tierCap;
+          else if (tierFiltered || sortPageTier) canNext = rows.length >= limit && !tierCap;
           else canNext = rows.length >= limit;
           next.disabled = !canNext;
           next.style.opacity = next.disabled ? '0.45' : '1';
         }
         dfsBacklinksSyncSortButtons();
       } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="6" style="color:#fca5a5;">${dfsBacklinksEsc(String(e?.message || e))}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="color:#fca5a5;">${dfsBacklinksEsc(String(e?.message || e))}</td></tr>`;
         if (meta) meta.textContent = 'Error loading rows.';
       }
     }
