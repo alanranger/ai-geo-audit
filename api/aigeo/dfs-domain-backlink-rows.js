@@ -89,7 +89,7 @@ const ROW_SELECT =
 
 function enrichBacklinkRow(row, tierLookup) {
   const r = row && typeof row === 'object' ? { ...row } : {};
-  r.page_tier = getTierForUrlFromLookup(r.url_to, tierLookup);
+  r.page_tier = getTierForUrlFromLookup(r.url_to, tierLookup, r.domain_host, true);
   return r;
 }
 
@@ -226,7 +226,7 @@ async function fetchRowsWithPageTierFilter(supabase, opts) {
     for (let i = 0; i < batch.length; i += 1) {
       rowsScanned += 1;
       const row = batch[i];
-      if (getTierForUrlFromLookup(row?.url_to, tierLookup) !== tier) continue;
+      if (getTierForUrlFromLookup(row?.url_to, tierLookup, row?.domain_host, true) !== tier) continue;
       if (tierSkipped < offset) {
         tierSkipped += 1;
         continue;

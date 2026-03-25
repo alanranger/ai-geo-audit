@@ -381,12 +381,50 @@ export function buildTierLookupFromEntries(entries = []) {
   return lookup;
 }
 
-export function getTierForUrlFromLookup(url, lookup = null) {
-  const key = toTierUrlKey(url);
-  if (key && lookup instanceof Map && lookup.has(key)) {
-    return normalizeTierInput(lookup.get(key), 'unmapped');
+/**
+ * Make a parseable absolute URL for tier rules when DFS rows may omit scheme or use path-only targets.
+ * @param {string} raw url_to (or any target string)
+ * @param {string|null|undefined} domainHost e.g. alanranger.com from dfs_domain_backlink_rows.domain_host
+ */
+export function resolveBacklinkTargetUrlForTier(raw, domainHost) {
+  const s = String(raw || '').trim();
+  if (!s) return `${DEFAULT_SITE_ORIGIN}/`;
+  const dom = String(domainHost || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//i, '')
+    .split('/')[0]
+    .replace(/^www\./, '')
+    .replace(/:\d+$/, '');
+  const baseRaw = dom ? `https://www.${dom.replace(/^www\./, '')}` : DEFAULT_SITE_ORIGIN;
+  const base = baseRaw.endsWith('/') ? baseRaw : `${baseRaw}/`;
+  try {
+    return new URL(s, base).href;
+  } catch {
+    return `${DEFAULT_SITE_ORIGIN}/`;
   }
-  return classifyTierFromUrlHeuristic(url);
+}
+
+/**
+ * @param {string} url
+ * @param {Map|null} lookup from buildTierLookupFromEntries
+ * @param {string|null} [domainHost] when set, resolve relative/malformed targets before lookup/heuristic (backlinks)
+ * @param {boolean} [suppressUnmapped] backlinks only: never return unmapped (final fallback blog)
+ */
+export function getTierForUrlFromLookup(url, lookup = null, domainHost = null, suppressUnmapped = false) {
+  const hasHost = domainHost != null && String(domainHost).trim() !== '';
+  const resolved = hasHost ? resolveBacklinkTargetUrlForTier(url, domainHost) : String(url || '').trim();
+  const key = toTierUrlKey(resolved);
+  let fromLookup = null;
+  if (key && lookup instanceof Map && lookup.has(key)) {
+    fromLookup = normalizeTierInput(lookup.get(key), 'unmapped');
+  }
+  const fromHeuristic = classifyTierFromUrlHeuristic(resolved);
+  let tier;
+  if (fromLookup && fromLookup !== 'unmapped') tier = fromLookup;
+  else tier = fromHeuristic;
+  if (suppressUnmapped && tier === 'unmapped') tier = 'blog';
+  return tier;
 }
 
 export function countTierEntries(entries = []) {
