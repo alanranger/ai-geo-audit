@@ -1752,7 +1752,7 @@
       box-sizing: border-box;
       display: flex;
       flex-direction: column;
-      align-items: center;
+      align-items: stretch;
       justify-content: center;
       margin: 0.35rem 0 0.65rem;
     }
@@ -76657,19 +76657,22 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const labelPadding = typeof opts.labelPadding === 'number' ? opts.labelPadding : 0;
         const edgePadding = typeof opts.edgePadding === 'number' ? opts.edgePadding : 4;
         const ctx = chart.ctx;
-        const helpers = typeof Chart !== 'undefined' && Chart.helpers ? Chart.helpers : null;
-        const chartArea = chart.chartArea;
-        if (helpers && typeof helpers.unclipArea === 'function') helpers.unclipArea(ctx);
         ctx.save();
         for (let i = 0; i < labels.length; i += 1) {
           const label = labels[i] || '';
           const deltaRaw = deltas[i];
           const deltaText = (deltaRaw == null || deltaRaw === '') ? '—' : String(deltaRaw);
-          /* Do not call scale.getPointLabelPosition: with pointLabels hidden it can throw
-             (Chart.js 4: _pointLabelItems[i] undefined). Vertices follow default radar order from top. */
-          const angle = ((Math.PI * 2) / count) * i - (Math.PI / 2);
-          const baseX = (scale.xCenter || 0) + Math.cos(angle) * (scale.drawingArea || 0);
-          const baseY = (scale.yCenter || 0) + Math.sin(angle) * (scale.drawingArea || 0);
+          let pos = null;
+          try {
+            if (typeof scale.getPointLabelPosition === 'function') pos = scale.getPointLabelPosition(i);
+          } catch (e) {
+            pos = null;
+          }
+          const angle = (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y))
+            ? Math.atan2(pos.y - (scale.yCenter || 0), pos.x - (scale.xCenter || 0))
+            : ((Math.PI * 2) / count) * i - (Math.PI / 2);
+          const baseX = (pos && Number.isFinite(pos.x)) ? pos.x : (scale.xCenter || 0) + Math.cos(angle) * (scale.drawingArea || 0);
+          const baseY = (pos && Number.isFinite(pos.y)) ? pos.y : (scale.yCenter || 0) + Math.sin(angle) * (scale.drawingArea || 0);
           let x = baseX + Math.cos(angle) * labelPadding;
           let y = baseY + Math.sin(angle) * labelPadding;
 
@@ -76685,10 +76688,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.font = '600 10px system-ui, -apple-system, Segoe UI, sans-serif';
+          ctx.font = '600 11px system-ui, -apple-system, Segoe UI, sans-serif';
           const labelWidths = labelLines.map((line) => ctx.measureText(line).width);
           let maxWidth = labelWidths.length ? Math.max(...labelWidths) : 0;
-          ctx.font = '700 9px system-ui, -apple-system, Segoe UI, sans-serif';
+          ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
           const deltaWidth = ctx.measureText(deltaText).width;
           if (deltaWidth > maxWidth) maxWidth = deltaWidth;
           const totalHeight = (labelLines.length * lineGap) + deltaGap + lineGap;
@@ -76702,31 +76705,20 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.font = '600 10px system-ui, -apple-system, Segoe UI, sans-serif';
+          ctx.font = '600 11px system-ui, -apple-system, Segoe UI, sans-serif';
           ctx.fillStyle = 'rgba(226,232,240,0.9)';
           const startY = y - ((labelLines.length - 1) * lineGap) / 2;
           for (let j = 0; j < labelLines.length; j += 1) {
             ctx.fillText(labelLines[j], x, startY + (j * lineGap));
           }
 
-          ctx.font = '700 9px system-ui, -apple-system, Segoe UI, sans-serif';
+          ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
           ctx.fillStyle = (deltaRaw === '—' || deltaRaw == null || deltaRaw === '')
             ? 'rgba(226,232,240,0.6)'
             : (deltaColors[i] || 'rgba(226,232,240,0.9)');
           ctx.fillText(deltaText, x, startY + (labelLines.length * lineGap) + deltaGap);
         }
         ctx.restore();
-        if (
-          helpers &&
-          typeof helpers.clipArea === 'function' &&
-          chartArea &&
-          Number.isFinite(chartArea.left) &&
-          Number.isFinite(chartArea.right) &&
-          Number.isFinite(chartArea.top) &&
-          Number.isFinite(chartArea.bottom)
-        ) {
-          helpers.clipArea(ctx, chartArea);
-        }
       }
     };
 
@@ -76753,10 +76745,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                <div style="font-size:1.05rem;font-weight:800;color:#f8fafc;line-height:1.2;">${String(indexHeadline.total)}</div>
              </div>`
           : '';
-      hostEl.innerHTML = `<div style="width:100%;height:100%;min-height:260px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.35rem;">
+      hostEl.innerHTML = `<div style="width:100%;height:100%;min-height:0;box-sizing:border-box;display:flex;flex-direction:column;align-items:stretch;gap:0.35rem;">
         ${head}
-        <div style="width:min(100%,520px);max-width:100%;aspect-ratio:1;max-height:min(72vh,560px);min-height:260px;min-width:0;position:relative;margin:0 auto;flex-shrink:0;">
-          <canvas id="traditional-seo-dfs-radar-canvas" aria-label="Backlink mix: dofollow share, strong ref. rank bands (50–100), URL coverage" style="display:block;width:100%;height:100%;"></canvas>
+        <div style="width:100%;max-width:100%;margin:0;position:relative;flex-shrink:0;">
+          <canvas id="traditional-seo-dfs-radar-canvas" width="460" height="340" aria-label="Backlink mix: dofollow share, strong ref. rank bands (50–100), URL coverage" style="display:block;width:100%;height:340px;"></canvas>
         </div>
       </div>`;
 
@@ -76796,7 +76788,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           options: {
             responsive: true,
             maintainAspectRatio: false,
-            layout: { padding: 4 },
+            layout: { padding: 18 },
             plugins: {
               legend: { display: false },
               tooltip: {
@@ -76819,10 +76811,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                 labels,
                 deltaTexts: valueTexts,
                 deltaColors,
-                lineGap: 10,
-                deltaGap: 6,
-                labelPadding: 22,
-                edgePadding: 2
+                lineGap: 12,
+                deltaGap: 8,
+                labelPadding: 24,
+                edgePadding: 4
               }
             },
             scales: {
@@ -76830,13 +76822,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                 min: 0,
                 max: 100,
                 ticks: { display: false },
-                grid: { color: 'rgba(148, 163, 184, 0.20)' },
-                angleLines: { color: 'rgba(148, 163, 184, 0.20)' },
+                grid: { color: 'rgba(148, 163, 184, 0.25)' },
+                angleLines: { color: 'rgba(148, 163, 184, 0.25)' },
                 pointLabels: {
                   display: true,
                   color: 'rgba(0,0,0,0)',
-                  padding: 0,
-                  font: { size: 10, weight: '600' }
+                  font: { size: 11, weight: '600' },
+                  padding: 22
                 }
               }
             }
