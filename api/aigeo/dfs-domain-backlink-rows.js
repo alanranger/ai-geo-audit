@@ -2,9 +2,11 @@ export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
 import {
-  dfsBacklinkPageTierFromTargetUrl,
-  dfsBacklinkPageTierSortIndex
-} from '../../lib/dfs-backlink-page-tier.js';
+  fetchTierSegmentationEntries,
+  buildTierLookupFromEntries,
+  getTierForUrlFromLookup
+} from './tier-segmentation.js';
+import { dfsBacklinkPageTierSortIndex } from '../../lib/dfs-backlink-page-tier.js';
 
 const sendJson = (res, status, body) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -85,9 +87,9 @@ function applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search }) {
 const ROW_SELECT =
   'url_from,url_to,anchor,dofollow,domain_from_rank,page_from_rank,first_seen,last_seen,domain_host';
 
-function enrichBacklinkRow(row) {
+function enrichBacklinkRow(row, tierLookup) {
   const r = row && typeof row === 'object' ? { ...row } : {};
-  r.page_tier = dfsBacklinkPageTierFromTargetUrl(r.url_to);
+  r.page_tier = getTierForUrlFromLookup(r.url_to, tierLookup);
   return r;
 }
 
@@ -106,7 +108,10 @@ function compareRowsForPageTierSort(a, b, tierAscending) {
 /**
  * Load matching rows (optional tier filter), enrich with page_tier, cap at MAX_ROWS_SCAN DB rows read.
  */
-async function collectRowsForPageTierSort(supabase, { domainHost, follow, rankMin, rankMax, search, tierFilter }) {
+async function collectRowsForPageTierSort(
+  supabase,
+  { domainHost, follow, rankMin, rankMax, search, tierFilter, tierLookup }
+) {
   const all = [];
   let dbFrom = 0;
   let rowsScanned = 0;
@@ -128,7 +133,7 @@ async function collectRowsForPageTierSort(supabase, { domainHost, follow, rankMi
 
     for (let i = 0; i < batch.length; i += 1) {
       rowsScanned += 1;
-      const er = enrichBacklinkRow(batch[i]);
+      const er = enrichBacklinkRow(batch[i], tierLookup);
       if (tierFilter && er.page_tier !== tierFilter) continue;
       all.push(er);
       if (rowsScanned >= MAX_ROWS_SCAN) break;
@@ -154,6 +159,7 @@ async function fetchRowsPageTierSort(supabase, opts) {
     rankMax,
     search,
     tierFilter,
+    tierLookup,
     ascending,
     limit,
     offset
@@ -165,7 +171,8 @@ async function fetchRowsPageTierSort(supabase, opts) {
     rankMin,
     rankMax,
     search,
-    tierFilter
+    tierFilter,
+    tierLookup
   });
 
   collected.sort((a, b) => compareRowsForPageTierSort(a, b, ascending));
@@ -182,7 +189,7 @@ async function fetchRowsPageTierSort(supabase, opts) {
 }
 
 /**
- * Tier is derived from target URL path (same rules as Backlinks tile). Scan DB in order until
+ * Tier uses segmentation CSV + heuristic (same as Backlinks tile). Scan DB in order until
  * we skip `offset` tier matches and collect `limit` rows, or hit MAX_ROWS_SCAN.
  */
 async function fetchRowsWithPageTierFilter(supabase, opts) {
@@ -195,6 +202,7 @@ async function fetchRowsWithPageTierFilter(supabase, opts) {
     sort,
     ascending,
     tier,
+    tierLookup,
     limit,
     offset
   } = opts;
@@ -218,12 +226,12 @@ async function fetchRowsWithPageTierFilter(supabase, opts) {
     for (let i = 0; i < batch.length; i += 1) {
       rowsScanned += 1;
       const row = batch[i];
-      if (dfsBacklinkPageTierFromTargetUrl(row?.url_to) !== tier) continue;
+      if (getTierForUrlFromLookup(row?.url_to, tierLookup) !== tier) continue;
       if (tierSkipped < offset) {
         tierSkipped += 1;
         continue;
       }
-      collected.push(enrichBacklinkRow(row));
+      collected.push(enrichBacklinkRow(row, tierLookup));
       if (collected.length >= limit) break;
     }
 
@@ -246,6 +254,9 @@ export default async function handler(req, res) {
 
   try {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
+    const segEntries = await fetchTierSegmentationEntries();
+    const tierLookup = buildTierLookupFromEntries(segEntries);
+
     const q = req.query || {};
     const domainHost = normalizeDomainHost(q.domain || q.host || '');
     if (!domainHost) {
@@ -275,6 +286,7 @@ export default async function handler(req, res) {
         rankMax,
         search,
         tierFilter: pageTierFilter || null,
+        tierLookup,
         ascending,
         limit,
         offset
@@ -308,6 +320,7 @@ export default async function handler(req, res) {
         sort: sortCol,
         ascending,
         tier: pageTierFilter,
+        tierLookup,
         limit,
         offset
       });
@@ -345,7 +358,7 @@ export default async function handler(req, res) {
       return sendJson(res, 500, { status: 'error', message: String(error.message || error) });
     }
 
-    const rows = Array.isArray(data) ? data.map(enrichBacklinkRow) : [];
+    const rows = Array.isArray(data) ? data.map((row) => enrichBacklinkRow(row, tierLookup)) : [];
 
     return sendJson(res, 200, {
       status: 'ok',

@@ -211,7 +211,8 @@ export function classifyTierFromUrlHeuristic(url) {
     if (pathname === '/' || pathname === '/home') return 'landing';
     if (pathname.includes('/s/')) return 'academy';
     if (
-      pathname.includes('/photographic-workshops-near-me')
+      pathname.includes('/beginners-photography-lessons')
+      || pathname.includes('/photographic-workshops-near-me')
       || pathname.includes('/photography-workshops-near-me')
       || pathname.includes('/workshops')
       || pathname.includes('/event')
@@ -222,7 +223,9 @@ export function classifyTierFromUrlHeuristic(url) {
     if (pathname.includes('/academy') || pathname.includes('/free-online-photography-course')) return 'academy';
     if (pathname.includes('/blog') || pathname.includes('/article') || pathname.includes('/guides')) return 'blog';
     if (
-      pathname.includes('/photography-services-near-me/')
+      pathname.includes('/photography-services-near-me')
+      || pathname === '/photography-services'
+      || pathname.startsWith('/photography-services/')
       || pathname.includes('/photo-workshops-uk')
       || pathname.includes('/product')
       || pathname.includes('/courses')
