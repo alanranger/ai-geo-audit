@@ -7078,6 +7078,11 @@
               <label for="dfs-backlinks-filter-q" style="display:block;font-size:0.78rem;color:var(--dark-text-muted);margin-bottom:0.25rem;">Search (source, target, anchor)</label>
               <input id="dfs-backlinks-filter-q" type="text" placeholder="e.g. photography, /blog/, anchor text…" autocomplete="off">
             </div>
+            <div id="dfs-backlinks-count-wrap" style="min-width:6.75rem;max-width:11rem;display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-start;padding-bottom:0.12rem;">
+              <span style="font-size:0.78rem;color:var(--dark-text-muted);margin-bottom:0.2rem;">Matching rows</span>
+              <div id="dfs-backlinks-filter-count-num" style="font-size:1.2rem;font-weight:800;color:#fbbf24;font-variant-numeric:tabular-nums;line-height:1.15;">—</div>
+              <div id="dfs-backlinks-filter-count-sub" style="font-size:0.68rem;color:var(--dark-text-muted);margin-top:0.12rem;line-height:1.3;max-width:11rem;"></div>
+            </div>
             <div style="width:9rem;min-width:8rem;">
               <label for="dfs-backlinks-filter-follow" style="display:block;font-size:0.78rem;color:var(--dark-text-muted);margin-bottom:0.25rem;">Follow</label>
               <select id="dfs-backlinks-filter-follow">
@@ -78335,6 +78340,57 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       };
     }
 
+    function dfsBacklinksUpdateFilterCountPanel(payload) {
+      const numEl = document.getElementById('dfs-backlinks-filter-count-num');
+      const subEl = document.getElementById('dfs-backlinks-filter-count-sub');
+      if (!numEl || !subEl) return;
+      const phase = String(payload?.phase || '');
+      if (phase === 'loading') {
+        numEl.textContent = '…';
+        subEl.textContent = '';
+        return;
+      }
+      if (phase === 'no-domain') {
+        numEl.textContent = '—';
+        subEl.textContent = '';
+        return;
+      }
+      if (phase === 'error') {
+        numEl.textContent = '—';
+        subEl.textContent = 'Could not load';
+        return;
+      }
+      const rowsLength = Math.max(0, Math.round(Number(payload?.rowsLength) || 0));
+      const offset = Math.max(0, Math.round(Number(payload?.offset) || 0));
+      const totalRaw = payload?.total;
+      const total = typeof totalRaw === 'number' && Number.isFinite(totalRaw) ? totalRaw : null;
+      const tierFiltered = payload?.tierFiltered === true;
+      const sortPageTier = payload?.sortPageTier === true;
+      const tierCap = payload?.tierCap === true;
+      if (total != null) {
+        numEl.textContent = total.toLocaleString();
+        if (rowsLength < 1) {
+          subEl.textContent =
+            total < 1 ? 'No rows match filters' : `Page empty · ${total.toLocaleString()} match overall`;
+        } else {
+          const from = offset + 1;
+          const to = offset + rowsLength;
+          subEl.textContent =
+            from === 1 && to >= total ? 'All matching rows on this page' : `Viewing ${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()}`;
+        }
+        return;
+      }
+      if (tierFiltered || sortPageTier) {
+        numEl.textContent = rowsLength.toLocaleString();
+        let sub = 'On this page · index total not computed for this filter';
+        if (tierCap) sub += ' (scan may stop at 120k)';
+        subEl.textContent = sub;
+        return;
+      }
+      numEl.textContent = rowsLength.toLocaleString();
+      subEl.textContent = rowsLength === 1 ? 'Row in this response' : 'Rows in this response';
+    }
+
     async function dfsBacklinksFetchStatus(domain) {
       const u = traditionalSeoApiPath(
         `/api/aigeo/dataforseo-backlink-domain?action=status&domain=${encodeURIComponent(domain)}`
@@ -79026,6 +79082,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         tbody.innerHTML =
           '<tr><td colspan="7" style="color:var(--dark-text-muted);">Set a GSC property URL (Configuration) so we can match your domain.</td></tr>';
         if (meta) meta.textContent = 'No property hostname.';
+        dfsBacklinksUpdateFilterCountPanel({ phase: 'no-domain' });
         if (pager) pager.textContent = '';
         if (prev) {
           prev.disabled = true;
@@ -79038,6 +79095,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         return;
       }
       if (meta) meta.textContent = 'Loading…';
+      dfsBacklinksUpdateFilterCountPanel({ phase: 'loading' });
       try {
         const { res, j, f, limit } = await dfsBacklinksFetchRows(domain);
         if (!res.ok || j.status !== 'ok') throw new Error(j.message || `HTTP ${res.status}`);
@@ -79128,9 +79186,19 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           next.style.opacity = next.disabled ? '0.45' : '1';
         }
         dfsBacklinksSyncSortButtons();
+        dfsBacklinksUpdateFilterCountPanel({
+          phase: 'ok',
+          rowsLength: rows.length,
+          offset: DFS_BACKLINKS_UI.offset,
+          total,
+          tierFiltered,
+          sortPageTier,
+          tierCap
+        });
       } catch (e) {
         tbody.innerHTML = `<tr><td colspan="7" style="color:#fca5a5;">${dfsBacklinksEsc(String(e?.message || e))}</td></tr>`;
         if (meta) meta.textContent = 'Error loading rows.';
+        dfsBacklinksUpdateFilterCountPanel({ phase: 'error' });
       }
     }
 
