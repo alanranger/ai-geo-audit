@@ -1745,19 +1745,15 @@
 
     section[data-panel="traditional-seo"] #traditional-seo-dfs-radar-host {
       flex: 1 1 auto;
-      min-height: 420px;
+      min-height: 0;
       width: 100%;
       max-width: 100%;
       min-width: 0;
       box-sizing: border-box;
-      display: flex;
-      flex-direction: column;
-      align-items: stretch;
-      justify-content: center;
+      display: block;
       margin: 0.35rem 0 0.65rem;
     }
 
-    /* DFS radar: Chart.js can read width 0 / too narrow during flex layout; pin shell + canvas to card width. */
     section[data-panel="traditional-seo"] #traditional-seo-dfs-radar-chart-shell {
       width: 100%;
       min-width: 0;
@@ -1768,11 +1764,12 @@
       display: block;
     }
 
+    /* Same idea as dashboard dial canvases: 100% tile width, fixed height. */
     section[data-panel="traditional-seo"] #traditional-seo-dfs-radar-canvas {
       display: block;
       width: 100%;
       max-width: 100%;
-      min-height: 460px;
+      height: 380px;
       margin: 0;
       box-sizing: border-box;
     }
@@ -76673,23 +76670,6 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
     }
 
-    function traditionalSeoApplyDfsRadarBox(shellEl, canvasEl, hostEl) {
-      if (!canvasEl) return;
-      const card = typeof document !== 'undefined' ? document.getElementById('traditional-seo-dfs-tile-card') : null;
-      let w = 0;
-      if (hostEl) w = Math.floor(hostEl.getBoundingClientRect().width || hostEl.clientWidth || 0);
-      if (!w && shellEl) w = Math.floor(shellEl.getBoundingClientRect().width || shellEl.clientWidth || 0);
-      if (!w && card) w = Math.floor(card.clientWidth || card.getBoundingClientRect().width || 0);
-      w = Math.max(280, w || 320);
-      const h = Math.min(640, Math.max(460, Math.round(w * 0.9)));
-      canvasEl.style.width = '100%';
-      canvasEl.style.maxWidth = '100%';
-      canvasEl.style.height = `${h}px`;
-      canvasEl.style.display = 'block';
-      canvasEl.style.margin = '0';
-      canvasEl.style.boxSizing = 'border-box';
-    }
-
     /** Same label + value drawing pattern as AI Health (GAIO) radar (`dashboardRadarLabelPlugin`). */
     const traditionalSeoDfsRadarLabelPlugin = {
       id: 'traditionalSeoDfsRadarLabels',
@@ -76769,34 +76749,6 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             : (deltaColors[i] || 'rgba(226,232,240,0.9)');
           ctx.fillText(deltaText, x, startY + (labelLines.length * lineGap) + deltaGap);
         }
-        const dsMeta = chart.getDatasetMeta(0);
-        const ptVals = opts.deltaTexts || deltas;
-        if (dsMeta && Array.isArray(dsMeta.data) && ptVals.length) {
-          for (let i = 0; i < dsMeta.data.length; i += 1) {
-            const el = dsMeta.data[i];
-            if (!el || el.skip) continue;
-            const xy = typeof el.getProps === 'function' ? el.getProps(['x', 'y'], true) : null;
-            const px = xy && Number.isFinite(xy.x) ? xy.x : el.x;
-            const py = xy && Number.isFinite(xy.y) ? xy.y : el.y;
-            if (!Number.isFinite(px) || !Number.isFinite(py)) continue;
-            const t = String(ptVals[i] ?? '');
-            if (!t || t === '—') continue;
-            const cx = scale.xCenter || 0;
-            const cy = scale.yCenter || 0;
-            const ang = Math.atan2(py - cy, px - cx);
-            const ox = Math.cos(ang) * 12;
-            const oy = Math.sin(ang) * 12;
-            ctx.font = '700 9px system-ui, Segoe UI, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.strokeStyle = 'rgba(15,23,42,0.92)';
-            ctx.lineWidth = 2.5;
-            ctx.lineJoin = 'round';
-            ctx.strokeText(t, px + ox, py + oy);
-            ctx.fillStyle = '#f8fafc';
-            ctx.fillText(t, px + ox, py + oy);
-          }
-        }
         ctx.restore();
       }
     };
@@ -76818,11 +76770,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         cov && cov.total > 0 && cp != null
           ? `${cov.pct}% (${cov.withL}/${cov.total})`
           : '—';
-      hostEl.innerHTML = `<div style="width:100%;height:100%;min-height:0;box-sizing:border-box;display:flex;flex-direction:column;align-items:stretch;">
-        <div id="traditional-seo-dfs-radar-chart-shell" style="width:100%;max-width:100%;min-width:0;margin:0;padding:0;position:relative;flex:1 1 auto;box-sizing:border-box;display:block;">
-          <canvas id="traditional-seo-dfs-radar-canvas" width="800" height="640" aria-label="Backlink mix: dofollow share, strong ref. rank bands (50–100), URL coverage"></canvas>
-        </div>
-      </div>`;
+      hostEl.innerHTML = `<div id="traditional-seo-dfs-radar-chart-shell" style="width:100%;max-width:100%;min-width:0;margin:0;padding:0;box-sizing:border-box;">
+          <canvas id="traditional-seo-dfs-radar-canvas" width="460" height="380" style="width:100%;height:380px;display:block;" aria-label="Backlink mix: dofollow share, strong ref. rank bands (50–100), URL coverage"></canvas>
+        </div>`;
 
       const canvas = document.getElementById('traditional-seo-dfs-radar-canvas');
       if (!canvas || typeof Chart === 'undefined') {
@@ -76834,9 +76784,6 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-
-      const shell = document.getElementById('traditional-seo-dfs-radar-chart-shell');
-      traditionalSeoApplyDfsRadarBox(shell, canvas, hostEl);
 
       const labels = ['Dofollow', 'Strong bands / (50–100)', 'Coverage'];
       const values = [vFollow, vStrong, vCov];
@@ -76863,7 +76810,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           options: {
             responsive: true,
             maintainAspectRatio: false,
-            layout: { padding: { top: 4, right: 4, bottom: 4, left: 4 } },
+            layout: { padding: 18 },
             plugins: {
               legend: { display: false },
               tooltip: {
@@ -76903,40 +76850,32 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                   display: true,
                   color: 'rgba(0,0,0,0)',
                   font: { size: 11, weight: '600' },
-                  padding: 10
+                  padding: 22
                 }
               }
             }
           },
           plugins: [traditionalSeoDfsRadarLabelPlugin]
         });
-        const shellEl = document.getElementById('traditional-seo-dfs-radar-chart-shell');
         const resizeDfsRadar = () => {
           if (!window.__traditionalSeoDfsRadarChart) return;
-          traditionalSeoApplyDfsRadarBox(shellEl, canvas, hostEl);
           try {
             window.__traditionalSeoDfsRadarChart.resize();
           } catch (e) {
             /* ignore */
           }
         };
-        requestAnimationFrame(() => {
-          requestAnimationFrame(resizeDfsRadar);
-        });
+        requestAnimationFrame(resizeDfsRadar);
         setTimeout(resizeDfsRadar, 0);
-        setTimeout(resizeDfsRadar, 80);
-        setTimeout(resizeDfsRadar, 300);
-        if (typeof ResizeObserver !== 'undefined') {
+        setTimeout(resizeDfsRadar, 120);
+        if (typeof ResizeObserver !== 'undefined' && hostEl) {
           try {
             if (window.__traditionalSeoDfsRadarResizeObs) {
               window.__traditionalSeoDfsRadarResizeObs.disconnect();
               window.__traditionalSeoDfsRadarResizeObs = null;
             }
             window.__traditionalSeoDfsRadarResizeObs = new ResizeObserver(resizeDfsRadar);
-            const cardEl = document.getElementById('traditional-seo-dfs-tile-card');
-            if (cardEl) window.__traditionalSeoDfsRadarResizeObs.observe(cardEl);
-            else if (hostEl) window.__traditionalSeoDfsRadarResizeObs.observe(hostEl);
-            else if (shellEl) window.__traditionalSeoDfsRadarResizeObs.observe(shellEl);
+            window.__traditionalSeoDfsRadarResizeObs.observe(hostEl);
           } catch (e) {
             /* ignore */
           }
