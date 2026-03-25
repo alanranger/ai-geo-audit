@@ -7019,7 +7019,7 @@
           <div class="card dfs-backlinks-tier-bars-card">
             <div class="traditional-seo-strip-title traditional-seo-metric-heading">Dofollow by page tier</div>
             <div id="dfs-backlinks-tier-bars-host" class="dfs-backlinks-tier-bars-host" aria-label="Dofollow backlink counts by page segment tier (target URL)"></div>
-            <div class="traditional-seo-strip-sub">Tiers A–F from target page URL path · indexed dofollow (path rules match Traditional SEO parity fallback)</div>
+            <div class="traditional-seo-strip-sub">Tiers A–F from target URL (segmentation CSV + fallback rules). <strong>These bar counts are dofollow only</strong> — the table below can include nofollow when Follow is “All”.</div>
           </div>
         </div>
         <div class="card dfs-backlinks-rank-bands-card" style="margin-bottom: 1rem;">
@@ -7088,7 +7088,7 @@
             </div>
             <div style="width:11.5rem;min-width:10rem;">
               <label for="dfs-backlinks-filter-tier" style="display:block;font-size:0.78rem;color:var(--dark-text-muted);margin-bottom:0.25rem;">Page tier (target URL)</label>
-              <select id="dfs-backlinks-filter-tier" title="Same path rules as the Dofollow by page tier tile (target page URL).">
+              <select id="dfs-backlinks-filter-tier" title="Same URL→tier rules as the chart. The chart counts dofollow only; this list follows the Follow filter (default All = every link type).">
                 <option value="all">All tiers</option>
                 <option value="landing">Tier A · Landing</option>
                 <option value="product">Tier B · Product</option>
@@ -79083,18 +79083,23 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           const fq = f.q ? ` · search “${dfsBacklinksEsc(f.q)}”` : '';
           const ft = tierFiltered && pageTier ? ` · page tier “${dfsBacklinksEsc(pageTier)}” (target URL path)` : '';
           const st = sortPageTier ? ' · sorted by page tier (A→F), then ref. rank' : '';
+          const followAll = String(f.follow || 'all').toLowerCase() === 'all';
+          const tierBarNote =
+            tierFiltered && followAll
+              ? ' · “Dofollow by page tier” bars count dofollow only — set Follow to “Follow / dofollow” to match those numbers'
+              : '';
           const cap =
             (tierFiltered || sortPageTier) && tierCap
               ? ' · scan hit 120k row cap — narrow Follow/Rank/Search if results look incomplete'
               : '';
           if (total != null) {
             meta.textContent = rows.length
-              ? `Showing ${DFS_BACKLINKS_UI.offset + 1}–${DFS_BACKLINKS_UI.offset + rows.length} of ${total.toLocaleString()} · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${st}${cap}`
-              : `No rows on this page (total in index ${total.toLocaleString()}) · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${st}${cap}`;
+              ? `Showing ${DFS_BACKLINKS_UI.offset + 1}–${DFS_BACKLINKS_UI.offset + rows.length} of ${total.toLocaleString()} · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${st}${tierBarNote}${cap}`
+              : `No rows on this page (total in index ${total.toLocaleString()}) · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${st}${tierBarNote}${cap}`;
           } else if (tierFiltered) {
             meta.textContent = rows.length
-              ? `Showing tier-filtered rows ${DFS_BACKLINKS_UI.offset + 1}–${DFS_BACKLINKS_UI.offset + rows.length} (index total not computed) · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${st}${cap}`
-              : `No tier matches in the scanned range · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${st}${cap}`;
+              ? `Showing tier-filtered rows ${DFS_BACKLINKS_UI.offset + 1}–${DFS_BACKLINKS_UI.offset + rows.length} (index total not computed) · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${st}${tierBarNote}${cap}`
+              : `No tier matches in the scanned range · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${st}${tierBarNote}${cap}`;
           } else {
             meta.textContent = rows.length
               ? `Loaded ${rows.length} row(s) · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${st}${cap}`
