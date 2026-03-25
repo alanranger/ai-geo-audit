@@ -1745,7 +1745,7 @@
 
     section[data-panel="traditional-seo"] #traditional-seo-dfs-radar-host {
       flex: 1 1 auto;
-      min-height: 360px;
+      min-height: 420px;
       width: 100%;
       max-width: 100%;
       min-width: 0;
@@ -1765,15 +1765,15 @@
       box-sizing: border-box;
       margin: 0;
       padding: 0;
+      display: block;
     }
 
     section[data-panel="traditional-seo"] #traditional-seo-dfs-radar-canvas {
       display: block;
       width: 100%;
       max-width: 100%;
-      min-height: 420px;
-      margin-left: auto;
-      margin-right: auto;
+      min-height: 460px;
+      margin: 0;
       box-sizing: border-box;
     }
 
@@ -76675,16 +76675,19 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     function traditionalSeoApplyDfsRadarBox(shellEl, canvasEl, hostEl) {
       if (!canvasEl) return;
-      const shellW = shellEl ? Math.floor(shellEl.getBoundingClientRect().width || shellEl.clientWidth || 0) : 0;
-      const hostW = hostEl ? Math.floor(hostEl.getBoundingClientRect().width || hostEl.clientWidth || 0) : 0;
-      const w = Math.max(260, shellW || hostW || 320);
-      const h = Math.min(560, Math.max(420, Math.round(w * 0.95)));
-      canvasEl.style.width = `${w}px`;
+      const card = typeof document !== 'undefined' ? document.getElementById('traditional-seo-dfs-tile-card') : null;
+      let w = 0;
+      if (hostEl) w = Math.floor(hostEl.getBoundingClientRect().width || hostEl.clientWidth || 0);
+      if (!w && shellEl) w = Math.floor(shellEl.getBoundingClientRect().width || shellEl.clientWidth || 0);
+      if (!w && card) w = Math.floor(card.clientWidth || card.getBoundingClientRect().width || 0);
+      w = Math.max(280, w || 320);
+      const h = Math.min(640, Math.max(460, Math.round(w * 0.9)));
+      canvasEl.style.width = '100%';
+      canvasEl.style.maxWidth = '100%';
       canvasEl.style.height = `${h}px`;
       canvasEl.style.display = 'block';
-      canvasEl.style.marginLeft = 'auto';
-      canvasEl.style.marginRight = 'auto';
-      canvasEl.style.maxWidth = '100%';
+      canvasEl.style.margin = '0';
+      canvasEl.style.boxSizing = 'border-box';
     }
 
     /** Same label + value drawing pattern as AI Health (GAIO) radar (`dashboardRadarLabelPlugin`). */
@@ -76766,6 +76769,34 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             : (deltaColors[i] || 'rgba(226,232,240,0.9)');
           ctx.fillText(deltaText, x, startY + (labelLines.length * lineGap) + deltaGap);
         }
+        const dsMeta = chart.getDatasetMeta(0);
+        const ptVals = opts.deltaTexts || deltas;
+        if (dsMeta && Array.isArray(dsMeta.data) && ptVals.length) {
+          for (let i = 0; i < dsMeta.data.length; i += 1) {
+            const el = dsMeta.data[i];
+            if (!el || el.skip) continue;
+            const xy = typeof el.getProps === 'function' ? el.getProps(['x', 'y'], true) : null;
+            const px = xy && Number.isFinite(xy.x) ? xy.x : el.x;
+            const py = xy && Number.isFinite(xy.y) ? xy.y : el.y;
+            if (!Number.isFinite(px) || !Number.isFinite(py)) continue;
+            const t = String(ptVals[i] ?? '');
+            if (!t || t === '—') continue;
+            const cx = scale.xCenter || 0;
+            const cy = scale.yCenter || 0;
+            const ang = Math.atan2(py - cy, px - cx);
+            const ox = Math.cos(ang) * 12;
+            const oy = Math.sin(ang) * 12;
+            ctx.font = '700 9px system-ui, Segoe UI, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.strokeStyle = 'rgba(15,23,42,0.92)';
+            ctx.lineWidth = 2.5;
+            ctx.lineJoin = 'round';
+            ctx.strokeText(t, px + ox, py + oy);
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillText(t, px + ox, py + oy);
+          }
+        }
         ctx.restore();
       }
     };
@@ -76788,8 +76819,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           ? `${cov.pct}% (${cov.withL}/${cov.total})`
           : '—';
       hostEl.innerHTML = `<div style="width:100%;height:100%;min-height:0;box-sizing:border-box;display:flex;flex-direction:column;align-items:stretch;">
-        <div id="traditional-seo-dfs-radar-chart-shell" style="width:100%;max-width:100%;min-width:0;margin:0;padding:0;position:relative;flex:1 1 auto;box-sizing:border-box;display:flex;justify-content:center;align-items:flex-start;">
-          <canvas id="traditional-seo-dfs-radar-canvas" width="600" height="520" aria-label="Backlink mix: dofollow share, strong ref. rank bands (50–100), URL coverage"></canvas>
+        <div id="traditional-seo-dfs-radar-chart-shell" style="width:100%;max-width:100%;min-width:0;margin:0;padding:0;position:relative;flex:1 1 auto;box-sizing:border-box;display:block;">
+          <canvas id="traditional-seo-dfs-radar-canvas" width="800" height="640" aria-label="Backlink mix: dofollow share, strong ref. rank bands (50–100), URL coverage"></canvas>
         </div>
       </div>`;
 
@@ -76832,7 +76863,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           options: {
             responsive: true,
             maintainAspectRatio: false,
-            layout: { padding: { top: 8, right: 8, bottom: 8, left: 8 } },
+            layout: { padding: { top: 4, right: 4, bottom: 4, left: 4 } },
             plugins: {
               legend: { display: false },
               tooltip: {
@@ -76872,7 +76903,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                   display: true,
                   color: 'rgba(0,0,0,0)',
                   font: { size: 11, weight: '600' },
-                  padding: 14
+                  padding: 10
                 }
               }
             }
@@ -76889,7 +76920,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             /* ignore */
           }
         };
-        requestAnimationFrame(resizeDfsRadar);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(resizeDfsRadar);
+        });
         setTimeout(resizeDfsRadar, 0);
         setTimeout(resizeDfsRadar, 80);
         setTimeout(resizeDfsRadar, 300);
@@ -76900,8 +76933,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               window.__traditionalSeoDfsRadarResizeObs = null;
             }
             window.__traditionalSeoDfsRadarResizeObs = new ResizeObserver(resizeDfsRadar);
-            if (shellEl) window.__traditionalSeoDfsRadarResizeObs.observe(shellEl);
+            const cardEl = document.getElementById('traditional-seo-dfs-tile-card');
+            if (cardEl) window.__traditionalSeoDfsRadarResizeObs.observe(cardEl);
             else if (hostEl) window.__traditionalSeoDfsRadarResizeObs.observe(hostEl);
+            else if (shellEl) window.__traditionalSeoDfsRadarResizeObs.observe(shellEl);
           } catch (e) {
             /* ignore */
           }
