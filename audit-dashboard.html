@@ -1763,6 +1763,7 @@
       margin: 0;
       padding: 0;
       display: block;
+      text-align: center;
     }
 
     /* Same idea as dashboard dial canvases: 100% tile width, fixed height. */
@@ -1770,8 +1771,8 @@
       display: block;
       width: 100%;
       max-width: 100%;
-      height: 420px;
-      margin: 0;
+      height: 460px;
+      margin: 0 auto;
       box-sizing: border-box;
     }
 
@@ -6626,7 +6627,7 @@
             <div class="traditional-seo-strip-title traditional-seo-metric-heading">Backlinks (DataForSEO)</div>
             <div id="traditional-seo-dfs-radar-host" aria-label="Backlink mix radar">
               <div id="traditional-seo-dfs-radar-chart-shell" style="width:100%;max-width:100%;min-width:0;margin:0;padding:0;box-sizing:border-box;display:none;">
-                <canvas id="traditional-seo-dfs-radar-canvas" width="460" height="420" style="width:100%;height:420px;display:block;" aria-label="Backlink mix: dofollow share, strong ref. rank bands (50–100), URL coverage"></canvas>
+                <canvas id="traditional-seo-dfs-radar-canvas" width="520" height="460" style="width:100%;height:460px;display:block;margin:0 auto;" aria-label="Backlink mix: dofollow share, strong ref. rank bands (50–100), URL coverage"></canvas>
               </div>
             </div>
             <ul
@@ -76682,9 +76683,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       id: 'traditionalSeoDfsRadarLabels',
       afterDraw(chart) {
         const opts = chart.options.plugins?.traditionalSeoDfsRadarLabels || {};
-        const labels = (chart?.data?.labels && chart.data.labels.length)
-          ? chart.data.labels
-          : (opts.labels || []);
+        const dataLen = chart?.data?.labels?.length ?? 0;
+        const optLabs = opts.labels || [];
+        const labels = (optLabs.length === dataLen && dataLen > 0)
+          ? optLabs
+          : ((chart?.data?.labels && chart.data.labels.length) ? chart.data.labels : optLabs);
         const deltas = opts.deltaTexts || [];
         const deltaColors = opts.deltaColors || [];
         const scale = chart?.scales?.r;
@@ -76783,7 +76786,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       let canvas = document.getElementById('traditional-seo-dfs-radar-canvas');
       if (!shellEl || !canvas) {
         hostEl.innerHTML = `<div id="traditional-seo-dfs-radar-chart-shell" style="width:100%;max-width:100%;min-width:0;margin:0;padding:0;box-sizing:border-box;display:block;">
-          <canvas id="traditional-seo-dfs-radar-canvas" width="460" height="420" style="width:100%;height:420px;display:block;" aria-label="Backlink mix: dofollow share, strong ref. rank bands (50–100), URL coverage"></canvas>
+          <canvas id="traditional-seo-dfs-radar-canvas" width="520" height="460" style="width:100%;height:460px;display:block;margin:0 auto;" aria-label="Backlink mix: dofollow share, strong ref. rank bands (50–100), URL coverage"></canvas>
         </div>`;
         shellEl = document.getElementById('traditional-seo-dfs-radar-chart-shell');
         canvas = document.getElementById('traditional-seo-dfs-radar-canvas');
@@ -76797,7 +76800,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const labels = ['Dofollow', 'Strong bands / (50–100)', 'Coverage'];
+      const displayLabels = ['Dofollow', 'Strong bands / (50–100)', 'Coverage'];
+      const layoutLabels = ['·', '·', '·'];
       const values = [vFollow, vStrong, vCov];
       const valueTexts = [valFollow, valStrong, valCovAxis];
       const deltaColors = valueTexts.map(() => 'rgba(226,232,240,0.9)');
@@ -76806,7 +76810,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         window.__traditionalSeoDfsRadarChart = new Chart(ctx, {
           type: 'radar',
           data: {
-            labels,
+            labels: layoutLabels,
             datasets: [{
               label: 'Backlinks',
               data: values,
@@ -76822,7 +76826,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           options: {
             responsive: true,
             maintainAspectRatio: false,
-            layout: { autoPadding: false, padding: 16 },
+            layout: { padding: 18 },
             plugins: {
               legend: { display: false },
               tooltip: {
@@ -76831,7 +76835,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                     const i = c.dataIndex;
                     const v = Math.round(values[i]);
                     const shown = i === 2 ? valCovFull : valueTexts[i];
-                    const line = `${labels[i]}: ${shown} (axis ${v}/100)`;
+                    const line = `${displayLabels[i]}: ${shown} (axis ${v}/100)`;
                     if (i === 1) {
                       return [
                         line,
@@ -76843,7 +76847,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                 }
               },
               traditionalSeoDfsRadarLabels: {
-                labels,
+                labels: displayLabels,
                 deltaTexts: valueTexts,
                 deltaColors,
                 lineGap: 12,
