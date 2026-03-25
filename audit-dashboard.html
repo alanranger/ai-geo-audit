@@ -76657,6 +76657,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const labelPadding = typeof opts.labelPadding === 'number' ? opts.labelPadding : 0;
         const edgePadding = typeof opts.edgePadding === 'number' ? opts.edgePadding : 4;
         const ctx = chart.ctx;
+        const helpers = typeof Chart !== 'undefined' && Chart.helpers ? Chart.helpers : null;
+        const chartArea = chart.chartArea;
+        if (helpers && typeof helpers.unclipArea === 'function') helpers.unclipArea(ctx);
         ctx.save();
         for (let i = 0; i < labels.length; i += 1) {
           const label = labels[i] || '';
@@ -76716,6 +76719,17 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           ctx.fillText(deltaText, x, startY + (labelLines.length * lineGap) + deltaGap);
         }
         ctx.restore();
+        if (
+          helpers &&
+          typeof helpers.clipArea === 'function' &&
+          chartArea &&
+          Number.isFinite(chartArea.left) &&
+          Number.isFinite(chartArea.right) &&
+          Number.isFinite(chartArea.top) &&
+          Number.isFinite(chartArea.bottom)
+        ) {
+          helpers.clipArea(ctx, chartArea);
+        }
       }
     };
 
