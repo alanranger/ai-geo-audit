@@ -1757,6 +1757,25 @@
       margin: 0.35rem 0 0.65rem;
     }
 
+    /* DFS radar: Chart.js can read width 0 / too narrow during flex layout; pin shell + canvas to card width. */
+    section[data-panel="traditional-seo"] #traditional-seo-dfs-radar-chart-shell {
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    section[data-panel="traditional-seo"] #traditional-seo-dfs-radar-canvas {
+      display: block;
+      width: 100%;
+      max-width: 100%;
+      height: 380px;
+      margin: 0 auto;
+      box-sizing: border-box;
+    }
+
     section[data-panel="traditional-seo"] .traditional-seo-ctr-top-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -76630,6 +76649,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     function traditionalSeoDestroyDfsRadarChart() {
       try {
+        if (window.__traditionalSeoDfsRadarResizeObs) {
+          window.__traditionalSeoDfsRadarResizeObs.disconnect();
+          window.__traditionalSeoDfsRadarResizeObs = null;
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      try {
         if (window.__traditionalSeoDfsRadarChart) {
           window.__traditionalSeoDfsRadarChart.destroy();
           window.__traditionalSeoDfsRadarChart = null;
@@ -76747,8 +76774,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           : '';
       hostEl.innerHTML = `<div style="width:100%;height:100%;min-height:0;box-sizing:border-box;display:flex;flex-direction:column;align-items:stretch;gap:0.35rem;">
         ${head}
-        <div style="width:100%;max-width:100%;margin:0;position:relative;flex-shrink:0;">
-          <canvas id="traditional-seo-dfs-radar-canvas" width="460" height="340" aria-label="Backlink mix: dofollow share, strong ref. rank bands (50–100), URL coverage" style="display:block;width:100%;height:340px;"></canvas>
+        <div id="traditional-seo-dfs-radar-chart-shell" style="width:100%;max-width:100%;min-width:0;margin:0;padding:0;position:relative;flex-shrink:0;box-sizing:border-box;">
+          <canvas id="traditional-seo-dfs-radar-canvas" width="460" height="380" aria-label="Backlink mix: dofollow share, strong ref. rank bands (50–100), URL coverage"></canvas>
         </div>
       </div>`;
 
@@ -76763,7 +76790,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const labels = ['Dofollow', 'Strong ref. bands / (50–100 dfs)', 'Coverage'];
+      const labels = ['Dofollow', 'Strong bands / (50–100)', 'Coverage'];
       const values = [vFollow, vStrong, vCov];
       const valueTexts = [valFollow, valStrong, valCov];
       const deltaColors = valueTexts.map(() => 'rgba(226,232,240,0.9)');
@@ -76835,6 +76862,30 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           },
           plugins: [traditionalSeoDfsRadarLabelPlugin]
         });
+        const resizeDfsRadar = () => {
+          if (!window.__traditionalSeoDfsRadarChart) return;
+          try {
+            window.__traditionalSeoDfsRadarChart.resize();
+          } catch (e) {
+            /* ignore */
+          }
+        };
+        requestAnimationFrame(resizeDfsRadar);
+        setTimeout(resizeDfsRadar, 0);
+        setTimeout(resizeDfsRadar, 80);
+        setTimeout(resizeDfsRadar, 300);
+        if (hostEl && typeof ResizeObserver !== 'undefined') {
+          try {
+            if (window.__traditionalSeoDfsRadarResizeObs) {
+              window.__traditionalSeoDfsRadarResizeObs.disconnect();
+              window.__traditionalSeoDfsRadarResizeObs = null;
+            }
+            window.__traditionalSeoDfsRadarResizeObs = new ResizeObserver(resizeDfsRadar);
+            window.__traditionalSeoDfsRadarResizeObs.observe(hostEl);
+          } catch (e) {
+            /* ignore */
+          }
+        }
       } catch (e) {
         /* ignore */
       }
