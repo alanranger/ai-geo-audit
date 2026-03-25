@@ -7086,6 +7086,18 @@
                 <option value="nofollow">Nofollow</option>
               </select>
             </div>
+            <div style="width:11.5rem;min-width:10rem;">
+              <label for="dfs-backlinks-filter-tier" style="display:block;font-size:0.78rem;color:var(--dark-text-muted);margin-bottom:0.25rem;">Page tier (target URL)</label>
+              <select id="dfs-backlinks-filter-tier" title="Same path rules as the Dofollow by page tier tile (target page URL).">
+                <option value="all">All tiers</option>
+                <option value="landing">Tier A · Landing</option>
+                <option value="product">Tier B · Product</option>
+                <option value="event">Tier C · Event</option>
+                <option value="blog">Tier D · Blog</option>
+                <option value="academy">Tier E · Academy</option>
+                <option value="unmapped">Tier F · Unmapped</option>
+              </select>
+            </div>
             <div style="width:6.5rem;min-width:5.5rem;">
               <label for="dfs-backlinks-filter-rank-min" style="display:block;font-size:0.78rem;color:var(--dark-text-muted);margin-bottom:0.25rem;">Rank ≥</label>
               <input id="dfs-backlinks-filter-rank-min" type="number" inputmode="numeric" placeholder="min" min="0" max="1000">
@@ -78282,11 +78294,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     function dfsBacklinksReadFilters() {
       const q = document.getElementById('dfs-backlinks-filter-q');
       const follow = document.getElementById('dfs-backlinks-filter-follow');
+      const tier = document.getElementById('dfs-backlinks-filter-tier');
       const rmin = document.getElementById('dfs-backlinks-filter-rank-min');
       const rmax = document.getElementById('dfs-backlinks-filter-rank-max');
       return {
         q: String(q?.value || '').trim(),
         follow: String(follow?.value || 'all'),
+        tier: String(tier?.value || 'all'),
         rankMin: String(rmin?.value || '').trim(),
         rankMax: String(rmax?.value || '').trim()
       };
@@ -78850,6 +78864,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (f.q) params.set('q', f.q);
       if (f.rankMin !== '') params.set('rankMin', f.rankMin);
       if (f.rankMax !== '') params.set('rankMax', f.rankMax);
+      if (f.tier && String(f.tier).toLowerCase() !== 'all') params.set('tier', String(f.tier).toLowerCase());
       const res = await fetch(traditionalSeoApiPath(`/api/aigeo/dfs-domain-backlink-rows?${params}`), { cache: 'no-store' });
       const j = await res.json().catch(() => ({}));
       return { res, j, f, limit };
@@ -78903,6 +78918,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           if (f.q) params.set('q', f.q);
           if (f.rankMin !== '') params.set('rankMin', f.rankMin);
           if (f.rankMax !== '') params.set('rankMax', f.rankMax);
+          if (f.tier && String(f.tier).toLowerCase() !== 'all') params.set('tier', String(f.tier).toLowerCase());
           const res = await fetch(traditionalSeoApiPath(`/api/aigeo/dfs-domain-backlink-rows?${params}`), { cache: 'no-store' });
           const j = await res.json().catch(() => ({}));
           if (!res.ok || j.status !== 'ok') throw new Error(j.message || `HTTP ${res.status}`);
@@ -78922,7 +78938,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             lines.push([rk, foll, src, tgt, anc, sh, th].map(dfsBacklinksCsvCell).join(','));
           }
           if (rows.length < pageLimit) break;
-          offset += pageLimit;
+          offset += rows.length;
         }
         const blob = new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' });
         const a = document.createElement('a');
@@ -78990,6 +79006,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (!res.ok || j.status !== 'ok') throw new Error(j.message || `HTTP ${res.status}`);
         const rows = j.data?.rows || [];
         DFS_BACKLINKS_UI.total = typeof j.data?.total === 'number' ? j.data.total : null;
+        const tierFiltered = j.data?.tierFiltered === true;
+        const tierCap = j.data?.tierScanCapped === true;
+        const pageTier = j.data?.pageTier ? String(j.data.pageTier) : '';
         if (!rows.length) {
           tbody.innerHTML =
             '<tr><td colspan="6" style="color:var(--dark-text-muted);">No rows for this domain/filters. Run a DFS full index ingest (Traditional SEO) if the index is empty.</td></tr>';
@@ -79022,10 +79041,16 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const total = DFS_BACKLINKS_UI.total;
         if (meta) {
           const fq = f.q ? ` · search “${dfsBacklinksEsc(f.q)}”` : '';
+          const ft = tierFiltered && pageTier ? ` · page tier “${dfsBacklinksEsc(pageTier)}” (target URL path)` : '';
+          const cap = tierFiltered && tierCap ? ' · scan hit 120k row cap — narrow Follow/Rank/Search if results look incomplete' : '';
           if (total != null) {
             meta.textContent = rows.length
-              ? `Showing ${DFS_BACKLINKS_UI.offset + 1}–${DFS_BACKLINKS_UI.offset + rows.length} of ${total.toLocaleString()} · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}`
-              : `No rows on this page (total in index ${total.toLocaleString()}) · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}`;
+              ? `Showing ${DFS_BACKLINKS_UI.offset + 1}–${DFS_BACKLINKS_UI.offset + rows.length} of ${total.toLocaleString()} · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${cap}`
+              : `No rows on this page (total in index ${total.toLocaleString()}) · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${cap}`;
+          } else if (tierFiltered) {
+            meta.textContent = rows.length
+              ? `Showing tier-filtered rows ${DFS_BACKLINKS_UI.offset + 1}–${DFS_BACKLINKS_UI.offset + rows.length} (index total not computed) · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${cap}`
+              : `No tier matches in the scanned range · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}${ft}${cap}`;
           } else {
             meta.textContent = rows.length
               ? `Loaded ${rows.length} row(s) · sort ${DFS_BACKLINKS_UI.sort} ${DFS_BACKLINKS_UI.dir}${fq}`
@@ -79035,14 +79060,21 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (pager) {
           const pages = total != null && limit ? Math.max(1, Math.ceil(total / limit)) : null;
           pager.textContent =
-            pages != null ? `Page ${Math.floor(DFS_BACKLINKS_UI.offset / limit) + 1} / ${pages}` : `Offset ${DFS_BACKLINKS_UI.offset}`;
+            pages != null
+              ? `Page ${Math.floor(DFS_BACKLINKS_UI.offset / limit) + 1} / ${pages}`
+              : tierFiltered
+                ? `Tier page · offset ${DFS_BACKLINKS_UI.offset}`
+                : `Offset ${DFS_BACKLINKS_UI.offset}`;
         }
         if (prev) {
           prev.disabled = DFS_BACKLINKS_UI.offset <= 0;
           prev.style.opacity = prev.disabled ? '0.45' : '1';
         }
         if (next) {
-          const canNext = total != null ? DFS_BACKLINKS_UI.offset + limit < total : rows.length >= limit;
+          let canNext;
+          if (total != null) canNext = DFS_BACKLINKS_UI.offset + limit < total;
+          else if (tierFiltered) canNext = rows.length >= limit && !tierCap;
+          else canNext = rows.length >= limit;
           next.disabled = !canNext;
           next.style.opacity = next.disabled ? '0.45' : '1';
         }
@@ -79234,11 +79266,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       document.getElementById('dfs-backlinks-reset')?.addEventListener('click', () => {
         const q = document.getElementById('dfs-backlinks-filter-q');
         const follow = document.getElementById('dfs-backlinks-filter-follow');
+        const tier = document.getElementById('dfs-backlinks-filter-tier');
         const rmin = document.getElementById('dfs-backlinks-filter-rank-min');
         const rmax = document.getElementById('dfs-backlinks-filter-rank-max');
         const ps = document.getElementById('dfs-backlinks-page-size');
         if (q) q.value = '';
         if (follow) follow.value = 'all';
+        if (tier) tier.value = 'all';
         if (rmin) rmin.value = '';
         if (rmax) rmax.value = '';
         if (ps) ps.value = '50';
