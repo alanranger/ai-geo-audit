@@ -2474,10 +2474,45 @@
       color: #fcd34d;
       margin-bottom: 0.12rem;
     }
+    section[data-panel="backlinks"] .dfs-backlinks-wl-url-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.35rem 0.55rem;
+    }
     section[data-panel="backlinks"] .dfs-backlinks-wl-url {
       font-size: 0.76rem;
       line-height: 1.35;
       word-break: break-all;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    section[data-panel="backlinks"] .dfs-backlinks-wl-follow {
+      flex: 0 0 auto;
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 0.12rem 0.38rem;
+      border-radius: 6px;
+      line-height: 1.2;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      white-space: nowrap;
+    }
+    section[data-panel="backlinks"] .dfs-backlinks-wl-follow-df {
+      color: #6ee7b7;
+      background: rgba(16, 185, 129, 0.12);
+      border-color: rgba(52, 211, 153, 0.45);
+    }
+    section[data-panel="backlinks"] .dfs-backlinks-wl-follow-nf {
+      color: #cbd5e1;
+      background: rgba(71, 85, 105, 0.35);
+      border-color: rgba(148, 163, 184, 0.4);
+    }
+    section[data-panel="backlinks"] .dfs-backlinks-wl-follow-unk {
+      color: var(--dark-text-muted);
+      background: rgba(15, 23, 42, 0.5);
     }
     section[data-panel="backlinks"] .dfs-backlinks-wl-foot {
       margin: 0.42rem 0 0;
@@ -71765,7 +71800,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     function traditionalSeoBacklinkIndexShowDfs() {
       const m = TRADITIONAL_SEO_STATE.backlinkIndexSource;
-      return m === 'dataforseo' || m === 'both';
+      return m !== 'ke';
     }
 
     async function traditionalSeoDfsSummaryCall(action, force) {
@@ -72172,6 +72207,19 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           throw new Error(json?.message || `HTTP ${res.status}`);
         }
         const d = json?.data || {};
+        if (d.skipped === true) {
+          if (Object.prototype.hasOwnProperty.call(d, 'backlinkIndexSource')) {
+            TRADITIONAL_SEO_STATE.backlinkIndexSource = String(d.backlinkIndexSource || 'ke');
+          } else {
+            TRADITIONAL_SEO_STATE.backlinkIndexSource = 'ke';
+          }
+          const why = String(d.reason || '');
+          throw new Error(
+            why === 'index_source_ke'
+              ? 'DataForSEO ingest disabled on server (index source KE).'
+              : `Ingest skipped (${why || 'unknown'}).`
+          );
+        }
         if (d.rowCount != null && Number.isFinite(Number(d.rowCount))) {
           TRADITIONAL_SEO_STATE.dfsFilteredIndexRowCount = Math.round(Number(d.rowCount));
         }
@@ -78788,10 +78836,20 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return 'Ref. domain rank —';
     }
 
+    function dfsBacklinksWlFollowParts(r) {
+      const v = r?.dofollow;
+      if (v === true) return { text: 'Dofollow', kind: 'df', title: 'Rel: dofollow' };
+      if (v === false) return { text: 'Nofollow', kind: 'nf', title: 'Rel: nofollow' };
+      return { text: '—', kind: 'unk', title: 'Rel not stored — re-save baseline to capture' };
+    }
+
     function dfsBacklinksWlRowHtml(r) {
       const rk = dfsBacklinksEsc(dfsBacklinksWlRankLine(r));
       const link = dfsBacklinksSourceLinkCell(r?.url_from);
-      return `<div class="dfs-backlinks-wl-item"><div class="dfs-backlinks-wl-rank">${rk}</div><div class="dfs-backlinks-wl-url">${link}</div></div>`;
+      const fl = dfsBacklinksWlFollowParts(r);
+      const ft = dfsBacklinksEsc(fl.text);
+      const ttl = dfsBacklinksEsc(fl.title);
+      return `<div class="dfs-backlinks-wl-item"><div class="dfs-backlinks-wl-rank">${rk}</div><div class="dfs-backlinks-wl-url-row"><div class="dfs-backlinks-wl-url">${link}</div><span class="dfs-backlinks-wl-follow dfs-backlinks-wl-follow-${fl.kind}" title="${ttl}">${ft}</span></div></div>`;
     }
 
     async function dfsBacklinksRefreshWinsLosses(domain) {
@@ -79429,6 +79487,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       wireTraditionalSeoButtons();
       dfsBacklinksWireOnce();
       const domain = traditionalSeoPropertyHostname();
+      try {
+        if (domain) await traditionalSeoDfsSummaryCall('lookup', false);
+      } catch (_) {
+        /* non-fatal: tiles still load */
+      }
       await dfsBacklinksRefreshTiles(domain);
       await dfsBacklinksLoadTable();
       traditionalSeoRefreshDfsLastFetchedLabels();
