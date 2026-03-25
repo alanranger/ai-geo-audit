@@ -76665,14 +76665,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           const label = labels[i] || '';
           const deltaRaw = deltas[i];
           const deltaText = (deltaRaw == null || deltaRaw === '') ? '—' : String(deltaRaw);
-          const pos = (typeof scale.getPointLabelPosition === 'function')
-            ? scale.getPointLabelPosition(i)
-            : null;
-          const angle = (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y))
-            ? Math.atan2(pos.y - (scale.yCenter || 0), pos.x - (scale.xCenter || 0))
-            : ((Math.PI * 2) / count) * i - (Math.PI / 2);
-          const baseX = (pos && Number.isFinite(pos.x)) ? pos.x : (scale.xCenter || 0) + Math.cos(angle) * (scale.drawingArea || 0);
-          const baseY = (pos && Number.isFinite(pos.y)) ? pos.y : (scale.yCenter || 0) + Math.sin(angle) * (scale.drawingArea || 0);
+          /* Do not call scale.getPointLabelPosition: with pointLabels hidden it can throw
+             (Chart.js 4: _pointLabelItems[i] undefined). Vertices follow default radar order from top. */
+          const angle = ((Math.PI * 2) / count) * i - (Math.PI / 2);
+          const baseX = (scale.xCenter || 0) + Math.cos(angle) * (scale.drawingArea || 0);
+          const baseY = (scale.yCenter || 0) + Math.sin(angle) * (scale.drawingArea || 0);
           let x = baseX + Math.cos(angle) * labelPadding;
           let y = baseY + Math.sin(angle) * labelPadding;
 
@@ -76688,10 +76685,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.font = '600 11px system-ui, -apple-system, Segoe UI, sans-serif';
+          ctx.font = '600 10px system-ui, -apple-system, Segoe UI, sans-serif';
           const labelWidths = labelLines.map((line) => ctx.measureText(line).width);
           let maxWidth = labelWidths.length ? Math.max(...labelWidths) : 0;
-          ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
+          ctx.font = '700 9px system-ui, -apple-system, Segoe UI, sans-serif';
           const deltaWidth = ctx.measureText(deltaText).width;
           if (deltaWidth > maxWidth) maxWidth = deltaWidth;
           const totalHeight = (labelLines.length * lineGap) + deltaGap + lineGap;
@@ -76705,14 +76702,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.font = '600 11px system-ui, -apple-system, Segoe UI, sans-serif';
+          ctx.font = '600 10px system-ui, -apple-system, Segoe UI, sans-serif';
           ctx.fillStyle = 'rgba(226,232,240,0.9)';
           const startY = y - ((labelLines.length - 1) * lineGap) / 2;
           for (let j = 0; j < labelLines.length; j += 1) {
             ctx.fillText(labelLines[j], x, startY + (j * lineGap));
           }
 
-          ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
+          ctx.font = '700 9px system-ui, -apple-system, Segoe UI, sans-serif';
           ctx.fillStyle = (deltaRaw === '—' || deltaRaw == null || deltaRaw === '')
             ? 'rgba(226,232,240,0.6)'
             : (deltaColors[i] || 'rgba(226,232,240,0.9)');
@@ -76822,9 +76819,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                 labels,
                 deltaTexts: valueTexts,
                 deltaColors,
-                lineGap: 12,
-                deltaGap: 8,
-                labelPadding: 26,
+                lineGap: 10,
+                deltaGap: 6,
+                labelPadding: 22,
                 edgePadding: 2
               }
             },
@@ -76835,7 +76832,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                 ticks: { display: false },
                 grid: { color: 'rgba(148, 163, 184, 0.20)' },
                 angleLines: { color: 'rgba(148, 163, 184, 0.20)' },
-                pointLabels: { display: false }
+                pointLabels: {
+                  display: true,
+                  color: 'rgba(0,0,0,0)',
+                  padding: 0,
+                  font: { size: 10, weight: '600' }
+                }
               }
             }
           },
