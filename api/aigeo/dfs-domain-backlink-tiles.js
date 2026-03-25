@@ -79,6 +79,14 @@ export default async function handler(req, res) {
           r_lt20: 0,
           r_null: 0
         },
+        pageTierDofollow: {
+          landing: 0,
+          product: 0,
+          event: 0,
+          blog: 0,
+          academy: 0,
+          unmapped: 0
+        },
         generatedAt: new Date().toISOString(),
         source: 'dfs_supabase_tile_scan',
         truncated: false

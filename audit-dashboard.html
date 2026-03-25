@@ -7012,9 +7012,9 @@
             <div class="traditional-seo-strip-sub">Links marked nofollow</div>
           </div>
           <div class="card dfs-backlinks-tier-bars-card">
-            <div class="traditional-seo-strip-title traditional-seo-metric-heading">Dofollow by tier</div>
-            <div id="dfs-backlinks-tier-bars-host" class="dfs-backlinks-tier-bars-host" aria-label="Dofollow backlink counts by referring domain rank band"></div>
-            <div class="traditional-seo-strip-sub">Ref. domain rank bands · indexed dofollow (same as table)</div>
+            <div class="traditional-seo-strip-title traditional-seo-metric-heading">Dofollow by page tier</div>
+            <div id="dfs-backlinks-tier-bars-host" class="dfs-backlinks-tier-bars-host" aria-label="Dofollow backlink counts by page segment tier (target URL)"></div>
+            <div class="traditional-seo-strip-sub">Tiers A–F from target page URL path · indexed dofollow (path rules match Traditional SEO parity fallback)</div>
           </div>
         </div>
         <div class="card dfs-backlinks-rank-bands-card" style="margin-bottom: 1rem;">
@@ -78349,6 +78349,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       };
     }
 
+    function dfsBacklinksCopyPageTierShape(src) {
+      const o = src && typeof src === 'object' ? src : {};
+      return {
+        landing: o.landing ?? 0,
+        product: o.product ?? 0,
+        event: o.event ?? 0,
+        blog: o.blog ?? 0,
+        academy: o.academy ?? 0,
+        unmapped: o.unmapped ?? 0
+      };
+    }
+
     function dfsBacklinksBuildSnapshotFromCur(cur) {
       return {
         totalBacklinks: cur.totalBacklinks ?? 0,
@@ -78359,7 +78371,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         rankBands: dfsBacklinksCopyBandShape(cur.rankBands),
         rankBandsDofollow: dfsBacklinksCopyBandShape(cur.rankBandsDofollow),
         rankBandsNofollow: dfsBacklinksCopyBandShape(cur.rankBandsNofollow),
-        rankBandsUnknown: dfsBacklinksCopyBandShape(cur.rankBandsUnknown)
+        rankBandsUnknown: dfsBacklinksCopyBandShape(cur.rankBandsUnknown),
+        pageTierDofollow: dfsBacklinksCopyPageTierShape(cur.pageTierDofollow)
       };
     }
 
@@ -78437,24 +78450,21 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     function dfsBacklinksRenderDofollowTierBars(cur) {
       const host = document.getElementById('dfs-backlinks-tier-bars-host');
       if (!host) return;
-      const bd = cur?.rankBandsDofollow || {};
+      const bd = dfsBacklinksCopyPageTierShape(cur?.pageTierDofollow);
       const meta = [
-        { key: 'r80_100', label: '80 – 100', color: '#e11d48' },
-        { key: 'r50_79', label: '50 – 79', color: '#ea580c' },
-        { key: 'r30_49', label: '30 – 49', color: '#ca8a04' },
-        { key: 'r20_29', label: '20 – 29', color: '#16a34a' },
-        { key: 'r_lt20', label: '< 20', color: '#2563eb' }
+        { key: 'landing', label: 'Tier A · Landing', color: '#e11d48', hint: 'Target path looks like home / single segment' },
+        { key: 'product', label: 'Tier B · Product', color: '#ea580c', hint: 'Courses, product, mentoring, subscription paths' },
+        { key: 'event', label: 'Tier C · Event', color: '#ca8a04', hint: 'Workshops, events, webinars' },
+        { key: 'blog', label: 'Tier D · Blog', color: '#16a34a', hint: 'Blog, articles, guides' },
+        { key: 'academy', label: 'Tier E · Academy', color: '#2563eb', hint: 'Academy / free course paths' },
+        { key: 'unmapped', label: 'Tier F · Unmapped', color: '#9333ea', hint: 'Does not match path rules above' }
       ];
-      if ((bd.r_null ?? 0) > 0) {
-        meta.push({ key: 'r_null', label: 'No rank', color: '#9333ea' });
-      }
       const counts = meta.map((m) => Math.max(0, Number(bd[m.key]) || 0));
       const max = Math.max(1, ...counts);
       const rows = meta.map((m, i) => {
         const c = counts[i];
         const pct = (c / max) * 100;
-        const desc = dfsBacklinksBandDescriptorForKey(m.key);
-        const title = desc ? `${m.label}: ${c.toLocaleString()} — ${desc}` : `${m.label}: ${c.toLocaleString()}`;
+        const title = `${m.label}: ${c.toLocaleString()} — ${m.hint}`;
         return `<div class="dfs-backlinks-tier-bar-row" title="${dfsBacklinksEsc(title)}">
           <div class="dfs-backlinks-tier-bar-label">${dfsBacklinksEsc(m.label)}</div>
           <div class="dfs-backlinks-tier-bar-track"><span class="dfs-backlinks-tier-bar-fill" style="width:${pct.toFixed(2)}%;background-color:${m.color};"></span></div>
