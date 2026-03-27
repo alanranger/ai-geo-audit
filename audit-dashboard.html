@@ -72160,18 +72160,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
       const rows = TRADITIONAL_SEO_STATE.evaluationRows;
       const urls = traditionalSeoPageUrlsFromRows(rows);
-      if (!urls.length) {
-        traditionalSeoDfsActivitySet({ show: false });
-        if (typeof window.showStatus === 'function') {
-          window.showStatus('No URL rows — run ② or ① first, then run a DFS ingest.', 'info');
-        }
-        return;
-      }
       const dfsProgTitle = m === 'full' ? 'DataForSEO — Full domain index' : 'DataForSEO — New links (delta)';
       const dfsFmtN = (v) =>
         v != null && Number.isFinite(Number(v)) ? Math.round(Number(v)).toLocaleString() : '—';
       const dfsUrlN = urls.length;
-      const dfsCountsBase = () => `Domain: ${domain} · Page URLs in scope: ${dfsFmtN(dfsUrlN)}`;
+      const dfsCountsBase = () =>
+        dfsUrlN > 0
+          ? `Domain: ${domain} · Page URLs in scope: ${dfsFmtN(dfsUrlN)}`
+          : `Domain: ${domain} · No Traditional SEO URL rows (①/②) — domain ingest only`;
       const btns = [
         document.getElementById('traditional-seo-dfs-full-btn'),
         document.getElementById('traditional-seo-dfs-delta-btn'),
@@ -72288,7 +72284,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           pct: 82,
           title: dfsProgTitle,
           counts: dfsCountsIngest,
-          text: `Step 4/4: Loading per-URL backlink rows from Supabase (${dfsFmtN(dfsUrlN)} pages)…`
+          text:
+            dfsUrlN > 0
+              ? `Step 4/4: Loading per-URL backlink rows from Supabase (${dfsFmtN(dfsUrlN)} pages)…`
+              : 'Step 4/4: Skipped per-page Traditional SEO cache (no URL rows). Backlinks table uses the domain index.'
         });
         await traditionalSeoDfsPagesLookupSilently();
         const okMsg =
