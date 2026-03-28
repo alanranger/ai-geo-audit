@@ -67471,6 +67471,72 @@ Final Score: ${score}/100`;
         }
       }
 
+      function mergeDashboardPageRowsWithTraditionalSeoUniverse(gscRows, segmentLookup, evaluationRows) {
+        const gsc = Array.isArray(gscRows) ? gscRows : [];
+        const evalRows = Array.isArray(evaluationRows) ? evaluationRows : [];
+        if (evalRows.length === 0) return gsc;
+
+        const gscByKey = new Map();
+        gsc.forEach((row) => {
+          const rawUrl = String(row?.url || '').trim();
+          if (!rawUrl) return;
+          const k = toDashboardSegmentUrlKey(rawUrl);
+          if (!k) return;
+          const prev = gscByKey.get(k);
+          if (!prev || String(rawUrl).length < String(prev.url || '').length) gscByKey.set(k, row);
+        });
+
+        const urlToTier = new Map();
+        evalRows.forEach((row) => {
+          if (String(row?.tier || '').toLowerCase() === 'sitewide') return;
+          const url = String(row?.url || '').trim();
+          if (!url) return;
+          if (!urlToTier.has(url)) urlToTier.set(url, String(row?.tier || 'unmapped').toLowerCase());
+        });
+        if (urlToTier.size === 0) return gsc;
+
+        const merged = [];
+        urlToTier.forEach((tierRaw, url) => {
+          const k = toDashboardSegmentUrlKey(url);
+          const hit = k ? gscByKey.get(k) : null;
+          const segment = normalizeDashboardSubsegment(tierRaw);
+          if (hit) {
+            const normUrl = normalizeDashboardRawUrl(url) || hit.url;
+            merged.push({
+              url: normUrl,
+              clicks: hit.clicks,
+              impressions: hit.impressions,
+              ctrPct: hit.ctrPct,
+              avgPosition: hit.avgPosition,
+              segment
+            });
+          } else {
+            const normUrl = normalizeDashboardRawUrl(url) || url;
+            merged.push({
+              url: normUrl,
+              clicks: 0,
+              impressions: 0,
+              ctrPct: null,
+              avgPosition: null,
+              segment
+            });
+          }
+        });
+        return merged;
+      }
+
+      async function fetchDashboardPageRowsMergedForWindow(propertyUrl, startDate, endDate, segmentLookup) {
+        const raw = await fetchDashboardPageRowsForWindow(propertyUrl, startDate, endDate, segmentLookup);
+        let evalRows =
+          typeof window.getGaioTraditionalSeoEvaluationRows === 'function'
+            ? window.getGaioTraditionalSeoEvaluationRows()
+            : [];
+        if ((!evalRows || !evalRows.length) && typeof window.peekGaioTraditionalSeoEvaluationRowsSync === 'function') {
+          evalRows = window.peekGaioTraditionalSeoEvaluationRowsSync();
+        }
+        return mergeDashboardPageRowsWithTraditionalSeoUniverse(raw, segmentLookup, evalRows);
+      }
+
       function summarizeDashboardWindowRowsBySegment(pageRows, segmentLookup = null) {
         const base = {
           landing: { clicks: 0, impressions: 0, posWeighted: 0, clickPages: new Set(), impressionPages: new Set() },
@@ -67683,7 +67749,7 @@ Final Score: ${score}/100`;
         const ninetyPrevBySegment = buildReconciledPeriodBySegment(ninetyDayWindow?.prev);
         const safeFetchWindowRows = async (startDate, endDate) => {
           if (!propertyUrl || !startDate || !endDate) return [];
-          return fetchDashboardPageRowsForWindow(propertyUrl, startDate, endDate, moneySegmentLookup);
+          return fetchDashboardPageRowsMergedForWindow(propertyUrl, startDate, endDate, moneySegmentLookup);
         };
         const [latestWindowRows, sevenWindowRows, twentyeightWindowRows, ninetyWindowRows] = await Promise.all([
           safeFetchWindowRows(latestWindow?.endDate, latestWindow?.endDate),
@@ -67716,10 +67782,16 @@ Final Score: ${score}/100`;
           fetchDashboardCanonicalTotals(propertyUrl, ninetyDayWindow?.startDate, ninetyDayWindow?.endDate),
           fetchDashboardCanonicalTotals(propertyUrl, ninetyPrevStart, ninetyPrevEnd)
         ]);
-        const applyLookupSegment = (row) => ({
-          ...row,
-          segment: resolveDashboardSubsegmentFromLookup(row?.url || '', moneySegmentLookup)
-        });
+        const applyLookupSegment = (row) => {
+          const seg =
+            row &&
+            Object.prototype.hasOwnProperty.call(row, 'segment') &&
+            row.segment != null &&
+            String(row.segment).trim() !== ''
+              ? row.segment
+              : resolveDashboardSubsegmentFromLookup(row?.url || '', moneySegmentLookup);
+          return { ...row, segment: normalizeDashboardSubsegment(seg) };
+        };
         const latestWindowRowsResolved = latestWindowRows.map(applyLookupSegment);
         const sevenWindowRowsResolved = sevenWindowRows.map(applyLookupSegment);
         const twentyeightWindowRowsResolved = twentyeightWindowRows.map(applyLookupSegment);
@@ -68143,12 +68215,23 @@ Final Score: ${score}/100`;
           }
 
           hostEl.innerHTML = `<div style="color: var(--dark-text-muted); font-size: 0.8rem;">Loading URL table...</div>`;
-          const pageRowsRaw = await fetchDashboardPageRowsForWindow(propertyUrl, period.startDate, period.endDate, moneySegmentLookup);
+          const pageRowsRaw = await fetchDashboardPageRowsMergedForWindow(
+            propertyUrl,
+            period.startDate,
+            period.endDate,
+            moneySegmentLookup
+          );
           const pageRows = Array.isArray(pageRowsRaw)
-            ? pageRowsRaw.map((row) => ({
-              ...row,
-              segment: resolveDashboardSubsegmentFromLookup(row?.url || '', moneySegmentLookup)
-            }))
+            ? pageRowsRaw.map((row) => {
+                const seg =
+                  row &&
+                  Object.prototype.hasOwnProperty.call(row, 'segment') &&
+                  row.segment != null &&
+                  String(row.segment).trim() !== ''
+                    ? row.segment
+                    : resolveDashboardSubsegmentFromLookup(row?.url || '', moneySegmentLookup);
+                return { ...row, segment: normalizeDashboardSubsegment(seg) };
+              })
             : [];
           if (pageRows.length === 0) {
             hostEl.innerHTML = `<div style="color: var(--dark-text-muted); font-size: 0.8rem;">No page rows returned for this period.</div>`;
@@ -71365,6 +71448,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       dfsTileAggregatesLoadAttempted: false
     };
 
+    window.getGaioTraditionalSeoEvaluationRows = function getGaioTraditionalSeoEvaluationRows() {
+      return Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
+    };
+
     /** SPA rewrite sends most paths to audit-dashboard.html; load disavow via API so we get real text. */
     const TRADITIONAL_SEO_DISAVOW_URL = '/api/aigeo/disavow-list';
 
@@ -72830,6 +72917,28 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         return false;
       }
     }
+
+    window.peekGaioTraditionalSeoEvaluationRowsSync = function peekGaioTraditionalSeoEvaluationRowsSync() {
+      try {
+        const prop = String(traditionalSeoPropertyUrl() || '').trim();
+        if (!prop) return [];
+        const raw = localStorage.getItem(TRADITIONAL_SEO_EVAL_LS_KEY);
+        if (!raw) return [];
+        const o = JSON.parse(raw);
+        const sp = String(o?.propertyUrl || '').trim();
+        const pkStored = String(o?.propertyKey || '').trim();
+        const pkCurrent = traditionalSeoNormalizeEvalCachePropertyKey(prop);
+        const keysOk =
+          (pkStored && pkCurrent && pkStored === pkCurrent) ||
+          traditionalSeoEvalCachePropertyKeysMatch(sp, prop) ||
+          sp === prop;
+        if (!keysOk) return [];
+        const rows = Array.isArray(o?.evaluationRows) ? o.evaluationRows : [];
+        return rows.length ? rows : [];
+      } catch (e) {
+        return [];
+      }
+    };
 
     function traditionalSeoReadBaselineFromStorage() {
       try {
