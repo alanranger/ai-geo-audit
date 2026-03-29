@@ -6806,8 +6806,8 @@
             <div style="font-weight: 700;">Traditional SEO — run controls</div>
           </div>
           <p class="traditional-seo-run-sequence-hint" id="traditional-seo-run-sequence-hint">
-            <strong>② (green)</strong> = quick rescore: saved audit + <strong>full extractability refresh</strong> for <em>every</em> URL (deduped), in <strong>batches of 25</strong>, then Traditional SEO scoring. Slower but always matches live HTML.
-            <strong>① (amber)</strong> = full site audit refresh, <em>then</em> Traditional SEO in one go — use after big site/schema changes or when crawl/GSC data feels stale.
+            <strong>② (green)</strong> = quick rescore: saved audit + <strong>full extractability refresh</strong> for <em>every</em> URL (deduped), in <strong>batches of 25</strong>, then Traditional SEO scoring. Also <strong>re-fetches GSC URL Inspection</strong> for every URL (batched server-side; can take many minutes on large sites). Slower but always matches live HTML.
+            <strong>① (amber)</strong> = full site audit refresh, <em>then</em> Traditional SEO in one go — same GSC + extract behaviour as <strong>②</strong> after the crawl — use after big site/schema changes or when crawl/GSC data feels stale.
             After <strong>①</strong>, you do <strong>not</strong> need to click <strong>②</strong>.
             <strong>Page reload</strong> restores the saved Traditional SEO matrix from the server/local cache only — it does <strong>not</strong> re-run extractability (use <strong>②</strong> when you need fresh HTML for every URL).
             <strong>③ (blue)</strong> = <strong>keyword demand + KE enrich</strong> (Keywords Everywhere): volume, per-URL traffic, URL-keyword metrics, and page backlink samples for the results table. Domain-level KE samples are no longer shown as separate tiles — use the <strong>Backlinks (DataForSEO)</strong> tile for full-index totals when enabled. <strong>DFS full index</strong> / <strong>DFS new links</strong> run when <code>TRADITIONAL_SEO_BACKLINK_INDEX_SOURCE</code> is <code>dataforseo</code> or <code>both</code>. Does <em>not</em> change Traditional SEO pass/fail.
@@ -78205,6 +78205,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const refreshAudit = options?.refreshAudit === true;
       /** Full-site HTML extract refresh is expensive; only ② / save / full-audit paths pass true. */
       const refreshExtractability = options?.refreshExtractability === true;
+      /** When true (② / ① / save rules), re-call URL Inspection for every URL; otherwise 3-day map TTL skips API. */
+      const forceGscRefresh = options?.forceGscRefresh === true;
       const rawOnly = options?.onlyRescorePageUrls;
       const priorRows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows)
         ? TRADITIONAL_SEO_STATE.evaluationRows.slice()
@@ -78277,9 +78279,15 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const rulesPrecheck = collectTraditionalSeoRulesFromTable().filter((r) => r.enabled !== false);
         const gscRuleOn = rulesPrecheck.some((r) => String(r.rule_key) === 'gsc_url_indexed');
         if (gscRuleOn) {
-          traditionalSeoEvalProgressStage('Google Search Console URL Inspection (batched; 3-day browser cache)…', 78);
+          traditionalSeoEvalProgressStage(
+            forceGscRefresh
+              ? 'Google Search Console URL Inspection (full refresh; batched, ~12 URLs per request)…'
+              : 'Google Search Console URL Inspection (batched; skipping URLs still inside 3-day cache)…',
+            78
+          );
           const gscTargets = isPartialPageRescore ? partialPageUrls : urls;
           await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, gscTargets, {
+            forceAll: forceGscRefresh,
             onChunk: (ev) => {
               if (!ev || !ev.total) return;
               const slice = 78 + Math.floor((6 * ev.done) / Math.max(1, ev.total));
@@ -78671,7 +78679,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             saveBtn.disabled = true;
             const payload = await saveTraditionalSeoRules();
             applyTraditionalSeoPayload(payload);
-            await runTraditionalSeoEvaluation({ refreshAudit: false, refreshExtractability: true });
+            await runTraditionalSeoEvaluation({
+              refreshAudit: false,
+              refreshExtractability: true,
+              forceGscRefresh: true
+            });
             if (typeof window.showStatus === 'function') {
               window.showStatus('Traditional SEO rules saved and rescored.', 'success');
             }
@@ -78687,13 +78699,21 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (runBtn && !runBtn.dataset.wired) {
         runBtn.dataset.wired = '1';
         runBtn.addEventListener('click', async () => {
-          await runTraditionalSeoEvaluation({ refreshAudit: false, refreshExtractability: true });
+          await runTraditionalSeoEvaluation({
+            refreshAudit: false,
+            refreshExtractability: true,
+            forceGscRefresh: true
+          });
         });
       }
       if (runFullBtn && !runFullBtn.dataset.wired) {
         runFullBtn.dataset.wired = '1';
         runFullBtn.addEventListener('click', async () => {
-          await runTraditionalSeoEvaluation({ refreshAudit: true, refreshExtractability: true });
+          await runTraditionalSeoEvaluation({
+            refreshAudit: true,
+            refreshExtractability: true,
+            forceGscRefresh: true
+          });
         });
       }
       if (tierFilter && !tierFilter.dataset.wired) {
