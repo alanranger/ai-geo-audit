@@ -9153,7 +9153,7 @@
                 </div>
               </div>
               <div style="display:flex;flex-direction:column;align-items:center;gap:0.2rem;flex-shrink:0;">
-                <button type="button" class="btn" id="traditional-seo-modal-gsc-inspect" style="background:#16a34a;border-color:#16a34a;color:#f8fafc;font-weight:700;">Search Console: inspect / request indexing</button>
+                <a class="btn" id="traditional-seo-modal-gsc-inspect" role="button" href="#" target="_blank" rel="noopener noreferrer" style="background:#16a34a;border-color:#16a34a;color:#f8fafc;font-weight:700;text-decoration:none;display:inline-block;">Search Console: inspect / request indexing</a>
                 <span style="font-size:0.62rem;color:#94a3b8;text-align:center;line-height:1.2;max-width:11rem;">Opens Google Search Console URL Inspection (use “Request indexing” there).</span>
               </div>
               <div style="display:flex;flex-direction:column;align-items:center;gap:0.2rem;flex-shrink:0;">
@@ -72952,6 +72952,52 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return `${u}/`;
     }
 
+    /** Match page host to URL-prefix property (www vs apex) so GSC UI and API accept url=. */
+    function traditionalSeoAlignInspectUrlToProperty(pageUrl, propertyUrl) {
+      const p = String(pageUrl || '').trim();
+      const prop = String(propertyUrl || '').trim();
+      if (!p || !prop || prop.toLowerCase().startsWith('sc-domain:')) return p;
+      if (!URL.canParse(p)) return p;
+      const baseHref = traditionalSeoNormalizeGscSiteUrlForInspect(prop);
+      if (!baseHref || !/^https?:\/\//i.test(baseHref) || !URL.canParse(baseHref)) return p;
+      try {
+        const base = new URL(baseHref);
+        const u = new URL(p);
+        const baseRoot = base.hostname.replace(/^www\./i, '').toLowerCase();
+        const pageRoot = u.hostname.replace(/^www\./i, '').toLowerCase();
+        if (baseRoot !== pageRoot) return p;
+        u.protocol = base.protocol;
+        u.hostname = base.hostname;
+        if (base.port) u.port = base.port;
+        return u.toString();
+      } catch (err) {
+        return p;
+      }
+    }
+
+    function traditionalSeoGscInspectDeepLink(pageUrl) {
+      const prop = String(traditionalSeoEffectivePropertyUrl() || traditionalSeoPropertyUrl() || '').trim();
+      const site = traditionalSeoNormalizeGscSiteUrlForInspect(prop);
+      const raw = String(pageUrl || '').trim();
+      const norm = traditionalSeoNormalizeUrl(raw, prop) || raw;
+      const page = traditionalSeoAlignInspectUrlToProperty(norm, prop);
+      if (!site || !page || !/^https?:\/\//i.test(page)) return '';
+      return `https://search.google.com/search-console/inspect?resource_id=${encodeURIComponent(site)}&url=${encodeURIComponent(page)}`;
+    }
+
+    function traditionalSeoSyncModalGscInspectHref(pageUrl) {
+      const el = document.getElementById('traditional-seo-modal-gsc-inspect');
+      if (!el) return;
+      const href = traditionalSeoGscInspectDeepLink(pageUrl);
+      if (href) {
+        el.setAttribute('href', href);
+        el.setAttribute('aria-disabled', 'false');
+      } else {
+        el.setAttribute('href', '#');
+        el.setAttribute('aria-disabled', 'true');
+      }
+    }
+
     /** Same URL shapes as keyword-metrics lookup so modal / rollup / CSV URLs share one GSC payload. */
     function traditionalSeoGscInspectTryKeys(rawUrl, propertyUrl) {
       const u = String(rawUrl || '').trim();
@@ -73300,16 +73346,16 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         TRADITIONAL_SEO_STATE.gscIndexByUrlKey = new Map();
       }
       const map = TRADITIONAL_SEO_STATE.gscIndexByUrlKey;
-      const list = (Array.isArray(urls) ? urls : [])
+      const listRaw = (Array.isArray(urls) ? urls : [])
         .map((u) => String(u || '').trim())
         .filter((u) => /^https?:\/\//i.test(u));
       const pending = [];
       const now = Date.now();
       const ttl = TRADITIONAL_SEO_GSC_INDEX_TTL_MS;
-      for (let i = 0; i < list.length; i += 1) {
-        const u = list[i];
-        if (traditionalSeoShouldExcludeUrlFromTraditionalAudit(u)) continue;
-        const key = traditionalSeoSignalMapKey(u, prop);
+      for (let i = 0; i < listRaw.length; i += 1) {
+        const uRaw = listRaw[i];
+        if (traditionalSeoShouldExcludeUrlFromTraditionalAudit(uRaw)) continue;
+        const key = traditionalSeoSignalMapKey(uRaw, prop);
         if (!key) continue;
         const prev = map.get(key);
         const forced = forceAll || (forceKeys && forceKeys.has(key));
@@ -73319,10 +73365,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           const t = Date.parse(prev.inspectedAt);
           if (Number.isFinite(t) && now - t < ttl) continue;
         }
-        pending.push({ u, key });
+        const norm = traditionalSeoNormalizeUrl(uRaw, prop) || uRaw;
+        const uReq = traditionalSeoAlignInspectUrlToProperty(norm, prop);
+        pending.push({ uRaw, uReq, key });
       }
       traditionalSeoDbg(
-        `GSC ensure: in=${list.length} pending=${pending.length} forceAll=${forceAll} forceKeys=${forceKeys ? forceKeys.size : 0}`
+        `GSC ensure: in=${listRaw.length} pending=${pending.length} forceAll=${forceAll} forceKeys=${forceKeys ? forceKeys.size : 0}`
       );
       if (!pending.length) {
         traditionalSeoDbg('GSC ensure: no pending URLs (TTL/cache or excluded)', 'info');
@@ -73330,7 +73378,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const batchSize = 12;
       for (let i = 0; i < pending.length; i += batchSize) {
         const slice = pending.slice(i, i + batchSize);
-        const urlChunk = slice.map((x) => x.u);
+        const urlChunk = slice.map((x) => x.uReq);
         traditionalSeoDbg(`GSC POST batch ${Math.floor(i / batchSize) + 1} size=${urlChunk.length}`);
         const res = await fetch(traditionalSeoApiPath('/api/aigeo/gsc-url-inspection'), {
           method: 'POST',
@@ -73360,10 +73408,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           }
           return {};
         };
-        slice.forEach(({ u }) => {
-          const hit = pickGscRowForUrl(u);
+        slice.forEach(({ uRaw, uReq }) => {
+          const hit = pickGscRowForUrl(uReq);
           const payload = {
-            inspectionUrl: u,
+            inspectionUrl: uReq,
             verdict: hit.verdict ?? null,
             coverageState: hit.coverageState ?? null,
             pageFetchState: hit.pageFetchState ?? null,
@@ -73372,7 +73420,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             apiError: hit.error || null,
             inspectedAt: new Date().toISOString()
           };
-          traditionalSeoGscInspectStoreAliases(map, prop, u, payload);
+          traditionalSeoGscInspectStoreAliases(map, prop, uRaw, payload);
         });
         if (typeof options.onChunk === 'function') {
           options.onChunk({ done: Math.min(i + batchSize, pending.length), total: pending.length });
@@ -73384,14 +73432,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     function traditionalSeoOpenGscInspectForPage(pageUrl) {
-      const prop = String(traditionalSeoEffectivePropertyUrl() || traditionalSeoPropertyUrl() || '').trim();
-      const site = traditionalSeoNormalizeGscSiteUrlForInspect(prop);
-      const page = String(pageUrl || '').trim();
-      if (!site || !page) {
+      const target = traditionalSeoGscInspectDeepLink(pageUrl);
+      if (!target) {
         if (typeof window.showStatus === 'function') window.showStatus('Set a Search Console property URL first.', 'warning');
         return;
       }
-      const target = `https://search.google.com/search-console/inspect?resource_id=${encodeURIComponent(site)}&url=${encodeURIComponent(page)}`;
       window.open(target, '_blank', 'noopener,noreferrer');
     }
 
@@ -76898,6 +76943,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (!backdrop || !urlEl || !bodyEl) return;
       const target = String(pageUrl || '');
       TRADITIONAL_SEO_STATE.modalPageUrl = target;
+      traditionalSeoSyncModalGscInspectHref(target);
       await traditionalSeoEnsureTargetKeywordOverridesLoaded();
       const all = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
       const propModal = traditionalSeoEffectivePropertyUrl();
@@ -77062,9 +77108,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const gscInspectBtn = document.getElementById('traditional-seo-modal-gsc-inspect');
       if (gscInspectBtn && !gscInspectBtn.dataset.wired) {
         gscInspectBtn.dataset.wired = '1';
-        gscInspectBtn.addEventListener('click', () => {
-          const pageUrl = String(TRADITIONAL_SEO_STATE.modalPageUrl || '').trim();
-          traditionalSeoOpenGscInspectForPage(pageUrl);
+        gscInspectBtn.addEventListener('click', (e) => {
+          const href = String(gscInspectBtn.getAttribute('href') || '').trim();
+          if (!href || href === '#') {
+            e.preventDefault();
+            if (typeof window.showStatus === 'function') window.showStatus('Set a Search Console property URL first.', 'warning');
+          }
         });
       }
       if (reauditBtn && !reauditBtn.dataset.wired) {
