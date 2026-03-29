@@ -6747,7 +6747,7 @@
           <div class="card" style="display: flex; flex-direction: column; justify-content: flex-start;">
             <div class="traditional-seo-strip-title">Pass / Warn / Fail</div>
             <div id="traditional-seo-pwf" class="traditional-seo-pwf-stack">—</div>
-            <div class="traditional-seo-strip-sub" style="margin-top: 0.15rem;">Current rule state mix for this property.</div>
+            <div class="traditional-seo-strip-sub" style="margin-top: 0.15rem;">Top row = each <strong>rule</strong> once (worst URL drives it). URL line + grid = each <strong>page</strong> once (worst rule drives it).</div>
             <div id="traditional-seo-drilldown-tiles" class="traditional-seo-drilldown-grid"></div>
           </div>
         </div>
@@ -74238,17 +74238,32 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return 'red';
     }
 
+    function traditionalSeoPwfUrlCountsForStrip() {
+      const allRows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
+      const f = TRADITIONAL_SEO_STATE.filters || {};
+      const drillBaseRows = allRows.filter((row) => traditionalSeoRowMatchesNonStatusFilters(row, f));
+      const mode = String(TRADITIONAL_SEO_STATE.resultsTableMode || 'pages');
+      const ruleIsAll = String(f.rule || 'all') === 'all';
+      return traditionalSeoDrilldownCounts(drillBaseRows, { mode, ruleAll: ruleIsAll });
+    }
+
     function traditionalSeoPwfMarkup(summary) {
       const enabled = Math.max(0, traditionalSeoToNum(summary?.enabledCount, 0));
       const passCount = Math.max(0, traditionalSeoToNum(summary?.passCount, 0));
       const warnCount = Math.max(0, traditionalSeoToNum(summary?.warnCount, 0));
       const failCount = Math.max(0, traditionalSeoToNum(summary?.failCount, 0));
-      const pills = [
-        `<button type="button" class="traditional-seo-status-pill" data-status="pass" data-filter-status="pass" title="Show pass rows">Pass ${passCount}</button>`,
-        `<button type="button" class="traditional-seo-status-pill" data-status="warn" data-filter-status="warn" title="Show warn rows">Warn ${warnCount}</button>`,
-        `<button type="button" class="traditional-seo-status-pill" data-status="fail" data-filter-status="fail" title="Show fail rows">Fail ${failCount}</button>`
+      const uc = traditionalSeoPwfUrlCountsForStrip();
+      const rulesPills = [
+        `<button type="button" class="traditional-seo-status-pill" data-status="pass" data-filter-status="pass" title="Filter table: rows with pass">Pass ${passCount}</button>`,
+        `<button type="button" class="traditional-seo-status-pill" data-status="warn" data-filter-status="warn" title="Filter table: rows with warn">Warn ${warnCount}</button>`,
+        `<button type="button" class="traditional-seo-status-pill" data-status="fail" data-filter-status="fail" title="Filter table: rows with fail">Fail ${failCount}</button>`
       ].join('');
-      return `<div class="traditional-seo-strip-sub" style="margin:0 0 0.1rem 0;"><strong style="color:var(--dark-text);">${enabled}</strong> rules enabled · weighted checks in score</div><div class="traditional-seo-pwf-row">${pills}</div>`;
+      return [
+        `<div class="traditional-seo-strip-sub" style="margin:0 0 0.12rem 0;font-size:0.78rem;color:var(--dark-text-muted);"><strong>Rules</strong> (${enabled} on) — one pill per rule; numbers sum to ~${enabled}, not URL count.</div>`,
+        `<div class="traditional-seo-pwf-row">${rulesPills}</div>`,
+        `<div class="traditional-seo-strip-sub" style="margin:0.5rem 0 0.12rem 0;font-size:0.78rem;color:var(--dark-text-muted);"><strong>URLs</strong> — same logic as the four tiles below (worst rule per URL).</div>`,
+        `<div class="traditional-seo-strip-sub" style="margin:0 0 0.1rem 0;"><strong style="color:var(--dark-text);">${uc.all}</strong> URLs · pass <strong>${uc.pass}</strong> · warn <strong>${uc.warn}</strong> · fail <strong>${uc.fail}</strong></div>`
+      ].join('');
     }
 
     function traditionalSeoNormalizeUrl(rawUrl, propertyUrl = '') {
@@ -76718,7 +76733,33 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         return `${head}${body}${codes}${det}`;
       }
       if (rk === 'gsc_url_indexed') {
-        const gsc = traditionalSeoGscInspectGet(prop, pageUrl);
+        const tryUrls = new Set();
+        [pageUrl, row?.url].forEach((u) => {
+          const s = String(u || '').trim();
+          if (s) tryUrls.add(s);
+        });
+        traditionalSeoLandingComparableVariants(pageUrl, prop).forEach((v) => {
+          if (v) tryUrls.add(v);
+        });
+        if (row?.url) {
+          traditionalSeoLandingComparableVariants(row.url, prop).forEach((v) => {
+            if (v) tryUrls.add(v);
+          });
+        }
+        let gsc = null;
+        for (const u of tryUrls) {
+          gsc = traditionalSeoGscInspectGet(prop, u);
+          if (gsc) break;
+        }
+        if (!gsc) {
+          for (const u of tryUrls) {
+            const sig = traditionalSeoSignalMapGet(maps.gscIndexInspect, u, prop);
+            if (sig) {
+              gsc = sig;
+              break;
+            }
+          }
+        }
         if (!gsc) return 'No GSC inspection cached — run ② Traditional SEO or re-audit this rule to fetch URL Inspection data.';
         const audit = traditionalSeoGscInspectDeriveStatus(pageUrl, gsc);
         const idx =
@@ -77936,6 +77977,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           ? ' · Loading kw cache…'
           : '';
         meta.textContent = `${totalFiltered} ${modeLbl} match filters${pageHint}${tail} · Last run: ${formatTraditionalSeoTimestamp(TRADITIONAL_SEO_STATE.lastEvaluationAt)} · Kw demand TTL: ${ttl}d${kmBusy}${kmNote}`;
+      }
+      {
+        const s = computeTraditionalSeoSummary(TRADITIONAL_SEO_STATE.rules || []);
+        renderTraditionalSeoScore(s, traditionalSeoComputeScoreDelta(s));
       }
       updateTraditionalSeoSortHeaderState();
       renderTraditionalSeoDfsBacklinkTiles();
