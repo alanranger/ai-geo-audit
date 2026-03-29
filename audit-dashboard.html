@@ -9152,6 +9152,10 @@
                 </div>
               </div>
               <div style="display:flex;flex-direction:column;align-items:center;gap:0.2rem;flex-shrink:0;">
+                <button type="button" class="btn" id="traditional-seo-modal-gsc-inspect" style="background:#16a34a;border-color:#16a34a;color:#f8fafc;font-weight:700;">Search Console: inspect / request indexing</button>
+                <span style="font-size:0.62rem;color:#94a3b8;text-align:center;line-height:1.2;max-width:11rem;">Opens Google Search Console URL Inspection (use “Request indexing” there).</span>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:0.2rem;flex-shrink:0;">
                 <button type="button" class="btn" id="traditional-seo-page-modal-reaudit" style="background:#f59e0b;border-color:#f59e0b;color:#0f172a;font-weight:700;">Re-audit page</button>
                 <span id="traditional-seo-page-modal-reaudit-last" style="font-size:0.62rem;color:#94a3b8;text-align:center;line-height:1.2;max-width:9rem;">Last run: —</span>
               </div>
@@ -71414,6 +71418,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       keywordMetricsRefreshInFlight: false,
       keywordMetricsStaleDays: 30,
       keywordMetricsLastNote: '',
+      /** Map: traditionalSeoSignalMapKey(url, property) → last GSC URL Inspection payload (browser + localStorage). */
+      gscIndexByUrlKey: null,
       /** Domain-level KE cache row (Moz DA + referring domains sample) from keyword-target-metrics API. */
       keDomainMetrics: null,
       /** Domain-level DataForSEO backlinks/summary/live cache (Supabase via API). */
@@ -71585,6 +71591,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     const TRADITIONAL_SEO_BASELINE_RULES = [
+      { rule_key: 'gsc_url_indexed', rule_name: 'Indexed in Google (GSC URL Inspection)', description: 'Uses Search Console URL Inspection API. Pass when coverage is “Submitted and indexed” (or equivalent PASS). Warn when crawled but not indexed, redirect, or data not yet fetched. Fail when URL is unknown to Google. Intentional noindex passes. Highest weight: if the page is not in the index, other on-page wins are secondary.', category: 'indexation', severity: 'critical', scope: 'page', current_status: 'pass', enabled: true, weight: 3.0, sort_order: 2 },
       { rule_key: 'title_tag_present', rule_name: 'Title length (50–60 chars)', description: 'Best practice: title 50–60 characters. Prefers live HTML <title> from Extractability when available; otherwise schema crawl title.', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.5, sort_order: 10 },
       { rule_key: 'meta_description_present', rule_name: 'Meta description length (150–165 chars)', description: 'Pass if meta description is 150–165 chars (whitespace + numeric entities like &#124; normalized). Uses Extract HTML meta when present. Schema-only text over 165 chars is WARN (schema often longer than real <meta>). Warn if both missing.', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 20 },
       { rule_key: 'single_h1', rule_name: 'Exactly one H1', description: 'Fail if zero or more than one H1 (Extractability HTML). Exception: under /photo-workshops-uk/ and /photography-services-near-me/ pass if at least one H1 (Squarespace product grids use extra H1s).', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 30 },
@@ -72793,6 +72800,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     const TRADITIONAL_SEO_BASELINE_LS_KEY = 'gaio_traditional_seo_baseline_v1';
     const TRADITIONAL_SEO_EVAL_LS_KEY = 'gaio_traditional_seo_evaluation_v1';
+    const TRADITIONAL_SEO_GSC_INDEX_LS_KEY = 'gaio_traditional_seo_gsc_index_v1';
+    const TRADITIONAL_SEO_GSC_INDEX_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 
     function traditionalSeoNormalizeEvalCachePropertyKey(raw) {
       const s = String(raw || '').trim();
@@ -72828,6 +72837,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       traditionalSeoPopulateRuleFilter(TRADITIONAL_SEO_STATE.rules || []);
       renderTraditionalSeoResultsTable();
       void traditionalSeoKeywordMetricsLookupIfNeededForRun();
+      traditionalSeoHydrateGscIndexFromStorage();
     }
 
     function traditionalSeoWriteEvaluationLocalStorage() {
@@ -72916,6 +72926,150 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       } catch (e) {
         return false;
       }
+    }
+
+    function traditionalSeoNormalizeGscSiteUrlForInspect(raw) {
+      const s = String(raw || '').trim();
+      if (!s) return '';
+      if (s.startsWith('sc-domain:')) return s;
+      let u = s;
+      if (!/^https?:\/\//i.test(u)) u = `https://${u}`;
+      u = u.replace(/\/+$/, '');
+      return `${u}/`;
+    }
+
+    function traditionalSeoGscInspectGet(propertyUrl, pageUrl) {
+      const prop = String(propertyUrl || '').trim();
+      const key = traditionalSeoSignalMapKey(pageUrl, prop);
+      const m = TRADITIONAL_SEO_STATE.gscIndexByUrlKey;
+      if (!(m instanceof Map) || !key) return null;
+      return m.get(key) || null;
+    }
+
+    function traditionalSeoHydrateGscIndexFromStorage() {
+      try {
+        const prop = String(traditionalSeoPropertyUrl() || '').trim();
+        if (!prop) return;
+        const pkCurrent = traditionalSeoNormalizeEvalCachePropertyKey(prop);
+        const raw = localStorage.getItem(TRADITIONAL_SEO_GSC_INDEX_LS_KEY);
+        if (!raw) return;
+        const o = JSON.parse(raw);
+        const pkStored = String(o?.propertyKey || '').trim();
+        if (!pkStored || pkStored !== pkCurrent) return;
+        const ent = o?.entries && typeof o.entries === 'object' ? o.entries : {};
+        const m = new Map();
+        Object.keys(ent).forEach((k) => {
+          if (ent[k] && typeof ent[k] === 'object') m.set(k, ent[k]);
+        });
+        TRADITIONAL_SEO_STATE.gscIndexByUrlKey = m;
+      } catch (e) {
+        /* ignore */
+      }
+    }
+
+    function traditionalSeoPersistGscIndexToStorage() {
+      try {
+        const prop = String(traditionalSeoPropertyUrl() || '').trim();
+        const pk = traditionalSeoNormalizeEvalCachePropertyKey(prop);
+        const m = TRADITIONAL_SEO_STATE.gscIndexByUrlKey;
+        if (!pk || !(m instanceof Map) || !m.size) return;
+        const entries = {};
+        m.forEach((v, k) => {
+          entries[k] = v;
+        });
+        localStorage.setItem(
+          TRADITIONAL_SEO_GSC_INDEX_LS_KEY,
+          JSON.stringify({
+            v: 1,
+            propertyKey: pk,
+            updatedAt: new Date().toISOString(),
+            entries
+          })
+        );
+      } catch (e) {
+        /* Quota / private mode */
+      }
+    }
+
+    function traditionalSeoRuleNeedsGscIndexInspect(ruleKey) {
+      return String(ruleKey || '').toLowerCase() === 'gsc_url_indexed';
+    }
+
+    async function traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, urls, options = {}) {
+      const prop = String(propertyUrl || '').trim();
+      if (!prop) return;
+      const forceKeys = options.forceKeys instanceof Set ? options.forceKeys : null;
+      const forceAll = options.forceAll === true;
+      if (!(TRADITIONAL_SEO_STATE.gscIndexByUrlKey instanceof Map)) {
+        TRADITIONAL_SEO_STATE.gscIndexByUrlKey = new Map();
+      }
+      const map = TRADITIONAL_SEO_STATE.gscIndexByUrlKey;
+      const list = (Array.isArray(urls) ? urls : [])
+        .map((u) => String(u || '').trim())
+        .filter((u) => /^https?:\/\//i.test(u));
+      const pending = [];
+      const now = Date.now();
+      const ttl = TRADITIONAL_SEO_GSC_INDEX_TTL_MS;
+      for (let i = 0; i < list.length; i += 1) {
+        const u = list[i];
+        if (traditionalSeoShouldExcludeUrlFromTraditionalAudit(u)) continue;
+        const key = traditionalSeoSignalMapKey(u, prop);
+        if (!key) continue;
+        const prev = map.get(key);
+        const forced = forceAll || (forceKeys && forceKeys.has(key));
+        if (!forced && prev && prev.inspectedAt) {
+          const t = Date.parse(prev.inspectedAt);
+          if (Number.isFinite(t) && now - t < ttl) continue;
+        }
+        pending.push({ u, key });
+      }
+      const batchSize = 12;
+      for (let i = 0; i < pending.length; i += batchSize) {
+        const slice = pending.slice(i, i + batchSize);
+        const urlChunk = slice.map((x) => x.u);
+        const res = await fetch(traditionalSeoApiPath('/api/aigeo/gsc-url-inspection'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ propertyUrl: prop, urls: urlChunk })
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || String(json?.status || '').toLowerCase() !== 'ok') {
+          const msg = json?.message || `GSC URL Inspection failed (${res.status})`;
+          throw new Error(msg);
+        }
+        const rows = Array.isArray(json?.results) ? json.results : [];
+        const byUrl = new Map(rows.map((r) => [String(r?.inspectionUrl || '').trim(), r]));
+        slice.forEach(({ u, key }) => {
+          const hit = byUrl.get(String(u).trim()) || {};
+          map.set(key, {
+            inspectionUrl: u,
+            verdict: hit.verdict ?? null,
+            coverageState: hit.coverageState ?? null,
+            pageFetchState: hit.pageFetchState ?? null,
+            googleCanonical: hit.googleCanonical ?? null,
+            httpOk: hit.httpOk === true,
+            apiError: hit.error || null,
+            inspectedAt: new Date().toISOString()
+          });
+        });
+        if (typeof options.onChunk === 'function') {
+          options.onChunk({ done: Math.min(i + batchSize, pending.length), total: pending.length });
+        }
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      traditionalSeoPersistGscIndexToStorage();
+    }
+
+    function traditionalSeoOpenGscInspectForPage(pageUrl) {
+      const prop = String(traditionalSeoEffectivePropertyUrl() || traditionalSeoPropertyUrl() || '').trim();
+      const site = traditionalSeoNormalizeGscSiteUrlForInspect(prop);
+      const page = String(pageUrl || '').trim();
+      if (!site || !page) {
+        if (typeof window.showStatus === 'function') window.showStatus('Set a Search Console property URL first.', 'warning');
+        return;
+      }
+      const target = `https://search.google.com/search-console/inspect?resource_id=${encodeURIComponent(site)}&url=${encodeURIComponent(page)}`;
+      window.open(target, '_blank', 'noopener,noreferrer');
     }
 
     window.peekGaioTraditionalSeoEvaluationRowsSync = function peekGaioTraditionalSeoEvaluationRowsSync() {
@@ -73271,6 +73425,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         await traditionalSeoMergeExtractabilityForUrl(propertyUrl, urlsArg[0], payload);
         if (typeof window.showStatus === 'function') {
           window.showStatus('Page refreshed. Re-scoring this URL only…', 'info');
+        }
+        try {
+          const fk = new Set(
+            urlsArg
+              .map((u) => traditionalSeoSignalMapKey(u, propertyUrl))
+              .filter(Boolean)
+          );
+          await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, urlsArg, { forceKeys: fk });
+        } catch (gscErr) {
+          if (typeof window.showStatus === 'function') {
+            window.showStatus(`GSC URL Inspection refresh skipped: ${gscErr?.message || gscErr}`, 'warning');
+          }
         }
         await runTraditionalSeoEvaluation({ refreshAudit: false, onlyRescorePageUrls: urlsArg });
         await traditionalSeoOpenPageModal(url);
@@ -73801,6 +73967,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           sort_order: traditionalSeoToNum(remoteRule.sort_order, baseRule.sort_order)
         };
         const canonicalRuleCopy = new Set([
+          'gsc_url_indexed',
           'url_slug_word_count',
           'meta_description_present',
           'h1_length_best_practice',
@@ -74766,7 +74933,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         extractability: new Map(),
         qaGate: new Map(),
         localBusiness: new Map(),
-        serviceSchema: new Map()
+        serviceSchema: new Map(),
+        gscIndexInspect: new Map()
       };
       const toKey = (value) => traditionalSeoSignalMapKey(value, propertyUrl);
 
@@ -74835,6 +75003,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           maps.serviceSchema.set(aliases[i], row);
         }
       });
+      const gscStash = TRADITIONAL_SEO_STATE.gscIndexByUrlKey;
+      if (gscStash instanceof Map && gscStash.size) {
+        gscStash.forEach((val, k) => maps.gscIndexInspect.set(k, val));
+      }
       return maps;
     }
 
@@ -75034,6 +75206,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const schemaSignal = traditionalSeoSignalMapGetWithUrlAliases(maps.schemaPage, url, propertyUrl);
       const techSignal = traditionalSeoSignalMapGet(maps.techIndexability, url, propertyUrl);
       const extractSignal = traditionalSeoSignalMapGet(maps.extractability, url, propertyUrl);
+      const gscInspectSignal = traditionalSeoSignalMapGet(maps.gscIndexInspect, url, propertyUrl);
       const qaSignal = traditionalSeoSignalMapGetWithUrlAliases(maps.qaGate, url, propertyUrl);
       const qaIssues = Array.isArray(qaSignal?.issues) ? qaSignal.issues : [];
       const qaDetails = Array.isArray(qaSignal?.issueDetails) ? qaSignal.issueDetails : [];
@@ -75056,6 +75229,26 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (!techSignal) return 'warn';
         if (techSignal.googleIndexed === true) return 'pass';
         if (techSignal.googleIndexed === false) return 'fail';
+        return 'warn';
+      }
+      if (key === 'gsc_url_indexed') {
+        if (traditionalSeoShouldExcludeUrlFromTraditionalAudit(url)) return 'pass';
+        const gsc = gscInspectSignal || traditionalSeoGscInspectGet(propertyUrl, url);
+        if (!gsc) return 'warn';
+        if (gsc.apiError) return 'warn';
+        if (gsc.httpOk === false) return 'warn';
+        const covRaw = String(gsc.coverageState || '');
+        const cl = covRaw.toLowerCase();
+        if (cl.includes('submitted') && cl.includes('indexed')) return 'pass';
+        if (cl.includes('duplicate') && cl.includes('google')) return 'pass';
+        if (cl.includes('user') && cl.includes('canonical')) return 'pass';
+        if (cl.includes('noindex')) return 'pass';
+        if (cl.includes('unknown to google')) return 'fail';
+        if (cl.includes('not indexed') || cl.includes('currently not indexed')) return 'warn';
+        if (cl.includes('redirect')) return 'warn';
+        const ver = String(gsc.verdict || '').toUpperCase();
+        if (ver === 'PASS') return 'pass';
+        if (ver === 'FAIL') return 'fail';
         return 'warn';
       }
       if (key === 'https_enforced') {
@@ -76298,6 +76491,21 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const body = sm ? ` ${sm}` : '';
         return `${head}${body}${codes}${det}`;
       }
+      if (rk === 'gsc_url_indexed') {
+        const gsc = traditionalSeoGscInspectGet(prop, pageUrl);
+        if (!gsc) return 'No GSC inspection cached — run ② Traditional SEO or re-audit this rule to fetch URL Inspection data.';
+        const parts = [
+          gsc.coverageState ? `Coverage: ${gsc.coverageState}` : '',
+          gsc.verdict ? `Verdict: ${gsc.verdict}` : '',
+          gsc.pageFetchState ? `Fetch: ${gsc.pageFetchState}` : '',
+          gsc.googleCanonical ? `Google canonical: ${gsc.googleCanonical}` : '',
+          gsc.inspectedAt ? `Inspected: ${gsc.inspectedAt}` : ''
+        ].filter(Boolean);
+        if (gsc.apiError) {
+          parts.push(`API: ${typeof gsc.apiError === 'string' ? gsc.apiError : JSON.stringify(gsc.apiError).slice(0, 200)}`);
+        }
+        return parts.length ? parts.join(' · ') : base;
+      }
       if (rk === 'keyword_in_title' || rk === 'keyword_in_meta' || rk === 'keyword_in_h1' || rk === 'keyword_slug_tokens' || rk === 'keyword_in_intro') {
         const tk = String(row?.target_keyword || '').trim();
         if (!tk) return 'No target keyword mapped for this URL (GitHub CSV 07 or Supabase override). Rule scores WARN.';
@@ -76452,6 +76660,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (closeBtn && !closeBtn.dataset.wired) {
         closeBtn.dataset.wired = '1';
         closeBtn.addEventListener('click', () => traditionalSeoClosePageModal());
+      }
+      const gscInspectBtn = document.getElementById('traditional-seo-modal-gsc-inspect');
+      if (gscInspectBtn && !gscInspectBtn.dataset.wired) {
+        gscInspectBtn.dataset.wired = '1';
+        gscInspectBtn.addEventListener('click', () => {
+          const pageUrl = String(TRADITIONAL_SEO_STATE.modalPageUrl || '').trim();
+          traditionalSeoOpenGscInspectForPage(pageUrl);
+        });
       }
       if (reauditBtn && !reauditBtn.dataset.wired) {
         reauditBtn.dataset.wired = '1';
@@ -77654,6 +77870,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           traditionalSeoEvalProgressStage('Skipping extractability refresh (rule uses audit/schema/tech signals only)…', 40);
         }
 
+        if (traditionalSeoRuleNeedsGscIndexInspect(ruleKey)) {
+          traditionalSeoEvalProgressStage('Google Search Console URL Inspection (full refresh for this rule)…', 52);
+          await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, urls, { forceAll: true });
+        }
+
         traditionalSeoEvalProgressStage('Building signals and loading overrides…', 78);
         const implPayloads = await traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl, urls.length);
         const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
@@ -77821,19 +78042,32 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                 traditionalSeoEvalProgressStage('Extractability: no https URLs in list to refresh', 52);
               }
             });
-          } else {
-            traditionalSeoEvalProgressStage(
-              'Using cached extractability (no full-site HTML refresh). Click ② to refetch all pages.',
-              52
-            );
-            await new Promise((resolve) => setTimeout(resolve, 0));
-          }
+        } else {
+          traditionalSeoEvalProgressStage(
+            'Using cached extractability (no full-site HTML refresh). Click ② to refetch all pages.',
+            52
+          );
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
         } else {
           traditionalSeoEvalProgressStage(
             'Skipping full-site extract refresh (this page was just refreshed)…',
             52
           );
           await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+        const rulesPrecheck = collectTraditionalSeoRulesFromTable().filter((r) => r.enabled !== false);
+        const gscRuleOn = rulesPrecheck.some((r) => String(r.rule_key) === 'gsc_url_indexed');
+        if (gscRuleOn) {
+          traditionalSeoEvalProgressStage('Google Search Console URL Inspection (batched; 3-day browser cache)…', 78);
+          const gscTargets = isPartialPageRescore ? partialPageUrls : urls;
+          await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, gscTargets, {
+            onChunk: (ev) => {
+              if (!ev || !ev.total) return;
+              const slice = 78 + Math.floor((6 * ev.done) / Math.max(1, ev.total));
+              traditionalSeoEvalProgressStage(`GSC inspection batches ${ev.done}/${ev.total}…`, Math.min(84, slice));
+            }
+          });
         }
         traditionalSeoEvalProgressStage('Building signals and loading overrides…', 86);
         const implPayloads = await traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl, urls.length);
@@ -79651,6 +79885,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         let hydrated = await traditionalSeoHydrateEvaluationFromServer();
         if (!hydrated) {
           hydrated = traditionalSeoHydrateEvaluationFromStorage();
+        }
+        if (!hydrated) {
+          traditionalSeoHydrateGscIndexFromStorage();
         }
         /* Do not auto-run scoring on load: that re-fetched extractability for every URL. Restore from server/localStorage only; use ② for a full HTML refresh + rescore. */
       } catch (err) {
