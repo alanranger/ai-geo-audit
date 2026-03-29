@@ -73054,7 +73054,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     function traditionalSeoApplyServerGscCacheRows(dbRows) {
-      const prop = String(traditionalSeoPropertyUrl() || '').trim();
+      const prop = String(traditionalSeoEffectivePropertyUrl() || '').trim();
       if (!prop || !Array.isArray(dbRows) || !dbRows.length) return 0;
       if (!(TRADITIONAL_SEO_STATE.gscIndexByUrlKey instanceof Map)) {
         TRADITIONAL_SEO_STATE.gscIndexByUrlKey = new Map();
@@ -73138,7 +73138,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     async function traditionalSeoHydrateGscCacheFromServer() {
-      const prop = String(traditionalSeoPropertyUrl() || '').trim();
+      const prop = String(traditionalSeoEffectivePropertyUrl() || '').trim();
       if (!prop) return 0;
       try {
         const q = new URLSearchParams();
@@ -73156,7 +73156,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     function traditionalSeoHydrateGscIndexFromStorage() {
       try {
-        const prop = String(traditionalSeoPropertyUrl() || '').trim();
+        const prop = String(traditionalSeoEffectivePropertyUrl() || '').trim();
         if (!prop) return;
         const pkCurrent = traditionalSeoNormalizeEvalCachePropertyKey(prop);
         const raw = localStorage.getItem(TRADITIONAL_SEO_GSC_INDEX_LS_KEY);
@@ -73177,7 +73177,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     function traditionalSeoPersistGscIndexToStorage() {
       try {
-        const prop = String(traditionalSeoPropertyUrl() || '').trim();
+        const prop = String(traditionalSeoEffectivePropertyUrl() || '').trim();
         const pk = traditionalSeoNormalizeEvalCachePropertyKey(prop);
         const m = TRADITIONAL_SEO_STATE.gscIndexByUrlKey;
         if (!pk || !(m instanceof Map) || !m.size) return;
@@ -74811,7 +74811,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     async function traditionalSeoLoadAuditData(preferFresh = false) {
-      const propertyUrl = traditionalSeoPropertyUrl();
+      const propertyUrl = String(traditionalSeoEffectivePropertyUrl() || '').trim();
       if (preferFresh && propertyUrl && typeof window.fetchLatestAuditFromSupabase === 'function') {
         try {
           const latest = await window.fetchLatestAuditFromSupabase(propertyUrl, false);
@@ -78064,7 +78064,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         traditionalSeoEvalProgressStage('Loading saved audit data…', 10);
         const audit = await traditionalSeoLoadAuditData(true);
         if (!audit) throw new Error('No audit data available. Run a full audit first.');
-        const propertyUrl = traditionalSeoPropertyUrl();
+        const propertyUrl = String(traditionalSeoEffectivePropertyUrl() || '').trim();
         traditionalSeoEvalProgressStage('Collecting URLs and GSC metrics…', 18);
         const rawUrls = await traditionalSeoCollectUrls(audit, propertyUrl);
         const urls = Array.isArray(rawUrls) ? rawUrls.slice() : [];
@@ -78097,7 +78097,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const implPayloads = await traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl, urls.length);
         const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
         TRADITIONAL_SEO_STATE.lastSignalMaps = signalMaps;
-        TRADITIONAL_SEO_STATE.lastPropertyUrl = propertyUrl;
+        if (propertyUrl) TRADITIONAL_SEO_STATE.lastPropertyUrl = propertyUrl;
         await traditionalSeoEnsureRuleOverridesLoaded();
 
         const techFoundation = traditionalSeoReadTechFoundation(implPayloads.tech);
@@ -78238,7 +78238,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         traditionalSeoEvalProgressStage('Loading saved audit data…', 10);
         const audit = await traditionalSeoLoadAuditData(true);
         if (!audit) throw new Error('No audit data available. Run a full audit first.');
-        const propertyUrl = traditionalSeoPropertyUrl();
+        const propertyUrl = String(traditionalSeoEffectivePropertyUrl() || '').trim();
         traditionalSeoEvalProgressStage('Collecting URLs and GSC metrics…', 18);
         const rawUrls = await traditionalSeoCollectUrls(audit, propertyUrl);
         // Keep full 06-site-urls list (e.g. 505). Utility/login rows still pass indexation rules via rule logic.
@@ -78291,7 +78291,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const implPayloads = await traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl, urls.length);
         const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
         TRADITIONAL_SEO_STATE.lastSignalMaps = signalMaps;
-        TRADITIONAL_SEO_STATE.lastPropertyUrl = propertyUrl;
+        if (propertyUrl) TRADITIONAL_SEO_STATE.lastPropertyUrl = propertyUrl;
         await traditionalSeoEnsureRuleOverridesLoaded();
         const sourceParity = await traditionalSeoComputeSourceParity(propertyUrl);
         TRADITIONAL_SEO_STATE.sourceParity = sourceParity;
