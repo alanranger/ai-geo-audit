@@ -1,6 +1,6 @@
 /**
  * Mirrors dashboard traditionalSeoAggregateRuleStatus (audit-dashboard.html).
- * Proves why "Rules" row can show 0 WARN while many URLs are WARN: one rule
+ * Proves why the rules row can show PASS/WARN while many URLs differ: one rule
  * with any FAIL aggregates to FAIL for the whole ruleset row.
  */
 import { test } from 'node:test';
@@ -22,9 +22,9 @@ test('gsc_url_indexed: 504 warn + 2 fail => rule aggregates to fail (not warn)',
   assert.equal(aggregateRuleStatus(rows, 'gsc_url_indexed'), 'fail');
 });
 
-test('gsc_url_indexed: all warn => rule warn', () => {
-  const rows = Array.from({ length: 20 }, () => ({ rule_key: 'gsc_url_indexed', status: 'warn' }));
-  assert.equal(aggregateRuleStatus(rows, 'gsc_url_indexed'), 'warn');
+test('gsc_url_indexed: all fail => rule fail', () => {
+  const rows = Array.from({ length: 20 }, () => ({ rule_key: 'gsc_url_indexed', status: 'fail' }));
+  assert.equal(aggregateRuleStatus(rows, 'gsc_url_indexed'), 'fail');
 });
 
 test('other rule: all pass => pass', () => {

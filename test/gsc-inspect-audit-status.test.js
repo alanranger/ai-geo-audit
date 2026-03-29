@@ -27,23 +27,23 @@ test('deriveGscUrlIndexedStatus: submitted and indexed => pass', () => {
   );
 });
 
-test('deriveGscUrlIndexedStatus: no payload => warn', () => {
-  assert.equal(deriveGscUrlIndexedStatus(page, null), 'warn');
+test('deriveGscUrlIndexedStatus: no payload => fail', () => {
+  assert.equal(deriveGscUrlIndexedStatus(page, null), 'fail');
 });
 
-test('deriveGscUrlIndexedStatus: API http not ok => warn', () => {
+test('deriveGscUrlIndexedStatus: API http not ok => fail', () => {
   assert.equal(
     deriveGscUrlIndexedStatus(page, { httpOk: false, coverageState: null }),
-    'warn'
+    'fail'
   );
 });
 
-test('deriveGscUrlIndexedStatus: crawled not indexed => warn', () => {
+test('deriveGscUrlIndexedStatus: crawled not indexed => fail', () => {
   assert.equal(
     deriveGscUrlIndexedStatus(page, {
       httpOk: true,
       coverageState: 'Crawled - currently not indexed',
     }),
-    'warn'
+    'fail'
   );
 });

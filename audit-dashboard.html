@@ -71600,7 +71600,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     const TRADITIONAL_SEO_BASELINE_RULES = [
-      { rule_key: 'gsc_url_indexed', rule_name: 'Indexed in Google (GSC URL Inspection)', description: 'Uses Search Console URL Inspection API. Pass when coverage is “Submitted and indexed” (or equivalent PASS). Warn when crawled but not indexed, redirect, or data not yet fetched. Fail when URL is unknown to Google. Intentional noindex passes. Highest weight: if the page is not in the index, other on-page wins are secondary.', category: 'indexation', severity: 'critical', scope: 'page', current_status: 'pass', enabled: true, weight: 3.0, sort_order: 2 },
+      { rule_key: 'gsc_url_indexed', rule_name: 'Indexed in Google (GSC URL Inspection)', description: 'Uses Search Console URL Inspection (and server cache when present). Pass only when GSC confirms indexed (e.g. Submitted and indexed), duplicate/user-canonical equivalents, or intentional noindex. Fail for unknown to Google, crawled-not-indexed, redirect, API errors, or missing inspection data. Binary pass/fail (no warn).', category: 'indexation', severity: 'critical', scope: 'page', current_status: 'pass', enabled: true, weight: 3.0, sort_order: 2 },
       { rule_key: 'title_tag_present', rule_name: 'Title length (50–60 chars)', description: 'Best practice: title 50–60 characters. Prefers live HTML <title> from Extractability when available; otherwise schema crawl title.', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.5, sort_order: 10 },
       { rule_key: 'meta_description_present', rule_name: 'Meta description length (150–165 chars)', description: 'Pass if meta description is 150–165 chars (whitespace + numeric entities like &#124; normalized). Uses Extract HTML meta when present. Schema-only text over 165 chars is WARN (schema often longer than real <meta>). Warn if both missing.', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 20 },
       { rule_key: 'single_h1', rule_name: 'Exactly one H1', description: 'Fail if zero or more than one H1 (Extractability HTML). Exception: under /photo-workshops-uk/ and /photography-services-near-me/ pass if at least one H1 (Squarespace product grids use extra H1s).', category: 'on-page', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 30 },
@@ -73049,9 +73049,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     function traditionalSeoGscInspectDeriveStatus(pageUrl, gsc) {
       if (traditionalSeoShouldExcludeUrlFromTraditionalAudit(pageUrl)) return 'pass';
-      if (!gsc) return 'warn';
-      if (gsc.apiError) return 'warn';
-      if (gsc.httpOk === false) return 'warn';
+      if (!gsc) return 'fail';
+      if (gsc.apiError) return 'fail';
+      if (gsc.httpOk === false) return 'fail';
       const covRaw = String(gsc.coverageState || '');
       const cl = covRaw.toLowerCase();
       if (cl.includes('submitted') && cl.includes('indexed')) return 'pass';
@@ -73059,12 +73059,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (cl.includes('user') && cl.includes('canonical')) return 'pass';
       if (cl.includes('noindex')) return 'pass';
       if (cl.includes('unknown to google')) return 'fail';
-      if (cl.includes('not indexed') || cl.includes('currently not indexed')) return 'warn';
-      if (cl.includes('redirect')) return 'warn';
+      if (cl.includes('not indexed') || cl.includes('currently not indexed')) return 'fail';
+      if (cl.includes('redirect')) return 'fail';
       const ver = String(gsc.verdict || '').toUpperCase();
       if (ver === 'PASS') return 'pass';
       if (ver === 'FAIL') return 'fail';
-      return 'warn';
+      return 'fail';
     }
 
     function traditionalSeoApplyServerGscCacheRows(dbRows) {
@@ -76002,7 +76002,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const q = String(filt.query).toLowerCase();
         const u = String(row?.url || '').toLowerCase();
         const kw = String(row?.target_keyword || '').toLowerCase();
-        if (!u.includes(q) && !kw.includes(q)) return false;
+        const rk = String(row?.rule_key || '').toLowerCase();
+        const rn = String(row?.rule_name || '').toLowerCase();
+        if (!u.includes(q) && !kw.includes(q) && !rk.includes(q) && !rn.includes(q)) return false;
       }
       return true;
     }

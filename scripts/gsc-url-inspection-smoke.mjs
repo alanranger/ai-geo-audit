@@ -22,8 +22,8 @@ import { fileURLToPath } from 'url';
 import { dirname, join, resolve as pathResolve } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: join(__dirname, '..', '.env.local') });
-dotenv.config({ path: join(__dirname, '..', '.env') });
+dotenv.config({ path: join(__dirname, '..', '.env.local'), override: true });
+dotenv.config({ path: join(__dirname, '..', '.env'), override: true });
 
 const DEFAULT_SITE = process.env.GSC_PROPERTY_URL || 'https://www.alanranger.com/';
 const DEFAULT_URLS = [
