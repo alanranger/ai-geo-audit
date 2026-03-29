@@ -10080,7 +10080,7 @@
     console.log('Page URL:', window.location.href);
 
     // Build id is logged for verification only (no forced URL changes).
-    const BUILD_ID = '2026-03-29T19-05Z';
+    const BUILD_ID = '2026-03-29T20-20Z';
     window.__BUILD_ID__ = BUILD_ID;
     console.log('Build ID:', BUILD_ID);
     try {
@@ -76924,6 +76924,44 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         return String(a.rule_name || '').localeCompare(String(b.rule_name || ''));
       });
       await traditionalSeoLazyEnsureGscForPageModal(target, propModal);
+      const gscRk = 'gsc_url_indexed';
+      const gscRow = byRuleKey.get(gscRk);
+      if (gscRow && propModal) {
+        const seeds = new Set([target]);
+        traditionalSeoLandingComparableVariants(target, propModal).forEach((s) => {
+          if (s) seeds.add(s);
+        });
+        let gscPayload = null;
+        for (const u of seeds) {
+          gscPayload = traditionalSeoGscInspectGet(propModal, u);
+          if (gscPayload) break;
+        }
+        if (!gscPayload) {
+          const gim = TRADITIONAL_SEO_STATE.lastSignalMaps?.gscIndexInspect;
+          if (gim instanceof Map) {
+            for (const u of seeds) {
+              const sig = traditionalSeoSignalMapGet(gim, u, propModal);
+              if (sig) {
+                gscPayload = sig;
+                break;
+              }
+            }
+          }
+        }
+        if (gscPayload) {
+          const raw = traditionalSeoGscInspectDeriveStatus(target, gscPayload);
+          const bypass = traditionalSeoHasRuleBypass(target, gscRk);
+          gscRow.raw_status = raw;
+          gscRow.status = bypass ? 'pass' : raw;
+          gscRow.bypassed = bypass && String(raw || '').toLowerCase() !== 'pass';
+        }
+      }
+      hits.sort((a, b) => {
+        const da = order[String(a.status || 'fail').toLowerCase()] ?? 3;
+        const db = order[String(b.status || 'fail').toLowerCase()] ?? 3;
+        if (da !== db) return da - db;
+        return String(a.rule_name || '').localeCompare(String(b.rule_name || ''));
+      });
       const pageHits = hits.filter((row) => String(row?.tier || '').toLowerCase() !== 'sitewide');
       const scoreDetail = traditionalSeoPageScoreDetailFromHits(pageHits);
       if (ringEl) ringEl.style.background = traditionalSeoDonutBackground(scoreDetail.passW, scoreDetail.warnW, scoreDetail.failW);
