@@ -72938,6 +72938,66 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return `${u}/`;
     }
 
+    /** Same URL shapes as keyword-metrics lookup so modal / rollup / CSV URLs share one GSC payload. */
+    function traditionalSeoGscInspectTryKeys(rawUrl, propertyUrl) {
+      const u = String(rawUrl || '').trim();
+      const prop = String(propertyUrl || '').trim();
+      const tryKeys = [];
+      const seen = new Set();
+      const add = (k) => {
+        const s = String(k || '').trim();
+        if (s && !seen.has(s)) {
+          seen.add(s);
+          tryKeys.push(s);
+        }
+      };
+      add(traditionalSeoSignalMapKey(u, prop));
+      add(u);
+      const cmp = traditionalSeoToComparableUrl(u, prop);
+      if (cmp) add(cmp);
+      try {
+        if (URL.canParse(u)) {
+          const parsed = new URL(u);
+          const path = String(parsed.pathname || '/').replace(/\/+$/, '') || '/';
+          const noTrail = `${parsed.protocol}//${parsed.hostname.toLowerCase()}${path}`;
+          add(noTrail);
+          const hostNoWww = parsed.hostname.toLowerCase().replace(/^www\./, '');
+          add(`${parsed.protocol}//${hostNoWww}${path}`);
+          if (!parsed.hostname.toLowerCase().startsWith('www.')) {
+            add(`${parsed.protocol}//www.${hostNoWww}${path}`);
+          }
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      const vars = traditionalSeoLandingComparableVariants(u, prop);
+      for (let i = 0; i < vars.length; i += 1) {
+        add(vars[i]);
+        add(traditionalSeoSignalMapKey(vars[i], prop));
+      }
+      return tryKeys;
+    }
+
+    function traditionalSeoGscInspectStoreAliases(map, propertyUrl, pageUrl, payload) {
+      if (!(map instanceof Map) || !payload || typeof payload !== 'object') return;
+      const keys = traditionalSeoGscInspectTryKeys(pageUrl, propertyUrl);
+      for (let i = 0; i < keys.length; i += 1) {
+        map.set(keys[i], payload);
+      }
+    }
+
+    function traditionalSeoGscInspectFormatLocalTime(iso) {
+      const s = String(iso || '').trim();
+      if (!s) return '';
+      const t = Date.parse(s);
+      if (!Number.isFinite(t)) return s;
+      try {
+        return new Date(t).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'medium' });
+      } catch (e) {
+        return s;
+      }
+    }
+
     function traditionalSeoGscInspectReadFromLocalStorage(propertyUrl, pageUrl) {
       try {
         const prop = String(propertyUrl || '').trim();
@@ -72949,9 +73009,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const pkStored = String(o?.propertyKey || '').trim();
         if (!pkStored || pkStored !== pkCurrent) return null;
         const ent = o?.entries && typeof o.entries === 'object' ? o.entries : {};
-        const key = traditionalSeoSignalMapKey(pageUrl, prop);
-        const hit = key ? ent[key] : null;
-        return hit && typeof hit === 'object' ? hit : null;
+        const tryKeys = traditionalSeoGscInspectTryKeys(pageUrl, prop);
+        for (let i = 0; i < tryKeys.length; i += 1) {
+          const hit = ent[tryKeys[i]];
+          if (hit && typeof hit === 'object') return hit;
+        }
+        return null;
       } catch (e) {
         return null;
       }
@@ -72959,11 +73022,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     function traditionalSeoGscInspectGet(propertyUrl, pageUrl) {
       const prop = String(propertyUrl || '').trim();
-      const key = traditionalSeoSignalMapKey(pageUrl, prop);
       const m = TRADITIONAL_SEO_STATE.gscIndexByUrlKey;
-      if (key && m instanceof Map) {
-        const hit = m.get(key);
-        if (hit) return hit;
+      if (m instanceof Map) {
+        const tryKeys = traditionalSeoGscInspectTryKeys(pageUrl, prop);
+        for (let i = 0; i < tryKeys.length; i += 1) {
+          const hit = m.get(tryKeys[i]);
+          if (hit) return hit;
+        }
       }
       return traditionalSeoGscInspectReadFromLocalStorage(prop, pageUrl);
     }
@@ -72997,10 +73062,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const m = TRADITIONAL_SEO_STATE.gscIndexByUrlKey;
       let n = 0;
       dbRows.forEach((row) => {
-        const urlKey = String(row?.url_key || '').trim();
-        if (!urlKey) return;
-        m.set(urlKey, {
-          inspectionUrl: String(row?.page_url || '').trim(),
+        const page = String(row?.page_url || '').trim();
+        if (!page) return;
+        const payload = {
+          inspectionUrl: page,
           verdict: row?.verdict ?? null,
           coverageState: row?.coverage_state ?? null,
           pageFetchState: row?.page_fetch_state ?? null,
@@ -73010,7 +73075,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           inspectedAt: row?.inspected_at || row?.updated_at || null,
           auditStatus: String(row?.audit_status || '').toLowerCase() || null,
           indexed: row?.indexed === true,
-        });
+        };
+        traditionalSeoGscInspectStoreAliases(m, prop, page, payload);
         n += 1;
       });
       if (n) traditionalSeoPersistGscIndexToStorage();
@@ -73183,9 +73249,23 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
         const rows = Array.isArray(json?.results) ? json.results : [];
         const byUrl = new Map(rows.map((r) => [String(r?.inspectionUrl || '').trim(), r]));
-        slice.forEach(({ u, key }) => {
-          const hit = byUrl.get(String(u).trim()) || {};
-          map.set(key, {
+        const pickGscRowForUrl = (u0) => {
+          const t = String(u0 || '').trim();
+          const direct = byUrl.get(t);
+          if (direct && typeof direct === 'object') return direct;
+          const cmp = traditionalSeoToComparableUrl(t, prop);
+          for (let j = 0; j < rows.length; j += 1) {
+            const r = rows[j];
+            const ins = String(r?.inspectionUrl || '').trim();
+            if (!ins) continue;
+            if (ins === t) return r;
+            if (cmp && traditionalSeoToComparableUrl(ins, prop) === cmp) return r;
+          }
+          return {};
+        };
+        slice.forEach(({ u }) => {
+          const hit = pickGscRowForUrl(u);
+          const payload = {
             inspectionUrl: u,
             verdict: hit.verdict ?? null,
             coverageState: hit.coverageState ?? null,
@@ -73194,7 +73274,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             httpOk: hit.httpOk === true,
             apiError: hit.error || null,
             inspectedAt: new Date().toISOString()
-          });
+          };
+          traditionalSeoGscInspectStoreAliases(map, prop, u, payload);
         });
         if (typeof options.onChunk === 'function') {
           options.onChunk({ done: Math.min(i + batchSize, pending.length), total: pending.length });
@@ -76634,7 +76715,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           gsc.verdict ? `Verdict: ${gsc.verdict}` : '',
           gsc.pageFetchState ? `Fetch: ${gsc.pageFetchState}` : '',
           gsc.googleCanonical ? `Google canonical: ${gsc.googleCanonical}` : '',
-          gsc.inspectedAt ? `Last checked: ${gsc.inspectedAt}` : ''
+          gsc.inspectedAt
+            ? `Last checked: ${traditionalSeoGscInspectFormatLocalTime(gsc.inspectedAt)} (local)`
+            : ''
         ].filter(Boolean);
         if (gsc.apiError) {
           parts.push(`API: ${typeof gsc.apiError === 'string' ? gsc.apiError : JSON.stringify(gsc.apiError).slice(0, 200)}`);
