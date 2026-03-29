@@ -6655,6 +6655,7 @@
       <section class="aigeo-panel" data-panel="traditional-seo">
         <div class="card--section-header" style="margin-bottom: 1rem;">
           <h2 style="margin: 0 0 0.35rem 0; color: var(--dark-brand);">Traditional SEO</h2>
+          <p id="aigeo-tradseo-build-stamp" style="margin: 0.15rem 0 0.35rem 0; font-size: 0.72rem; color: var(--dark-text-muted); font-family: ui-monospace, monospace;"></p>
           <p style="margin: 0; color: var(--dark-text-muted);">Weighted SEO hygiene rules, score trend, and governance controls for your in-house SEO audit system.</p>
           <div class="traditional-seo-pills">
             <span class="traditional-seo-pill">Crawlability</span>
@@ -10079,9 +10080,17 @@
     console.log('Page URL:', window.location.href);
 
     // Build id is logged for verification only (no forced URL changes).
-    const BUILD_ID = '2026-01-14T23-10Z';
+    const BUILD_ID = '2026-03-29T19-05Z';
     window.__BUILD_ID__ = BUILD_ID;
     console.log('Build ID:', BUILD_ID);
+    try {
+      const st = document.getElementById('aigeo-tradseo-build-stamp');
+      if (st) {
+        st.textContent = `UI build ${BUILD_ID} — if this date is old after deploy, hard-refresh (Ctrl+Shift+R).`;
+      }
+    } catch (e) {
+      /* ignore */
+    }
     // Clear persisted error logs when build changes to avoid stale errors.
     try {
       const previousBuildId = localStorage.getItem('_build_id');
@@ -73208,6 +73217,77 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return String(ruleKey || '').toLowerCase() === 'gsc_url_indexed';
     }
 
+    function traditionalSeoSyncGscMapIntoLastSignalMaps() {
+      const src = TRADITIONAL_SEO_STATE.gscIndexByUrlKey;
+      if (!(src instanceof Map)) return;
+      let maps = TRADITIONAL_SEO_STATE.lastSignalMaps;
+      if (!maps || typeof maps !== 'object') {
+        maps = { gscIndexInspect: new Map() };
+        TRADITIONAL_SEO_STATE.lastSignalMaps = maps;
+      }
+      if (!(maps.gscIndexInspect instanceof Map)) maps.gscIndexInspect = new Map();
+      src.forEach((val, k) => maps.gscIndexInspect.set(k, val));
+    }
+
+    async function traditionalSeoLazyEnsureGscForPageModal(targetUrl, propModal) {
+      const prop = String(propModal || '').trim();
+      const t = String(targetUrl || '').trim();
+      if (!prop || !t) return;
+      const gscOn = (TRADITIONAL_SEO_STATE.rules || []).some(
+        (r) => String(r.rule_key) === 'gsc_url_indexed' && r.enabled !== false
+      );
+      if (!gscOn) return;
+      const seeds = new Set([t]);
+      traditionalSeoLandingComparableVariants(t, prop).forEach((s) => {
+        if (s) seeds.add(s);
+      });
+      let miss = false;
+      for (const u of seeds) {
+        if (!traditionalSeoGscInspectGet(prop, u)) {
+          miss = true;
+          break;
+        }
+      }
+      if (!miss) {
+        traditionalSeoSyncGscMapIntoLastSignalMaps();
+        return;
+      }
+      const urls = [];
+      seeds.forEach((s) => {
+        const n = traditionalSeoNormalizeUrl(s, prop) || String(s).trim();
+        if (n && /^https?:\/\//i.test(n) && !urls.includes(n)) urls.push(n);
+      });
+      const fk = new Set();
+      urls.forEach((u) => {
+        const k = traditionalSeoSignalMapKey(u, prop);
+        if (k) fk.add(k);
+      });
+      try {
+        await traditionalSeoHydrateGscCacheFromServer();
+      } catch (e) {
+        /* ignore */
+      }
+      let still = false;
+      for (const u of seeds) {
+        if (!traditionalSeoGscInspectGet(prop, u)) {
+          still = true;
+          break;
+        }
+      }
+      if (!still) {
+        traditionalSeoSyncGscMapIntoLastSignalMaps();
+        return;
+      }
+      try {
+        await traditionalSeoEnsureGscIndexInspectForUrls(prop, urls.length ? urls : [t], {
+          forceKeys: fk.size ? fk : null
+        });
+      } catch (e) {
+        traditionalSeoDbg(`modal lazy GSC: ${e?.message || e}`, 'warn');
+      }
+      traditionalSeoSyncGscMapIntoLastSignalMaps();
+    }
+
     async function traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, urls, options = {}) {
       const prop = String(propertyUrl || '').trim();
       if (!prop) {
@@ -73300,6 +73380,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         await new Promise((r) => setTimeout(r, 0));
       }
       traditionalSeoPersistGscIndexToStorage();
+      traditionalSeoSyncGscMapIntoLastSignalMaps();
     }
 
     function traditionalSeoOpenGscInspectForPage(pageUrl) {
@@ -76842,6 +76923,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (da !== db) return da - db;
         return String(a.rule_name || '').localeCompare(String(b.rule_name || ''));
       });
+      await traditionalSeoLazyEnsureGscForPageModal(target, propModal);
       const pageHits = hits.filter((row) => String(row?.tier || '').toLowerCase() !== 'sitewide');
       const scoreDetail = traditionalSeoPageScoreDetailFromHits(pageHits);
       if (ringEl) ringEl.style.background = traditionalSeoDonutBackground(scoreDetail.passW, scoreDetail.warnW, scoreDetail.failW);
