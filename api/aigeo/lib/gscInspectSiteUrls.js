@@ -3,6 +3,7 @@
  * - URL-prefix property: https://www.example.com/
  * - Domain property: sc-domain:example.com
  * Dashboard localStorage may not match GSC; try alternates on PERMISSION_DENIED.
+ * Inspection URLs may be apex while property is www (or reverse) — try inspection-apex + sc-domain first.
  */
 
 export function normalizeSiteUrlForInspect(raw) {
@@ -23,39 +24,57 @@ function hostWithoutWww(hostname) {
   return h.startsWith('www.') ? h.slice(4) : h;
 }
 
-/**
- * Ordered unique siteUrl values to try for index:inspect.
- */
-export function buildGscSiteUrlCandidates(propertyUrl, inspectionUrl) {
+function uniqueOrdered(lists) {
+  const seen = new Set();
   const out = [];
-  const add = (v) => {
-    const s = String(v || '').trim();
-    if (s && !out.includes(s)) out.push(s);
-  };
+  for (let li = 0; li < lists.length; li += 1) {
+    const list = lists[li];
+    if (!Array.isArray(list)) continue;
+    for (let i = 0; i < list.length; i += 1) {
+      const s = String(list[i] || '').trim();
+      if (s && !seen.has(s)) {
+        seen.add(s);
+        out.push(s);
+      }
+    }
+  }
+  return out;
+}
 
-  const prop = String(propertyUrl || '').trim();
+function candidatesFromInspectionUrl(inspectionUrl) {
   const insp = String(inspectionUrl || '').trim();
+  if (!insp || typeof URL === 'undefined' || !URL.canParse(insp)) return [];
+  try {
+    const u = new URL(insp);
+    const apex = hostWithoutWww(u.hostname.toLowerCase());
+    if (!apex) return [];
+    return [`sc-domain:${apex}`, `https://www.${apex}/`, `https://${apex}/`];
+  } catch {
+    return [];
+  }
+}
 
+function candidatesFromPropertyUrl(propertyUrl) {
+  const prop = String(propertyUrl || '').trim();
+  const out = [];
   if (prop.toLowerCase().startsWith('sc-domain:')) {
     const apex = prop.slice('sc-domain:'.length).trim().toLowerCase().replace(/^www\./, '');
     if (apex) {
-      add(`sc-domain:${apex}`);
-      add(`https://www.${apex}/`);
-      add(`https://${apex}/`);
+      out.push(`sc-domain:${apex}`, `https://www.${apex}/`, `https://${apex}/`);
     }
   } else if (/^https?:\/\//i.test(prop)) {
     const norm = normalizeSiteUrlForInspect(prop);
-    add(norm);
+    out.push(norm);
     try {
       const u = new URL(norm);
       const host = u.hostname.toLowerCase();
       const apex = hostWithoutWww(host);
       if (host.startsWith('www.')) {
-        add(`https://${apex}/`);
+        out.push(`https://${apex}/`);
       } else {
-        add(`https://www.${host}/`);
+        out.push(`https://www.${host}/`);
       }
-      add(`sc-domain:${apex}`);
+      out.push(`sc-domain:${apex}`);
     } catch {
       /* ignore */
     }
@@ -63,26 +82,24 @@ export function buildGscSiteUrlCandidates(propertyUrl, inspectionUrl) {
     const rawHost = prop.replace(/^https?:\/\//i, '').split('/')[0].trim().toLowerCase();
     const apex = hostWithoutWww(rawHost);
     if (apex) {
-      add(`sc-domain:${apex}`);
-      add(`https://www.${apex}/`);
-      add(`https://${apex}/`);
+      out.push(`sc-domain:${apex}`, `https://www.${apex}/`, `https://${apex}/`);
     }
   }
+  return out;
+}
 
-  if (insp && typeof URL !== 'undefined' && URL.canParse(insp)) {
-    try {
-      const u = new URL(insp);
-      const host = u.hostname.toLowerCase();
-      const apex = hostWithoutWww(host);
-      add(`sc-domain:${apex}`);
-      add(`https://www.${apex}/`);
-      add(`https://${apex}/`);
-    } catch {
-      /* ignore */
-    }
-  }
-
-  return out.length ? out : [normalizeSiteUrlForInspect(prop)].filter(Boolean);
+/**
+ * Ordered unique siteUrl values to try for index:inspect.
+ * Inspection-URL-derived candidates first (fixes www vs apex mismatch with URL-prefix properties).
+ */
+export function buildGscSiteUrlCandidates(propertyUrl, inspectionUrl) {
+  const prop = String(propertyUrl || '').trim();
+  const merged = uniqueOrdered([
+    candidatesFromInspectionUrl(inspectionUrl),
+    candidatesFromPropertyUrl(propertyUrl),
+  ]);
+  if (merged.length) return merged;
+  return [normalizeSiteUrlForInspect(prop)].filter(Boolean);
 }
 
 export function isGscInspectPermissionDenied(row) {
