@@ -3,6 +3,11 @@ export const config = { runtime: 'nodejs', maxDuration: 60 };
 import { createClient } from '@supabase/supabase-js';
 import { normalizePropertyKey, signalMapKey } from './lib/gscInspectKeys.js';
 import { deriveGscUrlIndexedStatus } from './lib/gscInspectAuditStatus.js';
+import {
+  isGscInspectPermissionDenied,
+  normalizeSiteUrlForInspect,
+  resolveGscSiteUrlForInspect,
+} from './lib/gscInspectSiteUrls.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -19,16 +24,6 @@ const sendJson = (res, status, body) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.status(status).send(JSON.stringify(body));
 };
-
-function normalizeSiteUrlForInspect(raw) {
-  const s = String(raw || '').trim();
-  if (!s) return '';
-  if (s.startsWith('sc-domain:')) return s;
-  let u = s;
-  if (!/^https?:\/\//i.test(u)) u = `https://${u}`;
-  u = u.replace(/\/+$/, '');
-  return `${u}/`;
-}
 
 async function getAccessToken() {
   const clientId = need('GOOGLE_CLIENT_ID');
@@ -154,25 +149,49 @@ export default async function handler(req, res) {
         message: `Too many URLs in one request (max ${max}).`,
       });
     }
-    const siteUrl = normalizeSiteUrlForInspect(propertyUrl);
-    if (!siteUrl) {
+    const siteUrlProbe = normalizeSiteUrlForInspect(propertyUrl);
+    if (!siteUrlProbe) {
       return sendJson(res, 400, { status: 'error', message: 'Invalid propertyUrl.' });
     }
     const accessToken = await getAccessToken();
     const results = [];
     const delayMs = 280;
+    let effectiveSiteUrl = '';
     for (let i = 0; i < urls.length; i += 1) {
       const inspectionUrl = urls[i];
-      const row = await inspectOne(accessToken, siteUrl, inspectionUrl);
+      if (i > 0) await sleep(delayMs);
+      if (!effectiveSiteUrl) {
+        const resolved = await resolveGscSiteUrlForInspect(
+          accessToken,
+          inspectOne,
+          propertyUrl,
+          inspectionUrl,
+          120
+        );
+        effectiveSiteUrl = resolved.siteUrl;
+        results.push(resolved.row);
+        continue;
+      }
+      let row = await inspectOne(accessToken, effectiveSiteUrl, inspectionUrl);
+      if (isGscInspectPermissionDenied(row)) {
+        const resolved = await resolveGscSiteUrlForInspect(
+          accessToken,
+          inspectOne,
+          propertyUrl,
+          inspectionUrl,
+          120
+        );
+        effectiveSiteUrl = resolved.siteUrl;
+        row = resolved.row;
+      }
       results.push(row);
-      if (i < urls.length - 1) await sleep(delayMs);
     }
     await persistInspectionCache(propertyUrl, results);
     return sendJson(res, 200, {
       status: 'ok',
-      siteUrl,
+      siteUrl: effectiveSiteUrl || siteUrlProbe,
       results,
-      meta: { generatedAt: new Date().toISOString() },
+      meta: { generatedAt: new Date().toISOString(), siteUrlUsed: effectiveSiteUrl || siteUrlProbe },
     });
   } catch (err) {
     const msg = String(err?.message || err);
