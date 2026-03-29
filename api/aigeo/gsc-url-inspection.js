@@ -1,5 +1,9 @@
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
+import { createClient } from '@supabase/supabase-js';
+import { normalizePropertyKey, signalMapKey } from './lib/gscInspectKeys.js';
+import { deriveGscUrlIndexedStatus } from './lib/gscInspectAuditStatus.js';
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const need = (key) => {
@@ -82,6 +86,52 @@ async function inspectOne(accessToken, siteUrl, inspectionUrl) {
   };
 }
 
+async function persistInspectionCache(propertyUrl, results) {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !String(url).trim() || !key || !String(key).trim()) return;
+  const pk = normalizePropertyKey(propertyUrl);
+  if (!pk || !Array.isArray(results) || !results.length) return;
+  const now = new Date().toISOString();
+  const rows = results.map((r) => {
+    const pageUrl = String(r?.inspectionUrl || '').trim();
+    const urlKey = signalMapKey(pageUrl, propertyUrl);
+    const gsc = {
+      verdict: r.verdict,
+      coverageState: r.coverageState,
+      pageFetchState: r.pageFetchState,
+      googleCanonical: r.googleCanonical,
+      httpOk: r.httpOk,
+      apiError: r.error || null,
+    };
+    const audit_status = deriveGscUrlIndexedStatus(pageUrl, gsc);
+    return {
+      property_key: pk,
+      url_key: urlKey,
+      page_url: pageUrl,
+      coverage_state: r.coverageState ?? null,
+      verdict: r.verdict ?? null,
+      page_fetch_state: r.pageFetchState ?? null,
+      google_canonical: r.googleCanonical ?? null,
+      http_ok: r.httpOk === true,
+      api_error: r.error ?? null,
+      audit_status,
+      indexed: audit_status === 'pass',
+      inspected_at: now,
+      updated_at: now,
+    };
+  });
+  try {
+    const supabase = createClient(url, key);
+    const { error } = await supabase.from('gsc_url_inspection_cache').upsert(rows, {
+      onConflict: 'property_key,url_key',
+    });
+    if (error) throw error;
+  } catch (e) {
+    /* Table missing or RLS — non-fatal for inspection response */
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return sendJson(res, 200, { status: 'ok' });
   if (req.method !== 'POST') {
@@ -117,6 +167,7 @@ export default async function handler(req, res) {
       results.push(row);
       if (i < urls.length - 1) await sleep(delayMs);
     }
+    await persistInspectionCache(propertyUrl, results);
     return sendJson(res, 200, {
       status: 'ok',
       siteUrl,

@@ -72938,12 +72938,154 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return `${u}/`;
     }
 
+    function traditionalSeoGscInspectReadFromLocalStorage(propertyUrl, pageUrl) {
+      try {
+        const prop = String(propertyUrl || '').trim();
+        if (!prop) return null;
+        const pkCurrent = traditionalSeoNormalizeEvalCachePropertyKey(prop);
+        const raw = localStorage.getItem(TRADITIONAL_SEO_GSC_INDEX_LS_KEY);
+        if (!raw) return null;
+        const o = JSON.parse(raw);
+        const pkStored = String(o?.propertyKey || '').trim();
+        if (!pkStored || pkStored !== pkCurrent) return null;
+        const ent = o?.entries && typeof o.entries === 'object' ? o.entries : {};
+        const key = traditionalSeoSignalMapKey(pageUrl, prop);
+        const hit = key ? ent[key] : null;
+        return hit && typeof hit === 'object' ? hit : null;
+      } catch (e) {
+        return null;
+      }
+    }
+
     function traditionalSeoGscInspectGet(propertyUrl, pageUrl) {
       const prop = String(propertyUrl || '').trim();
       const key = traditionalSeoSignalMapKey(pageUrl, prop);
       const m = TRADITIONAL_SEO_STATE.gscIndexByUrlKey;
-      if (!(m instanceof Map) || !key) return null;
-      return m.get(key) || null;
+      if (key && m instanceof Map) {
+        const hit = m.get(key);
+        if (hit) return hit;
+      }
+      return traditionalSeoGscInspectReadFromLocalStorage(prop, pageUrl);
+    }
+
+    function traditionalSeoGscInspectDeriveStatus(pageUrl, gsc) {
+      if (traditionalSeoShouldExcludeUrlFromTraditionalAudit(pageUrl)) return 'pass';
+      if (!gsc) return 'warn';
+      if (gsc.apiError) return 'warn';
+      if (gsc.httpOk === false) return 'warn';
+      const covRaw = String(gsc.coverageState || '');
+      const cl = covRaw.toLowerCase();
+      if (cl.includes('submitted') && cl.includes('indexed')) return 'pass';
+      if (cl.includes('duplicate') && cl.includes('google')) return 'pass';
+      if (cl.includes('user') && cl.includes('canonical')) return 'pass';
+      if (cl.includes('noindex')) return 'pass';
+      if (cl.includes('unknown to google')) return 'fail';
+      if (cl.includes('not indexed') || cl.includes('currently not indexed')) return 'warn';
+      if (cl.includes('redirect')) return 'warn';
+      const ver = String(gsc.verdict || '').toUpperCase();
+      if (ver === 'PASS') return 'pass';
+      if (ver === 'FAIL') return 'fail';
+      return 'warn';
+    }
+
+    function traditionalSeoApplyServerGscCacheRows(dbRows) {
+      const prop = String(traditionalSeoPropertyUrl() || '').trim();
+      if (!prop || !Array.isArray(dbRows) || !dbRows.length) return 0;
+      if (!(TRADITIONAL_SEO_STATE.gscIndexByUrlKey instanceof Map)) {
+        TRADITIONAL_SEO_STATE.gscIndexByUrlKey = new Map();
+      }
+      const m = TRADITIONAL_SEO_STATE.gscIndexByUrlKey;
+      let n = 0;
+      dbRows.forEach((row) => {
+        const urlKey = String(row?.url_key || '').trim();
+        if (!urlKey) return;
+        m.set(urlKey, {
+          inspectionUrl: String(row?.page_url || '').trim(),
+          verdict: row?.verdict ?? null,
+          coverageState: row?.coverage_state ?? null,
+          pageFetchState: row?.page_fetch_state ?? null,
+          googleCanonical: row?.google_canonical ?? null,
+          httpOk: row?.http_ok === true,
+          apiError: row?.api_error ?? null,
+          inspectedAt: row?.inspected_at || row?.updated_at || null,
+          auditStatus: String(row?.audit_status || '').toLowerCase() || null,
+          indexed: row?.indexed === true,
+        });
+        n += 1;
+      });
+      if (n) traditionalSeoPersistGscIndexToStorage();
+      return n;
+    }
+
+    function traditionalSeoBackfillGscEvaluationRows() {
+      const rules = TRADITIONAL_SEO_STATE.rules || [];
+      const gscRule = rules.find((r) => String(r.rule_key) === 'gsc_url_indexed' && r.enabled !== false);
+      if (!gscRule) return false;
+      const prop = String(traditionalSeoEffectivePropertyUrl() || traditionalSeoPropertyUrl() || '').trim();
+      const rows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
+      if (!rows.length || !prop) return false;
+      const without = rows.filter((r) => String(r.rule_key) !== 'gsc_url_indexed');
+      const metaByUrl = new Map();
+      rows.forEach((r) => {
+        if (String(r?.tier || '').toLowerCase() === 'sitewide') return;
+        const u = String(r?.url || '').trim();
+        if (!u || metaByUrl.has(u)) return;
+        metaByUrl.set(u, {
+          tier: r.tier,
+          clicks: traditionalSeoToNum(r.clicks, 0),
+          impressions: traditionalSeoToNum(r.impressions, 0),
+          target_keyword: String(r.target_keyword || '').trim(),
+        });
+      });
+      const additions = [];
+      metaByUrl.forEach((meta, url) => {
+        const gsc = traditionalSeoGscInspectGet(prop, url);
+        const rawStatus = traditionalSeoGscInspectDeriveStatus(url, gsc);
+        const bypass = traditionalSeoHasRuleBypass(url, 'gsc_url_indexed');
+        const status = bypass ? 'pass' : rawStatus;
+        additions.push({
+          rule_key: 'gsc_url_indexed',
+          rule_name: gscRule.rule_name,
+          rule_category: String(gscRule.category || 'indexation').toLowerCase(),
+          url,
+          tier: meta.tier,
+          status,
+          raw_status: rawStatus,
+          bypassed: bypass && String(rawStatus || '').toLowerCase() !== 'pass',
+          rule_weight: Math.max(0, traditionalSeoToNum(gscRule.weight, 1)),
+          clicks: meta.clicks,
+          impressions: meta.impressions,
+          target_keyword: meta.target_keyword,
+        });
+      });
+      const oldGsc = rows.filter((r) => String(r.rule_key) === 'gsc_url_indexed');
+      const rowSig = (list) =>
+        list
+          .map((r) => `${String(r.url)}:${String(r.status)}:${String(r.raw_status)}`)
+          .sort()
+          .join('|');
+      const changed = rowSig(oldGsc) !== rowSig(additions);
+      TRADITIONAL_SEO_STATE.evaluationRows = without.concat(additions);
+      traditionalSeoReapplyBypassesToAllRows();
+      traditionalSeoRefreshRulesSummaryFromEvaluationRows();
+      return changed;
+    }
+
+    async function traditionalSeoHydrateGscCacheFromServer() {
+      const prop = String(traditionalSeoPropertyUrl() || '').trim();
+      if (!prop) return 0;
+      try {
+        const q = new URLSearchParams();
+        q.set('propertyUrl', prop);
+        const res = await fetch(traditionalSeoApiPath(`/api/aigeo/gsc-url-inspection-cache?${q.toString()}`), {
+          cache: 'no-store',
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || String(json?.status || '').toLowerCase() !== 'ok') return 0;
+        return traditionalSeoApplyServerGscCacheRows(Array.isArray(json.rows) ? json.rows : []);
+      } catch (e) {
+        return 0;
+      }
     }
 
     function traditionalSeoHydrateGscIndexFromStorage() {
@@ -75232,24 +75374,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         return 'warn';
       }
       if (key === 'gsc_url_indexed') {
-        if (traditionalSeoShouldExcludeUrlFromTraditionalAudit(url)) return 'pass';
         const gsc = gscInspectSignal || traditionalSeoGscInspectGet(propertyUrl, url);
-        if (!gsc) return 'warn';
-        if (gsc.apiError) return 'warn';
-        if (gsc.httpOk === false) return 'warn';
-        const covRaw = String(gsc.coverageState || '');
-        const cl = covRaw.toLowerCase();
-        if (cl.includes('submitted') && cl.includes('indexed')) return 'pass';
-        if (cl.includes('duplicate') && cl.includes('google')) return 'pass';
-        if (cl.includes('user') && cl.includes('canonical')) return 'pass';
-        if (cl.includes('noindex')) return 'pass';
-        if (cl.includes('unknown to google')) return 'fail';
-        if (cl.includes('not indexed') || cl.includes('currently not indexed')) return 'warn';
-        if (cl.includes('redirect')) return 'warn';
-        const ver = String(gsc.verdict || '').toUpperCase();
-        if (ver === 'PASS') return 'pass';
-        if (ver === 'FAIL') return 'fail';
-        return 'warn';
+        return traditionalSeoGscInspectDeriveStatus(url, gsc);
       }
       if (key === 'https_enforced') {
         if (String(tier || '').toLowerCase() === 'sitewide') {
@@ -76494,12 +76620,19 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (rk === 'gsc_url_indexed') {
         const gsc = traditionalSeoGscInspectGet(prop, pageUrl);
         if (!gsc) return 'No GSC inspection cached — run ② Traditional SEO or re-audit this rule to fetch URL Inspection data.';
+        const audit = traditionalSeoGscInspectDeriveStatus(pageUrl, gsc);
+        const idx =
+          typeof gsc.indexed === 'boolean'
+            ? `Indexed (rule): ${gsc.indexed ? 'yes' : 'no'}`
+            : '';
         const parts = [
+          `Audit: ${audit}`,
+          idx,
           gsc.coverageState ? `Coverage: ${gsc.coverageState}` : '',
           gsc.verdict ? `Verdict: ${gsc.verdict}` : '',
           gsc.pageFetchState ? `Fetch: ${gsc.pageFetchState}` : '',
           gsc.googleCanonical ? `Google canonical: ${gsc.googleCanonical}` : '',
-          gsc.inspectedAt ? `Inspected: ${gsc.inspectedAt}` : ''
+          gsc.inspectedAt ? `Last checked: ${gsc.inspectedAt}` : ''
         ].filter(Boolean);
         if (gsc.apiError) {
           parts.push(`API: ${typeof gsc.apiError === 'string' ? gsc.apiError : JSON.stringify(gsc.apiError).slice(0, 200)}`);
@@ -79860,10 +79993,16 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         void refreshTraditionalSeoDomainCards();
         void traditionalSeoEnsureRuleOverridesLoaded()
           .then(() => traditionalSeoEnsureTargetKeywordOverridesLoaded())
-          .then(() => {
+          .then(async () => {
             if (Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) && TRADITIONAL_SEO_STATE.evaluationRows.length) {
-              traditionalSeoReapplyBypassesToAllRows();
-              traditionalSeoRefreshRulesSummaryFromEvaluationRows();
+              await traditionalSeoHydrateGscCacheFromServer();
+              traditionalSeoHydrateGscIndexFromStorage();
+              const changed = traditionalSeoBackfillGscEvaluationRows();
+              if (!changed) {
+                traditionalSeoReapplyBypassesToAllRows();
+                traditionalSeoRefreshRulesSummaryFromEvaluationRows();
+              }
+              if (changed) traditionalSeoPersistEvaluationSnapshot();
               renderTraditionalSeoResultsTable();
               void traditionalSeoKeywordMetricsLookupIfNeededForRun();
             }
@@ -79886,8 +80025,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (!hydrated) {
           hydrated = traditionalSeoHydrateEvaluationFromStorage();
         }
+        await traditionalSeoHydrateGscCacheFromServer();
         if (!hydrated) {
           traditionalSeoHydrateGscIndexFromStorage();
+        }
+        if (Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) && TRADITIONAL_SEO_STATE.evaluationRows.length) {
+          const changed = traditionalSeoBackfillGscEvaluationRows();
+          if (!changed) {
+            traditionalSeoReapplyBypassesToAllRows();
+            traditionalSeoRefreshRulesSummaryFromEvaluationRows();
+          }
+          if (changed) traditionalSeoPersistEvaluationSnapshot();
+          renderTraditionalSeoResultsTable();
         }
         /* Do not auto-run scoring on load: that re-fetched extractability for every URL. Restore from server/localStorage only; use ② for a full HTML refresh + rescore. */
       } catch (err) {
