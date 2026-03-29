@@ -71625,6 +71625,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return path;
     }
 
+    function traditionalSeoDbg(message, type) {
+      if (typeof window.debugLog !== 'function') return;
+      window.debugLog(`[TradSEO] ${String(message).slice(0, 450)}`, type || 'info');
+    }
+
     function traditionalSeoPropertyUrl() {
       return localStorage.getItem('gsc_property_url')
         || localStorage.getItem('last_property_url')
@@ -73205,7 +73210,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     async function traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, urls, options = {}) {
       const prop = String(propertyUrl || '').trim();
-      if (!prop) return;
+      if (!prop) {
+        traditionalSeoDbg('GSC ensure skipped: empty propertyUrl', 'warn');
+        return;
+      }
       const forceKeys = options.forceKeys instanceof Set ? options.forceKeys : null;
       const forceAll = options.forceAll === true;
       if (!(TRADITIONAL_SEO_STATE.gscIndexByUrlKey instanceof Map)) {
@@ -73233,10 +73241,17 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
         pending.push({ u, key });
       }
+      traditionalSeoDbg(
+        `GSC ensure: in=${list.length} pending=${pending.length} forceAll=${forceAll} forceKeys=${forceKeys ? forceKeys.size : 0}`
+      );
+      if (!pending.length) {
+        traditionalSeoDbg('GSC ensure: no pending URLs (TTL/cache or excluded)', 'info');
+      }
       const batchSize = 12;
       for (let i = 0; i < pending.length; i += batchSize) {
         const slice = pending.slice(i, i + batchSize);
         const urlChunk = slice.map((x) => x.u);
+        traditionalSeoDbg(`GSC POST batch ${Math.floor(i / batchSize) + 1} size=${urlChunk.length}`);
         const res = await fetch(traditionalSeoApiPath('/api/aigeo/gsc-url-inspection'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -73245,9 +73260,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const json = await res.json().catch(() => ({}));
         if (!res.ok || String(json?.status || '').toLowerCase() !== 'ok') {
           const msg = json?.message || `GSC URL Inspection failed (${res.status})`;
+          traditionalSeoDbg(`GSC API error: ${msg}`, 'error');
           throw new Error(msg);
         }
         const rows = Array.isArray(json?.results) ? json.results : [];
+        traditionalSeoDbg(`GSC batch ok: results=${rows.length}`);
         const byUrl = new Map(rows.map((r) => [String(r?.inspectionUrl || '').trim(), r]));
         const pickGscRowForUrl = (u0) => {
           const t = String(u0 || '').trim();
@@ -78222,6 +78239,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const runBtn = document.getElementById('traditional-seo-run-audit-btn');
       const runFullBtn = document.getElementById('traditional-seo-run-full-audit-btn');
       try {
+        traditionalSeoDbg(
+          `run start: ①② audit refreshAudit=${refreshAudit} extract=${refreshExtractability} forceGsc=${forceGscRefresh} partial=${isPartialPageRescore}`
+        );
         if (runBtn) runBtn.disabled = true;
         if (runFullBtn) runFullBtn.disabled = true;
 
@@ -78276,8 +78296,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           );
           await new Promise((resolve) => setTimeout(resolve, 0));
         }
-        const rulesPrecheck = collectTraditionalSeoRulesFromTable().filter((r) => r.enabled !== false);
+        const tableRules = collectTraditionalSeoRulesFromTable();
+        const rulesPrecheck = (tableRules.length ? tableRules : (TRADITIONAL_SEO_STATE.rules || []).slice()).filter(
+          (r) => r.enabled !== false
+        );
         const gscRuleOn = rulesPrecheck.some((r) => String(r.rule_key) === 'gsc_url_indexed');
+        traditionalSeoDbg(
+          `rules precheck: domRows=${tableRules.length} enabled=${rulesPrecheck.length} gscRuleOn=${gscRuleOn}`
+        );
         if (gscRuleOn) {
           traditionalSeoEvalProgressStage(
             forceGscRefresh
@@ -78286,6 +78312,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             78
           );
           const gscTargets = isPartialPageRescore ? partialPageUrls : urls;
+          traditionalSeoDbg(
+            `GSC phase: propertyUrl=${propertyUrl ? 'set' : 'EMPTY'} targets=${Array.isArray(gscTargets) ? gscTargets.length : 0}`
+          );
           await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, gscTargets, {
             forceAll: forceGscRefresh,
             onChunk: (ev) => {
@@ -78294,6 +78323,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               traditionalSeoEvalProgressStage(`GSC inspection batches ${ev.done}/${ev.total}…`, Math.min(84, slice));
             }
           });
+        } else {
+          traditionalSeoDbg('GSC phase skipped: gsc_url_indexed rule off or not in rules list', 'warn');
         }
         traditionalSeoEvalProgressStage('Building signals and loading overrides…', 86);
         const implPayloads = await traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl, urls.length);
@@ -78418,8 +78449,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
         void traditionalSeoKeywordMetricsLookupIfNeededForRun();
         traditionalSeoPersistEvaluationSnapshot();
+        traditionalSeoDbg('run complete OK', 'success');
       } catch (err) {
         traditionalSeoEvalProgressClose(false);
+        traditionalSeoDbg(`run FAILED: ${err?.message || err}`, 'error');
         if (typeof window.showStatus === 'function') {
           window.showStatus(`Traditional SEO audit failed: ${err?.message || err}`, 'error');
         }
@@ -78699,6 +78732,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (runBtn && !runBtn.dataset.wired) {
         runBtn.dataset.wired = '1';
         runBtn.addEventListener('click', async () => {
+          traditionalSeoDbg('Button ② clicked (Score Traditional SEO only)');
           await runTraditionalSeoEvaluation({
             refreshAudit: false,
             refreshExtractability: true,
@@ -80089,6 +80123,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         TRADITIONAL_SEO_STATE.loading = false;
       }
       if (!force && TRADITIONAL_SEO_STATE.rules.length > 0) {
+        const rb = document.getElementById('traditional-seo-rules-body');
+        const domRuleRows = rb ? rb.querySelectorAll('tr[data-rule-key]').length : 0;
+        if (!domRuleRows) {
+          renderTraditionalSeoRules(TRADITIONAL_SEO_STATE.rules);
+          traditionalSeoDbg(`Rules DOM was empty; rendered ${TRADITIONAL_SEO_STATE.rules.length} rows from state`, 'warn');
+        }
         if (!TRADITIONAL_SEO_STATE.sourceParity) {
           const parity = await traditionalSeoComputeSourceParity(traditionalSeoPropertyUrl());
           TRADITIONAL_SEO_STATE.sourceParity = parity;
