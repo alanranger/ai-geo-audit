@@ -74615,12 +74615,23 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return traditionalSeoDrilldownCounts(drillBaseRows, { mode, ruleAll: ruleIsAll });
     }
 
+    function traditionalSeoGscCountsForStrip() {
+      const rows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
+      const tally = traditionalSeoEvalCountRuleStatuses(rows, 'gsc_url_indexed');
+      return {
+        indexed: Math.max(0, traditionalSeoToNum(tally.pass, 0)),
+        notIndexed: Math.max(0, traditionalSeoToNum(tally.fail, 0)),
+        total: Math.max(0, traditionalSeoToNum(tally.total, 0))
+      };
+    }
+
     function traditionalSeoPwfMarkup(summary) {
       const enabled = Math.max(0, traditionalSeoToNum(summary?.enabledCount, 0));
       const passCount = Math.max(0, traditionalSeoToNum(summary?.passCount, 0));
       const warnCount = Math.max(0, traditionalSeoToNum(summary?.warnCount, 0));
       const failCount = Math.max(0, traditionalSeoToNum(summary?.failCount, 0));
       const uc = traditionalSeoPwfUrlCountsForStrip();
+      const gsc = traditionalSeoGscCountsForStrip();
       const rulesPills = [
         `<button type="button" class="traditional-seo-status-pill" data-status="pass" data-filter-status="pass" title="Filter table: rows with pass">Pass ${passCount}</button>`,
         `<button type="button" class="traditional-seo-status-pill" data-status="warn" data-filter-status="warn" title="Filter table: rows with warn">Warn ${warnCount}</button>`,
@@ -74630,7 +74641,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         `<div class="traditional-seo-strip-sub" style="margin:0 0 0.12rem 0;font-size:0.78rem;color:var(--dark-text-muted);"><strong>Rules</strong> (${enabled} on) — one pill per rule; numbers sum to ~${enabled}, not URL count.</div>`,
         `<div class="traditional-seo-pwf-row">${rulesPills}</div>`,
         `<div class="traditional-seo-strip-sub" style="margin:0.5rem 0 0.12rem 0;font-size:0.78rem;color:var(--dark-text-muted);"><strong>URLs</strong> — same logic as the four tiles below (worst rule per URL).</div>`,
-        `<div class="traditional-seo-strip-sub" style="margin:0 0 0.1rem 0;"><strong style="color:var(--dark-text);">${uc.all}</strong> URLs · pass <strong>${uc.pass}</strong> · warn <strong>${uc.warn}</strong> · fail <strong>${uc.fail}</strong></div>`
+        `<div class="traditional-seo-strip-sub" style="margin:0 0 0.1rem 0;"><strong style="color:var(--dark-text);">${uc.all}</strong> URLs · pass <strong>${uc.pass}</strong> · warn <strong>${uc.warn}</strong> · fail <strong>${uc.fail}</strong></div>`,
+        `<div class="traditional-seo-strip-sub" style="margin:0.08rem 0 0.1rem 0;"><strong>GSC index status</strong> · indexed <strong>${gsc.indexed}</strong> · not indexed <strong>${gsc.notIndexed}</strong>${gsc.total ? ` (rows ${gsc.total})` : ''}</div>`
       ].join('');
     }
 
