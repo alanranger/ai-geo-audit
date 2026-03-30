@@ -9159,7 +9159,7 @@
               </div>
               <div style="display:flex;flex-direction:column;align-items:center;gap:0.2rem;flex-shrink:0;">
                 <a class="btn" id="traditional-seo-modal-gsc-inspect" role="button" href="#" target="_blank" rel="noopener noreferrer" style="background:#16a34a;border-color:#16a34a;color:#f8fafc;font-weight:700;text-decoration:none;display:inline-block;">Search Console: inspect / request indexing</a>
-                <span style="font-size:0.62rem;color:#94a3b8;text-align:center;line-height:1.2;max-width:11rem;">Opens GSC URL Inspection. If Google didn’t return an API deep link for this URL yet, we copy the page URL for you to <strong>paste into the inspect bar</strong>. Run <strong>Refresh GSC URL Inspection</strong> (or <strong>Re-audit page</strong>) so the official link is stored.</span>
+                <span style="font-size:0.62rem;color:#94a3b8;text-align:center;line-height:1.2;max-width:11rem;">Opens Search Console for this property. Without an API deep link, GSC may flash blank then Overview — we copy the page URL to <strong>paste into the inspect bar</strong>. Run <strong>Refresh GSC URL Inspection</strong> (or <strong>Re-audit page</strong>) for a one-click official link.</span>
               </div>
               <div style="display:flex;flex-direction:column;align-items:center;gap:0.2rem;flex-shrink:0;">
                 <button type="button" class="btn" id="traditional-seo-page-modal-reaudit" style="background:#f59e0b;border-color:#f59e0b;color:#0f172a;font-weight:700;">Re-audit page</button>
@@ -73031,7 +73031,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const official = traditionalSeoGscInspectOfficialLink(prop, raw, page);
       if (official) return { href: official, copyUrl: '' };
       try {
-        const u = new URL('https://search.google.com/search-console/inspect');
+        // GSC often redirects /inspect?resource_id= to Overview anyway (blank flash). Open the same shell directly.
+        const u = new URL('https://search.google.com/search-console');
         u.searchParams.set('resource_id', site);
         return { href: u.toString(), copyUrl: page };
       } catch (err) {
@@ -73056,7 +73057,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           await navigator.clipboard.writeText(ctx.copyUrl);
           if (typeof window.showStatus === 'function') {
             window.showStatus(
-              'Search Console often ignores url= on inspect links. Copied this page URL — paste it into the inspect bar at the top, press Enter, then use Request indexing or Test live URL.',
+              'GSC may briefly show a blank page, then Overview — normal. Copied this page URL: paste into the inspect bar at the top, press Enter, then Request indexing or Test live URL.',
               'info'
             );
           }
