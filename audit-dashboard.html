@@ -73013,9 +73013,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       } catch (e) {
         /* keep page */
       }
-      const build = (path) => {
+      const buildInspectPath = () => {
         try {
-          const u = new URL(`https://search.google.com${path}`);
+          const u = new URL('https://search.google.com/search-console/inspect');
           u.searchParams.set('resource_id', site);
           u.searchParams.set('url', page);
           return u.toString();
@@ -73023,8 +73023,24 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           return '';
         }
       };
-      // Default Google account (/u/0/) avoids redirects that drop url= and land on ?resource_id= only.
-      return build('/u/0/search-console/inspect') || build('/search-console/inspect');
+      const buildHubActionInspect = (path) => {
+        try {
+          const u = new URL(`https://search.google.com${path}`);
+          u.searchParams.set('action', 'inspect');
+          u.searchParams.set('resource_id', site);
+          u.searchParams.set('url', page);
+          return u.toString();
+        } catch (err) {
+          return '';
+        }
+      };
+      // /u/0/search-console/inspect often redirects to /u/0/search-console?resource_id= and drops url=.
+      // Path /search-console/inspect (no /u/N/) keeps resource_id + url; hub ?action=inspect is fallback.
+      return (
+        buildInspectPath()
+        || buildHubActionInspect('/u/0/search-console')
+        || buildHubActionInspect('/search-console')
+      );
     }
 
     function traditionalSeoSyncModalGscInspectHref(pageUrl) {
