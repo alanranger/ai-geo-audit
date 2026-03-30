@@ -9159,7 +9159,7 @@
               </div>
               <div style="display:flex;flex-direction:column;align-items:center;gap:0.2rem;flex-shrink:0;">
                 <a class="btn" id="traditional-seo-modal-gsc-inspect" role="button" href="#" target="_blank" rel="noopener noreferrer" style="background:#16a34a;border-color:#16a34a;color:#f8fafc;font-weight:700;text-decoration:none;display:inline-block;">Search Console: inspect / request indexing</a>
-                <span style="font-size:0.62rem;color:#94a3b8;text-align:center;line-height:1.2;max-width:11rem;">Opens Search Console for this property. Without an API deep link, GSC may flash blank then Overview — we copy the page URL to <strong>paste into the inspect bar</strong>. Run <strong>Refresh GSC URL Inspection</strong> (or <strong>Re-audit page</strong>) for a one-click official link.</span>
+                <span style="font-size:0.62rem;color:#94a3b8;text-align:center;line-height:1.2;max-width:11rem;">If no stored deep link, we call the URL Inspection API once, then open Google’s inspection page (or copy the URL for the inspect bar). ~8s between live calls to protect quota.</span>
               </div>
               <div style="display:flex;flex-direction:column;align-items:center;gap:0.2rem;flex-shrink:0;">
                 <button type="button" class="btn" id="traditional-seo-page-modal-reaudit" style="background:#f59e0b;border-color:#f59e0b;color:#0f172a;font-weight:700;">Re-audit page</button>
@@ -71481,7 +71481,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       dfsTileAggregatesCur: null,
       dfsTileAggregatesDomain: '',
       dfsTileAggregatesFetching: false,
-      dfsTileAggregatesLoadAttempted: false
+      dfsTileAggregatesLoadAttempted: false,
+      /** One live URL Inspection API call before opening GSC when no stored inspectionResultLink. */
+      gscInspectOnDemandInFlight: false,
+      gscInspectOnDemandLastAt: 0
     };
 
     window.getGaioTraditionalSeoEvaluationRows = function getGaioTraditionalSeoEvaluationRows() {
@@ -72840,6 +72843,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     const TRADITIONAL_SEO_EVAL_LS_KEY = 'gaio_traditional_seo_evaluation_v1';
     const TRADITIONAL_SEO_GSC_INDEX_LS_KEY = 'gaio_traditional_seo_gsc_index_v1';
     const TRADITIONAL_SEO_GSC_INDEX_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+    const TRADITIONAL_SEO_GSC_ON_DEMAND_MIN_MS = 8000;
 
     function traditionalSeoNormalizeEvalCachePropertyKey(raw) {
       const s = String(raw || '').trim();
@@ -73044,30 +73048,174 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return traditionalSeoGscInspectOpenContext(pageUrl).href;
     }
 
-    async function traditionalSeoGscInspectOpenInNewTab(pageUrl) {
-      const ctx = traditionalSeoGscInspectOpenContext(pageUrl);
-      if (!ctx.href) {
-        if (typeof window.showStatus === 'function') {
-          window.showStatus('Set a Search Console property URL first.', 'warning');
-        }
+    function traditionalSeoGscInspectLooksQuota(json, httpStatus, hit) {
+      if (httpStatus === 429) return true;
+      const g = json && typeof json === 'object' ? json : {};
+      if (Number(g.error?.code) === 429) return true;
+      const gm = String(g.message || g.error?.message || '').toLowerCase();
+      if (gm.includes('quota') || gm.includes('resource_exhausted') || gm.includes('rate limit')) return true;
+      const e = hit && typeof hit === 'object' ? hit.error : null;
+      if (e && typeof e === 'object') {
+        if (Number(e.code) === 429) return true;
+        const em = String(e.message || '').toLowerCase();
+        if (em.includes('quota') || em.includes('resource_exhausted')) return true;
+      }
+      return false;
+    }
+
+    function traditionalSeoGscNormalizeInspectionResultLink(link) {
+      let s = String(link || '').trim();
+      if (!s) return '';
+      if (/^https:\/\//i.test(s)) return s;
+      if (/^\/\//.test(s)) return `https:${s}`;
+      if (s.startsWith('/')) return `https://search.google.com${s}`;
+      return '';
+    }
+
+    async function traditionalSeoGscInspectOpenFallbackNoApi(prop, page, opts) {
+      const quiet = opts && opts.quietCopyToast === true;
+      const site = traditionalSeoNormalizeGscSiteUrlForInspect(prop);
+      let href = '';
+      try {
+        const u = new URL('https://search.google.com/search-console');
+        u.searchParams.set('resource_id', site);
+        href = u.toString();
+      } catch (e) {
         return;
       }
-      if (ctx.copyUrl && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      if (page && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
         try {
-          await navigator.clipboard.writeText(ctx.copyUrl);
-          if (typeof window.showStatus === 'function') {
-            window.showStatus(
-              'GSC may briefly show a blank page, then Overview — normal. Copied this page URL: paste into the inspect bar at the top, press Enter, then Request indexing or Test live URL.',
-              'info'
-            );
+          await navigator.clipboard.writeText(page);
+          if (!quiet && typeof window.showStatus === 'function') {
+            window.showStatus('Copied page URL — paste into the GSC inspect bar, then Request indexing or Test live URL.', 'info');
           }
         } catch (clipErr) {
           if (typeof window.showStatus === 'function') {
-            window.showStatus(`Paste into GSC inspect: ${ctx.copyUrl}`, 'warning');
+            window.showStatus(`Paste into GSC inspect: ${page}`, 'warning');
           }
         }
       }
-      window.open(ctx.href, '_blank', 'noopener,noreferrer');
+      window.open(href, '_blank', 'noopener,noreferrer');
+    }
+
+    async function traditionalSeoGscInspectOpenInNewTab(pageUrl) {
+      const show = (msg, kind) => {
+        if (typeof window.showStatus === 'function') window.showStatus(msg, kind || 'info');
+      };
+      const prop = String(traditionalSeoEffectivePropertyUrl() || traditionalSeoPropertyUrl() || '').trim();
+      const site = traditionalSeoNormalizeGscSiteUrlForInspect(prop);
+      const raw = String(pageUrl || '').trim();
+      if (!site || !raw) {
+        show('Set a Search Console property URL first.', 'warning');
+        return;
+      }
+      const norm = traditionalSeoNormalizeUrl(raw, prop) || raw;
+      let page = traditionalSeoAlignInspectUrlToProperty(norm, prop);
+      if (!page || !/^https?:\/\//i.test(page)) {
+        show('Invalid page URL for GSC inspect.', 'warning');
+        return;
+      }
+      try {
+        const pu = new URL(page);
+        pu.hash = '';
+        page = pu.toString();
+      } catch (e) {
+        /* keep page */
+      }
+      const officialFirst = traditionalSeoGscInspectOfficialLink(prop, raw, page);
+      if (officialFirst) {
+        window.open(officialFirst, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      if (TRADITIONAL_SEO_STATE.gscInspectOnDemandInFlight) {
+        show('Already fetching a GSC inspection link…', 'info');
+        return;
+      }
+      const now = Date.now();
+      if (
+        TRADITIONAL_SEO_STATE.gscInspectOnDemandLastAt &&
+        now - TRADITIONAL_SEO_STATE.gscInspectOnDemandLastAt < TRADITIONAL_SEO_GSC_ON_DEMAND_MIN_MS
+      ) {
+        show('Wait a few seconds between live GSC inspects (API quota).', 'warning');
+        return;
+      }
+      TRADITIONAL_SEO_STATE.gscInspectOnDemandLastAt = now;
+
+      const btn = document.getElementById('traditional-seo-modal-gsc-inspect');
+      const setBusy = (busy) => {
+        TRADITIONAL_SEO_STATE.gscInspectOnDemandInFlight = !!busy;
+        if (!btn) return;
+        if (busy) {
+          btn.dataset.gscInspectBusy = '1';
+          btn.style.opacity = '0.65';
+          btn.style.pointerEvents = 'none';
+        } else {
+          delete btn.dataset.gscInspectBusy;
+          btn.style.opacity = '';
+          btn.style.pointerEvents = '';
+        }
+      };
+      setBusy(true);
+      show('Fetching GSC inspection link from Google…', 'info');
+      try {
+        const res = await fetch(traditionalSeoApiPath('/api/aigeo/gsc-url-inspection'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ propertyUrl: prop, urls: [page] })
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || String(json?.status || '').toLowerCase() !== 'ok') {
+          if (traditionalSeoGscInspectLooksQuota(json, res.status, null)) {
+            show('GSC URL Inspection quota or rate limit — try again later. Opening property with URL to paste.', 'warning');
+          } else {
+            show(
+              `${String(json?.message || '').trim() || `GSC inspect failed (${res.status})`} — opening property with URL to paste.`,
+              'warning'
+            );
+          }
+          await traditionalSeoGscInspectOpenFallbackNoApi(prop, page, { quietCopyToast: true });
+          return;
+        }
+        const hit = Array.isArray(json?.results) && json.results[0] && typeof json.results[0] === 'object' ? json.results[0] : {};
+        if (traditionalSeoGscInspectLooksQuota(json, res.status, hit)) {
+          show('GSC URL Inspection quota exceeded for this request. Opening property with URL to paste.', 'warning');
+          await traditionalSeoGscInspectOpenFallbackNoApi(prop, page, { quietCopyToast: true });
+          return;
+        }
+        const link = traditionalSeoGscNormalizeInspectionResultLink(hit?.inspectionResultLink);
+        if (!(TRADITIONAL_SEO_STATE.gscIndexByUrlKey instanceof Map)) {
+          TRADITIONAL_SEO_STATE.gscIndexByUrlKey = new Map();
+        }
+        const map = TRADITIONAL_SEO_STATE.gscIndexByUrlKey;
+        const payload = {
+          inspectionUrl: page,
+          verdict: hit.verdict ?? null,
+          coverageState: hit.coverageState ?? null,
+          pageFetchState: hit.pageFetchState ?? null,
+          googleCanonical: hit.googleCanonical ?? null,
+          httpOk: hit.httpOk === true,
+          apiError: hit.error || null,
+          inspectionResultLink: link || null,
+          inspectedAt: new Date().toISOString()
+        };
+        traditionalSeoGscInspectStoreAliases(map, prop, raw, payload);
+        traditionalSeoGscInspectStoreAliases(map, prop, page, payload);
+        traditionalSeoPersistGscIndexToStorage();
+        traditionalSeoSyncGscMapIntoLastSignalMaps();
+        traditionalSeoSyncModalGscInspectHref(raw);
+        if (link) {
+          window.open(link, '_blank', 'noopener,noreferrer');
+          show('Opened official GSC inspection page.', 'success');
+        } else {
+          show('Google did not return an inspection deep link — opening property with URL to paste.', 'warning');
+          await traditionalSeoGscInspectOpenFallbackNoApi(prop, page);
+        }
+      } catch (err) {
+        show(`GSC inspect request failed: ${String(err?.message || err)} — opening property with URL to paste.`, 'warning');
+        await traditionalSeoGscInspectOpenFallbackNoApi(prop, page, { quietCopyToast: true });
+      } finally {
+        setBusy(false);
+      }
     }
 
     function traditionalSeoSyncModalGscInspectHref(pageUrl) {
