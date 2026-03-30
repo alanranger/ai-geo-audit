@@ -9159,7 +9159,7 @@
               </div>
               <div style="display:flex;flex-direction:column;align-items:center;gap:0.2rem;flex-shrink:0;">
                 <a class="btn" id="traditional-seo-modal-gsc-inspect" role="button" href="#" target="_blank" rel="noopener noreferrer" style="background:#16a34a;border-color:#16a34a;color:#f8fafc;font-weight:700;text-decoration:none;display:inline-block;">Search Console: inspect / request indexing</a>
-                <span style="font-size:0.62rem;color:#94a3b8;text-align:center;line-height:1.2;max-width:11rem;">If no stored deep link, we call the URL Inspection API once, then open Google’s inspection page (or copy the URL for the inspect bar). ~8s between live calls to protect quota.</span>
+                <span style="font-size:0.62rem;color:#94a3b8;text-align:center;line-height:1.3;max-width:15rem;">Cached <strong>inspectionResultLink</strong> opens URL Inspection in one step. If missing, one live API inspect runs, then GSC opens (URL often shows <strong>utm_source=api</strong>). <strong>Test live URL</strong> and <strong>Request indexing</strong> stay in GSC. Wait ~8s between live inspects (quota).</span>
               </div>
               <div style="display:flex;flex-direction:column;align-items:center;gap:0.2rem;flex-shrink:0;">
                 <button type="button" class="btn" id="traditional-seo-page-modal-reaudit" style="background:#f59e0b;border-color:#f59e0b;color:#0f172a;font-weight:700;">Re-audit page</button>
@@ -77246,9 +77246,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           gscRow.raw_status = raw;
           gscRow.status = bypass ? 'pass' : raw;
           gscRow.bypassed = bypass && String(raw || '').toLowerCase() !== 'pass';
-          traditionalSeoReapplyBypassesToAllRows();
-          traditionalSeoRefreshRulesSummaryFromEvaluationRows();
-          renderTraditionalSeoResultsTable();
+          requestAnimationFrame(() => {
+            traditionalSeoReapplyBypassesToAllRows();
+            traditionalSeoRefreshRulesSummaryFromEvaluationRows();
+            renderTraditionalSeoResultsTable();
+          });
         }
       }
       hits.sort((a, b) => {
