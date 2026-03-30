@@ -9159,7 +9159,7 @@
               </div>
               <div style="display:flex;flex-direction:column;align-items:center;gap:0.2rem;flex-shrink:0;">
                 <a class="btn" id="traditional-seo-modal-gsc-inspect" role="button" href="#" target="_blank" rel="noopener noreferrer" style="background:#16a34a;border-color:#16a34a;color:#f8fafc;font-weight:700;text-decoration:none;display:inline-block;">Search Console: inspect / request indexing</a>
-                <span style="font-size:0.62rem;color:#94a3b8;text-align:center;line-height:1.2;max-width:11rem;">Opens Google Search Console URL Inspection (use “Request indexing” there).</span>
+                <span style="font-size:0.62rem;color:#94a3b8;text-align:center;line-height:1.2;max-width:11rem;">Uses Google’s inspection link from the last API refresh when available; otherwise a best‑effort inspect URL. Run <strong>Refresh GSC URL Inspection</strong> to capture links. Use <strong>Request indexing</strong> / <strong>Test live URL</strong> in GSC.</span>
               </div>
               <div style="display:flex;flex-direction:column;align-items:center;gap:0.2rem;flex-shrink:0;">
                 <button type="button" class="btn" id="traditional-seo-page-modal-reaudit" style="background:#f59e0b;border-color:#f59e0b;color:#0f172a;font-weight:700;">Re-audit page</button>
@@ -72999,6 +72999,20 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
     }
 
+    function traditionalSeoGscInspectOfficialLink(prop, pageUrlRaw, pageAligned) {
+      const p = String(prop || '').trim();
+      const tryOne = (u) => {
+        const gsc = traditionalSeoGscInspectGet(p, u);
+        const link = String(gsc?.inspectionResultLink || '').trim();
+        if (!link) return '';
+        if (/^https:\/\//i.test(link)) return link;
+        if (/^\/\//.test(link)) return `https:${link}`;
+        if (link.startsWith('/')) return `https://search.google.com${link}`;
+        return '';
+      };
+      return tryOne(pageUrlRaw) || tryOne(pageAligned);
+    }
+
     function traditionalSeoGscInspectDeepLink(pageUrl) {
       const prop = String(traditionalSeoEffectivePropertyUrl() || traditionalSeoPropertyUrl() || '').trim();
       const site = traditionalSeoNormalizeGscSiteUrlForInspect(prop);
@@ -73013,6 +73027,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       } catch (e) {
         /* keep page */
       }
+      const official = traditionalSeoGscInspectOfficialLink(prop, raw, page);
+      if (official) return official;
       const buildInspectPath = () => {
         try {
           const u = new URL('https://search.google.com/search-console/inspect');
@@ -73193,6 +73209,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           inspectedAt: row?.inspected_at || row?.updated_at || null,
           auditStatus: String(row?.audit_status || '').toLowerCase() || null,
           indexed: row?.indexed === true,
+          inspectionResultLink: String(row?.inspect_result_link || '').trim() || null
         };
         traditionalSeoGscInspectStoreAliases(m, prop, page, payload);
         n += 1;
@@ -73479,6 +73496,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             googleCanonical: hit.googleCanonical ?? null,
             httpOk: hit.httpOk === true,
             apiError: hit.error || null,
+            inspectionResultLink: hit.inspectionResultLink ? String(hit.inspectionResultLink).trim() : null,
             inspectedAt: new Date().toISOString()
           };
           traditionalSeoGscInspectStoreAliases(map, prop, uRaw, payload);

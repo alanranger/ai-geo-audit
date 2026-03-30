@@ -32,7 +32,7 @@ export default async function handler(req, res) {
     const { data, error } = await supabase
       .from('gsc_url_inspection_cache')
       .select(
-        'property_key,url_key,page_url,coverage_state,verdict,page_fetch_state,google_canonical,http_ok,api_error,audit_status,indexed,inspected_at,updated_at'
+        'property_key,url_key,page_url,coverage_state,verdict,page_fetch_state,google_canonical,http_ok,api_error,audit_status,indexed,inspect_result_link,inspected_at,updated_at'
       )
       .eq('property_key', propertyKey);
     if (error) throw error;

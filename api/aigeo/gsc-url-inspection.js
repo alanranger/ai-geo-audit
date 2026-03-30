@@ -69,9 +69,11 @@ async function inspectOne(accessToken, siteUrl, inspectionUrl) {
   } catch {
     json = { raw: text.slice(0, 400) };
   }
-  const idx = json?.inspectionResult?.indexStatusResult;
+  const ir = json?.inspectionResult;
+  const idx = ir?.indexStatusResult;
   return {
     inspectionUrl,
+    inspectionResultLink: ir?.inspectionResultLink ? String(ir.inspectionResultLink).trim() : null,
     httpOk: res.ok,
     httpStatus: res.status,
     verdict: idx?.verdict ?? null,
@@ -101,6 +103,7 @@ async function persistInspectionCache(propertyUrl, results) {
       apiError: r.error || null,
     };
     const audit_status = deriveGscUrlIndexedStatus(pageUrl, gsc);
+    const inspectLink = r.inspectionResultLink ? String(r.inspectionResultLink).trim() : null;
     return {
       property_key: pk,
       url_key: urlKey,
@@ -113,6 +116,7 @@ async function persistInspectionCache(propertyUrl, results) {
       api_error: r.error ?? null,
       audit_status,
       indexed: audit_status === 'pass',
+      inspect_result_link: inspectLink || null,
       inspected_at: now,
       updated_at: now,
     };
