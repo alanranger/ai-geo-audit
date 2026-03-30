@@ -1,3 +1,4 @@
+/** Hobby/Pro often cap here; keep batches small so one request finishes inside the limit (avoid 504). */
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
 import { createClient } from '@supabase/supabase-js';
@@ -136,7 +137,7 @@ export default async function handler(req, res) {
     const body = req.body || {};
     const propertyUrl = String(body.propertyUrl || '').trim();
     const urls = Array.isArray(body.urls) ? body.urls.map((u) => String(u || '').trim()).filter(Boolean) : [];
-    const max = 12;
+    const max = 5;
     if (!propertyUrl) {
       return sendJson(res, 400, { status: 'error', message: 'propertyUrl is required.' });
     }
