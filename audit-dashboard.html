@@ -55714,7 +55714,8 @@ Final Score: ${score}/100`;
         blog: 0,
         other: 0,
         money: 0,
-        site: 0
+        site: 0,
+        inferred: 0
       };
 
       const inferSegs = (url) => {
@@ -55742,12 +55743,34 @@ Final Score: ${score}/100`;
         const cCount = parseInt(r.ai_alan_citations_count ?? r.aiAlanCitationsCount ?? 0, 10) || 0;
         segCounts.site += cCount;
         const citedUrls = extractCitedUrls(r);
+        let attributed = 0;
         citedUrls.forEach(u => {
           inferSegs(u).forEach(seg => {
             if (segCounts[seg] === undefined) return;
             segCounts[seg] += 1;
+            attributed += 1;
           });
         });
+        // Some rows carry citation counts but no cited URL objects.
+        // Fallback to the row's ranking URL / page type so money-page share doesn't collapse to zero.
+        if (!citedUrls.length && cCount > 0) {
+          const pageTypeRaw = String(
+            r.pageType || r.page_type_display || r.page_type_norm || ''
+          ).toLowerCase();
+          const fallbackUrl = String(
+            r.targetUrl || r.best_url || r.ranking_url || r.url || ''
+          ).trim();
+          let seg = '';
+          if (pageTypeRaw === 'event') seg = 'event';
+          else if (pageTypeRaw === 'product') seg = 'product';
+          else if (pageTypeRaw === 'landing') seg = 'landing';
+          else if (pageTypeRaw === 'blog') seg = 'blog';
+          else if (pageTypeRaw === 'academy') seg = 'academy';
+          else seg = classifyPortfolioSegmentFromUrl(fallbackUrl) || 'other';
+          if (segCounts[seg] !== undefined) segCounts[seg] += cCount;
+          if (seg === 'landing' || seg === 'event' || seg === 'product') segCounts.money += cCount;
+          segCounts.inferred += cCount;
+        }
       });
 
       return segCounts;
@@ -55806,6 +55829,7 @@ Final Score: ${score}/100`;
               </table>
               <div style="margin-top: 0.5rem; color: #64748b; font-size: 0.8rem;">
                 ${unattributed > 0 ? `Includes <strong>${unattributed}</strong> unattributed citations (counted in totals, but no URL captured).` : `All citations were attributed to captured URLs.`}
+                ${counts.inferred > 0 ? ` <br><strong>${counts.inferred}</strong> citations were inferred from row page type/URL when cited URL objects were missing.` : ''}
               </div>
             </div>
           </div>
