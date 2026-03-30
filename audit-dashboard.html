@@ -9159,7 +9159,7 @@
               </div>
               <div style="display:flex;flex-direction:column;align-items:center;gap:0.2rem;flex-shrink:0;">
                 <a class="btn" id="traditional-seo-modal-gsc-inspect" role="button" href="#" target="_blank" rel="noopener noreferrer" style="background:#16a34a;border-color:#16a34a;color:#f8fafc;font-weight:700;text-decoration:none;display:inline-block;">Search Console: inspect / request indexing</a>
-                <span style="font-size:0.62rem;color:#94a3b8;text-align:center;line-height:1.2;max-width:11rem;">Uses Google’s inspection link from the last API refresh when available; otherwise a best‑effort inspect URL. Run <strong>Refresh GSC URL Inspection</strong> to capture links. Use <strong>Request indexing</strong> / <strong>Test live URL</strong> in GSC.</span>
+                <span style="font-size:0.62rem;color:#94a3b8;text-align:center;line-height:1.2;max-width:11rem;">Opens GSC URL Inspection. If Google didn’t return an API deep link for this URL yet, we copy the page URL for you to <strong>paste into the inspect bar</strong>. Run <strong>Refresh GSC URL Inspection</strong> (or <strong>Re-audit page</strong>) so the official link is stored.</span>
               </div>
               <div style="display:flex;flex-direction:column;align-items:center;gap:0.2rem;flex-shrink:0;">
                 <button type="button" class="btn" id="traditional-seo-page-modal-reaudit" style="background:#f59e0b;border-color:#f59e0b;color:#0f172a;font-weight:700;">Re-audit page</button>
@@ -73013,13 +73013,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       return tryOne(pageUrlRaw) || tryOne(pageAligned);
     }
 
-    function traditionalSeoGscInspectDeepLink(pageUrl) {
+    function traditionalSeoGscInspectOpenContext(pageUrl) {
       const prop = String(traditionalSeoEffectivePropertyUrl() || traditionalSeoPropertyUrl() || '').trim();
       const site = traditionalSeoNormalizeGscSiteUrlForInspect(prop);
       const raw = String(pageUrl || '').trim();
+      if (!site || !raw) return { href: '', copyUrl: '' };
       const norm = traditionalSeoNormalizeUrl(raw, prop) || raw;
       let page = traditionalSeoAlignInspectUrlToProperty(norm, prop);
-      if (!site || !page || !/^https?:\/\//i.test(page)) return '';
+      if (!page || !/^https?:\/\//i.test(page)) return { href: '', copyUrl: '' };
       try {
         const pu = new URL(page);
         pu.hash = '';
@@ -73028,35 +73029,44 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         /* keep page */
       }
       const official = traditionalSeoGscInspectOfficialLink(prop, raw, page);
-      if (official) return official;
-      const buildInspectPath = () => {
-        try {
-          const u = new URL('https://search.google.com/search-console/inspect');
-          u.searchParams.set('resource_id', site);
-          u.searchParams.set('url', page);
-          return u.toString();
-        } catch (err) {
-          return '';
+      if (official) return { href: official, copyUrl: '' };
+      try {
+        const u = new URL('https://search.google.com/search-console/inspect');
+        u.searchParams.set('resource_id', site);
+        return { href: u.toString(), copyUrl: page };
+      } catch (err) {
+        return { href: '', copyUrl: '' };
+      }
+    }
+
+    function traditionalSeoGscInspectDeepLink(pageUrl) {
+      return traditionalSeoGscInspectOpenContext(pageUrl).href;
+    }
+
+    async function traditionalSeoGscInspectOpenInNewTab(pageUrl) {
+      const ctx = traditionalSeoGscInspectOpenContext(pageUrl);
+      if (!ctx.href) {
+        if (typeof window.showStatus === 'function') {
+          window.showStatus('Set a Search Console property URL first.', 'warning');
         }
-      };
-      const buildHubActionInspect = (path) => {
+        return;
+      }
+      if (ctx.copyUrl && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
         try {
-          const u = new URL(`https://search.google.com${path}`);
-          u.searchParams.set('action', 'inspect');
-          u.searchParams.set('resource_id', site);
-          u.searchParams.set('url', page);
-          return u.toString();
-        } catch (err) {
-          return '';
+          await navigator.clipboard.writeText(ctx.copyUrl);
+          if (typeof window.showStatus === 'function') {
+            window.showStatus(
+              'Search Console often ignores url= on inspect links. Copied this page URL — paste it into the inspect bar at the top, press Enter, then use Request indexing or Test live URL.',
+              'info'
+            );
+          }
+        } catch (clipErr) {
+          if (typeof window.showStatus === 'function') {
+            window.showStatus(`Paste into GSC inspect: ${ctx.copyUrl}`, 'warning');
+          }
         }
-      };
-      // /u/0/search-console/inspect often redirects to /u/0/search-console?resource_id= and drops url=.
-      // Path /search-console/inspect (no /u/N/) keeps resource_id + url; hub ?action=inspect is fallback.
-      return (
-        buildInspectPath()
-        || buildHubActionInspect('/u/0/search-console')
-        || buildHubActionInspect('/search-console')
-      );
+      }
+      window.open(ctx.href, '_blank', 'noopener,noreferrer');
     }
 
     function traditionalSeoSyncModalGscInspectHref(pageUrl) {
@@ -73520,12 +73530,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     function traditionalSeoOpenGscInspectForPage(pageUrl) {
-      const target = traditionalSeoGscInspectDeepLink(pageUrl);
-      if (!target) {
-        if (typeof window.showStatus === 'function') window.showStatus('Set a Search Console property URL first.', 'warning');
-        return;
-      }
-      window.open(target, '_blank', 'noopener,noreferrer');
+      void traditionalSeoGscInspectOpenInNewTab(pageUrl);
     }
 
     window.peekGaioTraditionalSeoEvaluationRowsSync = function peekGaioTraditionalSeoEvaluationRowsSync() {
@@ -77202,17 +77207,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (gscInspectBtn && !gscInspectBtn.dataset.wired) {
         gscInspectBtn.dataset.wired = '1';
         gscInspectBtn.addEventListener('click', (e) => {
-          const pageUrl = String(TRADITIONAL_SEO_STATE.modalPageUrl || '').trim();
-          const link = traditionalSeoGscInspectDeepLink(pageUrl);
-          if (!link) {
-            e.preventDefault();
-            if (typeof window.showStatus === 'function') {
-              window.showStatus('Set a Search Console property URL first.', 'warning');
-            }
-            return;
-          }
           e.preventDefault();
-          window.open(link, '_blank', 'noopener,noreferrer');
+          const pageUrl = String(TRADITIONAL_SEO_STATE.modalPageUrl || '').trim();
+          void traditionalSeoGscInspectOpenInNewTab(pageUrl);
         });
       }
       if (reauditBtn && !reauditBtn.dataset.wired) {

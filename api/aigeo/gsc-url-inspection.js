@@ -71,9 +71,10 @@ async function inspectOne(accessToken, siteUrl, inspectionUrl) {
   }
   const ir = json?.inspectionResult;
   const idx = ir?.indexStatusResult;
+  const linkRaw = ir?.inspectionResultLink ?? json?.inspectionResultLink;
   return {
     inspectionUrl,
-    inspectionResultLink: ir?.inspectionResultLink ? String(ir.inspectionResultLink).trim() : null,
+    inspectionResultLink: linkRaw ? String(linkRaw).trim() : null,
     httpOk: res.ok,
     httpStatus: res.status,
     verdict: idx?.verdict ?? null,
