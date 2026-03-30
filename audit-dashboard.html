@@ -9304,9 +9304,12 @@
           <div class="impl-progress-modal-track">
             <div id="traditional-seo-eval-progress-fill" class="impl-progress-modal-fill"></div>
           </div>
-          <div class="impl-progress-modal-meta">
+          <div class="impl-progress-modal-meta" style="flex-wrap:wrap;align-items:center;gap:0.5rem 0.75rem;">
             <span id="traditional-seo-eval-progress-percent">5%</span>
-            <span id="traditional-seo-eval-progress-elapsed">Elapsed: 0s</span>
+            <span style="display:flex;flex-wrap:wrap;gap:0.65rem 1rem;margin-left:auto;justify-content:flex-end;text-align:right;">
+              <span id="traditional-seo-eval-progress-elapsed">Elapsed: 0:00</span>
+              <span id="traditional-seo-eval-progress-eta">ETA: —</span>
+            </span>
           </div>
         </div>
       </div>
@@ -71487,7 +71490,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       timer: null,
       startedAt: 0,
       displayPct: 5,
-      floorPct: 5
+      floorPct: 5,
+      trackDone: 0,
+      trackTotal: 0,
+      trackPhaseAt: 0
     };
 
     const TRADITIONAL_SEO_DFS_PROGRESS = {
@@ -78194,6 +78200,30 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       void traditionalSeoRefreshCtrTopTenTiles();
     }
 
+    function traditionalSeoFormatMinsSs(totalSec) {
+      const s = Math.max(0, Math.floor(Number(totalSec) || 0));
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return `${m}:${String(r).padStart(2, '0')}`;
+    }
+
+    function traditionalSeoEvalProgressTrack(done, total) {
+      const st = TRADITIONAL_SEO_EVAL_PROGRESS;
+      const d = Math.max(0, Math.floor(traditionalSeoToNum(done, 0)));
+      const t = Math.max(0, Math.floor(traditionalSeoToNum(total, 0)));
+      if (!t) {
+        st.trackDone = 0;
+        st.trackTotal = 0;
+        st.trackPhaseAt = 0;
+        return;
+      }
+      if (t !== st.trackTotal || d < st.trackDone) {
+        st.trackPhaseAt = Date.now();
+      }
+      st.trackTotal = t;
+      st.trackDone = d;
+    }
+
     function traditionalSeoEvalProgressClearTimer() {
       if (TRADITIONAL_SEO_EVAL_PROGRESS.timer) {
         clearInterval(TRADITIONAL_SEO_EVAL_PROGRESS.timer);
@@ -78208,18 +78238,35 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         subtitle: document.getElementById('traditional-seo-eval-progress-subtitle'),
         fill: document.getElementById('traditional-seo-eval-progress-fill'),
         pct: document.getElementById('traditional-seo-eval-progress-percent'),
-        elapsed: document.getElementById('traditional-seo-eval-progress-elapsed')
+        elapsed: document.getElementById('traditional-seo-eval-progress-elapsed'),
+        eta: document.getElementById('traditional-seo-eval-progress-eta')
       };
     }
 
     function traditionalSeoEvalProgressPaint() {
-      const { fill, pct, elapsed } = traditionalSeoEvalProgressDom();
-      const p = Math.round(TRADITIONAL_SEO_EVAL_PROGRESS.displayPct);
+      const { fill, pct, elapsed, eta } = traditionalSeoEvalProgressDom();
+      const st = TRADITIONAL_SEO_EVAL_PROGRESS;
+      const p = Math.round(st.displayPct);
       if (fill) fill.style.width = `${p}%`;
       if (pct) pct.textContent = `${p}%`;
-      if (elapsed && TRADITIONAL_SEO_EVAL_PROGRESS.startedAt) {
-        const s = Math.max(0, Math.floor((Date.now() - TRADITIONAL_SEO_EVAL_PROGRESS.startedAt) / 1000));
-        elapsed.textContent = `Elapsed: ${s}s`;
+      if (elapsed && st.startedAt) {
+        const s = Math.max(0, Math.floor((Date.now() - st.startedAt) / 1000));
+        elapsed.textContent = `Elapsed: ${traditionalSeoFormatMinsSs(s)}`;
+      }
+      if (eta) {
+        let etaLabel = 'ETA: —';
+        if (st.trackTotal > 0 && st.trackPhaseAt > 0) {
+          if (st.trackDone >= st.trackTotal) {
+            etaLabel = 'ETA: 0:00';
+          } else if (st.trackDone > 0) {
+            const phaseSec = Math.max(0.001, (Date.now() - st.trackPhaseAt) / 1000);
+            let rem = (phaseSec / st.trackDone) * (st.trackTotal - st.trackDone);
+            if (!Number.isFinite(rem) || rem < 0) rem = 0;
+            if (rem > 86400) rem = 86400;
+            etaLabel = `ETA: ~${traditionalSeoFormatMinsSs(rem)}`;
+          }
+        }
+        eta.textContent = etaLabel;
       }
     }
 
@@ -78230,6 +78277,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       TRADITIONAL_SEO_EVAL_PROGRESS.startedAt = Date.now();
       TRADITIONAL_SEO_EVAL_PROGRESS.displayPct = 6;
       TRADITIONAL_SEO_EVAL_PROGRESS.floorPct = 6;
+      TRADITIONAL_SEO_EVAL_PROGRESS.trackDone = 0;
+      TRADITIONAL_SEO_EVAL_PROGRESS.trackTotal = 0;
+      TRADITIONAL_SEO_EVAL_PROGRESS.trackPhaseAt = 0;
       title.textContent = titleOverride
         ? String(titleOverride)
         : (refreshAudit
@@ -78262,6 +78312,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     function traditionalSeoEvalProgressExtract(done, total) {
       const n = Math.max(0, traditionalSeoToNum(done, 0));
       const t = Math.max(1, traditionalSeoToNum(total, 1));
+      traditionalSeoEvalProgressTrack(n, t);
       const slice = 28 + Math.floor((50 * n) / t);
       traditionalSeoEvalProgressStage(`Extractability: ${n}/${t} URLs refreshed`, Math.min(85, slice));
     }
@@ -78269,6 +78320,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     function traditionalSeoEvalProgressClose(success, doneSubtitle) {
       const { modal, fill, pct, subtitle } = traditionalSeoEvalProgressDom();
       traditionalSeoEvalProgressClearTimer();
+      TRADITIONAL_SEO_EVAL_PROGRESS.trackDone = 0;
+      TRADITIONAL_SEO_EVAL_PROGRESS.trackTotal = 0;
+      TRADITIONAL_SEO_EVAL_PROGRESS.trackPhaseAt = 0;
       TRADITIONAL_SEO_EVAL_PROGRESS.displayPct = success
         ? 100
         : Math.max(TRADITIONAL_SEO_EVAL_PROGRESS.displayPct, 95);
@@ -78467,6 +78521,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             forceAll: true,
             onChunk: (ev) => {
               if (!ev || !ev.total) return;
+              traditionalSeoEvalProgressTrack(ev.done, ev.total);
               const slice = 52 + Math.floor((22 * ev.done) / Math.max(1, ev.total));
               const bi = Number(ev.batchIndex);
               const bt = Number(ev.batchTotal);
@@ -78482,6 +78537,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           gscBatches = traditionalSeoToNum(gscStatsRule?.batches, 0);
         }
 
+        traditionalSeoEvalProgressTrack(0, 0);
         traditionalSeoEvalProgressStage('Building signals and loading overrides…', 78);
         const implPayloads = await traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl, urls.length);
         const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
@@ -78735,6 +78791,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             forceAll: forceGscRefresh,
             onChunk: (ev) => {
               if (!ev || !ev.total) return;
+              traditionalSeoEvalProgressTrack(ev.done, ev.total);
               const slice = 78 + Math.floor((6 * ev.done) / Math.max(1, ev.total));
               const bi = Number(ev.batchIndex);
               const bt = Number(ev.batchTotal);
@@ -78763,6 +78820,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         } else {
           traditionalSeoDbg('GSC phase skipped: gsc_url_indexed rule off or not in rules list', 'warn');
         }
+        traditionalSeoEvalProgressTrack(0, 0);
         traditionalSeoEvalProgressStage('Building signals and loading overrides…', 86);
         const implPayloads = await traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl, urls.length);
         const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
