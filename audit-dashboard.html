@@ -77002,6 +77002,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           gscRow.raw_status = raw;
           gscRow.status = bypass ? 'pass' : raw;
           gscRow.bypassed = bypass && String(raw || '').toLowerCase() !== 'pass';
+          traditionalSeoReapplyBypassesToAllRows();
+          traditionalSeoRefreshRulesSummaryFromEvaluationRows();
+          renderTraditionalSeoResultsTable();
         }
       }
       hits.sort((a, b) => {
@@ -77271,7 +77274,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const rk = traditionalSeoLandingRollupGroupKey(u, prop);
         const rkey = String(row.rule_key || '').trim();
         if (!rkey) return;
-        const st = String(row.status || 'fail').toLowerCase();
+        let st = String(row.status || 'fail').toLowerCase();
+        if (rkey === 'gsc_url_indexed') {
+          const g = traditionalSeoGscInspectGet(prop, u);
+          const raw = traditionalSeoGscInspectDeriveStatus(u, g);
+          const bypass = traditionalSeoHasRuleBypass(u, rkey);
+          st = bypass ? 'pass' : raw;
+        }
         if (!ruleByRollup.has(rk)) ruleByRollup.set(rk, new Map());
         const m = ruleByRollup.get(rk);
         if (!m.has(rkey)) m.set(rkey, st);
@@ -80356,13 +80365,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           .then(() => traditionalSeoEnsureTargetKeywordOverridesLoaded())
           .then(async () => {
             if (Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) && TRADITIONAL_SEO_STATE.evaluationRows.length) {
-              await traditionalSeoHydrateGscCacheFromServer();
-              traditionalSeoHydrateGscIndexFromStorage();
+              const gscServerN = await traditionalSeoHydrateGscCacheFromServer();
+              if (!gscServerN) traditionalSeoHydrateGscIndexFromStorage();
               const changed = traditionalSeoBackfillGscEvaluationRows();
-              if (!changed) {
-                traditionalSeoReapplyBypassesToAllRows();
-                traditionalSeoRefreshRulesSummaryFromEvaluationRows();
-              }
+              traditionalSeoReapplyBypassesToAllRows();
+              traditionalSeoRefreshRulesSummaryFromEvaluationRows();
               if (changed) traditionalSeoPersistEvaluationSnapshot();
               renderTraditionalSeoResultsTable();
               void traditionalSeoKeywordMetricsLookupIfNeededForRun();
@@ -80386,16 +80393,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (!hydrated) {
           hydrated = traditionalSeoHydrateEvaluationFromStorage();
         }
-        await traditionalSeoHydrateGscCacheFromServer();
-        if (!hydrated) {
-          traditionalSeoHydrateGscIndexFromStorage();
-        }
+        const gscServerN = await traditionalSeoHydrateGscCacheFromServer();
+        if (!gscServerN) traditionalSeoHydrateGscIndexFromStorage();
         if (Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) && TRADITIONAL_SEO_STATE.evaluationRows.length) {
           const changed = traditionalSeoBackfillGscEvaluationRows();
-          if (!changed) {
-            traditionalSeoReapplyBypassesToAllRows();
-            traditionalSeoRefreshRulesSummaryFromEvaluationRows();
-          }
+          traditionalSeoReapplyBypassesToAllRows();
+          traditionalSeoRefreshRulesSummaryFromEvaluationRows();
           if (changed) traditionalSeoPersistEvaluationSnapshot();
           renderTraditionalSeoResultsTable();
         }
