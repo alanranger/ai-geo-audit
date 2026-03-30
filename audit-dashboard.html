@@ -9310,6 +9310,19 @@
           </div>
         </div>
       </div>
+      <div id="traditional-seo-eval-summary-modal" class="impl-progress-modal-backdrop" aria-hidden="true" style="z-index:10010;">
+        <div class="impl-progress-modal" role="dialog" aria-modal="true" aria-labelledby="traditional-seo-eval-summary-title" style="max-width:min(640px,96vw);">
+          <h4 id="traditional-seo-eval-summary-title" class="impl-progress-modal-title">Traditional SEO run</h4>
+          <p id="traditional-seo-eval-summary-lead" class="impl-progress-modal-subtitle" style="margin-bottom:0.65rem;">—</p>
+          <label for="traditional-seo-eval-summary-body" style="font-size:0.72rem;color:#94a3b8;display:block;margin-bottom:0.35rem;">Report (copy to share)</label>
+          <textarea id="traditional-seo-eval-summary-body" readonly rows="14" style="width:100%;box-sizing:border-box;font-family:ui-monospace,Consolas,monospace;font-size:0.78rem;line-height:1.35;padding:0.5rem;border-radius:8px;border:1px solid rgba(148,163,184,0.35);background:#0f172a;color:#e2e8f0;resize:vertical;min-height:200px;"></textarea>
+          <div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:0.75rem;align-items:center;">
+            <button type="button" class="btn" id="traditional-seo-eval-summary-copy" style="font-weight:700;">Copy report</button>
+            <button type="button" class="btn" id="traditional-seo-eval-summary-dismiss">Close</button>
+            <span id="traditional-seo-eval-summary-copy-hint" style="font-size:0.72rem;color:#64748b;">Copy puts the report on the clipboard.</span>
+          </div>
+        </div>
+      </div>
       <div id="traditional-seo-dfs-progress-modal" class="impl-progress-modal-backdrop" aria-hidden="true" style="z-index:10003;">
         <div class="impl-progress-modal" role="status" aria-live="polite">
           <h4 id="traditional-seo-dfs-progress-title" class="impl-progress-modal-title">DataForSEO backlink ingest</h4>
@@ -73338,7 +73351,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const prop = String(propertyUrl || '').trim();
       if (!prop) {
         traditionalSeoDbg('GSC ensure skipped: empty propertyUrl', 'warn');
-        return 0;
+        return { queued: 0, batches: 0 };
       }
       const forceKeys = options.forceKeys instanceof Set ? options.forceKeys : null;
       const forceAll = options.forceAll === true;
@@ -73431,7 +73444,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
       traditionalSeoPersistGscIndexToStorage();
       traditionalSeoSyncGscMapIntoLastSignalMaps();
-      return pending.length;
+      const batchesDone = pending.length ? Math.ceil(pending.length / batchSize) : 0;
+      return { queued: pending.length, batches: batchesDone };
     }
 
     function traditionalSeoOpenGscInspectForPage(pageUrl) {
@@ -78263,7 +78277,104 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (!modal) return;
         modal.classList.remove('is-open');
         modal.setAttribute('aria-hidden', 'true');
-      }, success ? 900 : 380);
+      }, success ? 220 : 380);
+    }
+
+    function traditionalSeoEvalCountRuleStatuses(rows, ruleKey) {
+      const rk = String(ruleKey || '');
+      let pass = 0;
+      let warn = 0;
+      let fail = 0;
+      let total = 0;
+      (Array.isArray(rows) ? rows : []).forEach((r) => {
+        if (String(r?.rule_key || '') !== rk) return;
+        total += 1;
+        const s = String(r?.status || 'fail').toLowerCase();
+        if (s === 'pass') pass += 1;
+        else if (s === 'warn') warn += 1;
+        else fail += 1;
+      });
+      return { pass, warn, fail, total };
+    }
+
+    function traditionalSeoEvalSummaryModalWireOnce() {
+      const root = document.getElementById('traditional-seo-eval-summary-modal');
+      if (!root || root.dataset.wiredSummary === '1') return;
+      root.dataset.wiredSummary = '1';
+      const close = () => {
+        root.classList.remove('is-open');
+        root.setAttribute('aria-hidden', 'true');
+      };
+      const onKey = (ev) => {
+        if (ev.key === 'Escape' && root.classList.contains('is-open')) {
+          ev.preventDefault();
+          close();
+        }
+      };
+      document.addEventListener('keydown', onKey);
+      document.getElementById('traditional-seo-eval-summary-dismiss')?.addEventListener('click', close);
+      root.addEventListener('click', (ev) => {
+        if (ev.target === root) close();
+      });
+      document.getElementById('traditional-seo-eval-summary-copy')?.addEventListener('click', async () => {
+        const ta = document.getElementById('traditional-seo-eval-summary-body');
+        const hint = document.getElementById('traditional-seo-eval-summary-copy-hint');
+        const text = String(ta?.value || '');
+        try {
+          if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            await navigator.clipboard.writeText(text);
+          } else {
+            throw new Error('no_clipboard_api');
+          }
+        } catch (e) {
+          try {
+            if (ta) {
+              ta.focus();
+              ta.select();
+              document.execCommand('copy');
+            }
+          } catch (e2) {
+            if (typeof window.showStatus === 'function') {
+              window.showStatus('Copy failed — select the report text manually.', 'error');
+            }
+            return;
+          }
+        }
+        if (hint) hint.textContent = 'Copied to clipboard.';
+        if (typeof window.showStatus === 'function') window.showStatus('Report copied to clipboard.', 'success');
+        setTimeout(() => {
+          if (hint) hint.textContent = 'Copy puts the report on the clipboard.';
+        }, 4000);
+      });
+    }
+
+    function traditionalSeoEvalSummaryModalOpen(bundle) {
+      traditionalSeoEvalSummaryModalWireOnce();
+      const modal = document.getElementById('traditional-seo-eval-summary-modal');
+      const titleEl = document.getElementById('traditional-seo-eval-summary-title');
+      const leadEl = document.getElementById('traditional-seo-eval-summary-lead');
+      const ta = document.getElementById('traditional-seo-eval-summary-body');
+      const hint = document.getElementById('traditional-seo-eval-summary-copy-hint');
+      if (!modal || !titleEl || !leadEl || !ta) return;
+      if (hint) hint.textContent = 'Copy puts the report on the clipboard.';
+      const ok = bundle?.ok === true;
+      titleEl.textContent = String(bundle?.title || 'Traditional SEO run');
+      leadEl.textContent = String(bundle?.lead || (ok ? 'Completed successfully.' : 'Run failed.'));
+      leadEl.style.color = ok ? '#86efac' : '#fca5a5';
+      const lines = Array.isArray(bundle?.lines) ? bundle.lines.slice() : [];
+      if (bundle?.errorDetail) {
+        lines.push('', '--- Error detail (stack) ---', String(bundle.errorDetail));
+      }
+      ta.value = lines.join('\n');
+      modal.classList.add('is-open');
+      modal.setAttribute('aria-hidden', 'false');
+    }
+
+    function traditionalSeoEvalFinishProgressAndShowSummary(progressOk, progressSubtitle, bundle) {
+      traditionalSeoEvalProgressClose(progressOk, progressSubtitle);
+      setTimeout(() => {
+        traditionalSeoEvalSummaryModalOpen(bundle);
+      }, 260);
     }
 
     function traditionalSeoRuleNeedsExtractRefresh(ruleKey) {
@@ -78303,6 +78414,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (typeof window.showStatus === 'function') window.showStatus('That rule is disabled or not found in the table.', 'warning');
         return;
       }
+      const reauditWallMark = Date.now();
       try {
         TRADITIONAL_SEO_STATE.seoEvalInFlight = true;
         if (runBtn) runBtn.disabled = true;
@@ -78338,9 +78450,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           traditionalSeoEvalProgressStage('Skipping extractability refresh (rule uses audit/schema/tech signals only)…', 40);
         }
 
+        let gscQueued = 0;
+        let gscBatches = 0;
         if (traditionalSeoRuleNeedsGscIndexInspect(ruleKey)) {
           traditionalSeoEvalProgressStage('Google Search Console URL Inspection (full refresh for this rule)…', 52);
-          await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, urls, {
+          const gscStatsRule = await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, urls, {
             forceAll: true,
             onChunk: (ev) => {
               if (!ev || !ev.total) return;
@@ -78348,6 +78462,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               traditionalSeoEvalProgressStage(`GSC batches ${ev.done}/${ev.total}…`, Math.min(74, slice));
             }
           });
+          gscQueued = traditionalSeoToNum(gscStatsRule?.queued, 0);
+          gscBatches = traditionalSeoToNum(gscStatsRule?.batches, 0);
         }
 
         traditionalSeoEvalProgressStage('Building signals and loading overrides…', 78);
@@ -78438,16 +78554,56 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         traditionalSeoReapplyBypassesToAllRows();
         traditionalSeoRefreshRulesSummaryFromEvaluationRows();
         renderTraditionalSeoResultsTable();
-        traditionalSeoEvalProgressClose(true, `Re-audit complete — ${newRows.length} row(s) updated.`);
-        if (typeof window.showStatus === 'function') {
-          window.showStatus(`Re-audit complete for “${ruleLabel}” (${newRows.length} row${newRows.length === 1 ? '' : 's'}).`, 'success');
+        const elapsedRe = Math.max(0, Math.floor((Date.now() - reauditWallMark) / 1000));
+        let passR = 0;
+        let warnR = 0;
+        let failR = 0;
+        newRows.forEach((r) => {
+          const s = String(r?.status || 'fail').toLowerCase();
+          if (s === 'pass') passR += 1;
+          else if (s === 'warn') warnR += 1;
+          else failR += 1;
+        });
+        const linesRe = [
+          `Finished: ${new Date().toISOString()}`,
+          `Elapsed: ${elapsedRe}s`,
+          'Mode: single-rule re-audit',
+          `Rule: ${ruleKey} (${ruleLabel})`,
+          `Rows written: ${newRows.length} (pass ${passR} · warn ${warnR} · fail ${failR})`,
+          `URLs in site list: ${urls.length}`
+        ];
+        if (traditionalSeoRuleNeedsGscIndexInspect(ruleKey)) {
+          linesRe.push(`GSC URL Inspection: queued=${gscQueued} URLs · API batches=${gscBatches}`);
         }
+        linesRe.push(`Property URL: ${propertyUrl || '(not set)'}`);
+        linesRe.push(`Page URL: ${String(typeof location !== 'undefined' ? location.href : '')}`);
+        traditionalSeoEvalFinishProgressAndShowSummary(true, `Re-audit complete — ${newRows.length} row(s) updated.`, {
+          ok: true,
+          title: 'Rule re-audit complete',
+          lead: `${ruleLabel} · ${elapsedRe}s · ${newRows.length} row(s)`,
+          lines: linesRe
+        });
         void traditionalSeoKeywordMetricsLookupIfNeededForRun();
         traditionalSeoPersistEvaluationSnapshot();
       } catch (err) {
-        traditionalSeoEvalProgressClose(false);
+        const elapsedRe = Math.max(0, Math.floor((Date.now() - reauditWallMark) / 1000));
+        const msgRe = String(err?.message || err);
+        const stackRe = err?.stack ? String(err.stack) : '';
+        traditionalSeoEvalFinishProgressAndShowSummary(false, 'Stopped with errors.', {
+          ok: false,
+          title: 'Rule re-audit failed',
+          lead: msgRe,
+          lines: [
+            `Finished: ${new Date().toISOString()}`,
+            `Elapsed: ${elapsedRe}s`,
+            'Mode: single-rule re-audit',
+            `Message: ${msgRe}`,
+            `Page URL: ${String(typeof location !== 'undefined' ? location.href : '')}`
+          ],
+          errorDetail: stackRe
+        });
         if (typeof window.showStatus === 'function') {
-          window.showStatus(`Rule re-audit failed: ${err?.message || err}`, 'error');
+          window.showStatus(`Rule re-audit failed: ${msgRe}`, 'error');
         }
       } finally {
         TRADITIONAL_SEO_STATE.seoEvalInFlight = false;
@@ -78478,6 +78634,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const isPartialPageRescore = partialPageUrls.length > 0;
       const runBtn = document.getElementById('traditional-seo-run-audit-btn');
       const runFullBtn = document.getElementById('traditional-seo-run-full-audit-btn');
+      let gscRuleOn = false;
+      let gscQueued = 0;
+      let gscBatches = 0;
+      const evalWallClockMark = Date.now();
       try {
         traditionalSeoDbg(
           `run start: ①② audit refreshAudit=${refreshAudit} extract=${refreshExtractability} forceGsc=${forceGscRefresh} partial=${isPartialPageRescore}`
@@ -78540,7 +78700,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const rulesPrecheck = (tableRules.length ? tableRules : (TRADITIONAL_SEO_STATE.rules || []).slice()).filter(
           (r) => r.enabled !== false
         );
-        const gscRuleOn = rulesPrecheck.some((r) => String(r.rule_key) === 'gsc_url_indexed');
+        gscRuleOn = rulesPrecheck.some((r) => String(r.rule_key) === 'gsc_url_indexed');
         traditionalSeoDbg(
           `rules precheck: domRows=${tableRules.length} enabled=${rulesPrecheck.length} gscRuleOn=${gscRuleOn}`
         );
@@ -78555,7 +78715,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           traditionalSeoDbg(
             `GSC phase: propertyUrl=${propertyUrl ? 'set' : 'EMPTY'} targets=${Array.isArray(gscTargets) ? gscTargets.length : 0}`
           );
-          const gscQueued = await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, gscTargets, {
+          const gscStatsRun = await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, gscTargets, {
             forceAll: forceGscRefresh,
             onChunk: (ev) => {
               if (!ev || !ev.total) return;
@@ -78563,9 +78723,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               traditionalSeoEvalProgressStage(`GSC inspection batches ${ev.done}/${ev.total}…`, Math.min(84, slice));
             }
           });
+          gscQueued = traditionalSeoToNum(gscStatsRun?.queued, 0);
+          gscBatches = traditionalSeoToNum(gscStatsRun?.batches, 0);
           if (
             forceGscRefresh
-            && Number(gscQueued) === 0
+            && gscQueued === 0
             && String(propertyUrl || '').trim()
             && (Array.isArray(gscTargets) ? gscTargets : []).some((u) => /^https:\/\//i.test(String(u || '').trim()))
             && typeof window.showStatus === 'function'
@@ -78690,23 +78852,72 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         renderTraditionalSeoScore(evalSummary, traditionalSeoComputeScoreDelta(evalSummary));
         traditionalSeoPopulateRuleFilter(updatedRules);
         renderTraditionalSeoResultsTable();
-        traditionalSeoEvalProgressClose(true);
-        if (typeof window.showStatus === 'function') {
-          window.showStatus(
-            isPartialPageRescore
-              ? 'Single-page Traditional SEO re-audit complete.'
-              : 'Traditional SEO evaluation complete.',
-            'success'
+        const elapsedSec = Math.max(0, Math.floor((Date.now() - evalWallClockMark) / 1000));
+        const runLabel = isPartialPageRescore
+          ? 'single-page rescore'
+          : refreshAudit
+            ? 'full audit + Traditional SEO'
+            : refreshExtractability
+              ? '② Score Traditional SEO (extract refresh)'
+              : 'Traditional SEO score';
+        const scoreNow = traditionalSeoToNum(evalSummary.score, 0);
+        const gcTally = traditionalSeoEvalCountRuleStatuses(rows, 'gsc_url_indexed');
+        const linesRun = [
+          `Finished: ${new Date().toISOString()}`,
+          `Elapsed: ${elapsedSec}s`,
+          `Run: ${runLabel}`,
+          `refreshAudit=${refreshAudit} · refreshExtractability=${refreshExtractability} · forceGscRefresh=${forceGscRefresh}`,
+          `URLs in list: ${urls.length}`,
+          `URLs scored this run: ${urlsToScore.length}`,
+          `Evaluation rows stored: ${rows.length}`,
+          `Overall score: ${scoreNow}/100`,
+          `GSC rule in ruleset: ${gscRuleOn ? 'yes' : 'no'}`
+        ];
+        if (gscRuleOn) {
+          linesRun.push(`GSC URL Inspection: queued=${gscQueued} URLs · API batches=${gscBatches}`);
+          linesRun.push(
+            `gsc_url_indexed tally: pass=${gcTally.pass} warn=${gcTally.warn} fail=${gcTally.fail} (rows=${gcTally.total})`
           );
         }
+        if (
+          forceGscRefresh
+          && gscRuleOn
+          && gscQueued === 0
+          && String(propertyUrl || '').trim()
+          && urls.some((u) => /^https:\/\//i.test(String(u || '').trim()))
+        ) {
+          linesRun.push('WARNING: GSC full refresh queued 0 URL Inspection API calls (check property URL / utility skips).');
+        }
+        linesRun.push(`Property URL: ${propertyUrl || '(not set)'}`);
+        linesRun.push(`Page URL: ${String(typeof location !== 'undefined' ? location.href : '')}`);
+        traditionalSeoEvalFinishProgressAndShowSummary(true, 'Finished — table updated.', {
+          ok: true,
+          title: isPartialPageRescore ? 'Traditional SEO (single page)' : 'Traditional SEO run',
+          lead: `Done in ${elapsedSec}s · score ${scoreNow}/100`,
+          lines: linesRun
+        });
         void traditionalSeoKeywordMetricsLookupIfNeededForRun();
         traditionalSeoPersistEvaluationSnapshot();
         traditionalSeoDbg('run complete OK', 'success');
       } catch (err) {
-        traditionalSeoEvalProgressClose(false);
-        traditionalSeoDbg(`run FAILED: ${err?.message || err}`, 'error');
+        const elapsedFail = Math.max(0, Math.floor((Date.now() - evalWallClockMark) / 1000));
+        const msgFail = String(err?.message || err);
+        const stackFail = err?.stack ? String(err.stack) : '';
+        traditionalSeoDbg(`run FAILED: ${msgFail}`, 'error');
+        traditionalSeoEvalFinishProgressAndShowSummary(false, 'Stopped with errors.', {
+          ok: false,
+          title: 'Traditional SEO run failed',
+          lead: msgFail,
+          lines: [
+            `Finished: ${new Date().toISOString()}`,
+            `Elapsed: ${elapsedFail}s`,
+            `Message: ${msgFail}`,
+            `Page URL: ${String(typeof location !== 'undefined' ? location.href : '')}`
+          ],
+          errorDetail: stackFail
+        });
         if (typeof window.showStatus === 'function') {
-          window.showStatus(`Traditional SEO audit failed: ${err?.message || err}`, 'error');
+          window.showStatus(`Traditional SEO audit failed: ${msgFail}`, 'error');
         }
       } finally {
         TRADITIONAL_SEO_STATE.seoEvalInFlight = false;
@@ -78893,6 +79104,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     }
 
     function wireTraditionalSeoButtons() {
+      traditionalSeoEvalSummaryModalWireOnce();
       const rulesToggle = document.getElementById('traditional-seo-rules-toggle');
       const rulesPanel = document.getElementById('traditional-seo-rules-table-panel');
       if (rulesToggle && rulesPanel && !rulesToggle.dataset.wiredToggle) {
