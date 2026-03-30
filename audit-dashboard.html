@@ -72995,7 +72995,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const norm = traditionalSeoNormalizeUrl(raw, prop) || raw;
       const page = traditionalSeoAlignInspectUrlToProperty(norm, prop);
       if (!site || !page || !/^https?:\/\//i.test(page)) return '';
-      return `https://search.google.com/search-console/inspect?resource_id=${encodeURIComponent(site)}&url=${encodeURIComponent(page)}`;
+      // Google Help "quick link" uses ?action=inspect; /inspect path often drops url= and lands on hub.
+      return `https://search.google.com/search-console?action=inspect&resource_id=${encodeURIComponent(site)}&url=${encodeURIComponent(page)}`;
     }
 
     function traditionalSeoSyncModalGscInspectHref(pageUrl) {
@@ -73389,6 +73390,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         traditionalSeoDbg('GSC ensure: no pending URLs (TTL/cache or excluded)', 'info');
       }
       const batchSize = 5;
+      const batchTotal = pending.length ? Math.ceil(pending.length / batchSize) : 0;
       for (let i = 0; i < pending.length; i += batchSize) {
         const slice = pending.slice(i, i + batchSize);
         const urlChunk = slice.map((x) => x.uReq);
@@ -73438,7 +73440,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           traditionalSeoGscInspectStoreAliases(map, prop, uRaw, payload);
         });
         if (typeof options.onChunk === 'function') {
-          options.onChunk({ done: Math.min(i + batchSize, pending.length), total: pending.length });
+          const urlsDone = Math.min(i + batchSize, pending.length);
+          const batchIndex = Math.floor(i / batchSize) + 1;
+          options.onChunk({
+            done: urlsDone,
+            total: pending.length,
+            batchIndex,
+            batchTotal
+          });
         }
         await new Promise((r) => setTimeout(r, 0));
       }
@@ -78459,7 +78468,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             onChunk: (ev) => {
               if (!ev || !ev.total) return;
               const slice = 52 + Math.floor((22 * ev.done) / Math.max(1, ev.total));
-              traditionalSeoEvalProgressStage(`GSC batches ${ev.done}/${ev.total}…`, Math.min(74, slice));
+              const bi = Number(ev.batchIndex);
+              const bt = Number(ev.batchTotal);
+              const batchTxt =
+                Number.isFinite(bi) && Number.isFinite(bt) && bt > 0 ? ` · batch ${bi}/${bt}` : '';
+              traditionalSeoEvalProgressStage(
+                `GSC URL Inspection: ${ev.done}/${ev.total} URLs${batchTxt}…`,
+                Math.min(74, slice)
+              );
             }
           });
           gscQueued = traditionalSeoToNum(gscStatsRule?.queued, 0);
@@ -78720,7 +78736,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             onChunk: (ev) => {
               if (!ev || !ev.total) return;
               const slice = 78 + Math.floor((6 * ev.done) / Math.max(1, ev.total));
-              traditionalSeoEvalProgressStage(`GSC inspection batches ${ev.done}/${ev.total}…`, Math.min(84, slice));
+              const bi = Number(ev.batchIndex);
+              const bt = Number(ev.batchTotal);
+              const batchTxt =
+                Number.isFinite(bi) && Number.isFinite(bt) && bt > 0 ? ` · batch ${bi}/${bt}` : '';
+              traditionalSeoEvalProgressStage(
+                `GSC URL Inspection: ${ev.done}/${ev.total} URLs${batchTxt}…`,
+                Math.min(84, slice)
+              );
             }
           });
           gscQueued = traditionalSeoToNum(gscStatsRun?.queued, 0);
