@@ -73338,7 +73338,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const prop = String(propertyUrl || '').trim();
       if (!prop) {
         traditionalSeoDbg('GSC ensure skipped: empty propertyUrl', 'warn');
-        return;
+        return 0;
       }
       const forceKeys = options.forceKeys instanceof Set ? options.forceKeys : null;
       const forceAll = options.forceAll === true;
@@ -73408,8 +73408,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           }
           return {};
         };
-        slice.forEach(({ uRaw, uReq }) => {
-          const hit = pickGscRowForUrl(uReq);
+        slice.forEach(({ uRaw, uReq }, j) => {
+          const byOrder = rows[j];
+          const hit =
+            byOrder != null && typeof byOrder === 'object' ? byOrder : pickGscRowForUrl(uReq);
           const payload = {
             inspectionUrl: uReq,
             verdict: hit.verdict ?? null,
@@ -73429,6 +73431,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
       traditionalSeoPersistGscIndexToStorage();
       traditionalSeoSyncGscMapIntoLastSignalMaps();
+      return pending.length;
     }
 
     function traditionalSeoOpenGscInspectForPage(pageUrl) {
@@ -78240,8 +78243,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       traditionalSeoEvalProgressStage(`Extractability: ${n}/${t} URLs refreshed`, Math.min(85, slice));
     }
 
-    function traditionalSeoEvalProgressClose(success) {
-      const { modal, fill, pct } = traditionalSeoEvalProgressDom();
+    function traditionalSeoEvalProgressClose(success, doneSubtitle) {
+      const { modal, fill, pct, subtitle } = traditionalSeoEvalProgressDom();
       traditionalSeoEvalProgressClearTimer();
       TRADITIONAL_SEO_EVAL_PROGRESS.displayPct = success
         ? 100
@@ -78250,12 +78253,17 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const w = Math.round(TRADITIONAL_SEO_EVAL_PROGRESS.displayPct);
       if (fill) fill.style.width = `${w}%`;
       if (pct) pct.textContent = `${w}%`;
+      if (subtitle) {
+        subtitle.textContent = String(
+          doneSubtitle || (success ? 'Finished — table updated.' : 'Stopped with errors.')
+        );
+      }
       traditionalSeoEvalProgressPaint();
       setTimeout(() => {
         if (!modal) return;
         modal.classList.remove('is-open');
         modal.setAttribute('aria-hidden', 'true');
-      }, success ? 220 : 380);
+      }, success ? 900 : 380);
     }
 
     function traditionalSeoRuleNeedsExtractRefresh(ruleKey) {
@@ -78332,7 +78340,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
         if (traditionalSeoRuleNeedsGscIndexInspect(ruleKey)) {
           traditionalSeoEvalProgressStage('Google Search Console URL Inspection (full refresh for this rule)…', 52);
-          await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, urls, { forceAll: true });
+          await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, urls, {
+            forceAll: true,
+            onChunk: (ev) => {
+              if (!ev || !ev.total) return;
+              const slice = 52 + Math.floor((22 * ev.done) / Math.max(1, ev.total));
+              traditionalSeoEvalProgressStage(`GSC batches ${ev.done}/${ev.total}…`, Math.min(74, slice));
+            }
+          });
         }
 
         traditionalSeoEvalProgressStage('Building signals and loading overrides…', 78);
@@ -78423,7 +78438,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         traditionalSeoReapplyBypassesToAllRows();
         traditionalSeoRefreshRulesSummaryFromEvaluationRows();
         renderTraditionalSeoResultsTable();
-        traditionalSeoEvalProgressClose(true);
+        traditionalSeoEvalProgressClose(true, `Re-audit complete — ${newRows.length} row(s) updated.`);
         if (typeof window.showStatus === 'function') {
           window.showStatus(`Re-audit complete for “${ruleLabel}” (${newRows.length} row${newRows.length === 1 ? '' : 's'}).`, 'success');
         }
@@ -78540,7 +78555,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           traditionalSeoDbg(
             `GSC phase: propertyUrl=${propertyUrl ? 'set' : 'EMPTY'} targets=${Array.isArray(gscTargets) ? gscTargets.length : 0}`
           );
-          await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, gscTargets, {
+          const gscQueued = await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, gscTargets, {
             forceAll: forceGscRefresh,
             onChunk: (ev) => {
               if (!ev || !ev.total) return;
@@ -78548,6 +78563,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               traditionalSeoEvalProgressStage(`GSC inspection batches ${ev.done}/${ev.total}…`, Math.min(84, slice));
             }
           });
+          if (
+            forceGscRefresh
+            && Number(gscQueued) === 0
+            && String(propertyUrl || '').trim()
+            && (Array.isArray(gscTargets) ? gscTargets : []).some((u) => /^https:\/\//i.test(String(u || '').trim()))
+            && typeof window.showStatus === 'function'
+          ) {
+            window.showStatus(
+              'GSC full refresh queued no URL Inspection calls (check property URL, or all targets skipped as utility URLs). Open the browser console for traditionalSeoDbg lines.',
+              'warning'
+            );
+          }
         } else {
           traditionalSeoDbg('GSC phase skipped: gsc_url_indexed rule off or not in rules list', 'warn');
         }
