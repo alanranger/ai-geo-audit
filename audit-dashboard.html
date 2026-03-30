@@ -73004,10 +73004,27 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const site = traditionalSeoNormalizeGscSiteUrlForInspect(prop);
       const raw = String(pageUrl || '').trim();
       const norm = traditionalSeoNormalizeUrl(raw, prop) || raw;
-      const page = traditionalSeoAlignInspectUrlToProperty(norm, prop);
+      let page = traditionalSeoAlignInspectUrlToProperty(norm, prop);
       if (!site || !page || !/^https?:\/\//i.test(page)) return '';
-      // /search-console/inspect opens the URL Inspection report; ?action=inspect on the hub often ignores url= and shows Overview.
-      return `https://search.google.com/search-console/inspect?resource_id=${encodeURIComponent(site)}&url=${encodeURIComponent(page)}`;
+      try {
+        const pu = new URL(page);
+        pu.hash = '';
+        page = pu.toString();
+      } catch (e) {
+        /* keep page */
+      }
+      const build = (path) => {
+        try {
+          const u = new URL(`https://search.google.com${path}`);
+          u.searchParams.set('resource_id', site);
+          u.searchParams.set('url', page);
+          return u.toString();
+        } catch (err) {
+          return '';
+        }
+      };
+      // Default Google account (/u/0/) avoids redirects that drop url= and land on ?resource_id= only.
+      return build('/u/0/search-console/inspect') || build('/search-console/inspect');
     }
 
     function traditionalSeoSyncModalGscInspectHref(pageUrl) {
@@ -77151,11 +77168,17 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (gscInspectBtn && !gscInspectBtn.dataset.wired) {
         gscInspectBtn.dataset.wired = '1';
         gscInspectBtn.addEventListener('click', (e) => {
-          const href = String(gscInspectBtn.getAttribute('href') || '').trim();
-          if (!href || href === '#') {
+          const pageUrl = String(TRADITIONAL_SEO_STATE.modalPageUrl || '').trim();
+          const link = traditionalSeoGscInspectDeepLink(pageUrl);
+          if (!link) {
             e.preventDefault();
-            if (typeof window.showStatus === 'function') window.showStatus('Set a Search Console property URL first.', 'warning');
+            if (typeof window.showStatus === 'function') {
+              window.showStatus('Set a Search Console property URL first.', 'warning');
+            }
+            return;
           }
+          e.preventDefault();
+          window.open(link, '_blank', 'noopener,noreferrer');
         });
       }
       if (reauditBtn && !reauditBtn.dataset.wired) {
