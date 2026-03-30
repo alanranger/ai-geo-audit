@@ -6807,8 +6807,8 @@
             <div style="font-weight: 700;">Traditional SEO — run controls</div>
           </div>
           <p class="traditional-seo-run-sequence-hint" id="traditional-seo-run-sequence-hint">
-            <strong>② (green)</strong> = quick rescore: saved audit + <strong>full extractability refresh</strong> for <em>every</em> URL (deduped), in <strong>batches of 25</strong>, then Traditional SEO scoring. Also <strong>re-fetches GSC URL Inspection</strong> for every URL (batched server-side; can take many minutes on large sites). Slower but always matches live HTML.
-            <strong>① (amber)</strong> = full site audit refresh, <em>then</em> Traditional SEO in one go — same GSC + extract behaviour as <strong>②</strong> after the crawl — use after big site/schema changes or when crawl/GSC data feels stale.
+            <strong>② (green)</strong> = quick rescore: saved audit + <strong>full extractability refresh</strong> for <em>every</em> URL (deduped), in <strong>batches of 25</strong>, then Traditional SEO scoring. Uses the <strong>GSC URL Inspection cache</strong> (Supabase + browser) for indexation — <strong>no</strong> live Search Console inspect API during ② (keeps runs fast).
+            <strong>① (amber)</strong> = full site audit refresh, <em>then</em> Traditional SEO in one go — same extract + scoring behaviour as <strong>②</strong> after the crawl — use after big site/schema changes. For fresh indexation data, run <strong>Refresh GSC URL Inspection</strong> separately.
             After <strong>①</strong>, you do <strong>not</strong> need to click <strong>②</strong>.
             <strong>Page reload</strong> restores the saved Traditional SEO matrix from the server/local cache only — it does <strong>not</strong> re-run extractability (use <strong>②</strong> when you need fresh HTML for every URL).
             <strong>③ (blue)</strong> = <strong>keyword demand + KE enrich</strong> (Keywords Everywhere): volume, per-URL traffic, URL-keyword metrics, and page backlink samples for the results table. Domain-level KE samples are no longer shown as separate tiles — use the <strong>Backlinks (DataForSEO)</strong> tile for full-index totals when enabled. <strong>DFS full index</strong> / <strong>DFS new links</strong> run when <code>TRADITIONAL_SEO_BACKLINK_INDEX_SOURCE</code> is <code>dataforseo</code> or <code>both</code>. Does <em>not</em> change Traditional SEO pass/fail.
@@ -6817,13 +6817,18 @@
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
             <button id="traditional-seo-run-audit-btn" class="btn traditional-seo-run-step2-btn" type="button" style="padding: 0.45rem 0.9rem;"
               aria-describedby="traditional-seo-run-sequence-hint"
-              title="Refetches extractability for every URL (batches of 25), updates the cache, then rescores Traditional SEO. Uses saved main audit only — does not re-run full site audit.">
+              title="Refetches extractability for every URL (batches of 25), updates the cache, then rescores Traditional SEO. Uses saved main audit and GSC URL Inspection cache — does not call live Search Console inspect (use Refresh GSC URL Inspection for that).">
               ② Score Traditional SEO only
             </button>
             <button id="traditional-seo-run-full-audit-btn" class="btn traditional-seo-run-step1-btn" type="button" style="padding: 0.45rem 0.9rem;"
               aria-describedby="traditional-seo-run-sequence-hint"
               title="Long path: runs the full site audit first (refreshes inputs), then runs Traditional SEO scoring automatically. Use when schema, GSC, or crawl data may be out of date. You do not need to press ② afterwards.">
               ① Full audit refresh + Traditional SEO
+            </button>
+            <button type="button" class="btn" id="traditional-seo-refresh-gsc-inspection-btn" style="padding: 0.45rem 0.9rem; border: 1px solid rgba(22, 163, 74, 0.55); background: rgba(22, 163, 74, 0.14); color: inherit; font-weight: 700;"
+              aria-describedby="traditional-seo-run-sequence-hint"
+              title="Calls Search Console URL Inspection for every URL in the list (batched, ~5 per request), updates Supabase cache, then refreshes gsc_url_indexed rows and score. Can take many minutes on large sites — run when you need live indexation data, not on every ①/②.">
+              Refresh GSC URL Inspection
             </button>
             <button type="button" class="btn" data-traditional-seo-refresh-kw="1" id="traditional-seo-refresh-kw-metrics-btn-controls" style="padding: 0.45rem 0.9rem; border: 1px solid rgba(56, 189, 248, 0.55); background: rgba(14, 165, 233, 0.18); color: inherit;"
               aria-describedby="traditional-seo-run-sequence-hint"
@@ -76920,7 +76925,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             }
           }
         }
-        if (!gsc) return 'No GSC inspection cached — run ② Traditional SEO or re-audit this rule to fetch URL Inspection data.';
+        if (!gsc) {
+          return 'No GSC inspection cached — click Refresh GSC URL Inspection (or run a single-page re-audit with GSC refresh).';
+        }
         const audit = traditionalSeoGscInspectDeriveStatus(pageUrl, gsc);
         const idx =
           typeof gsc.indexed === 'boolean'
@@ -78464,6 +78471,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (TRADITIONAL_SEO_STATE.seoEvalInFlight) return;
       const runBtn = document.getElementById('traditional-seo-run-audit-btn');
       const runFullBtn = document.getElementById('traditional-seo-run-full-audit-btn');
+      const gscRefreshBtn = document.getElementById('traditional-seo-refresh-gsc-inspection-btn');
       const existingRows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
       if (!existingRows.length) {
         if (typeof window.showStatus === 'function') {
@@ -78482,6 +78490,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         TRADITIONAL_SEO_STATE.seoEvalInFlight = true;
         if (runBtn) runBtn.disabled = true;
         if (runFullBtn) runFullBtn.disabled = true;
+        if (gscRefreshBtn) gscRefreshBtn.disabled = true;
         renderTraditionalSeoResultsTable();
 
         const ruleLabel = String(rule.rule_name || ruleKey);
@@ -78516,25 +78525,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         let gscQueued = 0;
         let gscBatches = 0;
         if (traditionalSeoRuleNeedsGscIndexInspect(ruleKey)) {
-          traditionalSeoEvalProgressStage('Google Search Console URL Inspection (full refresh for this rule)…', 52);
-          const gscStatsRule = await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, urls, {
-            forceAll: true,
-            onChunk: (ev) => {
-              if (!ev || !ev.total) return;
-              traditionalSeoEvalProgressTrack(ev.done, ev.total);
-              const slice = 52 + Math.floor((22 * ev.done) / Math.max(1, ev.total));
-              const bi = Number(ev.batchIndex);
-              const bt = Number(ev.batchTotal);
-              const batchTxt =
-                Number.isFinite(bi) && Number.isFinite(bt) && bt > 0 ? ` · batch ${bi}/${bt}` : '';
-              traditionalSeoEvalProgressStage(
-                `GSC URL Inspection: ${ev.done}/${ev.total} URLs${batchTxt}…`,
-                Math.min(74, slice)
-              );
-            }
-          });
-          gscQueued = traditionalSeoToNum(gscStatsRule?.queued, 0);
-          gscBatches = traditionalSeoToNum(gscStatsRule?.batches, 0);
+          traditionalSeoEvalProgressStage('Loading GSC URL Inspection from cache (Supabase + browser)…', 52);
+          gscQueued = await traditionalSeoHydrateGscCacheFromServer();
+          traditionalSeoHydrateGscIndexFromStorage();
+          traditionalSeoSyncGscMapIntoLastSignalMaps();
         }
 
         traditionalSeoEvalProgressTrack(0, 0);
@@ -78645,7 +78639,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           `URLs in site list: ${urls.length}`
         ];
         if (traditionalSeoRuleNeedsGscIndexInspect(ruleKey)) {
-          linesRe.push(`GSC URL Inspection: queued=${gscQueued} URLs · API batches=${gscBatches}`);
+          linesRe.push(
+            `GSC: hydrated ${gscQueued} row(s) from server cache (no live URL Inspection API — use Refresh GSC URL Inspection for that).`
+          );
         }
         linesRe.push(`Property URL: ${propertyUrl || '(not set)'}`);
         linesRe.push(`Page URL: ${String(typeof location !== 'undefined' ? location.href : '')}`);
@@ -78681,6 +78677,120 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         TRADITIONAL_SEO_STATE.seoEvalInFlight = false;
         if (runBtn) runBtn.disabled = false;
         if (runFullBtn) runFullBtn.disabled = false;
+        if (gscRefreshBtn) gscRefreshBtn.disabled = false;
+        wireTraditionalSeoButtons();
+        renderTraditionalSeoResultsTable();
+      }
+    }
+
+    async function runTraditionalSeoRefreshGscUrlInspection() {
+      if (TRADITIONAL_SEO_STATE.seoEvalInFlight) return;
+      const runBtn = document.getElementById('traditional-seo-run-audit-btn');
+      const runFullBtn = document.getElementById('traditional-seo-run-full-audit-btn');
+      const gscBtn = document.getElementById('traditional-seo-refresh-gsc-inspection-btn');
+      const wall = Date.now();
+      try {
+        TRADITIONAL_SEO_STATE.seoEvalInFlight = true;
+        if (runBtn) runBtn.disabled = true;
+        if (runFullBtn) runFullBtn.disabled = true;
+        if (gscBtn) gscBtn.disabled = true;
+        renderTraditionalSeoResultsTable();
+        traditionalSeoEvalProgressOpen(false, 'GSC URL Inspection refresh');
+        traditionalSeoEvalProgressStage('Loading saved audit data…', 10);
+        const audit = await traditionalSeoLoadAuditData(true);
+        if (!audit) throw new Error('No audit data available. Run a full audit first.');
+        const propertyUrl = String(traditionalSeoEffectivePropertyUrl() || '').trim();
+        if (!propertyUrl) throw new Error('Set a Search Console property URL first.');
+        traditionalSeoEvalProgressStage('Collecting URLs…', 18);
+        const rawUrls = await traditionalSeoCollectUrls(audit, propertyUrl);
+        const urls = Array.isArray(rawUrls) ? rawUrls.slice() : [];
+        if (!urls.length) throw new Error('No URLs to inspect.');
+        traditionalSeoEvalProgressStage('Google Search Console URL Inspection (batched, ~5 URLs per request)…', 24);
+        const gscStats = await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, urls, {
+          forceAll: true,
+          onChunk: (ev) => {
+            if (!ev || !ev.total) return;
+            traditionalSeoEvalProgressTrack(ev.done, ev.total);
+            const slice = 24 + Math.floor((62 * ev.done) / Math.max(1, ev.total));
+            const bi = Number(ev.batchIndex);
+            const bt = Number(ev.batchTotal);
+            const batchTxt =
+              Number.isFinite(bi) && Number.isFinite(bt) && bt > 0 ? ` · batch ${bi}/${bt}` : '';
+            traditionalSeoEvalProgressStage(
+              `GSC URL Inspection: ${ev.done}/${ev.total} URLs${batchTxt}…`,
+              Math.min(88, slice)
+            );
+          }
+        });
+        const gscQueued = traditionalSeoToNum(gscStats?.queued, 0);
+        const gscBatches = traditionalSeoToNum(gscStats?.batches, 0);
+        traditionalSeoEvalProgressTrack(0, 0);
+        traditionalSeoEvalProgressStage('Updating indexation rows and score…', 92);
+        const hadRows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) && TRADITIONAL_SEO_STATE.evaluationRows.length > 0;
+        const changed = traditionalSeoBackfillGscEvaluationRows();
+        traditionalSeoReapplyBypassesToAllRows();
+        traditionalSeoRefreshRulesSummaryFromEvaluationRows();
+        if (changed) traditionalSeoPersistEvaluationSnapshot();
+        const rows = TRADITIONAL_SEO_STATE.evaluationRows || [];
+        const updatedRules = collectTraditionalSeoRulesFromTable().map((rule) => ({
+          ...rule,
+          current_status: traditionalSeoAggregateRuleStatus(rows, rule.rule_key)
+        }));
+        TRADITIONAL_SEO_STATE.rules = updatedRules;
+        renderTraditionalSeoRules(updatedRules);
+        const evalSummary = computeTraditionalSeoSummary(updatedRules);
+        renderTraditionalSeoScore(evalSummary, traditionalSeoComputeScoreDelta(evalSummary));
+        traditionalSeoPopulateRuleFilter(updatedRules);
+        renderTraditionalSeoResultsTable();
+        const elapsedSec = Math.max(0, Math.floor((Date.now() - wall) / 1000));
+        const scoreNow = traditionalSeoToNum(evalSummary.score, 0);
+        const gcTally = traditionalSeoEvalCountRuleStatuses(rows, 'gsc_url_indexed');
+        const linesG = [
+          `Finished: ${new Date().toISOString()}`,
+          `Elapsed: ${elapsedSec}s`,
+          'Mode: GSC URL Inspection refresh',
+          `GSC URL Inspection: queued=${gscQueued} URLs · API batches=${gscBatches}`,
+          hadRows
+            ? `gsc_url_indexed tally: pass=${gcTally.pass} warn=${gcTally.warn} fail=${gcTally.fail} (rows=${gcTally.total})`
+            : 'No Traditional SEO matrix yet — run ② to build rows; GSC cache is updated for the next run.',
+          `Overall score: ${scoreNow}/100`,
+          `Property URL: ${propertyUrl || '(not set)'}`,
+          `Page URL: ${String(typeof location !== 'undefined' ? location.href : '')}`
+        ];
+        traditionalSeoEvalFinishProgressAndShowSummary(true, 'GSC URL Inspection finished.', {
+          ok: true,
+          title: 'GSC URL Inspection complete',
+          lead: `Done in ${elapsedSec}s · score ${scoreNow}/100`,
+          lines: linesG
+        });
+        void traditionalSeoKeywordMetricsLookupIfNeededForRun();
+        if (typeof window.showStatus === 'function') {
+          window.showStatus('GSC URL Inspection cache updated.', 'success');
+        }
+      } catch (err) {
+        const elapsedFail = Math.max(0, Math.floor((Date.now() - wall) / 1000));
+        const msgFail = String(err?.message || err);
+        const stackFail = err?.stack ? String(err.stack) : '';
+        traditionalSeoEvalFinishProgressAndShowSummary(false, 'Stopped with errors.', {
+          ok: false,
+          title: 'GSC URL Inspection failed',
+          lead: msgFail,
+          lines: [
+            `Finished: ${new Date().toISOString()}`,
+            `Elapsed: ${elapsedFail}s`,
+            `Message: ${msgFail}`,
+            `Page URL: ${String(typeof location !== 'undefined' ? location.href : '')}`
+          ],
+          errorDetail: stackFail
+        });
+        if (typeof window.showStatus === 'function') {
+          window.showStatus(`GSC URL Inspection failed: ${msgFail}`, 'error');
+        }
+      } finally {
+        TRADITIONAL_SEO_STATE.seoEvalInFlight = false;
+        if (runBtn) runBtn.disabled = false;
+        if (runFullBtn) runFullBtn.disabled = false;
+        if (gscBtn) gscBtn.disabled = false;
         wireTraditionalSeoButtons();
         renderTraditionalSeoResultsTable();
       }
@@ -78690,7 +78800,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const refreshAudit = options?.refreshAudit === true;
       /** Full-site HTML extract refresh is expensive; only ② / save / full-audit paths pass true. */
       const refreshExtractability = options?.refreshExtractability === true;
-      /** When true (② / ① / save rules), re-call URL Inspection for every URL; otherwise 3-day map TTL skips API. */
+      /** Opt-in: live Search Console URL Inspection API during this run (slow). Use Refresh GSC URL Inspection instead for routine updates. */
+      const runGscUrlInspection = options?.runGscUrlInspection === true;
+      /** When live GSC runs, ignore 3-day TTL and re-fetch every URL. */
       const forceGscRefresh = options?.forceGscRefresh === true;
       const rawOnly = options?.onlyRescorePageUrls;
       const priorRows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows)
@@ -78706,16 +78818,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const isPartialPageRescore = partialPageUrls.length > 0;
       const runBtn = document.getElementById('traditional-seo-run-audit-btn');
       const runFullBtn = document.getElementById('traditional-seo-run-full-audit-btn');
+      const gscRefreshBtnEval = document.getElementById('traditional-seo-refresh-gsc-inspection-btn');
       let gscRuleOn = false;
       let gscQueued = 0;
       let gscBatches = 0;
       const evalWallClockMark = Date.now();
       try {
         traditionalSeoDbg(
-          `run start: ①② audit refreshAudit=${refreshAudit} extract=${refreshExtractability} forceGsc=${forceGscRefresh} partial=${isPartialPageRescore}`
+          `run start: ①② audit refreshAudit=${refreshAudit} extract=${refreshExtractability} liveGsc=${runGscUrlInspection} forceGscTtl=${forceGscRefresh} partial=${isPartialPageRescore}`
         );
         if (runBtn) runBtn.disabled = true;
         if (runFullBtn) runFullBtn.disabled = true;
+        if (gscRefreshBtnEval) gscRefreshBtnEval.disabled = true;
 
         if (refreshAudit && typeof window.runAudit === 'function') {
           if (typeof window.showStatus === 'function') window.showStatus('Running full audit before Traditional SEO evaluation...', 'info');
@@ -78776,7 +78890,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         traditionalSeoDbg(
           `rules precheck: domRows=${tableRules.length} enabled=${rulesPrecheck.length} gscRuleOn=${gscRuleOn}`
         );
-        if (gscRuleOn) {
+        if (gscRuleOn && runGscUrlInspection) {
           traditionalSeoEvalProgressStage(
             forceGscRefresh
               ? 'Google Search Console URL Inspection (full refresh; batched, ~5 URLs per request)…'
@@ -78817,6 +78931,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               'warning'
             );
           }
+        } else if (gscRuleOn) {
+          traditionalSeoEvalProgressStage('Loading GSC URL Inspection from cache…', 78);
+          await traditionalSeoHydrateGscCacheFromServer();
+          traditionalSeoHydrateGscIndexFromStorage();
+          traditionalSeoSyncGscMapIntoLastSignalMaps();
         } else {
           traditionalSeoDbg('GSC phase skipped: gsc_url_indexed rule off or not in rules list', 'warn');
         }
@@ -78947,7 +79066,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           `Finished: ${new Date().toISOString()}`,
           `Elapsed: ${elapsedSec}s`,
           `Run: ${runLabel}`,
-          `refreshAudit=${refreshAudit} · refreshExtractability=${refreshExtractability} · forceGscRefresh=${forceGscRefresh}`,
+          `refreshAudit=${refreshAudit} · refreshExtractability=${refreshExtractability} · liveGscApi=${runGscUrlInspection} · forceGscTtl=${forceGscRefresh}`,
           `URLs in list: ${urls.length}`,
           `URLs scored this run: ${urlsToScore.length}`,
           `Evaluation rows stored: ${rows.length}`,
@@ -78955,13 +79074,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           `GSC rule in ruleset: ${gscRuleOn ? 'yes' : 'no'}`
         ];
         if (gscRuleOn) {
-          linesRun.push(`GSC URL Inspection: queued=${gscQueued} URLs · API batches=${gscBatches}`);
+          if (runGscUrlInspection) {
+            linesRun.push(`GSC URL Inspection (live API): queued=${gscQueued} URLs · API batches=${gscBatches}`);
+          } else {
+            linesRun.push('GSC: Supabase + browser cache only (no live URL Inspection API — use Refresh GSC URL Inspection when needed).');
+          }
           linesRun.push(
             `gsc_url_indexed tally: pass=${gcTally.pass} warn=${gcTally.warn} fail=${gcTally.fail} (rows=${gcTally.total})`
           );
         }
         if (
-          forceGscRefresh
+          runGscUrlInspection
+          && forceGscRefresh
           && gscRuleOn
           && gscQueued === 0
           && String(propertyUrl || '').trim()
@@ -79004,6 +79128,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         TRADITIONAL_SEO_STATE.seoEvalInFlight = false;
         if (runBtn) runBtn.disabled = false;
         if (runFullBtn) runFullBtn.disabled = false;
+        if (gscRefreshBtnEval) gscRefreshBtnEval.disabled = false;
         wireTraditionalSeoButtons();
         renderTraditionalSeoResultsTable();
       }
@@ -79259,8 +79384,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             applyTraditionalSeoPayload(payload);
             await runTraditionalSeoEvaluation({
               refreshAudit: false,
-              refreshExtractability: true,
-              forceGscRefresh: true
+              refreshExtractability: true
             });
             if (typeof window.showStatus === 'function') {
               window.showStatus('Traditional SEO rules saved and rescored.', 'success');
@@ -79280,8 +79404,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           traditionalSeoDbg('Button ② clicked (Score Traditional SEO only)');
           await runTraditionalSeoEvaluation({
             refreshAudit: false,
-            refreshExtractability: true,
-            forceGscRefresh: true
+            refreshExtractability: true
           });
         });
       }
@@ -79290,9 +79413,15 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         runFullBtn.addEventListener('click', async () => {
           await runTraditionalSeoEvaluation({
             refreshAudit: true,
-            refreshExtractability: true,
-            forceGscRefresh: true
+            refreshExtractability: true
           });
+        });
+      }
+      const gscInspectBtn = document.getElementById('traditional-seo-refresh-gsc-inspection-btn');
+      if (gscInspectBtn && !gscInspectBtn.dataset.wired) {
+        gscInspectBtn.dataset.wired = '1';
+        gscInspectBtn.addEventListener('click', async () => {
+          await runTraditionalSeoRefreshGscUrlInspection();
         });
       }
       if (tierFilter && !tierFilter.dataset.wired) {
