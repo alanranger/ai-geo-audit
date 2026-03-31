@@ -8153,6 +8153,10 @@
                   <button id="ranking-filter-clear" class="btn btn-small" style="width: 100%;">Clear filters</button>
                 </div>
               </div>
+              <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 0.5rem;">
+                <button id="ranking-export-csv" class="btn btn-small" style="padding: 0.4rem 0.9rem;" title="Export current filtered and sorted keyword rows to CSV.">Export CSV</button>
+                <div id="ranking-export-status" style="font-size: 0.8rem; color: #64748b;"></div>
+              </div>
             </div>
             <div class="ranking-table-wrapper" style="max-height: none;">
               <table class="ranking-table" id="ranking-ai-table">
@@ -58668,6 +58672,131 @@ Final Score: ${score}/100`;
       return sorted;
     }
 
+    function rankingAiCsvCell(value) {
+      const s = String(value ?? '');
+      if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    }
+
+    function rankingAiExportOptimisationLabel(row) {
+      try {
+        const taskType = 'content';
+        const status = typeof window.getOptimisationStatus === 'function'
+          ? window.getOptimisationStatus(row, taskType)
+          : null;
+        if (!status || typeof status !== 'object' || !status.status) return 'Not tracked';
+        return ({
+          planned: 'Planned',
+          in_progress: 'In progress',
+          monitoring: 'Monitoring',
+          done: 'Done',
+          paused: 'Paused',
+          cancelled: 'Cancelled'
+        })[status.status] || String(status.status);
+      } catch (err) {
+        return 'Not tracked';
+      }
+    }
+
+    async function exportRankingAiTableCsv() {
+      const { combinedRows } = RankingAiModule.state();
+      const exportBtn = document.getElementById('ranking-export-csv');
+      const statusEl = document.getElementById('ranking-export-status');
+
+      if (!Array.isArray(combinedRows) || combinedRows.length === 0) {
+        if (statusEl) statusEl.textContent = 'No rows to export. Run Ranking & AI check first.';
+        return;
+      }
+
+      if (exportBtn) {
+        exportBtn.disabled = true;
+        exportBtn.style.opacity = '0.6';
+      }
+      if (statusEl) statusEl.textContent = 'Preparing CSV…';
+
+      try {
+        const filteredRows = applyRankingFilters(combinedRows);
+        const sortedRows = sortRankingRows(filteredRows);
+        if (!sortedRows.length) {
+          if (statusEl) statusEl.textContent = 'No rows match current filters. Nothing to export.';
+          return;
+        }
+
+        if (typeof window.fetchOptimisationStatuses === 'function') {
+          await window.fetchOptimisationStatuses(sortedRows);
+        }
+
+        const headers = [
+          'Keyword',
+          'Segment',
+          'Current organic rank',
+          'Search volume',
+          'CTR (28d)',
+          'Impressions (28d)',
+          'Opportunity score',
+          'AI Overview',
+          'AI citations',
+          'Classic Ranking URL',
+          'Page type',
+          'Optimisation'
+        ];
+
+        const lines = [headers.map(rankingAiCsvCell).join(',')];
+        sortedRows.forEach((row) => {
+          const queryTotal = getQueryTotalForKeyword(row.keyword);
+          const ctr = (queryTotal && queryTotal.impressions > 0 && queryTotal.ctr != null)
+            ? `${Number(queryTotal.ctr).toFixed(1)}%`
+            : '';
+          const impressions = (queryTotal && queryTotal.impressions != null && queryTotal.impressions > 0)
+            ? String(queryTotal.impressions)
+            : '';
+          const citations = row.ai_alan_citations_count > 0
+            ? `${row.ai_alan_citations_count}/${row.ai_total_citations || ''}`
+            : '0';
+          const url = row.best_url || row.targetUrl || row.ranking_url || '';
+          const pageType = row.pageType || 'Other';
+          const optimisation = rankingAiExportOptimisationLabel(row);
+
+          lines.push([
+            row.keyword || '',
+            row.segment || 'Other',
+            row.best_rank_group == null ? '' : row.best_rank_group,
+            row.search_volume == null ? '' : row.search_volume,
+            ctr,
+            impressions,
+            row.opportunityScore == null ? '' : row.opportunityScore,
+            row.has_ai_overview ? 'On' : 'Off',
+            citations,
+            url,
+            pageType,
+            optimisation
+          ].map(rankingAiCsvCell).join(','));
+        });
+
+        const blob = new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' });
+        const a = document.createElement('a');
+        const href = URL.createObjectURL(blob);
+        a.href = href;
+        a.download = `keyword-rankings-ai-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(href);
+
+        if (statusEl) {
+          statusEl.textContent = `Exported ${sortedRows.length.toLocaleString()} keyword row(s) to CSV.`;
+        }
+      } catch (err) {
+        const msg = String(err?.message || err || 'Unknown error');
+        if (statusEl) statusEl.textContent = `CSV export failed: ${msg}`;
+      } finally {
+        if (exportBtn) {
+          exportBtn.disabled = false;
+          exportBtn.style.opacity = '1';
+        }
+      }
+    }
+
     // Toggle metric pill details
     function toggleMetricPillDetails(cardId) {
       const card = document.getElementById(cardId);
@@ -63087,6 +63216,7 @@ Final Score: ${score}/100`;
         const serpFeaturesFilter = document.getElementById("ranking-filter-serp-features");
         const optimisationStatusFilter = document.getElementById("ranking-filter-optimisation-status");
         const keywordFilter = document.getElementById("ranking-filter-keyword");
+        const exportCsvBtn = document.getElementById("ranking-export-csv");
         const clearBtn = document.getElementById("ranking-filter-clear");
 
         // Update active state styling for filters
@@ -63200,6 +63330,11 @@ Final Score: ${score}/100`;
         if (minOpportunityInput) {
           minOpportunityInput.addEventListener("input", debouncedUpdateFilters);
           minOpportunityInput.addEventListener("blur", updateFilters);
+        }
+        if (exportCsvBtn) {
+          exportCsvBtn.addEventListener("click", () => {
+            exportRankingAiTableCsv();
+          });
         }
 
         if (clearBtn) {
