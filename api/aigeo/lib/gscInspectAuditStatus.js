@@ -29,13 +29,16 @@ const gscCoverageImpliesPass = (cl) =>
   (cl.includes('indexed') && !cl.includes('not indexed')) ||
   (cl.includes('duplicate') && cl.includes('google')) ||
   (cl.includes('user') && cl.includes('canonical')) ||
-  cl.includes('noindex');
+  cl.includes('noindex') ||
+  /** GSC UI label: redirecting URL with chosen canonical — not the same as a redirect/fetch error. */
+  cl.includes('page with redirect');
 
 const gscCoverageImpliesFail = (cl) =>
   cl.includes('unknown to google') ||
   cl.includes('not indexed') ||
   cl.includes('currently not indexed') ||
-  cl.includes('redirect');
+  /** Do not treat "Page with redirect" as failure (matched by impliesPass). Other redirect issues still fail. */
+  (cl.includes('redirect') && !cl.includes('page with redirect'));
 
 const meaningfulApiError = (e) => {
   if (e == null) return false;

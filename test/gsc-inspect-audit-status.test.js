@@ -59,6 +59,30 @@ test('deriveGscUrlIndexedStatus: crawled not indexed => fail', () => {
   );
 });
 
+test('deriveGscUrlIndexedStatus: Page with redirect (GSC canonical state) => pass', () => {
+  assert.equal(
+    deriveGscUrlIndexedStatus(page, {
+      httpOk: true,
+      coverageState: 'Page with redirect',
+      verdict: 'NEUTRAL',
+      pageFetchState: 'SUCCESSFUL',
+      googleCanonical: 'https://www.alanranger.com/photography-courses-coventry',
+    }),
+    'pass'
+  );
+});
+
+test('deriveGscUrlIndexedStatus: redirect error style => fail when not page-with-redirect', () => {
+  assert.equal(
+    deriveGscUrlIndexedStatus(page, {
+      httpOk: true,
+      coverageState: 'Redirect error',
+      verdict: 'FAIL',
+    }),
+    'fail'
+  );
+});
+
 test('deriveGscUrlIndexedStatus: empty api error object is ignored', () => {
   assert.equal(
     deriveGscUrlIndexedStatus(page, {
