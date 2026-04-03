@@ -73835,22 +73835,69 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
       const batchSize = 5;
       const batchTotal = pending.length ? Math.ceil(pending.length / batchSize) : 0;
+      const makeSyntheticErrorRows = (urlsInChunk, httpStatus, message) =>
+        (Array.isArray(urlsInChunk) ? urlsInChunk : []).map((u) => ({
+          inspectionUrl: String(u || '').trim(),
+          httpOk: false,
+          httpStatus: Number.isFinite(Number(httpStatus)) ? Number(httpStatus) : null,
+          error: {
+            code: Number.isFinite(Number(httpStatus)) ? Number(httpStatus) : 0,
+            message: String(message || 'GSC URL Inspection batch failed'),
+            status: 'BATCH_ERROR'
+          }
+        }));
+      const fetchGscChunk = async (urlsInChunk) => {
+        const chunk = (Array.isArray(urlsInChunk) ? urlsInChunk : []).filter(Boolean);
+        if (!chunk.length) return [];
+        let res;
+        let json;
+        try {
+          res = await fetch(traditionalSeoApiPath('/api/aigeo/gsc-url-inspection'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ propertyUrl: prop, urls: chunk })
+          });
+          json = await res.json().catch(() => ({}));
+        } catch (netErr) {
+          const msg = `GSC request network error: ${String(netErr?.message || netErr)}`;
+          traditionalSeoDbg(msg, 'warn');
+          return makeSyntheticErrorRows(chunk, 0, msg);
+        }
+        if (res.ok && String(json?.status || '').toLowerCase() === 'ok') {
+          return Array.isArray(json?.results) ? json.results : [];
+        }
+        const status = Number(res?.status);
+        const msg = String(json?.message || `GSC URL Inspection failed (${status || 0})`).trim();
+        // Gateway timeouts happen on long batches; split into 1-URL calls so the run can finish.
+        if ([502, 503, 504].includes(status) && chunk.length > 1) {
+          traditionalSeoDbg(
+            `GSC batch ${status} for ${chunk.length} URLs; retrying one-by-one to continue run`,
+            'warn'
+          );
+          const recovered = [];
+          for (let ci = 0; ci < chunk.length; ci += 1) {
+            const one = chunk[ci];
+            const oneRows = await fetchGscChunk([one]);
+            if (oneRows.length) {
+              recovered.push(...oneRows);
+            } else {
+              recovered.push(...makeSyntheticErrorRows([one], status, msg));
+            }
+            await new Promise((r) => setTimeout(r, 0));
+          }
+          return recovered;
+        }
+        if ([502, 503, 504].includes(status)) {
+          traditionalSeoDbg(`GSC transient ${status} for URL ${chunk[0]}: ${msg}`, 'warn');
+          return makeSyntheticErrorRows(chunk, status, msg);
+        }
+        throw new Error(msg);
+      };
       for (let i = 0; i < pending.length; i += batchSize) {
         const slice = pending.slice(i, i + batchSize);
         const urlChunk = slice.map((x) => x.uReq);
         traditionalSeoDbg(`GSC POST batch ${Math.floor(i / batchSize) + 1} size=${urlChunk.length}`);
-        const res = await fetch(traditionalSeoApiPath('/api/aigeo/gsc-url-inspection'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ propertyUrl: prop, urls: urlChunk })
-        });
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok || String(json?.status || '').toLowerCase() !== 'ok') {
-          const msg = json?.message || `GSC URL Inspection failed (${res.status})`;
-          traditionalSeoDbg(`GSC API error: ${msg}`, 'error');
-          throw new Error(msg);
-        }
-        const rows = Array.isArray(json?.results) ? json.results : [];
+        const rows = await fetchGscChunk(urlChunk);
         traditionalSeoDbg(`GSC batch ok: results=${rows.length}`);
         const byUrl = traditionalSeoGscInspectBuildRowMap(rows);
         slice.forEach(({ uRaw, uReq }, j) => {
