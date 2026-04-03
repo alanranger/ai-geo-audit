@@ -27,6 +27,17 @@ test('deriveGscUrlIndexedStatus: submitted and indexed => pass', () => {
   );
 });
 
+test('deriveGscUrlIndexedStatus: indexed but not submitted phrase (sitemap variant) => pass', () => {
+  assert.equal(
+    deriveGscUrlIndexedStatus(page, {
+      httpOk: true,
+      coverageState: 'Indexed, not submitted in sitemap',
+      verdict: 'NEUTRAL',
+    }),
+    'pass'
+  );
+});
+
 test('deriveGscUrlIndexedStatus: no payload => fail', () => {
   assert.equal(deriveGscUrlIndexedStatus(page, null), 'fail');
 });

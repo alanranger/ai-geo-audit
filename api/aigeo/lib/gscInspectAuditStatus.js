@@ -26,6 +26,7 @@ const isUtilityUrl = (url) => {
 
 const gscCoverageImpliesPass = (cl) =>
   (cl.includes('submitted') && cl.includes('indexed')) ||
+  (cl.includes('indexed') && !cl.includes('not indexed')) ||
   (cl.includes('duplicate') && cl.includes('google')) ||
   (cl.includes('user') && cl.includes('canonical')) ||
   cl.includes('noindex');

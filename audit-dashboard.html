@@ -73500,6 +73500,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       if (cl.includes('unknown to google')) return 'fail';
       if (cl.includes('not indexed') || cl.includes('currently not indexed')) return 'fail';
       if (cl.includes('redirect')) return 'fail';
+      // GSC often returns indexed states without the exact phrase "Submitted and indexed" (e.g. not-in-sitemap variants).
+      // Require explicit negative phrases above; then treat any remaining "indexed" coverage as pass.
+      if (cl.includes('indexed')) return 'pass';
       const ver = String(gsc.verdict || '').toUpperCase();
       if (ver === 'PASS') return 'pass';
       if (ver === 'FAIL') return 'fail';
@@ -78630,7 +78633,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
     function traditionalSeoEvalProgressPaint() {
       const { fill, pct, elapsed, eta } = traditionalSeoEvalProgressDom();
       const st = TRADITIONAL_SEO_EVAL_PROGRESS;
-      const p = Math.round(st.displayPct);
+      // During GSC batching we drive floorPct from real done/total; ignore the fake "time-based" displayPct
+      // so the bar matches the subtitle (otherwise a 400ms timer races ahead and shows ~60% at ~6% done).
+      let p;
+      if (st.trackTotal > 0) {
+        p = Math.min(88, Math.max(6, Math.round(st.floorPct)));
+      } else {
+        p = Math.round(Math.max(st.displayPct, st.floorPct));
+      }
       if (fill) fill.style.width = `${p}%`;
       if (pct) pct.textContent = `${p}%`;
       if (elapsed && st.startedAt) {
@@ -79083,6 +79093,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const urls = Array.isArray(rawUrls) ? rawUrls.slice() : [];
         if (!urls.length) throw new Error('No URLs to inspect.');
         traditionalSeoEvalProgressStage('Google Search Console URL Inspection (batched, ~5 URLs per request)…', 24);
+        traditionalSeoEvalProgressTrack(0, urls.length);
         const gscStats = await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, urls, {
           forceAll: true,
           onChunk: (ev) => {
@@ -79278,6 +79289,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           traditionalSeoDbg(
             `GSC phase: propertyUrl=${propertyUrl ? 'set' : 'EMPTY'} targets=${Array.isArray(gscTargets) ? gscTargets.length : 0}`
           );
+          traditionalSeoEvalProgressTrack(0, Array.isArray(gscTargets) ? gscTargets.length : 0);
           const gscStatsRun = await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, gscTargets, {
             forceAll: forceGscRefresh,
             onChunk: (ev) => {
