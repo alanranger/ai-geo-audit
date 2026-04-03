@@ -73194,10 +73194,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const official = traditionalSeoGscInspectOfficialLink(prop, raw, page);
       if (official) return { href: official, copyUrl: '' };
       try {
-        // GSC often redirects /inspect?resource_id= to Overview anyway (blank flash). Open the same shell directly.
-        const u = new URL('https://search.google.com/search-console');
+        const u = new URL('https://search.google.com/search-console/inspect');
         u.searchParams.set('resource_id', site);
-        return { href: u.toString(), copyUrl: page };
+        u.searchParams.set('url', page);
+        return { href: u.toString(), copyUrl: '' };
       } catch (err) {
         return { href: '', copyUrl: '' };
       }
@@ -73236,8 +73236,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       const site = traditionalSeoNormalizeGscSiteUrlForInspect(prop);
       let href = '';
       try {
-        const u = new URL('https://search.google.com/search-console');
+        const u = new URL('https://search.google.com/search-console/inspect');
         u.searchParams.set('resource_id', site);
+        if (page) u.searchParams.set('url', page);
         href = u.toString();
       } catch (e) {
         return;
@@ -73325,10 +73326,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const json = await res.json().catch(() => ({}));
         if (!res.ok || String(json?.status || '').toLowerCase() !== 'ok') {
           if (traditionalSeoGscInspectLooksQuota(json, res.status, null)) {
-            show('GSC URL Inspection quota or rate limit — try again later. Opening property with URL to paste.', 'warning');
+            show('GSC URL Inspection quota or rate limit — try again later. Opening URL Inspection.', 'warning');
           } else {
             show(
-              `${String(json?.message || '').trim() || `GSC inspect failed (${res.status})`} — opening property with URL to paste.`,
+              `${String(json?.message || '').trim() || `GSC inspect failed (${res.status})`} — opening URL Inspection.`,
               'warning'
             );
           }
@@ -73337,7 +73338,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         }
         const hit = Array.isArray(json?.results) && json.results[0] && typeof json.results[0] === 'object' ? json.results[0] : {};
         if (traditionalSeoGscInspectLooksQuota(json, res.status, hit)) {
-          show('GSC URL Inspection quota exceeded for this request. Opening property with URL to paste.', 'warning');
+          show('GSC URL Inspection quota exceeded for this request. Opening URL Inspection.', 'warning');
           await traditionalSeoGscInspectOpenFallbackNoApi(prop, page, { quietCopyToast: true });
           return;
         }
@@ -73366,11 +73367,11 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           window.open(link, '_blank', 'noopener,noreferrer');
           show('Opened official GSC inspection page.', 'success');
         } else {
-          show('Google did not return an inspection deep link — opening property with URL to paste.', 'warning');
+          show('Google did not return an inspection deep link — opening URL Inspection.', 'warning');
           await traditionalSeoGscInspectOpenFallbackNoApi(prop, page);
         }
       } catch (err) {
-        show(`GSC inspect request failed: ${String(err?.message || err)} — opening property with URL to paste.`, 'warning');
+        show(`GSC inspect request failed: ${String(err?.message || err)} — opening URL Inspection.`, 'warning');
         await traditionalSeoGscInspectOpenFallbackNoApi(prop, page, { quietCopyToast: true });
       } finally {
         setBusy(false);

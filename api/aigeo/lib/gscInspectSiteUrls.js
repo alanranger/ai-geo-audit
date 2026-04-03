@@ -90,13 +90,13 @@ function candidatesFromPropertyUrl(propertyUrl) {
 
 /**
  * Ordered unique siteUrl values to try for index:inspect.
- * Inspection-URL-derived candidates first (fixes www vs apex mismatch with URL-prefix properties).
+ * Prefer configured property URL first (www/apex), then alternates from inspection URL.
  */
 export function buildGscSiteUrlCandidates(propertyUrl, inspectionUrl) {
   const prop = String(propertyUrl || '').trim();
   const merged = uniqueOrdered([
-    candidatesFromInspectionUrl(inspectionUrl),
     candidatesFromPropertyUrl(propertyUrl),
+    candidatesFromInspectionUrl(inspectionUrl),
   ]);
   if (merged.length) return merged;
   return [normalizeSiteUrlForInspect(prop)].filter(Boolean);
@@ -114,8 +114,17 @@ export function isGscInspectPermissionDenied(row) {
   return false;
 }
 
+export function isGscInspectQuotaExceeded(row) {
+  const e = row?.error;
+  if (!e || typeof e !== 'object') return false;
+  if (Number(e.code) === 429) return true;
+  if (String(e.status || '').toUpperCase() === 'RESOURCE_EXHAUSTED') return true;
+  const msg = String(e.message || '').toLowerCase();
+  return msg.includes('quota') || msg.includes('resource_exhausted') || msg.includes('rate limit');
+}
+
 /**
- * Try candidates until one does not return a property permission error.
+ * Try candidates until one does not return permission/quota property-level errors.
  * Returns { siteUrl, row } where row is the last inspect response for the probe URL.
  */
 export async function resolveGscSiteUrlForInspect(accessToken, inspectOne, propertyUrl, probeInspectionUrl, sleepMs) {
@@ -126,7 +135,7 @@ export async function resolveGscSiteUrlForInspect(accessToken, inspectOne, prope
     const siteUrl = candidates[i];
     const row = await inspectOne(accessToken, siteUrl, probeInspectionUrl);
     lastRow = row;
-    if (!isGscInspectPermissionDenied(row)) {
+    if (!isGscInspectPermissionDenied(row) && !isGscInspectQuotaExceeded(row)) {
       return { siteUrl, row, tried: candidates.slice(0, i + 1) };
     }
     if (i < candidates.length - 1) await new Promise((r) => setTimeout(r, delay));
