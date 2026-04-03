@@ -74303,19 +74303,12 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (typeof window.showStatus === 'function') {
           window.showStatus('Page refreshed. Re-scoring this URL only…', 'info');
         }
-        try {
-          const fk = new Set(
-            urlsArg
-              .map((u) => traditionalSeoSignalMapKey(u, propertyUrl))
-              .filter(Boolean)
-          );
-          await traditionalSeoEnsureGscIndexInspectForUrls(propertyUrl, urlsArg, { forceKeys: fk });
-        } catch (gscErr) {
-          if (typeof window.showStatus === 'function') {
-            window.showStatus(`GSC URL Inspection refresh skipped: ${gscErr?.message || gscErr}`, 'warning');
-          }
-        }
-        await runTraditionalSeoEvaluation({ refreshAudit: false, onlyRescorePageUrls: urlsArg });
+        await runTraditionalSeoEvaluation({
+          refreshAudit: false,
+          onlyRescorePageUrls: urlsArg,
+          runGscUrlInspection: true,
+          forceGscRefresh: true
+        });
         await traditionalSeoOpenPageModal(url);
         if (typeof window.showStatus === 'function') {
           window.showStatus('Re-audit complete.', 'success');
@@ -78574,6 +78567,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               if (scoreMap.has(displayUrl)) scoreText = `${traditionalSeoToNum(scoreMap.get(displayUrl), 0)}`;
               else if (scoreMap.has(urlRaw)) scoreText = `${traditionalSeoToNum(scoreMap.get(urlRaw), 0)}`;
             }
+            if (isSummaryRow(row)) {
+              const sp = Math.max(0, traditionalSeoToNum(row.summary_pass, 0));
+              const sw = Math.max(0, traditionalSeoToNum(row.summary_warn, 0));
+              const sf = Math.max(0, traditionalSeoToNum(row.summary_fail, 0));
+              const st = sp + sw + sf;
+              const liveScore = st > 0 ? Math.round(((sp + sw * 0.5) / st) * 100) : 0;
+              scoreText = `${liveScore}`;
+            }
             const kwRaw = String(row.target_keyword || '').trim();
             const kwCell = kwRaw ? escapeHtml(kwRaw) : '—';
             const dfsRowForUi = !isSitewide ? traditionalSeoGetDfsPageRow(displayUrl) : null;
@@ -79557,6 +79558,21 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               : 'Traditional SEO score';
         const scoreNow = traditionalSeoToNum(evalSummary.score, 0);
         const gcTally = traditionalSeoEvalCountRuleStatuses(rows, 'gsc_url_indexed');
+        let gcSelected = null;
+        if (isPartialPageRescore && gscRuleOn) {
+          const cmpSel = new Set(
+            (Array.isArray(urlsToScore) ? urlsToScore : [])
+              .map((u) => traditionalSeoToComparableUrl(u, propertyUrl) || String(u || '').trim())
+              .filter(Boolean)
+          );
+          const selectedRows = rows.filter((r) => {
+            if (String(r?.rule_key || '') !== 'gsc_url_indexed') return false;
+            if (String(r?.tier || '').toLowerCase() === 'sitewide') return false;
+            const cmp = traditionalSeoToComparableUrl(r?.url, propertyUrl) || String(r?.url || '').trim();
+            return cmp && cmpSel.has(cmp);
+          });
+          gcSelected = traditionalSeoEvalCountRuleStatuses(selectedRows, 'gsc_url_indexed');
+        }
         const linesRun = [
           `Finished: ${new Date().toISOString()}`,
           `Elapsed: ${elapsedSec}s`,
@@ -79574,8 +79590,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           } else {
             linesRun.push('GSC: Supabase + browser cache only (no live URL Inspection API — use Refresh GSC URL Inspection when needed).');
           }
+          if (gcSelected && gcSelected.total > 0) {
+            linesRun.push(
+              `gsc_url_indexed (selected URLs): pass=${gcSelected.pass} warn=${gcSelected.warn} fail=${gcSelected.fail} (rows=${gcSelected.total})`
+            );
+          }
           linesRun.push(
-            `gsc_url_indexed tally: pass=${gcTally.pass} warn=${gcTally.warn} fail=${gcTally.fail} (rows=${gcTally.total})`
+            `gsc_url_indexed tally (all URLs): pass=${gcTally.pass} warn=${gcTally.warn} fail=${gcTally.fail} (rows=${gcTally.total})`
           );
         }
         if (
