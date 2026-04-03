@@ -75515,31 +75515,40 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     async function traditionalSeoCollectUrls(audit, propertyUrl = '') {
       const urls = new Set();
+      const canonicalByKey = new Map();
+      const addCanonicalUrl = (raw) => {
+        const normalized = traditionalSeoNormalizeUrl(raw, propertyUrl);
+        if (!normalized) return;
+        const key =
+          traditionalSeoLandingRollupGroupKey(normalized, propertyUrl)
+          || traditionalSeoToComparableUrl(normalized, propertyUrl)
+          || normalized;
+        const aligned = traditionalSeoAlignInspectUrlToProperty(normalized, propertyUrl) || normalized;
+        if (!canonicalByKey.has(key)) canonicalByKey.set(key, aligned);
+      };
       let usedAuthoritativeSource = false;
 
       if (typeof fetchAndParseSiteUrlsCsv === 'function') {
         try {
           const siteUrls = await fetchAndParseSiteUrlsCsv();
           (Array.isArray(siteUrls) ? siteUrls : []).forEach((url) => {
-            const normalized = traditionalSeoNormalizeUrl(url, propertyUrl);
-            if (normalized) urls.add(normalized);
+            addCanonicalUrl(url);
           });
-          usedAuthoritativeSource = urls.size > 0;
+          usedAuthoritativeSource = canonicalByKey.size > 0;
         } catch (err) {
           usedAuthoritativeSource = false;
         }
       }
 
       if (usedAuthoritativeSource) {
-        return [...urls].slice(0, 1400);
+        return [...canonicalByKey.values()].slice(0, 1400);
       }
 
       try {
         const rawManual = localStorage.getItem('manual_url_list');
         const manual = rawManual ? JSON.parse(rawManual) : [];
         (Array.isArray(manual) ? manual : []).forEach((url) => {
-          const normalized = traditionalSeoNormalizeUrl(url, propertyUrl);
-          if (normalized) urls.add(normalized);
+          addCanonicalUrl(url);
         });
       } catch (err) {
         // ignore malformed manual list
@@ -75549,16 +75558,15 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         ? window.getDashboardQueryPagesFromAudit(audit)
         : [];
       (Array.isArray(queryPages) ? queryPages : []).forEach((row) => {
-        const normalized = traditionalSeoNormalizeUrl(row?.page || row?.url || row?.best_url || row?.bestUrl || '', propertyUrl);
-        if (normalized) urls.add(normalized);
+        addCanonicalUrl(row?.page || row?.url || row?.best_url || row?.bestUrl || '');
       });
 
       const moneyRows = audit?.scores?.moneyPagesMetrics?.rows || audit?.moneyPagesMetrics?.rows || [];
       (Array.isArray(moneyRows) ? moneyRows : []).forEach((row) => {
-        const normalized = traditionalSeoNormalizeUrl(row?.url || row?.page || '', propertyUrl);
-        if (normalized) urls.add(normalized);
+        addCanonicalUrl(row?.url || row?.page || '');
       });
 
+      canonicalByKey.forEach((u) => urls.add(u));
       return [...urls].slice(0, 800);
     }
 
@@ -78844,18 +78852,47 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
     function traditionalSeoEvalCountRuleStatuses(rows, ruleKey) {
       const rk = String(ruleKey || '');
+      const dedupeByUrl = rk === 'gsc_url_indexed';
+      const worstByUrl = dedupeByUrl ? new Map() : null;
+      const statusRank = { fail: 0, warn: 1, pass: 2 };
       let pass = 0;
       let warn = 0;
       let fail = 0;
       let total = 0;
       (Array.isArray(rows) ? rows : []).forEach((r) => {
         if (String(r?.rule_key || '') !== rk) return;
+        if (String(r?.tier || '').toLowerCase() === 'sitewide') return;
+        if (dedupeByUrl) {
+          const key =
+            traditionalSeoLandingRollupGroupKey(r?.url, traditionalSeoEffectivePropertyUrl())
+            || traditionalSeoToComparableUrl(r?.url, traditionalSeoEffectivePropertyUrl())
+            || String(r?.url || '').trim();
+          if (!key) return;
+          const s = String(r?.status || 'fail').toLowerCase();
+          const prev = worstByUrl.get(key);
+          if (!prev) {
+            worstByUrl.set(key, s);
+            return;
+          }
+          const pa = statusRank[String(prev)] ?? 3;
+          const pb = statusRank[String(s)] ?? 3;
+          worstByUrl.set(key, pa <= pb ? prev : s);
+          return;
+        }
         total += 1;
         const s = String(r?.status || 'fail').toLowerCase();
         if (s === 'pass') pass += 1;
         else if (s === 'warn') warn += 1;
         else fail += 1;
       });
+      if (dedupeByUrl) {
+        total = worstByUrl.size;
+        worstByUrl.forEach((s) => {
+          if (s === 'pass') pass += 1;
+          else if (s === 'warn') warn += 1;
+          else fail += 1;
+        });
+      }
       return { pass, warn, fail, total };
     }
 
