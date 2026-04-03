@@ -58,3 +58,35 @@ test('deriveGscUrlIndexedStatus: crawled not indexed => fail', () => {
     'fail'
   );
 });
+
+test('deriveGscUrlIndexedStatus: empty api error object is ignored', () => {
+  assert.equal(
+    deriveGscUrlIndexedStatus(page, {
+      httpOk: true,
+      apiError: {},
+      coverageState: 'Submitted and indexed',
+    }),
+    'pass'
+  );
+});
+
+test('deriveGscUrlIndexedStatus: BLOCKED_BY_META_TAG => pass (intentional noindex)', () => {
+  assert.equal(
+    deriveGscUrlIndexedStatus(page, {
+      httpOk: true,
+      indexingState: 'BLOCKED_BY_META_TAG',
+      verdict: 'NEUTRAL',
+    }),
+    'pass'
+  );
+});
+
+test('deriveGscUrlIndexedStatus: httpStatus 200 without httpOk boolean => pass', () => {
+  assert.equal(
+    deriveGscUrlIndexedStatus(page, {
+      httpStatus: 200,
+      coverageState: 'Submitted and indexed',
+    }),
+    'pass'
+  );
+});

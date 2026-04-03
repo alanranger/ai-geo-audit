@@ -12,6 +12,13 @@ import {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** Avoid treating `{}` as a hard API error (truthy object with no fields). */
+const normalizeInspectApiError = (e) => {
+  if (e == null || e === false) return null;
+  if (typeof e === 'object' && !Array.isArray(e) && !Object.keys(e).length) return null;
+  return e;
+};
+
 const need = (key) => {
   const value = process.env[key];
   if (!value || !String(value).trim()) throw new Error(`missing_env:${key}`);
@@ -79,9 +86,10 @@ async function inspectOne(accessToken, siteUrl, inspectionUrl) {
     httpStatus: res.status,
     verdict: idx?.verdict ?? null,
     coverageState: idx?.coverageState ?? null,
+    indexingState: idx?.indexingState ?? null,
     pageFetchState: idx?.pageFetchState ?? null,
     googleCanonical: idx?.googleCanonical ?? null,
-    error: json?.error || (!res.ok ? json : null),
+    error: normalizeInspectApiError(json?.error || (!res.ok ? json : null)),
   };
 }
 
@@ -95,13 +103,18 @@ async function persistInspectionCache(propertyUrl, results) {
   const rows = results.map((r) => {
     const pageUrl = String(r?.inspectionUrl || '').trim();
     const urlKey = signalMapKey(pageUrl, propertyUrl);
+    const st = Number(r?.httpStatus);
+    const httpOkNorm =
+      r?.httpOk === true || (Number.isFinite(st) && st >= 200 && st < 300);
     const gsc = {
       verdict: r.verdict,
       coverageState: r.coverageState,
+      indexingState: r.indexingState ?? null,
       pageFetchState: r.pageFetchState,
       googleCanonical: r.googleCanonical,
-      httpOk: r.httpOk,
-      apiError: r.error || null,
+      httpOk: httpOkNorm,
+      httpStatus: r.httpStatus,
+      apiError: normalizeInspectApiError(r.error),
     };
     const audit_status = deriveGscUrlIndexedStatus(pageUrl, gsc);
     const inspectLink = r.inspectionResultLink ? String(r.inspectionResultLink).trim() : null;
@@ -113,8 +126,8 @@ async function persistInspectionCache(propertyUrl, results) {
       verdict: r.verdict ?? null,
       page_fetch_state: r.pageFetchState ?? null,
       google_canonical: r.googleCanonical ?? null,
-      http_ok: r.httpOk === true,
-      api_error: r.error ?? null,
+      http_ok: httpOkNorm,
+      api_error: normalizeInspectApiError(r.error),
       audit_status,
       indexed: audit_status === 'pass',
       inspect_result_link: inspectLink || null,
