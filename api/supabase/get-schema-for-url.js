@@ -119,8 +119,14 @@ export default async function handler(req, res) {
 
     let pageData = null;
     let matchedAudit = null;
+    // Track whether the latest audit (audits[0]) was missing this URL, so we
+    // can self-heal it if we find the page in an older run. This prevents the
+    // "URL vanished from today's audit but was present yesterday" scenario
+    // from lingering across rescores.
+    let latestAuditMissing = false;
 
-    for (const record of audits) {
+    for (let i = 0; i < audits.length; i++) {
+      const record = audits[i];
       const pagesDetail = parsePagesDetail(record.schema_pages_detail);
       if (!pagesDetail) continue;
 
@@ -145,7 +151,57 @@ export default async function handler(req, res) {
 
       if (pageData) {
         matchedAudit = record;
+        // If we found it in a *non-latest* audit, mark the latest one as
+        // needing a heal so we can append a stale entry.
+        if (i > 0) latestAuditMissing = true;
         break;
+      }
+
+      // If the newest audit didn't contain the URL, remember so we can heal.
+      if (i === 0) latestAuditMissing = true;
+    }
+
+    // Self-heal: if the latest audit is missing this URL but an older audit
+    // has schema for it, append a stale: true entry to the latest audit's
+    // schema_pages_detail so the next evaluation rescore finds it without
+    // requiring a full re-crawl. This is the same merge strategy used by
+    // save-audit.js for full audit runs.
+    if (pageData && latestAuditMissing && audits.length > 0) {
+      try {
+        const latest = audits[0];
+        const existingDetail = parsePagesDetail(latest.schema_pages_detail) || [];
+        // Only heal if truly missing (defensive; the find above already confirmed).
+        const alreadyPresent = existingDetail.some(p => {
+          if (!p || !p.url) return false;
+          return normalizeUrl(p.url) === normalizeUrl(pageData.url);
+        });
+        if (!alreadyPresent) {
+          const healedEntry = {
+            ...pageData,
+            stale: true,
+            staleSince: matchedAudit?.audit_date || null,
+            healedBy: 'get-schema-for-url self-heal',
+            healedAt: new Date().toISOString()
+          };
+          const patchRes = await fetch(`${supabaseUrl}/rest/v1/audit_results?id=eq.${encodeURIComponent(latest.id)}`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({ schema_pages_detail: existingDetail.concat([healedEntry]) })
+          });
+          if (!patchRes.ok) {
+            const errText = await patchRes.text().catch(() => '');
+            console.warn(`[get-schema-for-url] self-heal PATCH failed: ${patchRes.status} ${errText.slice(0, 200)}`);
+          } else {
+            console.log(`[get-schema-for-url] self-healed audit_results[${latest.id}] for ${pageData.url} using ${matchedAudit?.audit_date}`);
+          }
+        }
+      } catch (healErr) {
+        console.warn('[get-schema-for-url] self-heal error (non-fatal):', healErr?.message || healErr);
       }
     }
 
@@ -170,7 +226,10 @@ export default async function handler(req, res) {
         hasInheritedSchema: pageData.hasInheritedSchema === true,
         schemaTypes: Array.isArray(pageData.schemaTypes) ? pageData.schemaTypes : (pageData.schemaTypes ? [pageData.schemaTypes] : []),
         error: pageData.error || null,
-        errorType: pageData.errorType || null
+        errorType: pageData.errorType || null,
+        // true when the result was pulled from an older audit because the
+        // latest one was missing this URL (transient crawl miss).
+        healedFromOlderAudit: latestAuditMissing === true
       }
     });
 

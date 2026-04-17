@@ -49,3 +49,22 @@ The user then saw a warning in the UI that _looked like_ a page-level schema fai
 - If a URL keeps showing "URL not in the cached schema audit" even after a fresh full audit, check `impl_audit_snapshots.payload.qaGate.results` for that URL and look at `audit_results.schema_pages_detail` for the same property. If the new payload has fewer URLs than the previous one, the crawler genuinely lost them — inspect Vercel logs for `schema-audit` warnings like `⚠️ schema-audit: N input URL(s) produced no crawl result`.
 - `stale: true` entries in `schema_pages_detail` are a signal that a URL dropped out. They will self-correct on the next full audit that successfully crawls the URL (the new entry replaces the stale one).
 - The merge helper is skipped for partial saves (ranking-only, query-pages-only, etc.) so it never interferes with non-schema writes.
+
+## Follow-up (same day) — self-heal + status pill flip
+
+After the initial three-layer fix deployed, the user opened the modal for the same URL and still saw `warn` status. Two problems remained:
+
+1. The initial fix only patches the **note cell**; the **status pill** still rendered from the (still-bad) evaluation. The user saw "Live schema lookup found 38 types" sitting next to a `warn` pill, which looks like a bug.
+2. The merge helper in `save-audit.js` only triggers on the **next full schema audit**. Partial rescores (`refreshAudit=false`) still read the stale cached payload, so the warn never cleared until a full audit.
+
+### Additional changes
+
+- **`/api/supabase/get-schema-for-url.js` now self-heals the latest audit row.** When the newest `audit_results` is missing the URL but an older audit (within the 5-record lookup window) still has it, the endpoint `PATCH`es the newest row's `schema_pages_detail` to append a `stale: true` + `healedBy: 'get-schema-for-url self-heal'` entry. The next evaluation rescore then finds the URL and reports `pass` natively, without waiting for a full schema audit. The response also includes `data.healedFromOlderAudit: true` for diagnostics.
+- **`traditionalSeoApplySchemaRuleFallback` now flips the status pill** for the two whitelisted schema rules (`schema_present_core` / `schema_qa_gate_page`) from `warn`/`fail` to `pass*` (with a tooltip: "Healed via live schema lookup — re-run the schema audit to refresh the cache"). UI and note are now consistent.
+- **Manual data patch for 2026-04-17**: `audit_results` (schema_pages_detail) and `impl_audit_snapshots` (qa payload — both `pages[]` and `qaGate.rows[]`) were patched by copying the 2026-04-16 entry for `/blog-on-photography/photography-gift-vouchers-ideas` forward, tagged `stale: true`, `healedBy: 'manual-patch-2026-04-17'`. Arrays grew from 526 → 527 in all three locations.
+
+### What to do next time you see this
+
+1. Open the URL modal — the status pill should now already read `pass*`. If it still reads `warn`/`fail`, the self-heal is still in flight (second open confirms it).
+2. If you want to clear the `stale` markers, run a full schema audit (Dashboard → Standard/Full refresh); `mergeSchemaPagesDetail` will overwrite stale entries with fresh `stale: false` data the moment the URL crawls cleanly.
+
