@@ -2,6 +2,16 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-04-17] - Schema audit resilience: transient crawl drops no longer look like missing schema
+
+### Fixed
+- **Schema audit can no longer silently drop a URL.** `api/schema-audit.js` (a) force-refreshes `csv/06-site-urls.csv` on every run so stale GitHub-raw CDN caches can’t shrink the input list, and (b) reconciles `results` against the input URL list, emitting a synthetic `errorType: 'Missing Result'` row for any URL that produced no crawl entry so it still reaches `save-audit.js`.
+- **`schema_pages_detail` now merges with the previous audit row** (`api/supabase/save-audit.js`, helpers `fetchPreviousSchemaPagesDetail` / `mergeSchemaPagesDetail`). URLs present in the last saved payload but missing from the new one are carried over tagged `stale: true` + `staleSince` (14-day freshness cap), so a single bad run no longer permanently erases a URL’s schema coverage.
+- **Traditional SEO page modal — schema rule notes.** `audit-dashboard.html` `traditionalSeoModalNoteForRule` now has a dedicated branch for `schema_present_core` (was falling through to the generic rule description) and rewrites the `schema_qa_gate_page` missing-row copy. Both say `URL not in the cached schema audit (likely a transient crawl miss — the live page is unaffected)` rather than implying the page has no schema. After rendering the modal, `traditionalSeoApplySchemaRuleFallback` queries `/api/supabase/get-schema-for-url` for any URL that is missing the `schemaPage`/`qaGate` signal; if the live database actually has schema for it, the note cell is patched with the detected types so the warning is obviously a data-coverage gap rather than a page defect.
+
+### Added
+- **`Docs/SCHEMA-AUDIT-RESILIENCE-2026-04-17.md`** — full investigation, root-cause trace (started with `/blog-on-photography/photography-gift-vouchers-ideas` on 2026-04-17), and operator notes for reading `stale: true` entries.
+
 ## [2026-03-23] - Backlinks tiles: follow split by rank band + DB baseline
 
 ### Added

@@ -7,6 +7,77 @@
 
 import { enqueuePending, normalizeDomain } from '../../lib/domainStrength/domains.js';
 
+// ---- Schema_pages_detail merge helpers -----------------------------------
+// Added 2026-04-17: When a schema audit run transiently drops a URL (e.g. a
+// fetch timeout or an upstream cache serving a shorter URL list), the saved
+// schema_pages_detail used to lose that URL wholesale and downstream rules
+// (schema_present_core, schema_qa_gate_page) would report "missing from
+// audit" for a page that demonstrably has schema on the live site. We now
+// merge the new payload with the last saved payload: successful entries
+// present in the previous run but absent from the new run get carried over
+// and tagged `stale: true` so consumers can surface the reason. A 14-day
+// freshness cap prevents truly deleted URLs from lingering forever.
+const SCHEMA_PAGES_DETAIL_STALE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+async function fetchPreviousSchemaPagesDetail(supabaseUrl, supabaseKey, propertyUrl) {
+  if (!supabaseUrl || !supabaseKey || !propertyUrl) return { pages: [], auditDate: null };
+  try {
+    const qs = `property_url=eq.${encodeURIComponent(propertyUrl)}` +
+      `&schema_pages_detail=not.is.null` +
+      `&order=audit_date.desc&limit=1&select=audit_date,schema_pages_detail`;
+    const resp = await fetch(`${supabaseUrl}/rest/v1/audit_results?${qs}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`
+      }
+    });
+    if (!resp.ok) return { pages: [], auditDate: null };
+    const data = await resp.json();
+    if (!Array.isArray(data) || data.length === 0) return { pages: [], auditDate: null };
+    const latest = data[0] || {};
+    const raw = latest.schema_pages_detail;
+    let parsed = raw;
+    if (typeof raw === 'string') {
+      try { parsed = JSON.parse(raw); } catch { parsed = null; }
+    }
+    if (!Array.isArray(parsed)) return { pages: [], auditDate: latest.audit_date || null };
+    return { pages: parsed, auditDate: latest.audit_date || null };
+  } catch (err) {
+    console.warn('[Save Audit] Previous schema_pages_detail fetch failed:', err?.message || err);
+    return { pages: [], auditDate: null };
+  }
+}
+
+function previousEntryIsStillUseful(entry, staleSinceMs) {
+  if (!entry || typeof entry !== 'object') return false;
+  if (!entry.url) return false;
+  const hasSchemaTrue = entry.hasSchema === true;
+  const hasTypes = Array.isArray(entry.schemaTypes) && entry.schemaTypes.length > 0;
+  if (!hasSchemaTrue && !hasTypes) return false;
+  if (!Number.isFinite(staleSinceMs)) return true;
+  return staleSinceMs >= Date.now() - SCHEMA_PAGES_DETAIL_STALE_TTL_MS;
+}
+
+function mergeSchemaPagesDetail(newPages, prevPages, prevAuditDate) {
+  if (!Array.isArray(newPages) || newPages.length === 0) return newPages;
+  if (!Array.isArray(prevPages) || prevPages.length === 0) return newPages;
+  const byUrl = new Map();
+  newPages.forEach((p) => { if (p && p.url) byUrl.set(p.url, p); });
+  const staleSinceMs = prevAuditDate ? new Date(prevAuditDate).getTime() : null;
+  let carried = 0;
+  prevPages.forEach((prev) => {
+    if (!prev || !prev.url || byUrl.has(prev.url)) return;
+    if (!previousEntryIsStillUseful(prev, staleSinceMs)) return;
+    byUrl.set(prev.url, { ...prev, stale: true, staleSince: prevAuditDate || null });
+    carried += 1;
+  });
+  if (carried > 0) {
+    console.log(`[Save Audit] Merged ${carried} previous schema_pages_detail entry(ies) carried over as stale (prev audit: ${prevAuditDate || 'unknown'}).`);
+  }
+  return Array.from(byUrl.values());
+}
+
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -758,6 +829,24 @@ export default async function handler(req, res) {
     const hasRankingAiDataOnly = rankingAiData && !scores && !schemaAudit && !searchData;
     
     const isPartialUpdate = hasQueryTotalsOnly || hasQueryPagesOnly || hasTopQueriesOnly || hasRankingAiDataOnly;
+
+    // ---- Merge schema_pages_detail with previous run --------------------
+    // Only merge when we actually have a new schema_pages_detail payload
+    // (i.e. this save is a real schema audit, not a partial update).
+    if (!isPartialUpdate
+      && Array.isArray(auditRecord.schema_pages_detail)
+      && auditRecord.schema_pages_detail.length > 0) {
+      const prev = await fetchPreviousSchemaPagesDetail(
+        supabaseUrl,
+        process.env.SUPABASE_SERVICE_ROLE_KEY,
+        auditRecord.property_url
+      );
+      auditRecord.schema_pages_detail = mergeSchemaPagesDetail(
+        auditRecord.schema_pages_detail,
+        prev.pages,
+        prev.auditDate
+      );
+    }
 
     // ---- Guardrails: prevent writing "null audits" and mark partials ----
     // We consider a write "invalid" (reject) if it contains no meaningful audit payload.

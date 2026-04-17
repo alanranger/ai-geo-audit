@@ -1179,11 +1179,18 @@ function ensureRootUrlIncluded(urls) {
 
 /**
  * Resolve crawl URLs: prefer 06-site-urls.csv; else tier segmentation CSV.
+ *
+ * Always force-refreshes the canonical 06-site-urls.csv fetch so stale GitHub-raw
+ * CDN caches can't silently cause dropped URLs on a given audit run (root cause
+ * traced 2026-04-17 for `/blog-on-photography/photography-gift-vouchers-ideas`:
+ * URL was in the CSV, present in yesterday's audit, but missing from today's
+ * because the fetch came back from an older cached copy).
  */
 async function parseCsvUrls(options = {}) {
-  const siteUrls = await fetchCanonicalSiteUrlList(options);
+  const siteUrlOptions = { ...options, forceRefresh: true };
+  const siteUrls = await fetchCanonicalSiteUrlList(siteUrlOptions);
   if (siteUrls.length > 0) {
-    console.log(`✓ 06-site-urls.csv: ${siteUrls.length} URLs (tiers still from segmentation lookup)`);
+    console.log(`✓ 06-site-urls.csv: ${siteUrls.length} URLs (forceRefresh=true; tiers still from segmentation lookup)`);
     return { urls: siteUrls, listKind: 'site_urls_06' };
   }
   const entries = await fetchTierSegmentationEntries(options);
@@ -2044,6 +2051,30 @@ export default async function handler(req, res) {
       error: result.success ? null : (result.error || null),
       errorType: result.success ? null : (result.errorType || null)
     }));
+
+    // Defensive reconciliation: guarantee every input URL appears in pages[].
+    // If something dropped a URL between queue → results (unhandled promise
+    // rejection, await never resolving, an early return in crawlUrl that wasn't
+    // wrapped, etc.) we emit a synthetic row so save-audit.js can still record
+    // it and downstream consumers don't see the URL as "not in the audit".
+    const emittedUrls = new Set(pages.map(p => p.url));
+    const missingFromResults = urls.filter(u => !emittedUrls.has(u));
+    if (missingFromResults.length > 0) {
+      console.warn(`⚠️ schema-audit: ${missingFromResults.length} input URL(s) produced no crawl result; emitting synthetic error rows so save-audit merges them rather than dropping them.`);
+      missingFromResults.forEach((url) => {
+        pages.push({
+          url,
+          title: null,
+          metaDescription: null,
+          statusCode: null,
+          hasSchema: false,
+          hasInheritedSchema: false,
+          schemaTypes: [],
+          error: 'No crawl result returned for this URL (queue→result gap; see schema-audit.js reconciliation).',
+          errorType: 'Missing Result'
+        });
+      });
+    }
     const serviceSchemaCoverage = buildServiceSchemaCoverage(pages);
     const qaGate = {
       ...buildSchemaQaGate(results, urlSource, runMode, runTier, qaTierLookup),
