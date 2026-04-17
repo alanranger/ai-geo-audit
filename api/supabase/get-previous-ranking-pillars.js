@@ -118,22 +118,45 @@ async function fetchPreviousAuditRow({ supabaseUrl, supabaseKey, propertyUrl, cu
   };
   const candidates = buildPropertyUrlCandidates(propertyUrl);
   for (const candidate of candidates) {
-    const previousUrl =
-      `${supabaseUrl}/rest/v1/audit_results` +
-      `?property_url=eq.${encodeURIComponent(candidate)}` +
-      `&audit_date=lt.${encodeURIComponent(currentAuditDate)}` +
-      `&order=audit_date.desc` +
-      `&limit=1` +
-      `&select=audit_date,ranking_ai_pillar_scores,ranking_ai_data`;
-
-    const response = await fetch(previousUrl, { method: 'GET', headers: authHeaders });
-    if (!response.ok) continue;
-    const rows = await response.json();
-    if (Array.isArray(rows) && rows.length > 0) {
-      return rows[0];
-    }
+    const row = await queryPreviousRowForCandidate({
+      supabaseUrl,
+      authHeaders,
+      candidate,
+      currentAuditDate
+    });
+    if (row) return row;
   }
   return null;
+}
+
+async function queryPreviousRowForCandidate({
+  supabaseUrl,
+  authHeaders,
+  candidate,
+  currentAuditDate
+}) {
+  const baseUrl =
+    `${supabaseUrl}/rest/v1/audit_results` +
+    `?property_url=eq.${encodeURIComponent(candidate)}` +
+    `&audit_date=lt.${encodeURIComponent(currentAuditDate)}` +
+    `&order=audit_date.desc` +
+    `&limit=1` +
+    `&select=audit_date,ranking_ai_pillar_scores,ranking_ai_data`;
+
+  const preferredUrl = `${baseUrl}&ranking_ai_pillar_scores=not.is.null`;
+  const preferred = await fetchFirstRow(preferredUrl, authHeaders);
+  if (preferred) return preferred;
+
+  const legacyUrl = `${baseUrl}&ranking_ai_data=not.is.null`;
+  return fetchFirstRow(legacyUrl, authHeaders);
+}
+
+async function fetchFirstRow(url, authHeaders) {
+  const response = await fetch(url, { method: 'GET', headers: authHeaders });
+  if (!response.ok) return null;
+  const rows = await response.json().catch(() => null);
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  return rows[0];
 }
 
 function extractPillarScores(previousRow) {
