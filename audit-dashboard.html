@@ -55913,9 +55913,14 @@ Final Score: ${score}/100`;
         const response = await fetch(apiUrl(`/api/supabase/get-previous-ranking-pillars?propertyUrl=${encodeURIComponent(propertyUrl)}&currentAuditDate=${encodeURIComponent(currentAuditDate)}`));
         if (!response.ok) return null;
         const payload = await response.json();
-        if (payload?.status !== 'ok' || !payload?.data?.pillarScores) return null;
+        if (payload?.status !== 'ok' || !payload?.data) return null;
 
-        const scores = payload.data.pillarScores;
+        let scores = payload.data.pillarScores || null;
+        if (!scores && Array.isArray(payload.data.combinedRows) && payload.data.combinedRows.length > 0) {
+          scores = computeRankingPillarScoresFromRows(payload.data.combinedRows);
+        }
+        if (!scores) return null;
+
         const prevAuditDate = payload.data.auditDate || null;
         cache.previousByAuditDate[currentAuditDate] = scores;
         cache.previousAuditDateByAuditDate[currentAuditDate] = prevAuditDate;

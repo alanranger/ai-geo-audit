@@ -104,12 +104,16 @@ export default async function handler(req, res) {
     const rankingAiData = parseJson(previousRow.ranking_ai_data);
     const summary = rankingAiData?.summary || null;
     const pillarScores = summary?.pillar_scores || summary?.pillarScores || null;
+    const combinedRows = Array.isArray(rankingAiData?.combinedRows)
+      ? rankingAiData.combinedRows
+      : null;
 
     return res.status(200).json({
       status: 'ok',
       data: {
         auditDate: previousRow.audit_date || null,
-        pillarScores: pillarScores || null
+        pillarScores: pillarScores || null,
+        combinedRows: pillarScores ? null : combinedRows
       }
     });
   } catch (error) {
