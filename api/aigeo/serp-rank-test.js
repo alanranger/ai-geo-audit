@@ -294,7 +294,17 @@ async function fetchKeywordOverview(keywords, auth) {
   }
 }
 
-async function fetchSerpForKeyword(keyword, auth, targetRoot) {
+const DEFAULT_SERP_DEPTH = 50;
+const MAX_SERP_DEPTH = 100; // DFS supports up to 700, but cost/latency grows; cap at 100 for now.
+
+function resolveSerpDepth(rawDepth) {
+  const n = Number(rawDepth);
+  if (!Number.isFinite(n)) return DEFAULT_SERP_DEPTH;
+  const clamped = Math.max(10, Math.min(MAX_SERP_DEPTH, Math.round(n)));
+  return clamped;
+}
+
+async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SERP_DEPTH) {
   const endpoint =
     "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
 
@@ -312,7 +322,7 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot) {
           location_code: 2826, // United Kingdom
           device: "desktop",
           os: "windows",
-          depth: 50,
+          depth,
           // Phase 1: pull Google AI Overview citations in the same call.
           load_async_ai_overview: true,
           expand_ai_overview: true,
@@ -487,6 +497,12 @@ export default async function handler(req, res) {
     keywords = keywords.slice(0, MAX_KEYWORDS_PER_REQUEST);
   }
 
+  // Optional ?depth= override. Default 50, clamped to [10, 100]. Lets us
+  // verify "not ranked at all" vs. "ranks at 51-100" without changing the
+  // default cost profile of the audit.
+  const depth = resolveSerpDepth(req.query.depth);
+  console.log(`[Handler] Using SERP depth: ${depth}`);
+
   try {
     // Log handler entry with keywords
     console.log(`[Handler] === START === Processing ${keywords.length} keywords`);
@@ -510,7 +526,7 @@ export default async function handler(req, res) {
       
       const batchPromises = batch.map(async (keyword) => {
         try {
-          const result = await fetchSerpForKeyword(keyword, auth, targetRoot);
+          const result = await fetchSerpForKeyword(keyword, auth, targetRoot, depth);
           
           // Merge search volume data using normalized keyword lookup
           const normalizedKw = normalizeKeyword(keyword);
@@ -666,6 +682,7 @@ export default async function handler(req, res) {
         avg_position_volume_weighted: avgPositionVolumeWeighted !== null ? Math.round(avgPositionVolumeWeighted * 100) / 100 : null,
         keywords_used_for_avg: keywordsUsedForAvg,
         keywords_with_volume: keywordsWithVolume,
+        depth,
       },
       per_keyword: perKeyword,
     });
