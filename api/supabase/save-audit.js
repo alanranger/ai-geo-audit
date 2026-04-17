@@ -1529,6 +1529,8 @@ export default async function handler(req, res) {
           page_type: row.pageType ? String(row.pageType).trim() : null,
           demand_share: row.demand_share !== null && row.demand_share !== undefined ? parseFloat(row.demand_share) : null,
           opportunity_score: row.opportunityScore !== null && row.opportunityScore !== undefined ? parseInt(row.opportunityScore) : null,
+          // Phase 1: per-engine AI citation data (google_aio + google_ai_mode)
+          ai_engines: row.ai_engines && typeof row.ai_engines === 'object' ? row.ai_engines : null,
           updated_at: new Date().toISOString()
         }));
 

@@ -1,21 +1,24 @@
 /**
  * DataForSEO Organic SERP Rank Test API
- * 
- * Test endpoint to fetch classic organic rankings and SERP features per keyword.
- * Uses DataForSEO Google Organic SERP Live Advanced API.
- * 
- * Note: DataForSEO now captures asynchronous AI Overviews (AIOs) that load after initial
- * page render, ensuring more accurate AI Overview detection. This improvement is automatic
- * and requires no code changes.
- * 
- * Returns:
- * - best_rank_group: best ranking group for alanranger.com (if found)
- * - best_rank_absolute: best absolute rank for alanranger.com (if found)
- * - best_url: URL of best ranking page
- * - best_title: title of best ranking page
- * - has_ai_overview: whether AI overview element appeared (now includes async AIOs)
- * - serp_features: object with local_pack, featured_snippet, people_also_ask flags
+ *
+ * Fetches classic organic rankings, SERP features and Google AI Overview
+ * citations per keyword via DataForSEO Google Organic SERP Live Advanced.
+ *
+ * Phase 1 (Apr 2026): enables `load_async_ai_overview` + `expand_ai_overview`
+ * so the response includes a rich `ai_overview` item with references whenever
+ * Google shows an AIO in classic SERP. Those citations are surfaced under
+ * `ai_overview_citations` — a separate AI engine slot from Google AI Mode
+ * (which is scraped via the dedicated ai_mode endpoint).
+ *
+ * Returns per keyword:
+ * - best_rank_group / best_rank_absolute / best_url / best_title
+ * - has_ai_overview: AIO item present in classic SERP
+ * - serp_features: { local_pack, featured_snippet, people_also_ask }
+ * - ai_overview_citations: normalised Google AIO citation data (see
+ *   lib/ai-citation-extract.js for shape)
  */
+
+import { extractCitationsFromDfsResult } from '../../lib/ai-citation-extract.js';
 
 function normalizeDomain(value) {
   if (!value) return null;
@@ -310,6 +313,9 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot) {
           device: "desktop",
           os: "windows",
           depth: 50,
+          // Phase 1: pull Google AI Overview citations in the same call.
+          load_async_ai_overview: true,
+          expand_ai_overview: true,
         },
       ]),
     });
@@ -329,6 +335,7 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot) {
           featured_snippet: false,
           people_also_ask: false,
         },
+        ai_overview_citations: null,
         error: data.status_message || "DataForSEO request failed",
       };
     }
@@ -375,6 +382,9 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot) {
       people_also_ask: paa_present_any,
     };
 
+    // Phase 1: extract Google AI Overview citations from the same response.
+    const aiOverviewCitations = extractCitationsFromDfsResult(result);
+
     return {
       keyword,
       best_rank_group: bestRankGroup,
@@ -388,6 +398,8 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot) {
       local_pack_present_any,
       paa_present_any,
       featured_snippet_present_any,
+      // Phase 1: Google AI Overview citation slot (engine = google_aio)
+      ai_overview_citations: aiOverviewCitations,
     };
   } catch (err) {
     console.error(`Error fetching SERP for keyword "${keyword}":`, err);
@@ -408,6 +420,7 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot) {
       local_pack_present_any: false,
       paa_present_any: false,
       featured_snippet_present_any: false,
+      ai_overview_citations: null,
       error: "Unexpected server error",
     };
   }

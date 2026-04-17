@@ -2,6 +2,40 @@ import { classifyKeywordSegment } from '../../lib/segment/classifyKeywordSegment
 import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
 import { logCronEvent } from '../../lib/cron/logCron.js';
 
+// Phase 1: build the per-engine `ai_engines` JSONB from the two upstream calls.
+// serp-rank-test returns an already-normalised engine-slot shape on
+// `row.ai_overview_citations`; ai-mode-serp-batch-test still uses the legacy
+// field names, which we convert to the same slot shape here.
+const buildGoogleAioSlot = (serpRow) => {
+  const slot = serpRow?.ai_overview_citations;
+  if (slot && typeof slot === 'object') return slot;
+  return null;
+};
+
+const buildGoogleAiModeSlot = (aiRow) => {
+  if (!aiRow || typeof aiRow !== 'object') return null;
+  const citationsRaw = Array.isArray(aiRow.alanranger_citations)
+    ? aiRow.alanranger_citations
+    : [];
+  return {
+    present: Boolean(aiRow.has_ai_overview),
+    total_citations: Number(aiRow.total_citations || 0),
+    alan_citations_count: Number(aiRow.alanranger_citations_count || 0),
+    alan_citations: citationsRaw,
+    sample_citations: Array.isArray(aiRow.sample_citations) ? aiRow.sample_citations : [],
+    checked_at: new Date().toISOString(),
+  };
+};
+
+const buildAiEngines = (serpRow, aiRow) => {
+  const engines = {};
+  const aio = buildGoogleAioSlot(serpRow);
+  if (aio) engines.google_aio = aio;
+  const aiMode = buildGoogleAiModeSlot(aiRow);
+  if (aiMode) engines.google_ai_mode = aiMode;
+  return Object.keys(engines).length > 0 ? engines : null;
+};
+
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 const sendJson = (res, status, body) => {
@@ -126,7 +160,9 @@ const buildCombinedRows = (serpRows, aiRows) => {
       local_pack_present_any: row?.local_pack_present_any ?? false,
       paa_present_any: row?.paa_present_any ?? false,
       featured_snippet_present_any: row?.featured_snippet_present_any ?? false,
-      search_volume: row?.search_volume ?? null
+      search_volume: row?.search_volume ?? null,
+      // Phase 1: per-engine AI citation slots (google_aio + google_ai_mode).
+      ai_engines: buildAiEngines(row, ai)
     };
   });
 };
@@ -161,7 +197,8 @@ const buildKeywordRows = (combinedRows, auditDate, propertyUrl) => combinedRows.
   local_pack_present_any: row.local_pack_present_any,
   paa_present_any: row.paa_present_any,
   featured_snippet_present_any: row.featured_snippet_present_any,
-  search_volume: row.search_volume
+  search_volume: row.search_volume,
+  ai_engines: row.ai_engines || null
 }));
 
 const saveKeywordBatch = async (baseUrl, payload) => {
