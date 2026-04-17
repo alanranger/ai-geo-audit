@@ -19,6 +19,29 @@ const sendJSON = (res, status, obj) => {
   res.status(status).send(JSON.stringify(obj));
 };
 
+/**
+ * Return the single most-recent `keyword_rankings` row for a given keyword,
+ * ordered by `last_refreshed_at` (ad-hoc refresh stamp) then `audit_date`
+ * (cron-driven full-audit stamp). Used by the Optimisation task drawer's
+ * "Add Measurement" flow so a per-keyword refresh immediately feeds into
+ * task measurements without waiting for a full 84-keyword re-audit.
+ */
+async function fetchMostRecentKeywordRow(supabase, propertyUrl, keyword) {
+  const normalized = String(keyword || '').trim();
+  if (!normalized) return null;
+  const { data, error } = await supabase
+    .from('keyword_rankings')
+    .select('*')
+    .eq('property_url', propertyUrl)
+    .ilike('keyword', normalized)
+    .order('last_refreshed_at', { ascending: false, nullsFirst: false })
+    .order('audit_date', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data || null;
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -32,7 +55,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { auditDate, propertyUrl, latestOnly } = req.query;
+    const { auditDate, propertyUrl, latestOnly, keyword } = req.query;
     
     if (!propertyUrl) {
       return sendJSON(res, 400, { error: 'propertyUrl is required' });
@@ -42,6 +65,13 @@ export default async function handler(req, res) {
       need('SUPABASE_URL'),
       need('SUPABASE_SERVICE_ROLE_KEY')
     );
+
+    // Single-keyword lookup: return the freshest `keyword_rankings` row,
+    // preferring `last_refreshed_at` over `audit_date` so ad-hoc refreshes win.
+    if (keyword) {
+      const row = await fetchMostRecentKeywordRow(supabase, propertyUrl, keyword);
+      return sendJSON(res, 200, { status: 'ok', data: { row } });
+    }
 
     // If latestOnly=true, return the latest audit_date AND timestamp from audit_results
     if (latestOnly === 'true') {
