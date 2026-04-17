@@ -105,8 +105,12 @@ const fetchSerpRows = async (
   keywords,
   batchSize,
   async (batch) => {
+    // depth=100 so we catch rankings in slots 51–100 (e.g. "photography
+    // courses" was observed at #21 but SERP volatility had pushed it out of
+    // the old depth=50 window on some pulls). Server default is also 100;
+    // passing it explicitly insulates this caller if the default ever moves.
     const serpResp = await fetchJson(
-      `${baseUrl}/api/aigeo/serp-rank-test?keywords=${encodeURIComponent(batch.join(','))}`
+      `${baseUrl}/api/aigeo/serp-rank-test?keywords=${encodeURIComponent(batch.join(','))}&depth=100`
     );
     return Array.isArray(serpResp?.per_keyword) ? serpResp.per_keyword : [];
   },

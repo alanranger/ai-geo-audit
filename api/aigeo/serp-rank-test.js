@@ -294,7 +294,12 @@ async function fetchKeywordOverview(keywords, auth) {
   }
 }
 
-const DEFAULT_SERP_DEPTH = 50;
+// Default SERP depth for audits. Flipped 50 → 100 on 2026-04-17 after
+// investigating a "photography courses" miss where alanranger.com ranked #21
+// (well inside DFS's top 100 but outside the old top-50 window). Callers can
+// still override with ?depth=50 for cheap sanity checks; the `?depth=` param
+// is clamped to [10, MAX_SERP_DEPTH].
+const DEFAULT_SERP_DEPTH = 100;
 const MAX_SERP_DEPTH = 100; // DFS supports up to 700, but cost/latency grows; cap at 100 for now.
 
 function resolveSerpDepth(rawDepth) {
@@ -346,6 +351,7 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
           people_also_ask: false,
         },
         ai_overview_citations: null,
+        serp_depth: depth,
         error: data.status_message || "DataForSEO request failed",
       };
     }
@@ -410,6 +416,7 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
       featured_snippet_present_any,
       // Phase 1: Google AI Overview citation slot (engine = google_aio)
       ai_overview_citations: aiOverviewCitations,
+      serp_depth: depth,
     };
   } catch (err) {
     console.error(`Error fetching SERP for keyword "${keyword}":`, err);
@@ -431,6 +438,7 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
       paa_present_any: false,
       featured_snippet_present_any: false,
       ai_overview_citations: null,
+      serp_depth: depth,
       error: "Unexpected server error",
     };
   }
@@ -572,6 +580,7 @@ export default async function handler(req, res) {
             },
             search_volume: null,
             search_volume_trend: undefined,
+            serp_depth: depth,
             error: err.message || "Error processing keyword",
           };
         }
