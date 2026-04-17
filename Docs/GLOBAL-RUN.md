@@ -121,6 +121,20 @@ If the cron behaviour ever drifts, update both `api/cron/global-run.js` *and* th
 
 ---
 
+## Cross-script-block dependency
+
+The global-run orchestrator lives in one `<script>` IIFE (around line 73483 of `audit-dashboard.html`); the Traditional SEO runners (`runTraditionalSeoEvaluation`, `traditionalSeoRefreshKeywordMetricsFromProvider`, `runTraditionalSeoRefreshGscUrlInspection`, `traditionalSeoRunDfsDomainIngest`) live in a different `<script>` IIFE (starts at line 74293). For the orchestrator to call them, the Traditional SEO IIFE re-exports them onto `window` at the bottom of its block — same pattern already used by `runDomainStrengthSnapshot`.
+
+If you add a **new** runner in another script block, you must do the same:
+
+```js
+window.myNewRunner = myNewRunner;
+```
+
+If you forget, the global run will mark the step `Failed` with the message `myNewRunner function not available` (which is exactly the bug fixed on 2026-04-17 — initial Full-tier runs surfaced four such failures because the cross-block exposure had been missed).
+
+---
+
 ## Known gaps (future work)
 
 - **Per-step "last ran" timestamps in the dashboard header.** The next iteration should add a freshness panel so the user can see, at a glance, when each audit kind was last updated. Candidate endpoint: a single `GET /api/supabase/audit-freshness?propertyUrl=…` aggregating max timestamps from `audit_results`, `keyword_rankings`, `dfs_domain_backlink_rows`, `domain_strength_snapshots`, `keyword_target_metrics_cache`, `traditional_seo_evaluation_cache`, `gsc_url_inspection_cache`.
