@@ -104,6 +104,7 @@ export default async function handler(req, res) {
       moneySegmentMetrics, // Phase: Money Pages Priority Matrix - segment metrics for KPI tracker
       moneyPagePriorityData, // CRITICAL: Money Pages Priority Matrix data for Priority & Actions table
       rankingAiData, // Ranking & AI data (SERP rankings + AI Overview citations)
+      rankingAiPillarScores, // Ranking & AI pillar percentages snapshot (computed client-side at save time)
       domainStrength // Domain strength snapshot for historical delta calculations
     } = bodyData;
 
@@ -462,6 +463,11 @@ export default async function handler(req, res) {
       
       // Ranking & AI data (SERP rankings + AI Overview citations)
       ranking_ai_data: ensureJson(rankingAiData), // JSON object: {combinedRows: [...], summary: {...}}
+
+      // Ranking & AI pillar percentages snapshot (for cheap delta reads across audits).
+      // Computed client-side at save time using the real classifier, so this column is the
+      // authoritative source for the five pillar percentages shown in the Keyword Ranking & AI tab.
+      ranking_ai_pillar_scores: ensureJson(rankingAiPillarScores),
       
       // Calculate AI Summary Likelihood (Phase 1)
       // Uses snippetReadiness, visibility, and brand score
@@ -965,6 +971,7 @@ export default async function handler(req, res) {
           'money_page_priority_data',
           // ranking/ai
           'ranking_ai_data',
+          'ranking_ai_pillar_scores',
           // core scores
           'visibility_score',
           'authority_score',

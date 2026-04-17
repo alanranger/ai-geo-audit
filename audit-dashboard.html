@@ -55662,13 +55662,26 @@ Final Score: ${score}/100`;
 
         // Save to Supabase
         const auditDate = new Date().toISOString().split('T')[0];
+        // Compute pillar percentages at save time so the dedicated column is authoritative.
+        // This uses the real URL classifier (classifyPortfolioSegmentFromUrl) for the money-citations
+        // pillar, which can't be reproduced in SQL reliably.
+        let rankingAiPillarScores = null;
+        try {
+          if (Array.isArray(combinedRows) && combinedRows.length > 0 &&
+              typeof computeRankingPillarScoresFromRows === 'function') {
+            rankingAiPillarScores = computeRankingPillarScoresFromRows(combinedRows);
+          }
+        } catch (pillarErr) {
+          debugLog(`⚠ Could not compute pillar scores for save: ${pillarErr?.message || pillarErr}`, 'warn');
+        }
         const response = await fetch(apiUrl('/api/supabase/save-audit'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             propertyUrl,
             auditDate,
-            rankingAiData // New field for ranking AI data
+            rankingAiData, // New field for ranking AI data
+            rankingAiPillarScores // Snapshot of the 5 pillar percentages for cheap delta reads
           })
         });
 
@@ -55915,10 +55928,9 @@ Final Score: ${score}/100`;
         const payload = await response.json();
         if (payload?.status !== 'ok' || !payload?.data) return null;
 
-        let scores = payload.data.pillarScores || null;
-        if (!scores && Array.isArray(payload.data.combinedRows) && payload.data.combinedRows.length > 0) {
-          scores = computeRankingPillarScoresFromRows(payload.data.combinedRows);
-        }
+        // pillarScores come straight from the dedicated ranking_ai_pillar_scores column
+        // (populated at save time + SQL-backfilled for historical rows).
+        const scores = payload.data.pillarScores || null;
         if (!scores) return null;
 
         const prevAuditDate = payload.data.auditDate || null;
