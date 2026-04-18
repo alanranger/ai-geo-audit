@@ -2,6 +2,16 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-04-17] - Ranking & AI hero: cohesive colour palette + filter banner + AIO footnotes
+
+### Changed
+- **Hero strip colour palette realigned to the dashboard's brand tokens.** The AI Visibility Score hero, its commercial-value funnel, the per-pillar contribution bar, twin sub-scores, sparkline and the opportunity panel no longer use violet (`#8b5cf6`, `#a855f7`), magenta (`#ec4899`) or mint (`#34d399`) shades that clashed with the page's native `#E57200 / #f59e0b / #10b981 / #ef4444` palette. The highest-weight pillar (`moneyCitations`) now renders in brand orange so the eye lands on the money-page signal first; RAG colours across score / delta / twin cards now use the brand success / warning / danger tokens directly. The funnel's terminal stage ("the win") also uses brand orange instead of two greens. See `Docs/HERO-UI-REFRESH-2026-04-17.md` for the full before→after mapping.
+
+### Added
+- **Filter-active banner above the Keyword Ranking & AI pillar grid.** Whenever `filteredCount !== totalKeywords` the tile denominators silently flex (e.g. `2/3 (67%)` instead of `2/84`), which has been a recurring source of "do these numbers make sense?" confusion. A new `#ranking-filter-banner` (brand-orange, cream background) appears whenever a filter is active, spells out the scope (`X of Y keywords`), lists which filters are currently applied (`summariseActiveRankingFilters`), reminds users that Cross-engine and Share-of-voice tiles still use the full tracked set, and offers a **Clear filters** button that delegates to the existing sidebar clear (so preset state, keyword debounce, priority-matrix filter, pagination and sort all reset together).
+- **Clarifying footnotes on SERP feature coverage and Cross-engine citation breadth tiles.** Explain that Google AIO triggers are sparse and skew toward informational queries — a low AIO count usually reflects query mix, not a data pipeline gap — and that cross-engine overlap is naturally capped by AIO trigger rate. Closes the "only 3/84 keywords returned AI data" follow-up.
+- **`Docs/HERO-UI-REFRESH-2026-04-17.md`** — colour-mapping table, filter-banner implementation notes, and the AIO investigation summary.
+
 ## [2026-04-17] - Schema audit resilience: transient crawl drops no longer look like missing schema
 
 ### Fixed
