@@ -20,6 +20,77 @@ const sendJSON = (res, status, obj) => {
   res.status(status).send(JSON.stringify(obj));
 };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const EVENTS_DELETE_CAP = 500;
+
+function validateTaskId(rawId) {
+  if (Array.isArray(rawId)) return { ok: false, error: 'Exactly one task ID required (got array)' };
+  if (!rawId || typeof rawId !== 'string') return { ok: false, error: 'Task ID required' };
+  const id = rawId.trim();
+  if (!UUID_RE.test(id)) return { ok: false, error: 'Task ID must be a valid UUID' };
+  return { ok: true, id };
+}
+
+async function handleDelete(req, res) {
+  try {
+    const validation = validateTaskId(req.query.id);
+    if (!validation.ok) return sendJSON(res, 400, { error: validation.error });
+    const { id } = validation;
+
+    const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
+
+    const { data: targetRows, error: preErr } = await supabase
+      .from('optimisation_tasks')
+      .select('id')
+      .eq('id', id);
+    if (preErr) {
+      console.error('[Optimisation Task] Delete preflight error:', preErr);
+      return sendJSON(res, 500, { error: preErr.message });
+    }
+    if (!targetRows || targetRows.length === 0) {
+      return sendJSON(res, 404, { error: 'Task not found' });
+    }
+    if (targetRows.length !== 1) {
+      console.error('[Optimisation Task] Refusing multi-row delete', { id, matched: targetRows.length });
+      return sendJSON(res, 400, { error: `Refusing to delete: query matched ${targetRows.length} rows; expected 1` });
+    }
+
+    const { count: eventsCount } = await supabase
+      .from('optimisation_task_events')
+      .select('id', { count: 'exact', head: true })
+      .eq('task_id', id);
+    if (eventsCount != null && eventsCount > EVENTS_DELETE_CAP) {
+      console.error('[Optimisation Task] Refusing delete; events over cap', { id, eventsCount });
+      return sendJSON(res, 409, { error: `Refusing to delete task with ${eventsCount} events (guardrail limit ${EVENTS_DELETE_CAP})` });
+    }
+
+    console.log('[Optimisation Task] DELETE starting', { id, eventsCount });
+
+    const { error: eventsError } = await supabase
+      .from('optimisation_task_events')
+      .delete()
+      .eq('task_id', id);
+    if (eventsError) {
+      console.error('[Optimisation Task] Delete events error:', eventsError);
+      return sendJSON(res, 500, { error: eventsError.message });
+    }
+
+    const { error: taskError } = await supabase
+      .from('optimisation_tasks')
+      .delete()
+      .eq('id', id);
+    if (taskError) {
+      console.error('[Optimisation Task] Delete task error:', taskError);
+      return sendJSON(res, 500, { error: taskError.message });
+    }
+
+    return sendJSON(res, 200, { message: 'Task deleted successfully', deleted: { task_id: id, events_deleted: eventsCount ?? 0 } });
+  } catch (error) {
+    console.error('[Optimisation Task] Delete error:', error);
+    return sendJSON(res, 500, { error: error.message || 'Internal server error' });
+  }
+}
+
 export default async function handler(req, res) {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -126,46 +197,8 @@ export default async function handler(req, res) {
     return sendJSON(res, 403, { error: 'Write operations not allowed in share mode' });
   }
 
-  // Handle DELETE (hard delete)
   if (req.method === 'DELETE') {
-    try {
-      const { id } = req.query;
-      if (!id) {
-        return sendJSON(res, 400, { error: 'Task ID required' });
-      }
-
-      const supabase = createClient(
-        need('SUPABASE_URL'),
-        need('SUPABASE_SERVICE_ROLE_KEY')
-      );
-
-      // Delete all events first (foreign key constraint)
-      const { error: eventsError } = await supabase
-        .from('optimisation_task_events')
-        .delete()
-        .eq('task_id', id);
-
-      if (eventsError) {
-        console.error('[Optimisation Task] Delete events error:', eventsError);
-        return sendJSON(res, 500, { error: eventsError.message });
-      }
-
-      // Delete the task
-      const { error: taskError } = await supabase
-        .from('optimisation_tasks')
-        .delete()
-        .eq('id', id);
-
-      if (taskError) {
-        console.error('[Optimisation Task] Delete task error:', taskError);
-        return sendJSON(res, 500, { error: taskError.message });
-      }
-
-      return sendJSON(res, 200, { message: 'Task deleted successfully' });
-    } catch (error) {
-      console.error('[Optimisation Task] Delete error:', error);
-      return sendJSON(res, 500, { error: error.message || 'Internal server error' });
-    }
+    return handleDelete(req, res);
   }
 
   if (req.method !== 'PATCH') {
