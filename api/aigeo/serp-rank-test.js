@@ -294,13 +294,13 @@ async function fetchKeywordOverview(keywords, auth) {
   }
 }
 
-// Default SERP depth for audits. Flipped 50 → 100 on 2026-04-17 after
-// investigating a "photography courses" miss where alanranger.com ranked #21
-// (well inside DFS's top 100 but outside the old top-50 window). Callers can
-// still override with ?depth=50 for cheap sanity checks; the `?depth=` param
-// is clamped to [10, MAX_SERP_DEPTH].
-const DEFAULT_SERP_DEPTH = 100;
-const MAX_SERP_DEPTH = 100; // DFS supports up to 700, but cost/latency grows; cap at 100 for now.
+// Default SERP depth for audits. Reverted 100 → 50 on 2026-04-22 after a
+// single "full audit" click burned $50-70 of DFS credit. depth=100 with
+// expand_ai_overview=true costs ~$0.025 per keyword; depth=50 without AIO
+// expansion is ~$0.002 (the historical "few dollars per full audit" rate).
+// Callers can still pass ?depth=100 explicitly for deep investigations.
+const DEFAULT_SERP_DEPTH = 50;
+const MAX_SERP_DEPTH = 100; // DFS supports up to 700; cap at 100 to keep a manual `?depth=100` override possible.
 
 function resolveSerpDepth(rawDepth) {
   const n = Number(rawDepth);
@@ -309,9 +309,53 @@ function resolveSerpDepth(rawDepth) {
   return clamped;
 }
 
-async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SERP_DEPTH) {
+// 2026-04-22 spend guard: once DFS reports "Payment Required" or a similar
+// fatal auth/billing failure we flip this flag and short-circuit every
+// subsequent keyword in the same handler invocation. Prevents a single
+// scan click from firing 100+ paid requests (at $0.025 each at depth=100
+// with AIO expansion) after the account is already depleted.
+const DFS_FATAL_STATUS_CODES = new Set([40100, 40101, 40200, 40300, 40400]);
+
+function isDfsFatalStatus(statusCode) {
+  if (statusCode === undefined || statusCode === null) return false;
+  const n = Number(statusCode);
+  if (!Number.isFinite(n)) return false;
+  return DFS_FATAL_STATUS_CODES.has(n);
+}
+
+function buildEmptySerpResult(keyword, depth, errorMessage, errorCode) {
+  return {
+    keyword,
+    best_rank_group: null,
+    best_rank_absolute: null,
+    best_url: null,
+    best_title: null,
+    has_ai_overview: false,
+    serp_features: {
+      local_pack: false,
+      featured_snippet: false,
+      people_also_ask: false,
+    },
+    ai_overview_present_any: false,
+    local_pack_present_any: false,
+    paa_present_any: false,
+    featured_snippet_present_any: false,
+    ai_overview_citations: null,
+    serp_depth: depth,
+    error: errorMessage || "DataForSEO request failed",
+    error_code: errorCode ?? null,
+  };
+}
+
+async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SERP_DEPTH, opts = {}) {
   const endpoint =
     "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
+
+  // 2026-04-22: expand_ai_overview is the main cost driver (~3-5x per request).
+  // Default is now OFF. Callers opt in via ?ai_overview=1 on the handler, which
+  // sets expandAiOverview: true here. has_ai_overview flag (from the item list)
+  // still works without expansion — only the full citation list is skipped.
+  const expandAiOverview = Boolean(opts.expandAiOverview);
 
   try {
     const dfResponse = await fetch(endpoint, {
@@ -328,9 +372,8 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
           device: "desktop",
           os: "windows",
           depth,
-          // Phase 1: pull Google AI Overview citations in the same call.
-          load_async_ai_overview: true,
-          expand_ai_overview: true,
+          load_async_ai_overview: expandAiOverview,
+          expand_ai_overview: expandAiOverview,
         },
       ]),
     });
@@ -338,22 +381,18 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
     const data = await dfResponse.json();
 
     if (!dfResponse.ok || !String(data.status_code).startsWith("200")) {
-      return {
-        keyword,
-        best_rank_group: null,
-        best_rank_absolute: null,
-        best_url: null,
-        best_title: null,
-        has_ai_overview: false,
-        serp_features: {
-          local_pack: false,
-          featured_snippet: false,
-          people_also_ask: false,
-        },
-        ai_overview_citations: null,
-        serp_depth: depth,
-        error: data.status_message || "DataForSEO request failed",
-      };
+      const taskStatus = data?.tasks?.[0]?.status_code;
+      const topStatus = data?.status_code;
+      let fatalStatus = null;
+      if (isDfsFatalStatus(topStatus)) fatalStatus = topStatus;
+      else if (isDfsFatalStatus(taskStatus)) fatalStatus = taskStatus;
+      if (fatalStatus) {
+        console.warn(`[SERP-RANK-TEST] Fatal DFS status ${fatalStatus} on "${keyword}" — short-circuiting remaining keywords.`);
+      }
+      return Object.assign(
+        buildEmptySerpResult(keyword, depth, data.status_message || "DataForSEO request failed", topStatus || taskStatus || null),
+        fatalStatus ? { fatal: true } : {}
+      );
     }
 
     const task = data.tasks?.[0];
@@ -420,27 +459,7 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
     };
   } catch (err) {
     console.error(`Error fetching SERP for keyword "${keyword}":`, err);
-    return {
-      keyword,
-      best_rank_group: null,
-      best_rank_absolute: null,
-      best_url: null,
-      best_title: null,
-      has_ai_overview: false,
-      serp_features: {
-        local_pack: false,
-        featured_snippet: false,
-        people_also_ask: false,
-      },
-      // New boolean fields for SERP feature coverage (all false on error)
-      ai_overview_present_any: false,
-      local_pack_present_any: false,
-      paa_present_any: false,
-      featured_snippet_present_any: false,
-      ai_overview_citations: null,
-      serp_depth: depth,
-      error: "Unexpected server error",
-    };
+    return buildEmptySerpResult(keyword, depth, "Unexpected server error", null);
   }
 }
 
@@ -509,7 +528,11 @@ export default async function handler(req, res) {
   // verify "not ranked at all" vs. "ranks at 51-100" without changing the
   // default cost profile of the audit.
   const depth = resolveSerpDepth(req.query.depth);
-  console.log(`[Handler] Using SERP depth: ${depth}`);
+  // 2026-04-22: AIO expansion is now opt-in. Pass ?ai_overview=1 to request
+  // Google AI Overview citations (expensive). Default false keeps routine
+  // audits cheap (~$0.002/keyword instead of ~$0.025).
+  const expandAiOverview = /^(1|true|yes)$/i.test(String(req.query.ai_overview ?? ''));
+  console.log(`[Handler] Using SERP depth: ${depth}, expand_ai_overview: ${expandAiOverview}`);
 
   try {
     // Log handler entry with keywords
@@ -526,15 +549,28 @@ export default async function handler(req, res) {
     // IMPORTANT: Process ALL keywords, including Brand segment - do not filter
     const CONCURRENCY_LIMIT = 5; // Process 5 keywords at a time
     const perKeyword = [];
+    // 2026-04-22: set true once any DFS call returns a fatal billing/auth
+    // status so the remaining keywords short-circuit to empty rows instead
+    // of racking up more paid failed requests.
+    let dfsFatalHit = false;
+    let dfsFatalReason = null;
     
     // Process keywords in batches to respect concurrency limit
     for (let i = 0; i < keywords.length; i += CONCURRENCY_LIMIT) {
+      if (dfsFatalHit) {
+        const remaining = keywords.slice(i);
+        console.warn(`[Handler] ABORTING remaining ${remaining.length} keyword(s) after fatal DFS status: ${dfsFatalReason}`);
+        remaining.forEach((kw) => {
+          perKeyword.push(buildEmptySerpResult(kw, depth, `Aborted after fatal DFS error: ${dfsFatalReason}`, null));
+        });
+        break;
+      }
       const batch = keywords.slice(i, i + CONCURRENCY_LIMIT);
       console.log(`[Handler] Processing batch ${Math.floor(i / CONCURRENCY_LIMIT) + 1} (keywords ${i + 1}-${Math.min(i + CONCURRENCY_LIMIT, keywords.length)})`);
       
       const batchPromises = batch.map(async (keyword) => {
         try {
-          const result = await fetchSerpForKeyword(keyword, auth, targetRoot, depth);
+          const result = await fetchSerpForKeyword(keyword, auth, targetRoot, depth, { expandAiOverview });
           
           // Merge search volume data using normalized keyword lookup
           const normalizedKw = normalizeKeyword(keyword);
@@ -588,11 +624,23 @@ export default async function handler(req, res) {
       
       const batchResults = await Promise.all(batchPromises);
       perKeyword.push(...batchResults);
+      // 2026-04-22 spend guard: if any result in this concurrency batch
+      // flagged a fatal DFS status (402/401/403/404), stop issuing further
+      // paid requests for the remaining keywords.
+      const fatalResult = batchResults.find((r) => r?.fatal);
+      if (fatalResult) {
+        dfsFatalHit = true;
+        dfsFatalReason = `${fatalResult.error_code || ''} ${fatalResult.error || ''}`.trim() || 'DFS fatal status';
+      }
     }
     
     // Retry fetching search_volume for keywords that didn't get it in the initial batch
     // This handles cases where DataForSEO's batch API might miss some keywords
-    const missingVolumeKeywords = perKeyword.filter(k => k.search_volume === null || k.search_volume === undefined);
+    // 2026-04-22: skip the retry if we already hit a fatal DFS status — no
+    // point spending more credits after the account is depleted.
+    const missingVolumeKeywords = dfsFatalHit
+      ? []
+      : perKeyword.filter(k => k.search_volume === null || k.search_volume === undefined);
     if (missingVolumeKeywords.length > 0) {
       console.log(`[Handler] Retrying search_volume fetch for ${missingVolumeKeywords.length} keywords that didn't get volume data`);
       const retryKeywords = missingVolumeKeywords.map(k => k.keyword);
@@ -692,6 +740,10 @@ export default async function handler(req, res) {
         keywords_used_for_avg: keywordsUsedForAvg,
         keywords_with_volume: keywordsWithVolume,
         depth,
+        // 2026-04-22 spend guard: surface the abort reason to the client so
+        // it can stop firing subsequent batches and show a loud banner.
+        dfs_fatal: dfsFatalHit,
+        dfs_fatal_reason: dfsFatalReason,
       },
       per_keyword: perKeyword,
     });

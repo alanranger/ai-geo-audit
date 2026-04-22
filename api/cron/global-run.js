@@ -101,7 +101,13 @@ export default async function handler(req, res) {
 
     const syncResult = await fetchJson(`${baseUrl}/api/sync-csv`, { method: 'GET', headers });
 
-    const forceChildren = true;
+    // 2026-04-22 spend-guard: NEVER auto-force child crons. forceChildren was
+    // hard-coded true which caused every global-run tick to fire a full paid
+    // DFS scan regardless of each child's own "frequency=off / daily / weekly"
+    // setting. That plus the */5-min Vercel cron burned ~$50+ in DFS credit
+    // on 2026-04-22 in a few hours. Only honour an explicit ?force=1 on this
+    // handler's own URL (manual admin use only).
+    const forceChildren = false;
     const gscForce = forceChildren || forceRun ? '&force=1' : '';
     const rankingForce = forceChildren || forceRun ? '&force=1' : '';
 

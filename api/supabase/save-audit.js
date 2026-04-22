@@ -78,6 +78,81 @@ function mergeSchemaPagesDetail(newPages, prevPages, prevAuditDate) {
   return Array.from(byUrl.values());
 }
 
+// ---- impl_audit_snapshots (snapshot_key='qa') sync -----------------------
+// Added 2026-04-22 (follow-up to the 2026-04-17 resilience work). Previously
+// a full schema audit wrote audit_results.schema_pages_detail but NOT
+// impl_audit_snapshots (snapshot_key='qa'). The Traditional SEO page modal's
+// fallback check requires BOTH signals (schemaPage + qaGate), so any URL that
+// appeared in today's schema_pages_detail but was missing from the last qa
+// snapshot would have its schema rules flipped to `pass*` forever — until the
+// user manually re-ran the Implementation-tab Schema QA gate button. This
+// helper mirrors today's schema audit payload into impl_audit_snapshots with
+// snapshot_key='qa' so both tables stay in lockstep from a single full run.
+// Mirrors the write shape of api/aigeo/impl-snapshots.js (POST handler) so
+// the GET handler + hydrateImplementationCachesFromSupabase see it.
+function deriveQaGeneratedAtIso(payload) {
+  const candidates = [
+    payload?.meta?.generatedAt,
+    payload?.generatedAt,
+    payload?.data?.generatedAt
+  ];
+  for (const candidate of candidates) {
+    const ts = Date.parse(String(candidate || ''));
+    if (Number.isFinite(ts) && ts > 0) return new Date(ts).toISOString();
+  }
+  return null;
+}
+
+function deriveQaMode(payload) {
+  const raw = String(
+    payload?.data?.mode
+    || payload?.meta?.selection?.mode
+    || ''
+  ).toLowerCase();
+  return raw === 'sample' ? 'sample' : 'full';
+}
+
+async function upsertImplAuditQaSnapshot(supabaseUrl, supabaseKey, propertyUrl, schemaAudit) {
+  if (!supabaseUrl || !supabaseKey || !propertyUrl) return { saved: false, reason: 'missing_env' };
+  const payload = schemaAudit && typeof schemaAudit === 'object' ? schemaAudit : null;
+  const qaGate = payload?.data?.qaGate;
+  if (!qaGate || typeof qaGate !== 'object') return { saved: false, reason: 'no_qagate' };
+
+  const row = {
+    property_url: String(propertyUrl).trim(),
+    snapshot_key: 'qa',
+    mode: deriveQaMode(payload),
+    payload,
+    generated_at: deriveQaGeneratedAtIso(payload),
+    updated_at: new Date().toISOString()
+  };
+
+  try {
+    const resp = await fetch(
+      `${supabaseUrl}/rest/v1/impl_audit_snapshots?on_conflict=property_url,snapshot_key,mode`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+          Prefer: 'resolution=merge-duplicates,return=minimal'
+        },
+        body: JSON.stringify(row)
+      }
+    );
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '');
+      console.warn(`[Save Audit] impl_audit_snapshots qa upsert failed (${resp.status}): ${detail.slice(0, 200)}`);
+      return { saved: false, reason: `http_${resp.status}` };
+    }
+    return { saved: true };
+  } catch (err) {
+    console.warn('[Save Audit] impl_audit_snapshots qa upsert error:', err?.message || err);
+    return { saved: false, reason: 'exception' };
+  }
+}
+
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -846,6 +921,28 @@ export default async function handler(req, res) {
         prev.pages,
         prev.auditDate
       );
+
+      // Keep impl_audit_snapshots (snapshot_key='qa') in lockstep with
+      // schema_pages_detail. Without this, a full schema audit writes the
+      // per-URL detail table but the qa snapshot (which the Traditional SEO
+      // modal fallback needs) drifts until the user hits the separate
+      // Implementation-tab QA gate button. See helper comment near top of
+      // file for the detailed backstory.
+      try {
+        const qaSync = await upsertImplAuditQaSnapshot(
+          supabaseUrl,
+          process.env.SUPABASE_SERVICE_ROLE_KEY,
+          auditRecord.property_url,
+          finalSchemaAudit
+        );
+        if (qaSync?.saved) {
+          console.log('[Save Audit] ✓ Synced impl_audit_snapshots (snapshot_key=qa) from full schema audit.');
+        } else if (qaSync?.reason && qaSync.reason !== 'no_qagate') {
+          console.warn(`[Save Audit] impl_audit_snapshots qa sync skipped: ${qaSync.reason}`);
+        }
+      } catch (err) {
+        console.warn('[Save Audit] impl_audit_snapshots qa sync threw:', err?.message || err);
+      }
     }
 
     // ---- Guardrails: prevent writing "null audits" and mark partials ----

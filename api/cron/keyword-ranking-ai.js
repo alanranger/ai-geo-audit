@@ -129,13 +129,11 @@ export default async function handler(req, res) {
       });
     }
 
-    let serpRows = await fetchSerpRows(baseUrl, keywords, { batchSize: 20, concurrency: 4 });
-    if (!serpRows.length) {
-      serpRows = await fetchSerpRows(baseUrl, keywords, { batchSize: 10, concurrency: 2 });
-    }
-    if (!serpRows.length) {
-      serpRows = await fetchSerpRows(baseUrl, keywords, { batchSize: 5, concurrency: 1 });
-    }
+    // 2026-04-22 spend-guard: removed the 20/10/5 batch-size retry cascade.
+    // Empty SERP rows almost always mean DFS billing/credit failure; retrying
+    // with smaller batches just fires the same expensive requests 3 more times
+    // ($50-70 in credits on 2026-04-22). One pass, then surface the error.
+    const serpRows = await fetchSerpRows(baseUrl, keywords, { batchSize: 20, concurrency: 4 });
     const aiRows = await fetchAiRows(baseUrl, keywords, { batchSize: 10, concurrency: 4 });
     const combinedRows = buildCombinedRows(serpRows, aiRows);
     if (!combinedRows.length) {

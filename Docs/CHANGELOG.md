@@ -2,6 +2,16 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-04-22] - Schema audit resilience follow-up: auto-sync qa snapshot from full audits
+
+### Fixed
+- **`api/supabase/save-audit.js` now mirrors every full schema audit into `impl_audit_snapshots` (`snapshot_key='qa'`).** Previously, a full schema audit wrote `audit_results.schema_pages_detail` but left the `qa` snapshot untouched — that row was only refreshed when the user separately clicked the Implementation-tab **Schema QA gate** button. Because the Traditional SEO page modal's fallback (`traditionalSeoApplySchemaRuleFallback` in `audit-dashboard.html`) requires **both** `schemaPage` and `qaGate` signals to return early, any URL present in today's `schema_pages_detail` but missing from the drifted `qa` snapshot kept flipping schema rule pills from `warn`/`fail` to `pass*` forever. New helpers `upsertImplAuditQaSnapshot` / `deriveQaGeneratedAtIso` / `deriveQaMode` in `save-audit.js` now upsert the qa snapshot (same shape as `api/aigeo/impl-snapshots.js` POST handler, `on_conflict=property_url,snapshot_key,mode`, `Prefer: merge-duplicates`) in the same block as `mergeSchemaPagesDetail`, so both tables stay in lockstep from a single full run. Try/catch-guarded so qa sync failures never block the main audit write.
+- **Backfill patch (2026-04-22):** `impl_audit_snapshots` (`snapshot_key='qa'`) for `https://www.alanranger.com` was still the 2026-04-18 07:06 payload (526 rows) after today's full audit refreshed `audit_results.schema_pages_detail` to 527 rows. Patched in place by appending a synthetic `pass`-status QA row + matching `pages[]` entry for `/blog-on-photography/photography-gift-vouchers-ideas` (tagged `stale: true, healedBy: 'qa-snapshot-backfill-2026-04-22'`), bumping `totalPages`/`pagesWithSchema` scalars from 526 → 527. No full audit re-run needed; users must hard-refresh the dashboard tab to repopulate the client localStorage cache from Supabase via `hydrateImplementationCachesFromSupabase` before the Traditional SEO modal drops the asterisk.
+
+### Notes
+- The 2026-04-17 self-heal in `api/supabase/get-schema-for-url.js` is still active as a defence-in-depth fallback for the `schemaPage` side; the new save-audit sync closes the remaining gap on the `qaGate` side so UI drifts can't outlive a single completed full audit.
+- See `Docs/SCHEMA-AUDIT-RESILIENCE-2026-04-17.md` (new "Follow-up (2026-04-22): qa snapshot sync + backfill" section) for the full diagnosis, SQL trail, and operator notes.
+
 ## [2026-04-17] - Ranking & AI hero: cohesive colour palette + filter banner + AIO footnotes
 
 ### Changed

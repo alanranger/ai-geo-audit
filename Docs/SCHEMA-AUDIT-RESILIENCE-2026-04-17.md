@@ -68,3 +68,91 @@ After the initial three-layer fix deployed, the user opened the modal for the sa
 1. Open the URL modal — the status pill should now already read `pass*`. If it still reads `warn`/`fail`, the self-heal is still in flight (second open confirms it).
 2. If you want to clear the `stale` markers, run a full schema audit (Dashboard → Standard/Full refresh); `mergeSchemaPagesDetail` will overwrite stale entries with fresh `stale: false` data the moment the URL crawls cleanly.
 
+## Follow-up (2026-04-22): `qa` snapshot sync + backfill
+
+### Symptom (return visit)
+
+User re-ran a full schema audit and the Traditional SEO page modal _still_ showed `pass*` on the same URL. Scrolling through `audit_results.schema_pages_detail` confirmed today's row was clean (`hasSchema: true`, 38 types, no `stale`, no `healedBy`) — so this time it wasn't a schema data gap.
+
+### Additional diagnosis
+
+`traditionalSeoApplySchemaRuleFallback` (in `audit-dashboard.html`) only short-circuits when **both** `schemaPage` and `qaGate` signals are present for the URL:
+
+```js
+const schemaSig = traditionalSeoSignalMapGetWithUrlAliases(maps.schemaPage, pageUrl, prop);
+const qaSig     = traditionalSeoSignalMapGetWithUrlAliases(maps.qaGate,    pageUrl, prop);
+if (schemaSig && qaSig) return;
+```
+
+The `qaGate` signal map is hydrated from `impl_audit_snapshots` (`snapshot_key='qa'`) via the GET handler in `api/aigeo/impl-snapshots.js` → `hydrateImplementationCachesFromSupabase` → localStorage. That row is upserted **only** by the Implementation-tab **Schema QA gate** button (which writes the `impl_schema_qa_last_payload_v1` cache key).
+
+A full site Schema audit from the Schema tab:
+
+- writes `audit_results.schema_pages_detail` (per-URL schema rows), and
+- _computes_ `qaGate` in its `/api/schema-audit` response payload,
+
+but **never persists that `qaGate` payload into `impl_audit_snapshots`** server-side, and the dashboard's client-side sync path (line ~37921 in `audit-dashboard.html`) only runs from the big "Run all audits" flow — not every full-schema-audit code path. So the two tables drift whenever a user re-runs the Schema audit alone, which is what had happened on 2026-04-22: `audit_results` had 527 URLs for today, `impl_audit_snapshots.qa` was still from 2026-04-18 with 526 URLs (missing the same gift-vouchers URL that had the transient crawl miss on 2026-04-17).
+
+Net effect: `schemaSig` resolved (from today's fresh schema_pages_detail), `qaSig` was still `undefined` (drifted qa snapshot), the fallback re-fired, and the pill was re-flipped to `pass*` every time the modal opened.
+
+### Fix (Option 1: server-side sync in save-audit)
+
+**`api/supabase/save-audit.js`** — new helpers near the top of the file (next to `mergeSchemaPagesDetail`):
+
+- `deriveQaGeneratedAtIso(payload)` — walk `meta.generatedAt` → `generatedAt` → `data.generatedAt` and normalise to ISO.
+- `deriveQaMode(payload)` — normalise `data.mode` / `meta.selection.mode` to `sample | full` (default `full`).
+- `upsertImplAuditQaSnapshot(supabaseUrl, supabaseKey, propertyUrl, schemaAudit)` — when `schemaAudit.data.qaGate` is present, POST to `/rest/v1/impl_audit_snapshots?on_conflict=property_url,snapshot_key,mode` with `Prefer: resolution=merge-duplicates, return=minimal`. Payload mirrors what `api/aigeo/impl-snapshots.js` POST writes, so the GET handler + `hydrateImplementationCachesFromSupabase` pick it up transparently.
+
+Call site is inside the same `if (!isPartialUpdate && Array.isArray(schema_pages_detail) && length>0)` guard that wraps `mergeSchemaPagesDetail`, wrapped in try/catch so a qa-sync failure never blocks the main audit save. Success + skip + error logs mirror the existing `[Save Audit] ...` prefix so Vercel log greps still work.
+
+### One-time backfill for the live cluster
+
+To fix the 2026-04-22 drift without forcing another full audit (user-confirmed: “costs money and takes nearly two hours”), a single SQL patch appended one synthetic QA row + one `pages[]` entry for `/blog-on-photography/photography-gift-vouchers-ideas` to the existing 2026-04-18 qa snapshot (tagged `stale: true, healedBy: 'qa-snapshot-backfill-2026-04-22'`) and bumped the scalar `totalPages` / `pagesWithSchema` fields from 526 → 527. Applied via `user-supabase-ai-chat` MCP against project `igzvwbvgvmzvvzoclufx`:
+
+```sql
+WITH today_entry AS (
+  SELECT entry
+  FROM audit_results, LATERAL jsonb_array_elements(schema_pages_detail) entry
+  WHERE property_url='https://www.alanranger.com'
+    AND audit_date='2026-04-22'
+    AND entry->>'url' ILIKE '%photography-gift-vouchers-ideas%'
+  LIMIT 1
+), built AS (
+  SELECT
+    jsonb_build_object(
+      'url', entry->>'url', 'pageTier', 'blog', 'statusCode', 200,
+      'status', 'pass', 'blockIssueCount', 0, 'warningIssueCount', 0,
+      'summary', 'Schema QA checks passed', 'issueCodes', '[]'::jsonb,
+      'issueDetails', '[]'::jsonb, 'issueDetailsTruncated', false,
+      'stale', true, 'healedBy', 'qa-snapshot-backfill-2026-04-22'
+    ) AS qa_row,
+    (entry || jsonb_build_object('stale', true, 'healedBy', 'qa-snapshot-backfill-2026-04-22', 'statusCode', 200)) AS page_row
+  FROM today_entry
+)
+UPDATE impl_audit_snapshots s
+SET payload = jsonb_set(
+      jsonb_set(
+        jsonb_set(
+          jsonb_set(s.payload,
+            '{data,qaGate,rows}', (s.payload->'data'->'qaGate'->'rows') || (SELECT qa_row FROM built)),
+          '{data,pages}',        (s.payload->'data'->'pages')           || (SELECT page_row FROM built)),
+        '{data,totalPages}',     to_jsonb(COALESCE((s.payload->'data'->>'totalPages')::int,0)+1)),
+      '{data,pagesWithSchema}',  to_jsonb(COALESCE((s.payload->'data'->>'pagesWithSchema')::int,0)+1)),
+    updated_at = now()
+WHERE s.snapshot_key='qa'
+  AND s.property_url='https://www.alanranger.com';
+```
+
+After the patch, the user must hard-refresh the dashboard tab so `hydrateImplementationCachesFromSupabase` repopulates `localStorage.impl_schema_qa_last_payload_v1` from the patched Supabase row; the next modal open then finds both `schemaSig` and `qaSig`, the fallback early-returns, and the pill renders as plain `pass`.
+
+### Touched files (2026-04-22)
+
+- `api/supabase/save-audit.js` — new helpers (`deriveQaGeneratedAtIso`, `deriveQaMode`, `upsertImplAuditQaSnapshot`) + call from the `mergeSchemaPagesDetail` block.
+- `Docs/CHANGELOG.md` — 2026-04-22 entry.
+- `Docs/SCHEMA-AUDIT-RESILIENCE-2026-04-17.md` — this follow-up section.
+
+### How to diagnose "why is the asterisk still there" in future
+
+1. Check today's `audit_results.schema_pages_detail` for the URL: if `hasSchema:true` with real `schemaTypes`, `schemaSig` is fine.
+2. Check `impl_audit_snapshots` (`snapshot_key='qa'`) `generated_at` vs latest `audit_results.audit_date`. If the qa snapshot is older, the sync didn't fire — check Vercel logs for `[Save Audit] impl_audit_snapshots qa` messages.
+3. If the sync fired but the URL is still missing from `payload->'data'->'qaGate'->'rows'`, the crawler itself failed on that URL (same pattern as 2026-04-17) — the `pages[]` reconciliation will carry the URL but `qaGate` is built from `results` and currently has no equivalent reconciliation. Follow-up option B from the 2026-04-22 analysis (extend `buildSchemaQaGate` with the same synthetic-row logic) remains on the table if this recurs.

@@ -3,6 +3,33 @@
 // Note: DataForSEO now captures asynchronous AI Overviews (AIOs) that load after initial
 // page render, ensuring more accurate AI Overview detection and citation data.
 // This improvement is automatic and requires no code changes.
+//
+// 2026-04-22 spend guard: short-circuit the batch loop once any DFS call
+// returns a fatal billing/auth status (40100, 40101, 40200, 40300, 40400)
+// so the remaining keywords don't fire paid requests after the account is
+// depleted. Matches the behaviour in serp-rank-test.js.
+
+const DFS_FATAL_STATUS_CODES_AI = new Set([40100, 40101, 40200, 40300, 40400]);
+
+function isDfsFatalStatusAi(statusCode) {
+  if (statusCode === undefined || statusCode === null) return false;
+  const n = Number(statusCode);
+  if (!Number.isFinite(n)) return false;
+  return DFS_FATAL_STATUS_CODES_AI.has(n);
+}
+
+function buildEmptyAiRow(keyword, errorMessage, errorCode) {
+  return {
+    query: keyword,
+    has_ai_overview: false,
+    total_citations: 0,
+    alanranger_citations_count: 0,
+    alanranger_citations: [],
+    sample_citations: [],
+    error: errorMessage || null,
+    error_code: errorCode ?? null,
+  };
+}
 
 function extractCitationsFromTask(task) {
   const result = task && task.result && task.result[0];
@@ -106,15 +133,18 @@ async function fetchAiModeForKeyword(keyword, auth) {
 
   if (!dfResponse.ok || data.status_code !== 20000) {
     console.error(`[AI Mode] DataForSEO API error for "${keyword}":`, data.status_message || `HTTP ${dfResponse.status}`);
-    return {
-      query: keyword,
-      has_ai_overview: false,
-      total_citations: 0,
-      alanranger_citations_count: 0,
-      alanranger_citations: [],
-      sample_citations: [],
-      error: data.status_message || `DataForSEO request failed (HTTP ${dfResponse.status})`,
-    };
+    const taskStatus = data?.tasks?.[0]?.status_code;
+    const topStatus = data?.status_code;
+    let fatalStatus = null;
+    if (isDfsFatalStatusAi(topStatus)) fatalStatus = topStatus;
+    else if (isDfsFatalStatusAi(taskStatus)) fatalStatus = taskStatus;
+    const row = buildEmptyAiRow(
+      keyword,
+      data.status_message || `DataForSEO request failed (HTTP ${dfResponse.status})`,
+      topStatus || taskStatus || null
+    );
+    if (fatalStatus) row.fatal = true;
+    return row;
   }
 
   const tasks = data.tasks || [];
@@ -193,22 +223,25 @@ export default async function handler(req, res) {
   const auth = Buffer.from(`${login}:${password}`).toString("base64");
 
   const perQuery = [];
+  let dfsFatalHit = false;
+  let dfsFatalReason = null;
   for (const keyword of queries) {
+    if (dfsFatalHit) {
+      perQuery.push(buildEmptyAiRow(keyword, `Aborted after fatal DFS error: ${dfsFatalReason}`, null));
+      continue;
+    }
     try {
       const result = await fetchAiModeForKeyword(keyword, auth);
       perQuery.push(result);
+      if (result?.fatal) {
+        dfsFatalHit = true;
+        dfsFatalReason = `${result.error_code || ''} ${result.error || ''}`.trim() || 'DFS fatal status';
+        console.warn(`[AI Mode] Fatal DFS status — aborting remaining keywords: ${dfsFatalReason}`);
+      }
     } catch (err) {
       console.error(`[AI Mode] Error processing keyword "${keyword}":`, err.message);
       console.error(`[AI Mode] Stack:`, err.stack);
-      perQuery.push({
-        query: keyword,
-        has_ai_overview: false,
-        total_citations: 0,
-        alanranger_citations_count: 0,
-        alanranger_citations: [],
-        sample_citations: [],
-        error: err.message || "Unexpected server error",
-      });
+      perQuery.push(buildEmptyAiRow(keyword, err.message || "Unexpected server error", null));
     }
   }
 
@@ -221,6 +254,8 @@ export default async function handler(req, res) {
       total_queries: totalQueries,
       queries_with_ai_overview: withAi,
       queries_where_alanranger_cited: whereCited,
+      dfs_fatal: dfsFatalHit,
+      dfs_fatal_reason: dfsFatalReason,
     },
     per_query: perQuery,
   });
