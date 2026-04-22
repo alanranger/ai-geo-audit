@@ -109,7 +109,18 @@ async function loadSnapshot(supabase, propertyUrl, auditDate) {
 }
 
 async function resolveDates(supabase, propertyUrl, query) {
-  const current = query.currentDate || await findMostRecentAuditDate(supabase, propertyUrl, null);
+  // 2026-04-22: always resolve the server-side most recent audit date first.
+  // If the caller passes currentDate AND it equals-or-exceeds the server's
+  // latest, honour it (explicit opt-in to a specific audit, e.g. historical
+  // comparison). Otherwise auto-bump to the latest so stale client-side
+  // localStorage can't force the comparison onto an old audit and hide the
+  // most recent gains/losses.
+  const latestOnServer = await findMostRecentAuditDate(supabase, propertyUrl, null);
+  const clientCurrent = query.currentDate ? String(query.currentDate).slice(0, 10) : null;
+  let current = latestOnServer;
+  if (clientCurrent && latestOnServer && clientCurrent >= latestOnServer) {
+    current = clientCurrent;
+  }
   if (!current) return { current: null, last_audit: null, seven_days: null };
   const lastAudit = query.lastAuditDate
     || await findMostRecentAuditDate(supabase, propertyUrl, current);
