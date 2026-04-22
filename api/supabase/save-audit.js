@@ -1068,7 +1068,8 @@ export default async function handler(req, res) {
       // Only include fields that are being updated (non-null)
       updatePayload = {
         property_url: auditRecord.property_url,
-        audit_date: auditRecord.audit_date
+        audit_date: auditRecord.audit_date,
+        updated_at: auditRecord.updated_at
       };
       
       // Add the specific field being updated
@@ -1081,6 +1082,19 @@ export default async function handler(req, res) {
       } else if (hasTopQueriesOnly && auditRecord.top_queries && Array.isArray(auditRecord.top_queries) && auditRecord.top_queries.length > 0) {
         updatePayload.top_queries = auditRecord.top_queries;
         console.log('[Supabase Save] ⚠ Partial update detected - only updating top_queries to prevent data loss');
+      } else if (hasRankingAiDataOnly && hasRankingAiData) {
+        // 2026-04-22 fix: this branch was missing, so every Ranking & AI scan
+        // hit isPartialUpdate=true, stripped updatePayload to just
+        // {property_url, audit_date}, PATCHed nothing, and left
+        // audit_results.ranking_ai_data NULL even though the scan itself
+        // succeeded and keyword_rankings rows were saved. Root cause of the
+        // "UI showed data but the dashboard can't find it later" symptom.
+        updatePayload.ranking_ai_data = auditRecord.ranking_ai_data;
+        if (auditRecord.ranking_ai_pillar_scores !== null && auditRecord.ranking_ai_pillar_scores !== undefined) {
+          updatePayload.ranking_ai_pillar_scores = auditRecord.ranking_ai_pillar_scores;
+        }
+        console.log('[Supabase Save] ✓ Partial update: persisting ranking_ai_data (' +
+          (auditRecord.ranking_ai_data?.combinedRows?.length || 0) + ' combinedRows) + pillar scores');
       }
     }
 
@@ -1252,7 +1266,10 @@ export default async function handler(req, res) {
         // No existing record found
         if (isPartialUpdate) {
           // For partial updates, don't create a new record if it doesn't exist
-          const partialType = hasQueryTotalsOnly ? 'queryTotals' : (hasQueryPagesOnly ? 'queryPages' : 'topQueries');
+          let partialType = 'topQueries';
+          if (hasQueryTotalsOnly) partialType = 'queryTotals';
+          else if (hasQueryPagesOnly) partialType = 'queryPages';
+          else if (hasRankingAiDataOnly) partialType = 'rankingAiData';
           console.log(`[Supabase Save] ⚠ Partial update: No existing record found, skipping INSERT (${partialType} can only be added to existing audits)`);
           return res.status(404).json({
             status: 'error',
