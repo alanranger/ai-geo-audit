@@ -174,13 +174,41 @@ export default async function handler(req, res) {
       }
     }
 
+    // Keyword-level optimisation tasks can only be measured if the keyword is
+    // in the paid Ranking & AI tracking set. Before this guard, free-text
+    // "test ..." tasks could be created and later failed bulk update with the
+    // vague "No data found" message after Supabase baseline data was restored.
+    const finalTaskType = task_type || 'on_page';
+    if (finalTaskType !== 'on_page' && final_keyword_text) {
+      const propertyUrl = String(req.body.propertyUrl || req.body.property_url || 'https://www.alanranger.com').trim();
+      const { data: trackedKeyword, error: trackedKeywordError } = await supabase
+        .from('keyword_rankings')
+        .select('keyword, audit_date')
+        .eq('property_url', propertyUrl)
+        .ilike('keyword', final_keyword_text.trim())
+        .order('audit_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (trackedKeywordError && trackedKeywordError.code !== 'PGRST116') {
+        console.error('[Optimisation Task] Error checking tracked keyword:', trackedKeywordError);
+        return sendJSON(res, 500, { error: trackedKeywordError.message });
+      }
+
+      if (!trackedKeyword) {
+        return sendJSON(res, 400, {
+          error: `Keyword "${final_keyword_text}" is not tracked in Ranking & AI. Add it to the 84-keyword tracking set first, or create this as a URL-only/page task.`
+        });
+      }
+    }
+
     // Insert task with Phase B objective fields
     const { data: task, error: taskError } = await supabase
       .from('optimisation_tasks')
       .insert({
         keyword_text: final_keyword_text,
         target_url,
-        task_type: task_type || 'on_page',
+        task_type: finalTaskType,
         status: status || 'planned',
         title: title || null,
         notes: notes || null,
