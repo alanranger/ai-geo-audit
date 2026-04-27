@@ -548,6 +548,7 @@ function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
     metaDescription: '',
     imgTotal: 0,
     imgMissingAlt: 0,
+    internalLinkCount: 0,
     extOutboundCount: 0,
     extMissingTargetBlank: 0
   };
@@ -604,7 +605,11 @@ function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
     const proto = String(absUrl.protocol || '').toLowerCase();
     if (proto !== 'http:' && proto !== 'https:') return;
     const host = absUrl.hostname.replace(/^www\./i, '').toLowerCase();
-    if (!host || !pageHost || isLikelySameSiteHostname(pageHost, host)) return;
+    if (!host || !pageHost) return;
+    if (isLikelySameSiteHostname(pageHost, host)) {
+      out.internalLinkCount += 1;
+      return;
+    }
     if (isExternalLinkTargetBlankExemptHost(host)) return;
     out.extOutboundCount += 1;
     if (!anchorOpeningTagHasTargetBlank(inner)) out.extMissingTargetBlank += 1;
@@ -626,6 +631,7 @@ function buildTraditionalSeoSignalsFromHtml(html, htmlForChecks, pageUrl = '') {
     metaDescription: seoMain.metaDescription || seoMerged.metaDescription || '',
     imgTotal: seoMerged.imgTotal,
     imgMissingAlt: seoMerged.imgMissingAlt,
+    internalLinkCount: seoMerged.internalLinkCount,
     extOutboundCount: seoMerged.extOutboundCount,
     extMissingTargetBlank: seoMerged.extMissingTargetBlank
   };
@@ -641,6 +647,7 @@ function buildTraditionalSeoSignalsFromHtml(html, htmlForChecks, pageUrl = '') {
     seoIntroSnippet: buildSeoIntroSnippetFromHtml(htmlForChecks, 150),
     seoImgTotal: seo.imgTotal,
     seoImgMissingAlt: seo.imgMissingAlt,
+    seoInternalLinks: seo.internalLinkCount,
     seoExtOutbound: seo.extOutboundCount,
     seoExtMissingTargetBlank: seo.extMissingTargetBlank
   };
@@ -659,6 +666,7 @@ async function checkUrl(url, tierLookup = null) {
     seoIntroSnippet: '',
     seoImgTotal: 0,
     seoImgMissingAlt: 0,
+    seoInternalLinks: 0,
     seoExtOutbound: 0,
     seoExtMissingTargetBlank: 0
   };
