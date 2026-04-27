@@ -549,6 +549,7 @@ function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
     imgTotal: 0,
     imgMissingAlt: 0,
     internalLinkCount: 0,
+    internalLinkTargets: [],
     extOutboundCount: 0,
     extMissingTargetBlank: 0
   };
@@ -590,6 +591,8 @@ function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
     pageHost = '';
   }
   const anchorMatches = [...source.matchAll(/<a\b([^>]*)>/gi)];
+  const internalTargets = new Set();
+  const sourceUrl = normalizeSourceUrl(pageUrl);
   anchorMatches.forEach((match) => {
     const inner = match[1] || '';
     const hrefMatch = /\bhref\s*=\s*["']([^"']+)["']/i.exec(inner);
@@ -608,12 +611,15 @@ function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
     if (!host || !pageHost) return;
     if (isLikelySameSiteHostname(pageHost, host)) {
       out.internalLinkCount += 1;
+      const targetUrl = normalizeSourceUrl(absUrl.href);
+      if (targetUrl && targetUrl !== sourceUrl) internalTargets.add(targetUrl);
       return;
     }
     if (isExternalLinkTargetBlankExemptHost(host)) return;
     out.extOutboundCount += 1;
     if (!anchorOpeningTagHasTargetBlank(inner)) out.extMissingTargetBlank += 1;
   });
+  out.internalLinkTargets = [...internalTargets];
   return out;
 }
 
@@ -632,6 +638,7 @@ function buildTraditionalSeoSignalsFromHtml(html, htmlForChecks, pageUrl = '') {
     imgTotal: seoMerged.imgTotal,
     imgMissingAlt: seoMerged.imgMissingAlt,
     internalLinkCount: seoMerged.internalLinkCount,
+    internalLinkTargets: seoMerged.internalLinkTargets,
     extOutboundCount: seoMerged.extOutboundCount,
     extMissingTargetBlank: seoMerged.extMissingTargetBlank
   };
@@ -648,6 +655,7 @@ function buildTraditionalSeoSignalsFromHtml(html, htmlForChecks, pageUrl = '') {
     seoImgTotal: seo.imgTotal,
     seoImgMissingAlt: seo.imgMissingAlt,
     seoInternalLinks: seo.internalLinkCount,
+    seoInternalLinkTargets: Array.isArray(seo.internalLinkTargets) ? seo.internalLinkTargets : [],
     seoExtOutbound: seo.extOutboundCount,
     seoExtMissingTargetBlank: seo.extMissingTargetBlank
   };
@@ -667,6 +675,7 @@ async function checkUrl(url, tierLookup = null) {
     seoImgTotal: 0,
     seoImgMissingAlt: 0,
     seoInternalLinks: 0,
+    seoInternalLinkTargets: [],
     seoExtOutbound: 0,
     seoExtMissingTargetBlank: 0
   };
