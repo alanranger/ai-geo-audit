@@ -330,6 +330,55 @@ function collectTypes(node, bucket = new Set()) {
   return bucket;
 }
 
+function collectJsonLdDateValues(node, keys, bucket = []) {
+  if (!node || typeof node !== 'object') return bucket;
+  if (Array.isArray(node)) {
+    node.forEach((item) => collectJsonLdDateValues(item, keys, bucket));
+    return bucket;
+  }
+  keys.forEach((key) => {
+    const value = node[key];
+    if (typeof value === 'string' && value.trim()) bucket.push(value.trim());
+  });
+  Object.keys(node).forEach((key) => {
+    if (keys.has(key)) return;
+    collectJsonLdDateValues(node[key], keys, bucket);
+  });
+  return bucket;
+}
+
+function firstJsonLdDate(jsonLdBlocks, names) {
+  const keys = new Set(names);
+  const values = [];
+  (Array.isArray(jsonLdBlocks) ? jsonLdBlocks : []).forEach((block) => {
+    collectJsonLdDateValues(block, keys, values);
+  });
+  return values.find(Boolean) || '';
+}
+
+function firstVisibleLabelledDate(html, labels) {
+  const labelPattern = labels.join('|');
+  const datePattern = String.raw`(\d{4}-\d{2}-\d{2}(?:T[\d:+.Z-]{1,24})?|[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})`;
+  const re = new RegExp(String.raw`\b(?:${labelPattern})\b[\s\S]{0,120}?\b${datePattern}\b`, 'i');
+  const hit = String(html || '').match(re);
+  return hit?.[1] ? String(hit[1]).trim() : '';
+}
+
+function extractPageDateRaw(html, jsonLdBlocks) {
+  const source = String(html || '');
+  const meta = (names) => {
+    const namePattern = names.join('|');
+    const re = new RegExp(String.raw`<meta\b[^>]*(?:property|name)=["'](?:${namePattern})["'][^>]*content=["']([^"']+)["'][^>]*>`, 'i');
+    const hit = source.match(re);
+    return hit?.[1] ? String(hit[1]).trim() : '';
+  };
+  return meta(['article:modified_time', 'last-modified', 'dateModified', 'og:updated_time'])
+    || firstJsonLdDate(jsonLdBlocks, ['dateModified', 'modifiedTime'])
+    || meta(['article:published_time', 'datePublished', 'publish_date', 'pubdate'])
+    || firstJsonLdDate(jsonLdBlocks, ['datePublished', 'uploadDate'])
+    || firstVisibleLabelledDate(source, [String.raw`last\s*updated`, 'updated', 'published', 'posted']);
+}
+
 function evaluateExtractability(html, jsonLdBlocks = [], pageUrl = '') {
   const checks = {
     hasTldr: false,
@@ -370,35 +419,8 @@ function evaluateExtractability(html, jsonLdBlocks = [], pageUrl = '') {
   const hasManifestFaqLoader = hasManifestFaqLoaderSignal(html, pageUrl);
   checks.hasFaq = hasFaqFromSchema || questionHeadings >= 2 || hasFaqHeading || hasDeferredFaqLoader || hasManifestFaqLoader;
 
-  const modifiedMetaRegex = /<(?:meta)\b[^>]*(?:property|name)=["'](?:article:modified_time|last-modified|dateModified|og:updated_time)["'][^>]*content=["']([^"']+)["'][^>]*>/i;
-  const updatedLabelRegex = /\b(last\s*updated|updated)\b/i;
-  const updatedIsoDateRegex = /\b\d{4}-\d{2}-\d{2}\b/i;
-  const updatedMonthDayYearRegex = /\b[A-Z]{3,9}\s+\d{1,2},?\s+\d{4}\b/i;
-  const updatedDayMonthYearRegex = /\b\d{1,2}\s+[A-Z]{3,9}\s+\d{4}\b/i;
-  const hasUpdatedDate = updatedIsoDateRegex.test(html)
-    || updatedMonthDayYearRegex.test(html)
-    || updatedDayMonthYearRegex.test(html);
-
-  let lastUpdatedRaw = '';
-  const metaHit = html.match(modifiedMetaRegex);
-  if (metaHit && metaHit[1]) {
-    checks.hasLastUpdated = true;
-    lastUpdatedRaw = String(metaHit[1]).trim();
-  } else if (updatedLabelRegex.test(html) && hasUpdatedDate) {
-    checks.hasLastUpdated = true;
-    const isoHit = html.match(/\b(\d{4}-\d{2}-\d{2}(?:T[\d:+.Z-]{1,24})?)\b/);
-    if (isoHit) lastUpdatedRaw = isoHit[1];
-    else {
-      const mdyHit = html.match(/\b([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})\b/);
-      if (mdyHit) lastUpdatedRaw = mdyHit[1];
-      else {
-        const dmyHit = html.match(/\b(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\b/);
-        if (dmyHit) lastUpdatedRaw = dmyHit[1];
-      }
-    }
-  } else {
-    checks.hasLastUpdated = false;
-  }
+  const lastUpdatedRaw = extractPageDateRaw(html, jsonLdBlocks);
+  checks.hasLastUpdated = Boolean(lastUpdatedRaw);
 
   const passCount = Object.values(checks).filter(Boolean).length;
   const score = Math.round((passCount / 4) * 100);
@@ -406,7 +428,7 @@ function evaluateExtractability(html, jsonLdBlocks = [], pageUrl = '') {
   if (!checks.hasTldr) issues.push('Missing clear TLDR/summary section');
   if (!checks.hasDirectAnswer) issues.push('No direct-answer paragraph detected near page intro');
   if (!checks.hasFaq) issues.push('FAQ content not detected (FAQPage schema or FAQ headings)');
-  if (!checks.hasLastUpdated) issues.push('No visible/structured last-updated signal detected');
+  if (!checks.hasLastUpdated) issues.push('No visible/structured updated or published date signal detected');
 
   return {
     ...checks,
