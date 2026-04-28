@@ -22,6 +22,8 @@ const MEMBER_UTILITY_PATH_PATTERNS = [
 const INDEX_HUB_PATH_PATTERNS = [
   /^\/photography-news-blog(?:\/|$)/i
 ];
+const SITEMAP_LASTMOD_CACHE_TTL_MS = 10 * 60 * 1000;
+const sitemapLastmodCache = new Map();
 
 function parsePositiveInt(value) {
   const parsed = Number.parseInt(String(value ?? '').trim(), 10);
@@ -125,6 +127,54 @@ function normalizeSourceUrl(raw) {
   } catch {
     return '';
   }
+}
+
+function originForUrl(url) {
+  try {
+    return new URL(String(url || DEFAULT_SITE_ORIGIN)).origin;
+  } catch {
+    return DEFAULT_SITE_ORIGIN;
+  }
+}
+
+function parseSitemapLastmodMap(xml = '') {
+  const map = new Map();
+  const re = /<url>\s*<loc>([^<]+)<\/loc>[\s\S]*?<lastmod>([^<]+)<\/lastmod>[\s\S]*?<\/url>/gi;
+  let match = re.exec(String(xml || ''));
+  while (match) {
+    const key = normalizeSourceUrl(match[1]);
+    const lastmod = String(match[2] || '').trim();
+    if (key && lastmod) map.set(key, lastmod);
+    match = re.exec(String(xml || ''));
+  }
+  return map;
+}
+
+async function fetchSitemapLastmodMap(siteOrigin = DEFAULT_SITE_ORIGIN) {
+  const origin = originForUrl(siteOrigin);
+  const cached = sitemapLastmodCache.get(origin);
+  if (cached && Date.now() - cached.fetchedAt < SITEMAP_LASTMOD_CACHE_TTL_MS) return cached.map;
+  try {
+    const response = await fetch(`${origin}/sitemap.xml`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AI-GEO-Audit/1.0; +https://ai-geo-audit.vercel.app)' },
+      signal: AbortSignal.timeout(10000)
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const map = parseSitemapLastmodMap(await response.text());
+    sitemapLastmodCache.set(origin, { fetchedAt: Date.now(), map });
+    return map;
+  } catch {
+    const empty = new Map();
+    sitemapLastmodCache.set(origin, { fetchedAt: Date.now(), map: empty });
+    return empty;
+  }
+}
+
+function sitemapLastmodForUrl(url, sitemapLastmodMap) {
+  if (!(sitemapLastmodMap instanceof Map)) return '';
+  const key = normalizeSourceUrl(url);
+  if (!key) return '';
+  return sitemapLastmodMap.get(key) || sitemapLastmodMap.get(`${key}/`) || '';
 }
 
 function getTierForUrl(url, tierLookup = null) {
@@ -439,6 +489,19 @@ function evaluateExtractability(html, jsonLdBlocks = [], pageUrl = '') {
   };
 }
 
+function applySitemapDateFallback(result, sitemapLastmod = '') {
+  const fallback = String(sitemapLastmod || '').trim();
+  if (!fallback || result.hasLastUpdated) return result;
+  const next = { ...result, hasLastUpdated: true, lastUpdatedRaw: fallback, lastUpdatedSource: 'sitemap-lastmod' };
+  const passCount = [next.hasTldr, next.hasDirectAnswer, next.hasFaq, next.hasLastUpdated].filter(Boolean).length;
+  next.score = Math.round((passCount / 4) * 100);
+  next.pass = passCount >= 3;
+  next.issues = (Array.isArray(result.issues) ? result.issues : []).filter(
+    (issue) => !String(issue || '').toLowerCase().includes('updated or published date')
+  );
+  return next;
+}
+
 function plainTextFromHtmlFragment(fragment = '') {
   return decodeBasicHtmlEntities(
     String(fragment || '')
@@ -683,7 +746,7 @@ function buildTraditionalSeoSignalsFromHtml(html, htmlForChecks, pageUrl = '') {
   };
 }
 
-async function checkUrl(url, tierLookup = null) {
+async function checkUrl(url, tierLookup = null, sitemapLastmodMap = null) {
   const seoNone = {
     seoH1Count: 0,
     seoFirstH1Length: 0,
@@ -783,7 +846,10 @@ async function checkUrl(url, tierLookup = null) {
       };
     }
     const jsonLdBlocks = findJsonLdBlocks(htmlForChecks);
-    const result = evaluateExtractability(htmlForChecks, jsonLdBlocks, url);
+    const result = applySitemapDateFallback(
+      evaluateExtractability(htmlForChecks, jsonLdBlocks, url),
+      sitemapLastmodForUrl(url, sitemapLastmodMap)
+    );
     const plainText = stripHtmlToText(htmlForChecks);
     return {
       url,
@@ -798,6 +864,7 @@ async function checkUrl(url, tierLookup = null) {
       hasFaq: result.hasFaq,
       hasLastUpdated: result.hasLastUpdated,
       lastUpdatedRaw: String(result.lastUpdatedRaw || '').trim(),
+      lastUpdatedSource: String(result.lastUpdatedSource || '').trim(),
       issues: result.issues || [],
       textLength: plainText.length,
       excludedFromAudit: false,
@@ -858,10 +925,10 @@ class Semaphore {
   }
 }
 
-async function checkUrlWithPacing(url, semaphore, delayAfterMs = 0, tierLookup = null) {
+async function checkUrlWithPacing(url, semaphore, delayAfterMs = 0, tierLookup = null, sitemapLastmodMap = null) {
   await semaphore.acquire();
   try {
-    const result = await checkUrl(url, tierLookup);
+    const result = await checkUrl(url, tierLookup, sitemapLastmodMap);
     if (delayAfterMs > 0) await delay(delayAfterMs);
     return result;
   } finally {
@@ -1000,9 +1067,12 @@ export default async function handler(req, res) {
       });
     }
 
+    const sitemapLastmodMap = await fetchSitemapLastmodMap(selectedUrls[0] || DEFAULT_SITE_ORIGIN);
     const initialSemaphore = new Semaphore(2);
     const delayBetweenRequests = 300;
-    let results = await Promise.all(selectedUrls.map((url) => checkUrlWithPacing(url, initialSemaphore, delayBetweenRequests, tierLookup)));
+    let results = await Promise.all(
+      selectedUrls.map((url) => checkUrlWithPacing(url, initialSemaphore, delayBetweenRequests, tierLookup, sitemapLastmodMap))
+    );
 
     const retryCandidates = results.filter((row) => row.requestOk === false);
     if (retryCandidates.length > 0) {
@@ -1013,7 +1083,7 @@ export default async function handler(req, res) {
         if (row.errorType === 'Rate Limited') {
           await delay(1500);
         }
-        return checkUrlWithPacing(row.url, retrySemaphore, 800, tierLookup);
+        return checkUrlWithPacing(row.url, retrySemaphore, 800, tierLookup, sitemapLastmodMap);
       }));
       const retryMap = new Map(retryResults.map((row) => [row.url, row]));
       results = results.map((row) => retryMap.get(row.url) || row);
