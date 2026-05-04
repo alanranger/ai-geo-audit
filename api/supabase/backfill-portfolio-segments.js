@@ -12,6 +12,20 @@ const need = (k) => {
   return v;
 };
 
+/** PostgREST caps at 1000 rows; paginate so run_id discovery and per-run page loads are complete. */
+async function fetchAllWithRange(buildPagedQuery) {
+  const pageSize = 1000;
+  const rows = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await buildPagedQuery(from, pageSize);
+    if (error) throw error;
+    if (!data?.length) break;
+    rows.push(...data);
+    if (data.length < pageSize) break;
+  }
+  return rows;
+}
+
 const sendJSON = (res, status, obj) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -73,13 +87,17 @@ export default async function handler(req, res) {
       runIds = [String(runId)];
     } else if (dateEndGte) {
       const de = String(dateEndGte).slice(0, 10);
-      let q = supabase
-        .from('gsc_page_metrics_28d')
-        .select('run_id, date_end')
-        .gte('date_end', de);
-      if (dateEndLte) q = q.lte('date_end', String(dateEndLte).slice(0, 10));
-      const { data: runRows, error: runsErr } = await q;
-      if (runsErr) throw runsErr;
+      const deLte = dateEndLte ? String(dateEndLte).slice(0, 10) : null;
+      const runRows = await fetchAllWithRange((from, ps) => {
+        let q = supabase
+          .from('gsc_page_metrics_28d')
+          .select('run_id, date_end')
+          .gte('date_end', de)
+          .order('run_id', { ascending: true })
+          .order('date_end', { ascending: true });
+        if (deLte) q = q.lte('date_end', deLte);
+        return q.range(from, from + ps - 1);
+      });
       // Oldest snapshots first so a partial run (timeout) still repairs early months
       // (e.g. Feb/Mar) before burning budget on recent weeks.
       const minByRun = new Map();
@@ -99,11 +117,13 @@ export default async function handler(req, res) {
         runIds = runIds.slice(0, maxRuns);
       }
     } else {
-      const { data: runs } = await supabase
-        .from('gsc_page_metrics_28d')
-        .select('run_id')
-        .order('run_id', { ascending: false });
-      
+      const runs = await fetchAllWithRange((from, ps) =>
+        supabase
+          .from('gsc_page_metrics_28d')
+          .select('run_id')
+          .order('run_id', { ascending: false })
+          .range(from, from + ps - 1)
+      );
       runIds = [...new Set(runs?.map(r => r.run_id) || [])];
     }
 
@@ -111,13 +131,17 @@ export default async function handler(req, res) {
     const results = [];
 
     for (const currentRunId of runIds) {
-      // Get page metrics for this run
-      const { data: pages, error: pagesError } = await supabase
-        .from('gsc_page_metrics_28d')
-        .select('*')
-        .eq('run_id', currentRunId);
-
-      if (pagesError) {
+      let pages;
+      try {
+        pages = await fetchAllWithRange((from, ps) =>
+          supabase
+            .from('gsc_page_metrics_28d')
+            .select('*')
+            .eq('run_id', currentRunId)
+            .order('page_url', { ascending: true })
+            .range(from, from + ps - 1)
+        );
+      } catch (pagesError) {
         console.error(`[Backfill] Error fetching pages for ${currentRunId}:`, pagesError);
         continue;
       }
