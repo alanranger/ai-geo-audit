@@ -58,6 +58,8 @@ export default async function handler(req, res) {
     const body = req.body || {};
     const runId = body.runId;
     const dateEndGte = body.dateEndGte;
+    const dateEndLte = body.dateEndLte;
+    const maxRuns = Math.min(Math.max(parseInt(String(body.maxRuns || '500'), 10) || 500, 1), 2000);
 
     const supabase = createClient(
       need('SUPABASE_URL'),
@@ -66,16 +68,36 @@ export default async function handler(req, res) {
 
     // Distinct run_ids to rebuild portfolio_segment_metrics_28d from gsc_page_metrics_28d
     let runIds = [];
+    let truncated = false;
     if (runId) {
       runIds = [String(runId)];
     } else if (dateEndGte) {
       const de = String(dateEndGte).slice(0, 10);
-      const { data: runs, error: runsErr } = await supabase
+      let q = supabase
         .from('gsc_page_metrics_28d')
-        .select('run_id')
+        .select('run_id, date_end')
         .gte('date_end', de);
+      if (dateEndLte) q = q.lte('date_end', String(dateEndLte).slice(0, 10));
+      const { data: runRows, error: runsErr } = await q;
       if (runsErr) throw runsErr;
-      runIds = [...new Set((runs || []).map((r) => r.run_id).filter(Boolean))];
+      // Oldest snapshots first so a partial run (timeout) still repairs early months
+      // (e.g. Feb/Mar) before burning budget on recent weeks.
+      const minByRun = new Map();
+      for (const row of runRows || []) {
+        const rid = row?.run_id;
+        if (!rid) continue;
+        const dend = String(row.date_end || '').slice(0, 10);
+        if (!dend) continue;
+        const prev = minByRun.get(rid);
+        if (!prev || dend < prev) minByRun.set(rid, dend);
+      }
+      runIds = [...minByRun.entries()]
+        .sort((a, b) => a[1].localeCompare(b[1]))
+        .map(([rid]) => rid);
+      if (runIds.length > maxRuns) {
+        truncated = true;
+        runIds = runIds.slice(0, maxRuns);
+      }
     } else {
       const { data: runs } = await supabase
         .from('gsc_page_metrics_28d')
@@ -579,6 +601,9 @@ export default async function handler(req, res) {
       totalInserted,
       runsProcessed: runIds.length,
       dateEndGte: dateEndGte ? String(dateEndGte).slice(0, 10) : null,
+      dateEndLte: dateEndLte ? String(dateEndLte).slice(0, 10) : null,
+      maxRuns,
+      truncated,
       runId: runId ? String(runId) : null,
       results
     });

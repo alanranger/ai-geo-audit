@@ -1,10 +1,13 @@
 /**
- * Rebuild portfolio_segment_metrics_28d from gsc_page_metrics_28d.
+ * Rebuild portfolio_segment_metrics_28d from gsc_page_metrics_28d (server handler).
  *
  * Usage:
  *   node scripts/run-backfill-portfolio-segments.mjs
  *   node scripts/run-backfill-portfolio-segments.mjs 2026-02-01
- *   node scripts/run-backfill-portfolio-segments.mjs 2026-02-01 <single_run_id>
+ *   node scripts/run-backfill-portfolio-segments.mjs 2026-02-01 2026-03-31
+ *   node scripts/run-backfill-portfolio-segments.mjs runid:YOUR_RUN_ID
+ *
+ * Last form rebuilds a single gsc_page_metrics_28d run_id.
  *
  * Requires SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in .env.local or .env
  */
@@ -34,13 +37,24 @@ function mockRes() {
   };
 }
 
-const since = process.argv[2] || '2026-02-01';
-const onlyRunId = process.argv[3] || null;
+const arg2 = process.argv[2] || '2026-02-01';
+
+let body;
+if (String(arg2).toLowerCase().startsWith('runid:')) {
+  body = { runId: String(arg2).slice(6).trim(), maxRuns: 2000 };
+} else {
+  const dateEndGte = String(arg2).slice(0, 10);
+  const dateEndLte = process.argv[3] ? String(process.argv[3]).slice(0, 10) : null;
+  body = {
+    dateEndGte,
+    ...(dateEndLte ? { dateEndLte } : {}),
+    maxRuns: 1500
+  };
+}
+
+console.log('POST body:', body);
 
 const res = mockRes();
-const body = onlyRunId ? { runId: onlyRunId } : { dateEndGte: since };
-console.log('Portfolio backfill POST body:', body);
-
 try {
   await handler({ method: 'POST', body }, res);
   if (res.statusCode >= 400) {
