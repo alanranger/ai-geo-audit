@@ -1,7 +1,7 @@
 // /api/supabase/backfill-portfolio-segments.js
 // Backfill portfolio_segment_metrics_28d from existing gsc_page_metrics_28d data
 
-export const config = { runtime: 'nodejs' };
+export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 import { createClient } from '@supabase/supabase-js';
 import { classifyPageSegment as classifySitePageSegment, PageSegment } from '../aigeo/pageSegment.js';
@@ -55,17 +55,27 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { runId } = req.body;
-    
+    const body = req.body || {};
+    const runId = body.runId;
+    const dateEndGte = body.dateEndGte;
+
     const supabase = createClient(
       need('SUPABASE_URL'),
       need('SUPABASE_SERVICE_ROLE_KEY')
     );
 
-    // Get all unique run_ids if runId not specified
+    // Distinct run_ids to rebuild portfolio_segment_metrics_28d from gsc_page_metrics_28d
     let runIds = [];
     if (runId) {
-      runIds = [runId];
+      runIds = [String(runId)];
+    } else if (dateEndGte) {
+      const de = String(dateEndGte).slice(0, 10);
+      const { data: runs, error: runsErr } = await supabase
+        .from('gsc_page_metrics_28d')
+        .select('run_id')
+        .gte('date_end', de);
+      if (runsErr) throw runsErr;
+      runIds = [...new Set((runs || []).map((r) => r.run_id).filter(Boolean))];
     } else {
       const { data: runs } = await supabase
         .from('gsc_page_metrics_28d')
@@ -568,6 +578,8 @@ export default async function handler(req, res) {
       success: true,
       totalInserted,
       runsProcessed: runIds.length,
+      dateEndGte: dateEndGte ? String(dateEndGte).slice(0, 10) : null,
+      runId: runId ? String(runId) : null,
       results
     });
 
