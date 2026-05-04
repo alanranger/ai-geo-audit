@@ -7,15 +7,15 @@
  *   node scripts/run-backfill-portfolio-segments.mjs 2026-02-01 2026-03-31
  *   node scripts/run-backfill-portfolio-segments.mjs runid:YOUR_RUN_ID
  *
- * Last form rebuilds a single gsc_page_metrics_28d run_id.
+ * Loads .env.local BEFORE importing the handler so process.env is correct
+ * (static import would run before dotenv and could inherit a bad shell key).
  *
  * Requires SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in .env.local or .env
  */
 
 import dotenv from 'dotenv';
-import handler from '../api/supabase/backfill-portfolio-segments.js';
 
-dotenv.config({ path: '.env.local' });
+dotenv.config({ path: '.env.local', override: true });
 dotenv.config({ path: '.env' });
 
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -55,7 +55,9 @@ if (String(arg2).toLowerCase().startsWith('runid:')) {
 console.log('POST body:', body);
 
 const res = mockRes();
+
 try {
+  const { default: handler } = await import('../api/supabase/backfill-portfolio-segments.js');
   await handler({ method: 'POST', body }, res);
   if (res.statusCode >= 400) {
     console.error('FAIL', res.statusCode, res.body?.slice(0, 800));
