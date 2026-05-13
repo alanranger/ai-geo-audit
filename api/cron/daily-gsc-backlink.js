@@ -15,6 +15,13 @@ const normalizeUrl = (url) => {
   return normalized.replace(/^\/+/, '').replace(/\/+$/, '');
 };
 
+const formatLocalDate = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const buildRollingDateRange = (daysBack = 28) => {
   const end = new Date();
   end.setDate(end.getDate() - 1);
@@ -23,8 +30,8 @@ const buildRollingDateRange = (daysBack = 28) => {
   start.setDate(start.getDate() - Math.max(daysBack - 1, 0));
   start.setHours(0, 0, 0, 0);
   return {
-    startDate: start.toISOString().split('T')[0],
-    endDate: end.toISOString().split('T')[0]
+    startDate: formatLocalDate(start),
+    endDate: formatLocalDate(end)
   };
 };
 
