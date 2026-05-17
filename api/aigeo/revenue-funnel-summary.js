@@ -658,7 +658,33 @@ function finaliseTierBucket(bucket) {
   return bucket;
 }
 
-function pickMoneyPagePerformance(pageRows, aiMap) {
+// Attach the ACTUAL revenue numbers per tier (from the merged revenue rows).
+//   - revenue_actual_28d: from the latest rolling-window snapshot
+//   - revenue_actual_12m: sum across all monthly history rows
+//   - actual_vs_potential_pct: 28d actual / 28d potential
+//   - actual_vs_target_pct: 28d actual / 28d-pro-rated monthly target
+function tierRevenueFromRow(row, tierId) {
+  const map = row?.tier_revenue;
+  if (!map || typeof map !== 'object') return 0;
+  return Number(map[tierId]) || 0;
+}
+function attachActualRevenueToTier(bucket, latestSnap, monthlyHistory) {
+  bucket.revenue_actual_28d = Math.round(tierRevenueFromRow(latestSnap, bucket.tier_id) * 100) / 100;
+  let twelve = 0;
+  for (const row of monthlyHistory || []) twelve += tierRevenueFromRow(row, bucket.tier_id);
+  bucket.revenue_actual_12m = Math.round(twelve * 100) / 100;
+  const potential = bucket.revenue_potential_28d || 0;
+  bucket.actual_vs_potential_pct = potential > 0
+    ? Math.round((bucket.revenue_actual_28d / potential) * 1000) / 10
+    : null;
+  const target28d = (bucket.monthly_target || 0) * (28 / 30);
+  bucket.actual_vs_target_28d_pct = target28d > 0
+    ? Math.round((bucket.revenue_actual_28d / target28d) * 1000) / 10
+    : null;
+  return bucket;
+}
+
+function pickMoneyPagePerformance(pageRows, aiMap, latestSnap, monthlyHistory) {
   const byTier = new Map();
   for (const tier of MONEY_PAGE_TIERS) byTier.set(tier.id, initTierBucket(tier));
   for (const row of (pageRows || [])) {
@@ -669,7 +695,10 @@ function pickMoneyPagePerformance(pageRows, aiMap) {
     const tierId = tierOf(kw.best_url || '');
     if (tierId) accumulateKeywordIntoBucket(byTier.get(tierId), kw);
   }
-  return MONEY_PAGE_TIERS.map(t => finaliseTierBucket(byTier.get(t.id)));
+  return MONEY_PAGE_TIERS.map(t => {
+    const bucket = finaliseTierBucket(byTier.get(t.id));
+    return attachActualRevenueToTier(bucket, latestSnap, monthlyHistory);
+  });
 }
 
 // Decide RAG status for a KPI based on baseline thresholds.
@@ -810,9 +839,9 @@ export default async function handler(req, res) {
     const funnel = computeFunnel(kpis, revenueSnap);
     const leakPages = pickLeakPages(pageRows);
     const earningPages = pickEarningPages(pageRows);
-    const moneyPagePerformance = pickMoneyPagePerformance(pageRows, aiMap);
-    const kpiTargets = computeKpiTargets(kpis, revenueSnap);
     const revenueHistoryDecorated = decorateHistoryWithTargets(revenueHistory);
+    const moneyPagePerformance = pickMoneyPagePerformance(pageRows, aiMap, revenueSnap, revenueHistoryDecorated);
+    const kpiTargets = computeKpiTargets(kpis, revenueSnap);
     const tierHistory = buildTierHistory(revenueHistoryDecorated);
     const ytdSummary = buildYtdSummary(revenueHistoryDecorated);
     return send(res, 200, {
