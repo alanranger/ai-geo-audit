@@ -232,11 +232,20 @@ async function fetchAiOverviewMap(supabase, propertyUrl) {
   return out.slice(0, 200);
 }
 
-// Returns the most recent 12 month-shaped revenue rows (length 25-35 days),
-// oldest first, so the UI can render a sparkline + month-over-month deltas.
-function isMonthShapedRow(row) {
+// Returns up to the most recent 12 calendar-month-anchored revenue rows,
+// oldest first. A row qualifies if:
+//   - length is 25-35 days
+//   - period_start day-of-month is <= 5 (i.e. starts on the 1st-ish)
+//   - period_end day-of-month is >= 25 (i.e. ends near month-end)
+// This filters out rolling-28d rows like 2026-04-20 -> 2026-05-17 which
+// otherwise collide with the real April calendar month.
+function dayOfMonth(dateStr) {
+  return Number(String(dateStr).slice(8, 10)) || 1;
+}
+function isCalendarMonthRow(row) {
   const days = daysBetween(row.period_start, row.period_end);
-  return days >= 25 && days <= 35;
+  if (days < 25 || days > 35) return false;
+  return dayOfMonth(row.period_start) <= 5 && dayOfMonth(row.period_end) >= 25;
 }
 
 async function fetchRevenueHistory(supabase, propertyUrl) {
@@ -245,9 +254,9 @@ async function fetchRevenueHistory(supabase, propertyUrl) {
     .select('period_start, period_end, revenue_amount, currency, source, transactions')
     .eq('property_url', propertyUrl)
     .order('period_end', { ascending: false })
-    .limit(40);
+    .limit(60);
   if (error) throw error;
-  const monthly = (data || []).filter(isMonthShapedRow);
+  const monthly = (data || []).filter(isCalendarMonthRow);
   const dedupedByMonth = new Map();
   for (const row of monthly) {
     const key = row.period_start.slice(0, 7); // YYYY-MM
