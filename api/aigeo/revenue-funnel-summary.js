@@ -353,22 +353,80 @@ function isCalendarMonthRow(row) {
   return dayOfMonth(row.period_start) <= 5 && dayOfMonth(row.period_end) >= 25;
 }
 
+// Merge tier breakdowns from multiple revenue rows that cover the same
+// period. The Squarespace sync writes one row (source=squarespace_api), the
+// Stripe sync writes another (source=stripe_supplemental) with only the
+// non-overlapping streams (Acuity + subscriptions). Summing them gives the
+// true total without double counting.
+function addTierMaps(target, source) {
+  if (!source || typeof source !== 'object') return target;
+  for (const [k, v] of Object.entries(source)) {
+    target[k] = (Number(target[k]) || 0) + (Number(v) || 0);
+  }
+  return target;
+}
+
+function mergeRevenueRows(base, others) {
+  const merged = {
+    ...base,
+    revenue_amount: Number(base.revenue_amount) || 0,
+    transactions: Number(base.transactions) || 0,
+    tier_revenue: { ...(base.tier_revenue || {}) },
+    tier_transactions: { ...(base.tier_transactions || {}) },
+    sources: [base.source]
+  };
+  for (const row of others || []) {
+    merged.revenue_amount += Number(row.revenue_amount) || 0;
+    merged.transactions += Number(row.transactions) || 0;
+    addTierMaps(merged.tier_revenue, row.tier_revenue);
+    addTierMaps(merged.tier_transactions, row.tier_transactions);
+    merged.sources.push(row.source);
+  }
+  return merged;
+}
+
+// Prefer the Squarespace row as "base" because it carries the richest tier
+// breakdown (full line-item split). If absent, pick whichever row has the
+// most revenue so we don't accidentally use an empty Stripe-supplemental row.
+function pickHistoryBaseRow(rows) {
+  if (!rows.length) return null;
+  const ss = rows.find(r => String(r.source || '').startsWith('squarespace'));
+  if (ss) return ss;
+  return rows.reduce(
+    (best, cur) => ((Number(cur.revenue_amount) || 0) > (Number(best.revenue_amount) || 0) ? cur : best),
+    rows[0]
+  );
+}
+
+function mergeRowsByMonth(rows) {
+  const byMonth = new Map();
+  for (const row of rows) {
+    const key = row.period_start.slice(0, 7);
+    const arr = byMonth.get(key) || [];
+    arr.push(row);
+    byMonth.set(key, arr);
+  }
+  const merged = [];
+  for (const [, group] of byMonth) {
+    const base = pickHistoryBaseRow(group);
+    if (!base) continue;
+    const others = group.filter(r => r !== base);
+    merged.push(mergeRevenueRows(base, others));
+  }
+  return merged;
+}
+
 async function fetchRevenueHistory(supabase, propertyUrl) {
   const { data, error } = await supabase
     .from('revenue_snapshots')
     .select('period_start, period_end, revenue_amount, currency, source, transactions, tier_revenue, tier_transactions')
     .eq('property_url', propertyUrl)
     .order('period_end', { ascending: false })
-    .limit(60);
+    .limit(120);
   if (error) throw error;
   const monthly = (data || []).filter(isCalendarMonthRow);
-  const dedupedByMonth = new Map();
-  for (const row of monthly) {
-    const key = row.period_start.slice(0, 7); // YYYY-MM
-    if (!dedupedByMonth.has(key)) dedupedByMonth.set(key, row);
-  }
-  const sorted = Array.from(dedupedByMonth.values())
-    .sort((a, b) => a.period_end.localeCompare(b.period_end));
+  const merged = mergeRowsByMonth(monthly);
+  const sorted = merged.toSorted((a, b) => a.period_end.localeCompare(b.period_end));
   return sorted.slice(-12);
 }
 
@@ -711,12 +769,19 @@ function pickBestRevenueRow(rows) {
 async function fetchLatestRevenue(supabase, propertyUrl) {
   const { data, error } = await supabase
     .from('revenue_snapshots')
-    .select('period_start, period_end, revenue_amount, currency, source, transactions, notes')
+    .select('period_start, period_end, revenue_amount, currency, source, transactions, tier_revenue, tier_transactions, notes')
     .eq('property_url', propertyUrl)
     .order('period_end', { ascending: false })
-    .limit(12);
+    .limit(36);
   if (error) throw error;
-  return pickBestRevenueRow(data || []);
+  const allRows = data || [];
+  const base = pickBestRevenueRow(allRows);
+  if (!base) return null;
+  // Merge any other rows that cover the EXACT same window (different source).
+  const siblings = allRows.filter(r =>
+    r !== base && r.period_start === base.period_start && r.period_end === base.period_end
+  );
+  return mergeRevenueRows(base, siblings);
 }
 
 export default async function handler(req, res) {
