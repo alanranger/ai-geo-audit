@@ -440,6 +440,102 @@ function buildTierHistory(history) {
   return out;
 }
 
+// ---------------------------------------------------------------
+// Year-to-date summary (Jan -> today of the CURRENT calendar year)
+//
+// Separate from the rolling 12-month view because the user wants to
+// see "am I on track for this financial year (Jan-Dec) so far?".
+// Returns:
+//   {
+//     year,                         // 2026
+//     months_complete,              // 0-11 (full months that have ended)
+//     days_through_year,            // 1-365 (today's day-of-year)
+//     days_in_year,                 // 365 or 366
+//     ytd_revenue_gbp,              // sum of revenue for months in current year
+//     ytd_target_full_gbp,          // sum of full seasonal targets, Jan..current month
+//     ytd_target_prorata_gbp,       // same but prorate current month by days-elapsed
+//     variance_pct,                 // (rev - target_prorata) / target_prorata * 100
+//     annual_target_gbp,            // full-year target (always £60,556)
+//     run_rate_annual_gbp,          // straight-line projection if today's pace holds
+//     pace_variance_pct             // run_rate_annual vs annual_target_gbp
+//   }
+// ---------------------------------------------------------------
+function daysInMonth(year, monthIdx) {
+  return new Date(year, monthIdx + 1, 0).getDate();
+}
+
+function daysInYear(year) {
+  const isLeap = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+  return isLeap ? 366 : 365;
+}
+
+function dayOfYear(date) {
+  const start = new Date(Date.UTC(date.getUTCFullYear(), 0, 0));
+  const diff = date.getTime() - start.getTime();
+  return Math.floor(diff / 86400000);
+}
+
+function sumYtdRevenue(history, year) {
+  let total = 0;
+  for (const row of history || []) {
+    if (!row?.period_start) continue;
+    if (row.period_start.slice(0, 4) !== String(year)) continue;
+    total += Number(row.revenue_amount) || 0;
+  }
+  return total;
+}
+
+// Build the two YTD target totals.
+//   - full: sum of seasonal targets Jan..currentMonth (assumes current
+//           month finishes at full target). Useful as "end-of-month goal".
+//   - prorata: sum of completed months in full, plus current month
+//              pro-rated by days-elapsed-in-month. Use this for variance %.
+function ytdTargets(year, today) {
+  const currentMonthIdx = today.getUTCMonth();
+  const dim = daysInMonth(year, currentMonthIdx);
+  const dayInMonth = today.getUTCDate();
+  const currentMonthTarget = SEASONAL_MONTHLY_TARGETS[currentMonthIdx] || 0;
+
+  let full = 0;
+  let prorata = 0;
+  for (let i = 0; i < currentMonthIdx; i++) {
+    const t = SEASONAL_MONTHLY_TARGETS[i] || 0;
+    full += t;
+    prorata += t;
+  }
+  full += currentMonthTarget;
+  prorata += currentMonthTarget * (dayInMonth / dim);
+  return { full, prorata, currentMonthIdx };
+}
+
+function buildYtdSummary(history) {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const daysThrough = dayOfYear(now);
+  const diy = daysInYear(year);
+  const revenue = sumYtdRevenue(history, year);
+  const { full, prorata, currentMonthIdx } = ytdTargets(year, now);
+  const variancePctVal = prorata > 0 ? ((revenue - prorata) / prorata) * 100 : null;
+  const runRateAnnual = daysThrough > 0 ? revenue * (diy / daysThrough) : 0;
+  const paceVariancePct = ANNUAL_REVENUE_TARGET > 0
+    ? ((runRateAnnual - ANNUAL_REVENUE_TARGET) / ANNUAL_REVENUE_TARGET) * 100
+    : null;
+  return {
+    year,
+    months_complete: currentMonthIdx,    // Jan=0, so months fully complete
+    current_month_idx: currentMonthIdx,  // current (in-progress) month
+    days_through_year: daysThrough,
+    days_in_year: diy,
+    ytd_revenue_gbp: Math.round(revenue * 100) / 100,
+    ytd_target_full_gbp: Math.round(full * 100) / 100,
+    ytd_target_prorata_gbp: Math.round(prorata * 100) / 100,
+    variance_pct: variancePctVal == null ? null : Math.round(variancePctVal * 10) / 10,
+    annual_target_gbp: ANNUAL_REVENUE_TARGET,
+    run_rate_annual_gbp: Math.round(runRateAnnual * 100) / 100,
+    pace_variance_pct: paceVariancePct == null ? null : Math.round(paceVariancePct * 10) / 10
+  };
+}
+
 // -----------------------------------------------------------------
 // Money-page performance per tier — broken into small helpers to
 // stay under the 15-complexity rule. Each helper does ONE thing.
@@ -653,6 +749,7 @@ export default async function handler(req, res) {
     const kpiTargets = computeKpiTargets(kpis, revenueSnap);
     const revenueHistoryDecorated = decorateHistoryWithTargets(revenueHistory);
     const tierHistory = buildTierHistory(revenueHistoryDecorated);
+    const ytdSummary = buildYtdSummary(revenueHistoryDecorated);
     return send(res, 200, {
       property_url: propertyUrl,
       generated_at: new Date().toISOString(),
@@ -668,6 +765,7 @@ export default async function handler(req, res) {
       latest_revenue: revenueSnap,
       revenue_history: revenueHistoryDecorated,
       tier_history: tierHistory,
+      ytd_summary: ytdSummary,
       tiers: MONEY_PAGE_TIERS.map(t => ({ id: t.id, label: t.label, hub_url: t.hubUrl, monthly_target: t.monthlyTarget }))
     });
   } catch (err) {

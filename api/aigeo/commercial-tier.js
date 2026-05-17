@@ -54,10 +54,13 @@ const RULES = [
     nameTokens: ['foundation digital', 'field checklist', 'pocket guide', 'ebook', 'e-book', 'academy membership', 'academy subscription'],
     urlTokens: ['/free-photography-course', '/free-online-photography-course', '/academy'] },
 
-  // Hire / Commercial: physical prints + hire/headshots/property
+  // Hire / Commercial: physical prints + hire/headshots/property/commercial.
+  // NB: keep nameTokens unambiguous - "portrait photography" alone is too
+  // wide because it also matches "Beginners Portrait Photography Course".
+  // Rely on URL tokens + physical-only product nouns instead.
   { id: 'hire',
-    nameTokens: ['fine art print', 'canvas', 'framed print', 'framed fine art', 'a3 mounted', 'mounted print', 'mounted fine art', ' hire', 'headshot', 'portrait photography', 'commercial photography', 'property photography'],
-    urlTokens: ['/hire-a-professional', '/portrait-photography', '/property-photography', '/commercial-photography', '/headshots', '/professional-commercial-photographer'] },
+    nameTokens: ['fine art print', 'canvas wrap', 'framed print', 'framed fine art', 'unframed print', 'a3 mounted', 'mounted print', 'mounted fine art', 'headshot session', 'headshot photography', 'portrait shoot', 'portrait session', 'commercial shoot', 'product photography shoot', 'property photography shoot'],
+    urlTokens: ['/hire-a-professional', '/portrait-photography', '/property-photography', '/commercial-photography', '/headshots', '/professional-commercial-photographer', '/product-photographer', '/property-photographer', '/fine-art-prints', '/corporate-photography-training'] },
 
   // Services: subscriptions, 1-2-1 / private, mentoring, vouchers,
   // sensor clean, print prep
