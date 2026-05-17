@@ -256,15 +256,45 @@ async function fetchPrioritiesWithCycle(supabase, propertyUrl) {
   }));
 }
 
+// Rolling-window revenue picker.
+// The funnel KPI tiles divide revenue by GSC 28-day clicks, so we must use a
+// revenue snapshot whose window matches the GSC window length. We prefer
+// rolling-window rows (period length 25-35 days, ending on or before today)
+// over partial calendar months (which would understate revenue) and over
+// future-dated month-bucket rows.
+const ROLLING_MIN_DAYS = 25;
+const ROLLING_MAX_DAYS = 35;
+
+function daysBetween(startStr, endStr) {
+  const start = new Date(`${startStr}T00:00:00Z`);
+  const end = new Date(`${endStr}T00:00:00Z`);
+  return Math.round((end - start) / 86400000);
+}
+
+function pickBestRevenueRow(rows) {
+  if (!rows.length) return null;
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const isClosed = (row) => row.period_end <= todayIso;
+  const inRolling = (row) => {
+    const len = daysBetween(row.period_start, row.period_end);
+    return len >= ROLLING_MIN_DAYS && len <= ROLLING_MAX_DAYS;
+  };
+  const closedRolling = rows.filter(isClosed).filter(inRolling);
+  if (closedRolling.length) return closedRolling[0];
+  const closedAny = rows.filter(isClosed);
+  if (closedAny.length) return closedAny[0];
+  return rows[0];
+}
+
 async function fetchLatestRevenue(supabase, propertyUrl) {
   const { data, error } = await supabase
     .from('revenue_snapshots')
     .select('period_start, period_end, revenue_amount, currency, source, transactions, notes')
     .eq('property_url', propertyUrl)
     .order('period_end', { ascending: false })
-    .limit(1);
+    .limit(12);
   if (error) throw error;
-  return (data || [])[0] || null;
+  return pickBestRevenueRow(data || []);
 }
 
 export default async function handler(req, res) {
