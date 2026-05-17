@@ -190,40 +190,72 @@ function pickEarningPages(pageRows) {
     }));
 }
 
+function classifyAiMapRow(row) {
+  const cited = (Number(row.ai_alan_citations_count) || 0) > 0;
+  const overview = !!row.has_ai_overview;
+  let bucket = 'no_overview';
+  if (overview && cited) bucket = 'overview_cited';
+  else if (overview && !cited) bucket = 'overview_uncited';
+  const segment = row.segment || 'other';
+  const path = pathOf(row.best_url || '');
+  const isMoney = isMoneyPage(path) || segment === 'money';
+  return {
+    keyword: row.keyword,
+    rank: row.best_rank_group != null ? Number(row.best_rank_group) : null,
+    search_volume: Number(row.search_volume) || 0,
+    has_ai_overview: overview,
+    cited,
+    bucket,
+    best_url: row.best_url || null,
+    segment,
+    page_type: row.page_type || 'Other',
+    is_money_page: isMoney
+  };
+}
+
 async function fetchAiOverviewMap(supabase, propertyUrl) {
   const { data, error } = await supabase
     .from('keyword_rankings')
-    .select('audit_date, keyword, best_rank_group, search_volume, has_ai_overview, ai_alan_citations_count, segment, page_type')
+    .select('audit_date, keyword, best_rank_group, search_volume, has_ai_overview, ai_alan_citations_count, segment, page_type, best_url')
     .eq('property_url', propertyUrl)
     .order('audit_date', { ascending: false })
     .limit(2000);
   if (error) throw error;
-  // Latest snapshot per keyword.
   const latest = new Map();
   for (let i = 0; i < (data || []).length; i += 1) {
     const row = data[i];
     if (!latest.has(row.keyword)) latest.set(row.keyword, row);
   }
   const out = [];
-  for (const row of latest.values()) {
-    const cited = (Number(row.ai_alan_citations_count) || 0) > 0;
-    const overview = !!row.has_ai_overview;
-    let bucket = 'no_overview';
-    if (overview && cited) bucket = 'overview_cited';
-    else if (overview && !cited) bucket = 'overview_uncited';
-    out.push({
-      keyword: row.keyword,
-      rank: row.best_rank_group != null ? Number(row.best_rank_group) : null,
-      search_volume: Number(row.search_volume) || 0,
-      has_ai_overview: overview,
-      cited: cited,
-      bucket,
-      segment: row.segment || null,
-      page_type: row.page_type || null
-    });
-  }
+  for (const row of latest.values()) out.push(classifyAiMapRow(row));
   out.sort((a, b) => (b.search_volume || 0) - (a.search_volume || 0));
   return out.slice(0, 200);
+}
+
+// Returns the most recent 12 month-shaped revenue rows (length 25-35 days),
+// oldest first, so the UI can render a sparkline + month-over-month deltas.
+function isMonthShapedRow(row) {
+  const days = daysBetween(row.period_start, row.period_end);
+  return days >= 25 && days <= 35;
+}
+
+async function fetchRevenueHistory(supabase, propertyUrl) {
+  const { data, error } = await supabase
+    .from('revenue_snapshots')
+    .select('period_start, period_end, revenue_amount, currency, source, transactions')
+    .eq('property_url', propertyUrl)
+    .order('period_end', { ascending: false })
+    .limit(40);
+  if (error) throw error;
+  const monthly = (data || []).filter(isMonthShapedRow);
+  const dedupedByMonth = new Map();
+  for (const row of monthly) {
+    const key = row.period_start.slice(0, 7); // YYYY-MM
+    if (!dedupedByMonth.has(key)) dedupedByMonth.set(key, row);
+  }
+  const sorted = Array.from(dedupedByMonth.values())
+    .sort((a, b) => a.period_end.localeCompare(b.period_end));
+  return sorted.slice(-12);
 }
 
 async function fetchPrioritiesWithCycle(supabase, propertyUrl) {
@@ -308,12 +340,13 @@ export default async function handler(req, res) {
   const propertyUrl = String(req.query?.propertyUrl || DEFAULT_PROPERTY).trim();
   try {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
-    const [audits, pageMetrics, revenueSnap, aiMap, priorities] = await Promise.all([
+    const [audits, pageMetrics, revenueSnap, aiMap, priorities, revenueHistory] = await Promise.all([
       fetchLatestAudit(supabase, propertyUrl),
       fetchPageMetrics(supabase, propertyUrl),
       fetchLatestRevenue(supabase, propertyUrl),
       fetchAiOverviewMap(supabase, propertyUrl),
-      fetchPrioritiesWithCycle(supabase, propertyUrl)
+      fetchPrioritiesWithCycle(supabase, propertyUrl),
+      fetchRevenueHistory(supabase, propertyUrl)
     ]);
     const pageRows = pageMetrics.rows;
     const auditLatest = audits[0] || null;
@@ -332,7 +365,8 @@ export default async function handler(req, res) {
       ai_overview_map: aiMap,
       priorities,
       earning_pages: earningPages,
-      latest_revenue: revenueSnap
+      latest_revenue: revenueSnap,
+      revenue_history: revenueHistory
     });
   } catch (err) {
     return send(res, 500, { error: 'summary_failed', message: err?.message || String(err) });

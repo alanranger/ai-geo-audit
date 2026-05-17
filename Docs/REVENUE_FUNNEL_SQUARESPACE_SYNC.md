@@ -63,12 +63,26 @@ Setup steps:
 Registered in `vercel.json`:
 
 ```json
-{ "path": "/api/aigeo/squarespace-revenue-sync", "schedule": "0 3 * * *" }
+{ "path": "/api/aigeo/squarespace-revenue-sync", "schedule": "0 7 * * *" }
 ```
 
-Runs daily at 03:00 UTC. Vercel sends `x-vercel-cron: 1`, which the handler
-treats as authorised. The cron uses default window = today UTC - 27 days
-through today UTC, mode = `single,monthly`.
+Runs daily at **07:00 UTC** (08:00 BST UK / 07:00 GMT UK). Why 07:00 UTC?
+
+- It's after midnight UK, so the prior day is "closed" from a UK
+  business-day perspective.
+- It gives Squarespace several hours to settle any late-evening orders
+  (auth → capture → fulfilled).
+- It lands before the user typically opens the dashboard in the morning.
+
+Vercel cron runs **in Vercel's cloud**, not on your local machine — so it
+will fire at 07:00 UTC regardless of whether your computer is on.
+The handler treats the `x-vercel-cron: 1` header as authorised. Default
+window is today UTC - 27 days through today UTC, mode = `single,monthly`.
+
+If a particular night's cron run fails or is throttled, the next morning's
+run still fixes it because each row is keyed on
+`(property_url, period_start, period_end, source)` — upserts not inserts.
+You can also hit **Sync now** from the dashboard at any time.
 
 ## On-demand sync (UI)
 
