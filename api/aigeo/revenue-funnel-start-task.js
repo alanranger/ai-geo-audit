@@ -61,15 +61,6 @@ function buildTargetUrl(propertyUrl, pages) {
   return base + (first.startsWith('/') ? first : `/${first}`);
 }
 
-function cleanTargetUrl(url) {
-  try {
-    const u = new URL(url);
-    return u.origin.toLowerCase() + u.pathname.replace(/\/+$/, '') + (u.search || '') + (u.hash || '');
-  } catch {
-    return String(url || '').toLowerCase();
-  }
-}
-
 function buildObjective(priority, mappedKpi) {
   if (!mappedKpi) return null;
   return {
@@ -99,10 +90,11 @@ async function loadPriority(supabase, id) {
 
 async function insertTask(supabase, priority, targetUrl, mappedKpi) {
   const objective = buildObjective(priority, mappedKpi);
+  // NOTE: do NOT set `target_url_clean` — it is a generated column on
+  // optimisation_tasks and inserts will fail with 428C9 otherwise.
   const row = {
     keyword_text: priority.title.slice(0, 240),
     target_url: targetUrl,
-    target_url_clean: cleanTargetUrl(targetUrl),
     task_type: 'on_page',
     status: 'in_progress',
     title: priority.title,
@@ -139,7 +131,11 @@ async function insertCycle(supabase, taskId, priority, objective) {
     hypothesis: priority.description || null,
     plan: priority.description || null,
     objective: objective,
-    objective_status: objective ? 'no_measurement' : 'not_set',
+    // Allowed values for objective_status:
+    //   not_set | on_track | overdue | met
+    // Starting a brand-new cycle has no measurements yet, so we record
+    // 'on_track' when we have an objective and 'not_set' otherwise.
+    objective_status: objective ? 'on_track' : 'not_set',
     due_at: null,
     start_date: new Date().toISOString()
   };

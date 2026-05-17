@@ -14,19 +14,122 @@ import { createClient } from '@supabase/supabase-js';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
-// Path prefixes treated as money/commercial pages.
-const MONEY_PAGE_PREFIXES = [
-  '/photography-courses',
-  '/photography-workshops',
-  '/landscape-photography-workshops',
-  '/hire-a-professional-photographer',
-  '/photography-services',
-  '/1-2-1-photography-tuition',
-  '/1-2-1-private-photography-tuition',
-  '/photography-prints',
-  '/print-shop',
-  '/photography-products'
+// ----------------------------------------------------------------------
+// Money-page tiers
+//
+// These are the 5 commercial product groups the business actually sells.
+// Each tier has:
+//   - id          stable key used in API responses + UI filters
+//   - label       human-readable
+//   - hubUrl      the primary money page the user wants to convert on
+//   - prefixes    path prefixes that count as part of this tier
+//   - monthlyTarget  £ per month target from Booking Sheet 2026 ("flat")
+//
+// Order matters: more-specific tiers come first so a URL like
+//   /photography-courses-coventry-online
+// resolves to "courses", not "workshops".
+// ----------------------------------------------------------------------
+const MONEY_PAGE_TIERS = [
+  {
+    id: 'courses',
+    label: 'Courses',
+    hubUrl: '/photography-courses-coventry',
+    prefixes: ['/photography-courses', '/beginners-photography-class', '/beginners-photography-course', '/photography-classes', '/photography-lessons'],
+    monthlyTarget: 667
+  },
+  {
+    id: 'workshops',
+    label: 'Workshops',
+    hubUrl: '/photography-workshops',
+    prefixes: ['/photography-workshops', '/landscape-photography-workshops', '/2-5hr-workshops', '/2.5hr-4hr-workshops', '/one-day-workshops', '/residential-workshops', '/workshops-calendar'],
+    monthlyTarget: 2500
+  },
+  {
+    id: 'services',
+    label: '1-2-1 & Services',
+    hubUrl: '/photography-tuition-services',
+    prefixes: ['/photography-tuition-services', '/photography-services', '/1-2-1-photography-tuition', '/1-2-1-private-photography-tuition', '/photography-lessons-online-1-2-1', '/private-photography-lessons', '/mentoring', '/rps-mentoring', '/gift-vouchers', '/pick-n-mix'],
+    monthlyTarget: 863
+  },
+  {
+    id: 'hire',
+    label: 'Hire / Commercial',
+    hubUrl: '/hire-a-professional-photographer-in-coventry',
+    prefixes: ['/hire-a-professional-photographer', '/products-services-property-photography', '/portrait-photography', '/staff-training-on-photography', '/commercial-photography', '/headshots'],
+    monthlyTarget: 350
+  },
+  {
+    id: 'academy',
+    label: 'Academy',
+    hubUrl: '/free-photography-course',
+    prefixes: ['/free-photography-course', '/academy', '/free-online-photography-course', '/online-photography-course'],
+    monthlyTarget: 667
+  }
 ];
+
+// Seasonal monthly TOTAL targets (sum across all tiers) from Booking Sheet 2026.
+// Index 0 = January … 11 = December. Annual total = £60,556.
+const SEASONAL_MONTHLY_TARGETS = [4555, 3674, 2422, 4985, 5833, 6277, 4725, 3592, 5633, 7352, 6050, 5457];
+const ANNUAL_REVENUE_TARGET = SEASONAL_MONTHLY_TARGETS.reduce((a, b) => a + b, 0);
+const FLAT_MONTHLY_TIER_TOTAL = MONEY_PAGE_TIERS.reduce((s, t) => s + t.monthlyTarget, 0);
+
+// Industry baselines used for the funnel KPI RAG indicators.
+// These were chosen to align with the existing top-leak-page benchmark
+// (1.5% CTR target for informational queries) and the user's existing
+// money_page_click_share_pct target of ~3pp in the seeded priorities.
+const KPI_BASELINES = {
+  ctr_28d_pct: { target: 1.5, warn: 1 },              // last 28d CTR
+  money_page_click_share_pct: { target: 3, warn: 2 },
+  click_to_sale_pct: { target: 0.5, warn: 0.25 },
+  revenue_per_1k_impressions: { target: 1, warn: 0.5 }
+};
+
+function tierOf(pageUrl) {
+  const p = pathOf(pageUrl);
+  if (!p) return null;
+  for (const tier of MONEY_PAGE_TIERS) {
+    if (tier.prefixes.some(pref => p.startsWith(pref))) return tier.id;
+  }
+  return null;
+}
+
+function tierLabel(id) {
+  const t = MONEY_PAGE_TIERS.find(x => x.id === id);
+  return t ? t.label : 'Other';
+}
+
+// Clean a URL for display: strip tracking junk (?srsltid, utm_*, etc) so the
+// AI Overview map and earning tables show readable page paths.
+const TRACKING_PARAM_PREFIXES = ['srsltid', 'utm_', 'gclid', 'fbclid', 'mc_eid', '_gl'];
+function cleanUrlForDisplay(rawUrl) {
+  if (!rawUrl) return '';
+  try {
+    const u = new URL(rawUrl, 'https://www.alanranger.com');
+    const keys = Array.from(u.searchParams.keys());
+    keys.forEach(k => {
+      const lk = k.toLowerCase();
+      if (TRACKING_PARAM_PREFIXES.some(p => lk === p || lk.startsWith(p))) u.searchParams.delete(k);
+    });
+    u.hash = '';
+    const search = u.searchParams.toString();
+    return `${u.pathname}${search ? '?' + search : ''}`;
+  } catch {
+    return String(rawUrl).replace(/[?&](srsltid|utm_[^=]+|gclid|fbclid)=[^&]*/gi, '').replace(/^https?:\/\/[^/]+/i, '');
+  }
+}
+
+// Generate a short, friendly label for a path, e.g.
+//   "/photography-courses-coventry" -> "Photography courses coventry"
+//   "/blog-on-photography/jpeg-vs-raw-the-key-differences" -> "Blog – Jpeg vs raw the key differences"
+function labelForUrl(rawUrl) {
+  const path = cleanUrlForDisplay(rawUrl).split('?')[0];
+  if (!path || path === '/') return 'Home';
+  const segs = path.replace(/^\/+|\/+$/g, '').split('/');
+  const last = segs.at(-1) || '';
+  const friendly = last.replace(/[-_]+/g, ' ').replace(/^\w/, c => c.toUpperCase());
+  if (segs[0] === 'blog-on-photography') return `Blog – ${friendly}`;
+  return friendly;
+}
 
 const send = (res, status, body) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -53,9 +156,7 @@ function pathOf(url) {
 }
 
 function isMoneyPage(pageUrl) {
-  const p = pathOf(pageUrl);
-  if (!p) return false;
-  return MONEY_PAGE_PREFIXES.some((prefix) => p.startsWith(prefix));
+  return tierOf(pageUrl) !== null;
 }
 
 function pct(numer, denom) {
@@ -197,8 +298,8 @@ function classifyAiMapRow(row) {
   if (overview && cited) bucket = 'overview_cited';
   else if (overview && !cited) bucket = 'overview_uncited';
   const segment = row.segment || 'other';
-  const path = pathOf(row.best_url || '');
-  const isMoney = isMoneyPage(path) || segment === 'money';
+  const tier = tierOf(row.best_url || '');
+  const isMoney = !!tier || segment === 'money';
   return {
     keyword: row.keyword,
     rank: row.best_rank_group != null ? Number(row.best_rank_group) : null,
@@ -207,7 +308,11 @@ function classifyAiMapRow(row) {
     cited,
     bucket,
     best_url: row.best_url || null,
+    clean_url: cleanUrlForDisplay(row.best_url || ''),
+    url_label: labelForUrl(row.best_url || ''),
     segment,
+    tier: tier || null,
+    tier_label: tier ? tierLabel(tier) : null,
     page_type: row.page_type || 'Other',
     is_money_page: isMoney
   };
@@ -265,6 +370,134 @@ async function fetchRevenueHistory(supabase, propertyUrl) {
   const sorted = Array.from(dedupedByMonth.values())
     .sort((a, b) => a.period_end.localeCompare(b.period_end));
   return sorted.slice(-12);
+}
+
+// Attach per-month seasonal targets + variance % to the history rows.
+// month index 0..11; targets read from SEASONAL_MONTHLY_TARGETS.
+function decorateHistoryWithTargets(history) {
+  return history.map(row => {
+    const monthIdx = Number(row.period_start.slice(5, 7)) - 1;
+    const target = SEASONAL_MONTHLY_TARGETS[monthIdx] || null;
+    const revenue = Number(row.revenue_amount) || 0;
+    let variance_pct = null;
+    if (target && target > 0) variance_pct = ((revenue - target) / target) * 100;
+    // Mark partial-month rows so the UI can show them differently
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const is_partial = row.period_end > todayIso;
+    return { ...row, target, variance_pct, is_partial };
+  });
+}
+
+// -----------------------------------------------------------------
+// Money-page performance per tier — broken into small helpers to
+// stay under the 15-complexity rule. Each helper does ONE thing.
+// -----------------------------------------------------------------
+const AOV_BY_TIER = { workshops: 250, courses: 200, services: 100, hire: 200, academy: 79 };
+const TARGET_CONVERSION = 0.01; // 1% click-to-sale on a money page (industry baseline)
+
+function initTierBucket(tier) {
+  return {
+    tier_id: tier.id,
+    tier_label: tier.label,
+    hub_url: tier.hubUrl,
+    monthly_target: tier.monthlyTarget,
+    pages: [],
+    clicks_28d: 0,
+    impressions_28d: 0,
+    best_rank: null,
+    total_search_volume: 0,
+    ai_keywords_total: 0,
+    ai_keywords_cited: 0,
+    ai_keywords_uncited: 0
+  };
+}
+
+function accumulatePageIntoBucket(bucket, row) {
+  const clicks = Number(row.clicks_28d) || 0;
+  const impr = Number(row.impressions_28d) || 0;
+  bucket.pages.push({
+    page_url: row.page_url,
+    clean_url: cleanUrlForDisplay(row.page_url),
+    clicks_28d: clicks,
+    impressions_28d: impr,
+    ctr_28d_pct: row.ctr_28d != null ? Number(row.ctr_28d) * 100 : null,
+    position_28d: row.position_28d != null ? Number(row.position_28d) : null
+  });
+  bucket.clicks_28d += clicks;
+  bucket.impressions_28d += impr;
+}
+
+function accumulateKeywordIntoBucket(bucket, kw) {
+  bucket.total_search_volume += Number(kw.search_volume) || 0;
+  bucket.ai_keywords_total += 1;
+  if (kw.bucket === 'overview_cited') bucket.ai_keywords_cited += 1;
+  if (kw.bucket === 'overview_uncited') bucket.ai_keywords_uncited += 1;
+  const r = kw.rank;
+  if (r != null && (bucket.best_rank == null || r < bucket.best_rank)) {
+    bucket.best_rank = r;
+  }
+}
+
+function finaliseTierBucket(bucket) {
+  bucket.pages.sort((a, b) => b.clicks_28d - a.clicks_28d);
+  bucket.top_page = bucket.pages[0] || null;
+  bucket.page_count = bucket.pages.length;
+  bucket.ctr_28d_pct = bucket.impressions_28d > 0
+    ? (bucket.clicks_28d / bucket.impressions_28d) * 100
+    : null;
+  const aov = AOV_BY_TIER[bucket.tier_id] || 150;
+  bucket.aov_assumed = aov;
+  bucket.revenue_potential_28d = Math.round(bucket.clicks_28d * TARGET_CONVERSION * aov);
+  bucket.pages = bucket.pages.slice(0, 5);
+  return bucket;
+}
+
+function pickMoneyPagePerformance(pageRows, aiMap) {
+  const byTier = new Map();
+  for (const tier of MONEY_PAGE_TIERS) byTier.set(tier.id, initTierBucket(tier));
+  for (const row of (pageRows || [])) {
+    const tierId = tierOf(row.page_url);
+    if (tierId) accumulatePageIntoBucket(byTier.get(tierId), row);
+  }
+  for (const kw of (aiMap || [])) {
+    const tierId = tierOf(kw.best_url || '');
+    if (tierId) accumulateKeywordIntoBucket(byTier.get(tierId), kw);
+  }
+  return MONEY_PAGE_TIERS.map(t => finaliseTierBucket(byTier.get(t.id)));
+}
+
+// Decide RAG status for a KPI based on baseline thresholds.
+function ragFor(value, baseline) {
+  if (value == null || baseline == null) return 'unknown';
+  if (value >= baseline.target) return 'green';
+  if (value >= baseline.warn) return 'amber';
+  return 'red';
+}
+
+function revenueRagFor(actual, target) {
+  if (actual >= target) return 'green';
+  if (actual >= target * 0.7) return 'amber';
+  return 'red';
+}
+
+function computeKpiTargets(kpis, revenueSnap) {
+  // The 28-day revenue target: slice ANNUAL_REVENUE_TARGET to 28 days.
+  // (≈ £4,646 — a reasonable benchmark to compare against the rolling 28d
+  // actual.) The seasonal monthly figures are surfaced separately in the
+  // revenue history table.
+  const annual28d = ANNUAL_REVENUE_TARGET * (28 / 365);
+  const revenueActual = (revenueSnap && Number(revenueSnap.revenue_amount)) || 0;
+  const revenueRag = revenueRagFor(revenueActual, annual28d);
+  return {
+    annual_target: ANNUAL_REVENUE_TARGET,
+    rolling_28d_target: Math.round(annual28d),
+    rolling_28d_actual: Math.round(revenueActual),
+    rolling_28d_rag: revenueRag,
+    ctr_28d_pct: { value: kpis.ctr_28d_pct, target: KPI_BASELINES.ctr_28d_pct.target, rag: ragFor(kpis.ctr_28d_pct, KPI_BASELINES.ctr_28d_pct) },
+    money_page_click_share_pct: { value: kpis.money_page_click_share_pct, target: KPI_BASELINES.money_page_click_share_pct.target, rag: ragFor(kpis.money_page_click_share_pct, KPI_BASELINES.money_page_click_share_pct) },
+    click_to_sale_pct: { value: kpis.click_to_sale_pct, target: KPI_BASELINES.click_to_sale_pct.target, rag: ragFor(kpis.click_to_sale_pct, KPI_BASELINES.click_to_sale_pct) },
+    revenue_per_1k_impressions: { value: kpis.revenue_per_1k_impressions, target: KPI_BASELINES.revenue_per_1k_impressions.target, rag: ragFor(kpis.revenue_per_1k_impressions, KPI_BASELINES.revenue_per_1k_impressions) }
+  };
 }
 
 async function fetchPrioritiesWithCycle(supabase, propertyUrl) {
@@ -364,18 +597,24 @@ export default async function handler(req, res) {
     const funnel = computeFunnel(kpis, revenueSnap);
     const leakPages = pickLeakPages(pageRows);
     const earningPages = pickEarningPages(pageRows);
+    const moneyPagePerformance = pickMoneyPagePerformance(pageRows, aiMap);
+    const kpiTargets = computeKpiTargets(kpis, revenueSnap);
+    const revenueHistoryDecorated = decorateHistoryWithTargets(revenueHistory);
     return send(res, 200, {
       property_url: propertyUrl,
       generated_at: new Date().toISOString(),
       page_metrics_date_end: pageMetrics.dateEnd,
       kpis,
+      kpi_targets: kpiTargets,
       funnel,
       top_leak_pages: leakPages,
       ai_overview_map: aiMap,
       priorities,
       earning_pages: earningPages,
+      money_page_performance: moneyPagePerformance,
       latest_revenue: revenueSnap,
-      revenue_history: revenueHistory
+      revenue_history: revenueHistoryDecorated,
+      tiers: MONEY_PAGE_TIERS.map(t => ({ id: t.id, label: t.label, hub_url: t.hubUrl, monthly_target: t.monthlyTarget }))
     });
   } catch (err) {
     return send(res, 500, { error: 'summary_failed', message: err?.message || String(err) });
