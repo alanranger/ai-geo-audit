@@ -85,12 +85,243 @@ function applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search }) {
 }
 
 const ROW_SELECT =
-  'url_from,url_to,anchor,dofollow,domain_from_rank,page_from_rank,first_seen,last_seen,domain_host';
+  'row_hash,url_from,url_to,anchor,dofollow,domain_from_rank,page_from_rank,first_seen,last_seen,domain_host';
+
+const BASELINE_EDGE_SELECT =
+  'row_hash,url_from,url_to,dofollow,domain_from_rank,saved_at';
+
+const BASELINE_MODES = new Set(['all', 'new', 'lost']);
+
+function normalizeBaselineParam(raw) {
+  const t = String(raw ?? '').trim().toLowerCase();
+  return BASELINE_MODES.has(t) ? t : 'all';
+}
+
+async function loadRowHashSet(supabase, table, domainHost) {
+  const set = new Set();
+  let dbFrom = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('row_hash')
+      .eq('domain_host', domainHost)
+      .range(dbFrom, dbFrom + DB_PAGE - 1);
+    if (error) throw new Error(String(error.message || error));
+    const batch = Array.isArray(data) ? data : [];
+    for (let i = 0; i < batch.length; i += 1) {
+      const h = batch[i]?.row_hash;
+      if (h) set.add(String(h));
+    }
+    if (batch.length < DB_PAGE) break;
+    dbFrom += DB_PAGE;
+  }
+  return set;
+}
+
+async function getBaselineFilterState(supabase, domainHost) {
+  const { data: baseRow, error: baseErr } = await supabase
+    .from('dfs_backlink_tile_baseline')
+    .select('domain_host')
+    .eq('domain_host', domainHost)
+    .maybeSingle();
+  if (baseErr) throw new Error(String(baseErr.message || baseErr));
+  if (!baseRow) {
+    return { ready: false, reason: 'no_baseline', message: 'Save a DB baseline to filter new or lost links.' };
+  }
+  const { count, error: cntErr } = await supabase
+    .from('dfs_backlink_baseline_edges')
+    .select('row_hash', { count: 'exact', head: true })
+    .eq('domain_host', domainHost);
+  if (cntErr) throw new Error(String(cntErr.message || cntErr));
+  const nEdges = typeof count === 'number' ? count : 0;
+  if (nEdges === 0) {
+    return {
+      ready: false,
+      reason: 'needs_resave',
+      message: 'Re-save baseline once to capture link fingerprints for this domain.'
+    };
+  }
+  return { ready: true, reason: null, message: null };
+}
+
+function rowMatchesSearch(row, search, includeAnchor) {
+  if (!search) return true;
+  const q = search.toLowerCase();
+  const parts = [row?.url_from, row?.url_to];
+  if (includeAnchor) parts.push(row?.anchor);
+  return parts.some((p) => String(p || '').toLowerCase().includes(q));
+}
+
+function baselineEdgeToRow(edge, domainHost) {
+  return {
+    row_hash: edge?.row_hash,
+    url_from: edge?.url_from || '',
+    url_to: edge?.url_to || '',
+    anchor: '',
+    dofollow: edge?.dofollow ?? null,
+    domain_from_rank: edge?.domain_from_rank ?? null,
+    page_from_rank: null,
+    first_seen: null,
+    last_seen: edge?.saved_at || null,
+    domain_host: domainHost
+  };
+}
+
+function compareVal(a, b) {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  return String(a).localeCompare(String(b));
+}
+
+function compareBacklinkRows(a, b, sortCol, ascending) {
+  const mul = ascending ? 1 : -1;
+  if (sortCol === 'page_tier') return compareRowsForPageTierSort(a, b, ascending);
+  let va = a?.[sortCol];
+  let vb = b?.[sortCol];
+  if (sortCol === 'dofollow') {
+    va = a?.dofollow === true ? 1 : a?.dofollow === false ? 0 : -1;
+    vb = b?.dofollow === true ? 1 : b?.dofollow === false ? 0 : -1;
+  }
+  return compareVal(va, vb) * mul;
+}
+
+async function collectBaselineFilteredRows(
+  supabase,
+  { domainHost, baselineMode, follow, rankMin, rankMax, search, tierFilter, tierLookup }
+) {
+  const all = [];
+  let rowsScanned = 0;
+  let exhausted = false;
+  let dbFrom = 0;
+
+  if (baselineMode === 'new') {
+    const baselineSet = await loadRowHashSet(supabase, 'dfs_backlink_baseline_edges', domainHost);
+    while (rowsScanned < MAX_ROWS_SCAN) {
+      let query = supabase.from('dfs_domain_backlink_rows').select(ROW_SELECT).eq('domain_host', domainHost);
+      query = applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search });
+      query = query.order('domain_from_rank', { ascending: false, nullsFirst: false });
+      query = query.range(dbFrom, dbFrom + DB_PAGE - 1);
+      const { data, error } = await query;
+      if (error) throw new Error(String(error.message || error));
+      const batch = Array.isArray(data) ? data : [];
+      if (batch.length === 0) {
+        exhausted = true;
+        break;
+      }
+      for (let i = 0; i < batch.length; i += 1) {
+        rowsScanned += 1;
+        const row = batch[i];
+        if (baselineSet.has(String(row?.row_hash || ''))) continue;
+        const er = enrichBacklinkRow(row, tierLookup);
+        if (tierFilter && er.page_tier !== tierFilter) continue;
+        all.push(er);
+        if (rowsScanned >= MAX_ROWS_SCAN) break;
+      }
+      dbFrom += DB_PAGE;
+      if (batch.length < DB_PAGE) {
+        exhausted = true;
+        break;
+      }
+      if (rowsScanned >= MAX_ROWS_SCAN) break;
+    }
+  } else {
+    const currentSet = await loadRowHashSet(supabase, 'dfs_domain_backlink_rows', domainHost);
+    while (rowsScanned < MAX_ROWS_SCAN) {
+      let query = supabase
+        .from('dfs_backlink_baseline_edges')
+        .select(BASELINE_EDGE_SELECT)
+        .eq('domain_host', domainHost);
+      if (follow === 'follow' || follow === 'dofollow') query = query.eq('dofollow', true);
+      else if (follow === 'nofollow') query = query.eq('dofollow', false);
+      if (rankMin != null) query = query.gte('domain_from_rank', rankMin);
+      if (rankMax != null) query = query.lte('domain_from_rank', rankMax);
+      query = query.order('domain_from_rank', { ascending: false, nullsFirst: false });
+      query = query.range(dbFrom, dbFrom + DB_PAGE - 1);
+      const { data, error } = await query;
+      if (error) throw new Error(String(error.message || error));
+      const batch = Array.isArray(data) ? data : [];
+      if (batch.length === 0) {
+        exhausted = true;
+        break;
+      }
+      for (let i = 0; i < batch.length; i += 1) {
+        rowsScanned += 1;
+        const edge = batch[i];
+        if (currentSet.has(String(edge?.row_hash || ''))) continue;
+        const row = baselineEdgeToRow(edge, domainHost);
+        if (!rowMatchesSearch(row, search, false)) continue;
+        const er = enrichBacklinkRow(row, tierLookup);
+        if (tierFilter && er.page_tier !== tierFilter) continue;
+        all.push(er);
+        if (rowsScanned >= MAX_ROWS_SCAN) break;
+      }
+      dbFrom += DB_PAGE;
+      if (batch.length < DB_PAGE) {
+        exhausted = true;
+        break;
+      }
+      if (rowsScanned >= MAX_ROWS_SCAN) break;
+    }
+  }
+
+  return { rows: all, scanCapped: rowsScanned >= MAX_ROWS_SCAN, exhausted };
+}
+
+async function fetchRowsWithBaselineFilter(supabase, opts) {
+  const {
+    domainHost,
+    baselineMode,
+    follow,
+    rankMin,
+    rankMax,
+    search,
+    tierFilter,
+    tierLookup,
+    sortCol,
+    ascending,
+    limit,
+    offset
+  } = opts;
+
+  const { rows: collected, scanCapped, exhausted } = await collectBaselineFilteredRows(supabase, {
+    domainHost,
+    baselineMode,
+    follow,
+    rankMin,
+    rankMax,
+    search,
+    tierFilter: tierFilter || null,
+    tierLookup
+  });
+
+  collected.sort((a, b) => compareBacklinkRows(a, b, sortCol, ascending));
+  const page = collected.slice(offset, offset + limit);
+  const total = !scanCapped && exhausted ? collected.length : null;
+
+  return {
+    rows: page,
+    total,
+    tierFiltered: Boolean(tierFilter),
+    tier: tierFilter || null,
+    tierScanCapped: scanCapped,
+    baselineMode
+  };
+}
 
 function enrichBacklinkRow(row, tierLookup) {
   const r = row && typeof row === 'object' ? { ...row } : {};
   r.page_tier = getTierForUrlFromLookup(r.url_to, tierLookup, r.domain_host, true);
   return r;
+}
+
+function stripRowHash(rows) {
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    if (!row || typeof row !== 'object') return row;
+    const { row_hash: _h, ...rest } = row;
+    return rest;
+  });
 }
 
 function compareRowsForPageTierSort(a, b, tierAscending) {
@@ -277,6 +508,67 @@ export default async function handler(req, res) {
 
     const pageTierFilter = normalizePageTierParam(q.tier);
     const sortByPageTier = sortCol === 'page_tier';
+    const baselineMode = normalizeBaselineParam(q.baseline || q.baselineStatus);
+
+    if (baselineMode !== 'all') {
+      const baseState = await getBaselineFilterState(supabase, domainHost);
+      if (!baseState.ready) {
+        return sendJson(res, 200, {
+          status: 'ok',
+          data: {
+            domain: domainHost,
+            rows: [],
+            total: 0,
+            limit,
+            offset,
+            sort: sortCol,
+            dir: ascending ? 'asc' : 'desc',
+            tierFiltered: Boolean(pageTierFilter),
+            pageTier: pageTierFilter || null,
+            tierScanCapped: false,
+            baselineMode,
+            baselineReady: false,
+            baselineMessage: baseState.message
+          },
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
+
+      const r = await fetchRowsWithBaselineFilter(supabase, {
+        domainHost,
+        baselineMode,
+        follow,
+        rankMin,
+        rankMax,
+        search,
+        tierFilter: pageTierFilter || null,
+        tierLookup,
+        sortCol: sortByPageTier ? 'page_tier' : sortCol,
+        ascending,
+        limit,
+        offset
+      });
+
+      return sendJson(res, 200, {
+        status: 'ok',
+        data: {
+          domain: domainHost,
+          rows: stripRowHash(r.rows),
+          total: r.total,
+          limit,
+          offset,
+          sort: sortByPageTier ? 'page_tier' : sortCol,
+          dir: ascending ? 'asc' : 'desc',
+          tierFiltered: r.tierFiltered,
+          pageTier: pageTierFilter || null,
+          tierScanCapped: r.tierScanCapped,
+          baselineMode: r.baselineMode,
+          baselineReady: true,
+          baselineMessage: null
+        },
+        meta: { generatedAt: new Date().toISOString() }
+      });
+    }
 
     if (sortByPageTier) {
       const r = await fetchRowsPageTierSort(supabase, {
@@ -296,7 +588,7 @@ export default async function handler(req, res) {
         status: 'ok',
         data: {
           domain: domainHost,
-          rows: r.rows,
+          rows: stripRowHash(r.rows),
           total: r.total,
           limit,
           offset,
@@ -304,7 +596,10 @@ export default async function handler(req, res) {
           dir: ascending ? 'asc' : 'desc',
           tierFiltered: r.tierFiltered,
           pageTier: pageTierFilter || null,
-          tierScanCapped: r.tierScanCapped
+          tierScanCapped: r.tierScanCapped,
+          baselineMode: 'all',
+          baselineReady: true,
+          baselineMessage: null
         },
         meta: { generatedAt: new Date().toISOString() }
       });
@@ -329,7 +624,7 @@ export default async function handler(req, res) {
         status: 'ok',
         data: {
           domain: domainHost,
-          rows: tierResult.rows,
+          rows: stripRowHash(tierResult.rows),
           total: null,
           limit,
           offset,
@@ -337,7 +632,10 @@ export default async function handler(req, res) {
           dir: ascending ? 'asc' : 'desc',
           tierFiltered: true,
           pageTier: pageTierFilter,
-          tierScanCapped: tierResult.tierScanCapped
+          tierScanCapped: tierResult.tierScanCapped,
+          baselineMode: 'all',
+          baselineReady: true,
+          baselineMessage: null
         },
         meta: { generatedAt: new Date().toISOString() }
       });
@@ -358,7 +656,9 @@ export default async function handler(req, res) {
       return sendJson(res, 500, { status: 'error', message: String(error.message || error) });
     }
 
-    const rows = Array.isArray(data) ? data.map((row) => enrichBacklinkRow(row, tierLookup)) : [];
+    const rows = stripRowHash(
+      Array.isArray(data) ? data.map((row) => enrichBacklinkRow(row, tierLookup)) : []
+    );
 
     return sendJson(res, 200, {
       status: 'ok',
@@ -372,7 +672,10 @@ export default async function handler(req, res) {
         dir: ascending ? 'asc' : 'desc',
         tierFiltered: false,
         pageTier: null,
-        tierScanCapped: false
+        tierScanCapped: false,
+        baselineMode: 'all',
+        baselineReady: true,
+        baselineMessage: null
       },
       meta: { generatedAt: new Date().toISOString() }
     });
