@@ -137,13 +137,11 @@ async function fetchProducts(supabase) {
 // Candidate builders - one per priority type
 // ----------------------------------------------------------------------
 function ctrPriorityForTier(tierId, tierMetrics) {
-  // Find the page in this tier with the highest "recoverable clicks"
-  // (impressions * max(0, target_ctr - actual_ctr)).
   const eligible = tierMetrics.filter(r => (Number(r.impressions_28d) || 0) >= MIN_IMPRESSIONS_FOR_CTR_TASK);
   if (!eligible.length) return null;
   const scored = eligible.map(r => {
     const impr = Number(r.impressions_28d) || 0;
-    const ctr = Number(r.ctr_28d) || 0; // 0..1
+    const ctr = Number(r.ctr_28d) || 0;
     const targetCtr = Math.max(ctr * 1.5, TARGET_CTR_UPLIFT_PCT / 100);
     const uplift = Math.max(0, Math.round((targetCtr - ctr) * impr));
     return { row: r, uplift, ctrPct: ctr * 100, targetPct: targetCtr * 100, impr };
@@ -151,11 +149,12 @@ function ctrPriorityForTier(tierId, tierMetrics) {
     .sort((a, b) => b.uplift - a.uplift);
   if (!scored.length) return null;
   const top = scored[0];
+  const cleanedUrl = cleanUrl(top.row.page_url);
   return {
-    signature: `ctr|${top.row.page_url}`,
-    title: `Lift CTR on ${labelOf(top.row.page_url)}`,
-    description: `${top.row.page_url} has ${top.impr.toLocaleString()} impressions/28d at ${top.ctrPct.toFixed(2)}% CTR. Rewrite the SERP title (~60ch) and meta description (~155ch) to lead with the customer's outcome + price + location. Target ${top.targetPct.toFixed(1)}% CTR.`,
-    pages_affected: [top.row.page_url],
+    signature: `ctr|${cleanedUrl}`,
+    title: `Lift CTR on ${labelOf(cleanedUrl)}`,
+    description: `${cleanedUrl} has ${top.impr.toLocaleString()} impressions/28d at ${top.ctrPct.toFixed(2)}% CTR. Rewrite the SERP title (~60ch) and meta description (~155ch) to lead with the customer's outcome + price + location. Target ${top.targetPct.toFixed(1)}% CTR.`,
+    pages_affected: [cleanedUrl],
     primary_kpi: 'ctr_28d_pct',
     kpi_baseline_value: top.ctrPct,
     kpi_target_value: top.targetPct,
@@ -165,7 +164,6 @@ function ctrPriorityForTier(tierId, tierMetrics) {
 }
 
 function rankPriorityForTier(tierId, tierKeywords, _hubUrl) {
-  // Top tracked keyword at rank 5-20 with decent search volume.
   const eligible = tierKeywords
     .filter(k => {
       const r = k.best_rank_group;
@@ -175,11 +173,12 @@ function rankPriorityForTier(tierId, tierKeywords, _hubUrl) {
   if (!eligible.length) return null;
   const top = eligible[0];
   const targetRank = Math.max(3, Math.floor(Number(top.best_rank_group) / 2));
+  const cleanedUrl = cleanUrl(top.best_url || '');
   return {
-    signature: `rank|${top.keyword}|${top.best_url || ''}`,
+    signature: `rank|${top.keyword}|${cleanedUrl}`,
     title: `Lift "${top.keyword}" from rank ${top.best_rank_group} to top ${targetRank}`,
-    description: `${top.best_url || '(no URL)'} ranks #${top.best_rank_group} for "${top.keyword}" (${Number(top.search_volume).toLocaleString()} searches/mo). Strengthen the page: add a comparison table, customer outcome paragraphs, and 6-8 FAQ items mirroring the People-Also-Ask block. Re-build the internal link block from the tier hub.`,
-    pages_affected: top.best_url ? [top.best_url] : [],
+    description: `${cleanedUrl || '(no URL)'} ranks #${top.best_rank_group} for "${top.keyword}" (${Number(top.search_volume).toLocaleString()} searches/mo). Strengthen the page: add a comparison table, customer outcome paragraphs, and 6-8 FAQ items mirroring the People-Also-Ask block. Re-build the internal link block from the tier hub.`,
+    pages_affected: cleanedUrl ? [cleanedUrl] : [],
     primary_kpi: 'rank_position',
     kpi_baseline_value: Number(top.best_rank_group),
     kpi_target_value: targetRank,
@@ -189,17 +188,17 @@ function rankPriorityForTier(tierId, tierKeywords, _hubUrl) {
 }
 
 function aioCitationPriority(tierId, tierKeywords) {
-  // Top keyword in this tier where AIO exists but we're NOT cited.
   const uncited = tierKeywords
     .filter(k => k.has_ai_overview && !(Number(k.ai_alan_citations_count) > 0))
     .sort((a, b) => (Number(b.search_volume) || 0) - (Number(a.search_volume) || 0));
   if (!uncited.length) return null;
   const top = uncited[0];
+  const cleanedUrl = cleanUrl(top.best_url || '');
   return {
     signature: `aio|${top.keyword}`,
     title: `Get cited in Google's AI Overview for "${top.keyword}"`,
-    description: `An AI Overview exists for "${top.keyword}" (${Number(top.search_volume).toLocaleString()}/mo) but no alanranger.com citation. Add a short, structured answer block on ${top.best_url || 'the best matching page'} that directly answers the AIO query, followed by 3-5 supporting FAQs using question/answer schema markup mirroring the AIO summary.`,
-    pages_affected: top.best_url ? [top.best_url] : [],
+    description: `An AI Overview exists for "${top.keyword}" (${Number(top.search_volume).toLocaleString()}/mo) but no alanranger.com citation. Add a short, structured answer block on ${cleanedUrl || 'the best matching page'} that directly answers the AIO query, followed by 3-5 supporting FAQs using question/answer schema markup mirroring the AIO summary.`,
+    pages_affected: cleanedUrl ? [cleanedUrl] : [],
     primary_kpi: 'aio_citations',
     kpi_baseline_value: 0,
     kpi_target_value: 1,
@@ -209,8 +208,6 @@ function aioCitationPriority(tierId, tierKeywords) {
 }
 
 function orphanProductPriority(tierId, products, tierMetricsByUrl) {
-  // Product with the highest price in this tier that has 0 impressions in 28d
-  // (= effectively orphaned from the SEO point of view).
   const orphans = products
     .filter(p => {
       const m = tierMetricsByUrl.get(p.product_url);
@@ -219,11 +216,12 @@ function orphanProductPriority(tierId, products, tierMetricsByUrl) {
     .sort((a, b) => (Number(b.display_price_gbp) || 0) - (Number(a.display_price_gbp) || 0));
   if (!orphans.length) return null;
   const top = orphans[0];
+  const cleanedUrl = cleanUrl(top.product_url || '');
   return {
-    signature: `orphan|${top.product_url}`,
+    signature: `orphan|${cleanedUrl}`,
     title: `Surface orphan product: ${top.product_title}`,
-    description: `${top.product_url} has 0 GSC impressions in the last 28 days (price £${Number(top.display_price_gbp) || 0}). Add it to the ${TIER_HUBS[tierId].label} hub's product grid, write 250-400 words of unique content above the booking widget answering "who is this for / what you'll learn / what's included", and link from a relevant blog post.`,
-    pages_affected: [top.product_url, TIER_HUBS[tierId].hubUrl],
+    description: `${cleanedUrl} has 0 GSC impressions in the last 28 days (price £${Number(top.display_price_gbp) || 0}). Add it to the ${TIER_HUBS[tierId].label} hub's product grid, write 250-400 words of unique content above the booking widget answering "who is this for / what you'll learn / what's included", and link from a relevant blog post.`,
+    pages_affected: [cleanedUrl, TIER_HUBS[tierId].hubUrl],
     primary_kpi: 'impressions_28d',
     kpi_baseline_value: 0,
     kpi_target_value: 100,
@@ -289,6 +287,25 @@ function labelOf(url) {
     return segs.length ? segs[segs.length - 1].replace(/[-_]+/g, ' ') : '/';
   } catch {
     return url;
+  }
+}
+
+// Strip tracking parameters (srsltid, utm_*, gclid, fbclid, mc_eid, _gl)
+// from URLs returned by GSC/keyword data so priorities display clean paths.
+const TRACKING_PARAM_PREFIXES = ['srsltid', 'utm_', 'gclid', 'fbclid', 'mc_eid', '_gl'];
+function cleanUrl(rawUrl) {
+  if (!rawUrl) return '';
+  try {
+    const u = new URL(rawUrl, 'https://www.alanranger.com');
+    const keys = Array.from(u.searchParams.keys());
+    keys.forEach(k => {
+      const lk = k.toLowerCase();
+      if (TRACKING_PARAM_PREFIXES.some(p => lk === p || lk.startsWith(p))) u.searchParams.delete(k);
+    });
+    u.hash = '';
+    return u.toString();
+  } catch {
+    return String(rawUrl).replace(/[?&](srsltid|utm_[^=]+|gclid|fbclid|mc_eid|_gl)=[^&]*/gi, '');
   }
 }
 
