@@ -25,6 +25,7 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
+import { classifyCommercialTier, emptyTierAccumulator } from './commercial-tier.js';
 
 const SQS_BASE = 'https://api.squarespace.com/1.0/commerce/orders';
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
@@ -143,6 +144,65 @@ function isUsableOrder(order, includeCancelled) {
   return true;
 }
 
+// Per-line-item net value: unitPrice * qty, with a proportional share of the
+// order-level discount and refund applied so the per-tier total adds up to
+// the order net value within rounding.
+function lineNetValue(item) {
+  const unit = Number(item?.unitPricePaid?.value) || Number(item?.unitPrice?.value) || 0;
+  const qty = Number(item?.quantity) || 1;
+  return Math.max(0, unit * qty);
+}
+
+function lineProductInfo(item) {
+  return {
+    productName: item?.productName || item?.lineItemType || '',
+    productUrl: item?.productUrl || item?.product_url || ''
+  };
+}
+
+// Split an order's net value across its line items by tier. Returns
+// { workshops: 0, courses: 0, services: 0, hire: 0, academy: 0, other: 0 }
+// and matching transactions ({ workshops: 0|1, ... } using "any line in tier"
+// as the rule so an order with mixed tiers counts in each tier it touched).
+function splitOrderByTier(order) {
+  const lines = Array.isArray(order?.lineItems) ? order.lineItems : [];
+  const orderNet = orderNetValue(order);
+  const grossPerLine = lines.map(lineNetValue);
+  const grossTotal = grossPerLine.reduce((a, b) => a + b, 0);
+  const revenue = emptyTierAccumulator();
+  const transactions = emptyTierAccumulator();
+  if (!lines.length || grossTotal <= 0) {
+    revenue.other += orderNet;
+    if (orderNet > 0) transactions.other = 1;
+    return { revenue, transactions };
+  }
+  const tiersHit = new Set();
+  for (let i = 0; i < lines.length; i += 1) {
+    const item = lines[i];
+    const gross = grossPerLine[i];
+    if (gross <= 0) continue;
+    const share = gross / grossTotal;
+    const net = orderNet * share;
+    const tier = classifyCommercialTier(lineProductInfo(item));
+    revenue[tier] = (revenue[tier] || 0) + net;
+    tiersHit.add(tier);
+  }
+  for (const tier of tiersHit) transactions[tier] = 1;
+  return { revenue, transactions };
+}
+
+function addToTierAccum(target, source) {
+  for (const key of Object.keys(source || {})) {
+    target[key] = (target[key] || 0) + (source[key] || 0);
+  }
+}
+
+function roundTierAccum(accum) {
+  const out = {};
+  for (const k of Object.keys(accum || {})) out[k] = Number((accum[k] || 0).toFixed(2));
+  return out;
+}
+
 function inRange(dateStr, range) {
   if (!dateStr) return false;
   return dateStr >= range.start && dateStr <= range.end;
@@ -160,10 +220,27 @@ function monthBounds(monthKey) {
   return { start, end };
 }
 
+function newBucket(currency) {
+  return {
+    revenue: 0,
+    transactions: 0,
+    currency,
+    tierRevenue: emptyTierAccumulator(),
+    tierTransactions: emptyTierAccumulator()
+  };
+}
+
+function applyOrderToBucket(bucket, value, tierSplit) {
+  bucket.revenue += value;
+  bucket.transactions += 1;
+  addToTierAccum(bucket.tierRevenue, tierSplit.revenue);
+  addToTierAccum(bucket.tierTransactions, tierSplit.transactions);
+}
+
 function aggregateOrders(orders, range, includeCancelled) {
   const summary = {
-    inWindow: { revenue: 0, transactions: 0, currency: null },
-    byMonth: {} // { 'YYYY-MM': { revenue, transactions, currency } }
+    inWindow: newBucket(null),
+    byMonth: {} // { 'YYYY-MM': bucket }
   };
   for (const order of orders) {
     if (!isUsableOrder(order, includeCancelled)) continue;
@@ -171,36 +248,41 @@ function aggregateOrders(orders, range, includeCancelled) {
     if (!day) continue;
     const value = orderNetValue(order);
     const currency = order?.grandTotal?.currency || 'GBP';
+    const tierSplit = splitOrderByTier(order);
     if (inRange(day, range)) {
-      summary.inWindow.revenue += value;
-      summary.inWindow.transactions += 1;
       summary.inWindow.currency = summary.inWindow.currency || currency;
+      applyOrderToBucket(summary.inWindow, value, tierSplit);
     }
     const mKey = monthOf(day);
     if (mKey) {
-      const bucket = summary.byMonth[mKey] || { revenue: 0, transactions: 0, currency };
-      bucket.revenue += value;
-      bucket.transactions += 1;
+      const bucket = summary.byMonth[mKey] || newBucket(currency);
       bucket.currency = bucket.currency || currency;
+      applyOrderToBucket(bucket, value, tierSplit);
       summary.byMonth[mKey] = bucket;
     }
   }
   return summary;
 }
 
+function bucketToRow(propertyUrl, bucket, periodStart, periodEnd, notes) {
+  return {
+    property_url: propertyUrl,
+    period_start: periodStart,
+    period_end: periodEnd,
+    revenue_amount: Number(bucket.revenue.toFixed(2)),
+    currency: bucket.currency || 'GBP',
+    source: 'squarespace_api',
+    transactions: bucket.transactions,
+    tier_revenue: roundTierAccum(bucket.tierRevenue),
+    tier_transactions: roundTierAccum(bucket.tierTransactions),
+    notes
+  };
+}
+
 function buildRowsToSave(propertyUrl, summary, range, modes) {
   const rows = [];
   if (modes.has('single')) {
-    rows.push({
-      property_url: propertyUrl,
-      period_start: range.start,
-      period_end: range.end,
-      revenue_amount: Number(summary.inWindow.revenue.toFixed(2)),
-      currency: summary.inWindow.currency || 'GBP',
-      source: 'squarespace_api',
-      transactions: summary.inWindow.transactions,
-      notes: `Synced from Squarespace Orders API`
-    });
+    rows.push(bucketToRow(propertyUrl, summary.inWindow, range.start, range.end, 'Synced from Squarespace Orders API'));
   }
   if (modes.has('monthly')) {
     const monthKeys = Object.keys(summary.byMonth).sort((a, b) => a.localeCompare(b));
@@ -208,16 +290,7 @@ function buildRowsToSave(propertyUrl, summary, range, modes) {
       const bucket = summary.byMonth[mKey];
       const bounds = monthBounds(mKey);
       if (bounds.end < range.start || bounds.start > range.end) continue;
-      rows.push({
-        property_url: propertyUrl,
-        period_start: bounds.start,
-        period_end: bounds.end,
-        revenue_amount: Number(bucket.revenue.toFixed(2)),
-        currency: bucket.currency || 'GBP',
-        source: 'squarespace_api',
-        transactions: bucket.transactions,
-        notes: `Auto-synced calendar month`
-      });
+      rows.push(bucketToRow(propertyUrl, bucket, bounds.start, bounds.end, 'Auto-synced calendar month'));
     }
   }
   return rows;
@@ -293,6 +366,8 @@ export default async function handler(req, res) {
       revenue_in_window: Number(summary.inWindow.revenue.toFixed(2)),
       currency: summary.inWindow.currency || 'GBP',
       months_synced: Object.keys(summary.byMonth).length,
+      tier_revenue_in_window: roundTierAccum(summary.inWindow.tierRevenue),
+      tier_transactions_in_window: roundTierAccum(summary.inWindow.tierTransactions),
       saved
     });
   } catch (err) {

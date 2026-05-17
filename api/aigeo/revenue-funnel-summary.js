@@ -356,7 +356,7 @@ function isCalendarMonthRow(row) {
 async function fetchRevenueHistory(supabase, propertyUrl) {
   const { data, error } = await supabase
     .from('revenue_snapshots')
-    .select('period_start, period_end, revenue_amount, currency, source, transactions')
+    .select('period_start, period_end, revenue_amount, currency, source, transactions, tier_revenue, tier_transactions')
     .eq('property_url', propertyUrl)
     .order('period_end', { ascending: false })
     .limit(60);
@@ -372,20 +372,72 @@ async function fetchRevenueHistory(supabase, propertyUrl) {
   return sorted.slice(-12);
 }
 
+function targetForMonth(periodStart) {
+  const monthIdx = Number(periodStart.slice(5, 7)) - 1;
+  return SEASONAL_MONTHLY_TARGETS[monthIdx] || null;
+}
+
+function variancePct(revenue, target) {
+  if (!target || target <= 0) return null;
+  return ((revenue - target) / target) * 100;
+}
+
 // Attach per-month seasonal targets + variance % to the history rows.
-// month index 0..11; targets read from SEASONAL_MONTHLY_TARGETS.
 function decorateHistoryWithTargets(history) {
+  const todayIso = new Date().toISOString().slice(0, 10);
   return history.map(row => {
-    const monthIdx = Number(row.period_start.slice(5, 7)) - 1;
-    const target = SEASONAL_MONTHLY_TARGETS[monthIdx] || null;
+    const target = targetForMonth(row.period_start);
     const revenue = Number(row.revenue_amount) || 0;
-    let variance_pct = null;
-    if (target && target > 0) variance_pct = ((revenue - target) / target) * 100;
-    // Mark partial-month rows so the UI can show them differently
-    const todayIso = new Date().toISOString().slice(0, 10);
-    const is_partial = row.period_end > todayIso;
-    return { ...row, target, variance_pct, is_partial };
+    return {
+      ...row,
+      target,
+      variance_pct: variancePct(revenue, target),
+      is_partial: row.period_end > todayIso
+    };
   });
+}
+
+// Build a per-tier history series the dashboard can render as a mini
+// sparkline. For each commercial tier we return:
+//   { tier_id, tier_label, monthly_target, monthly_total_28d, points: [
+//       { month, revenue, target, variance_pct, is_partial }
+//     ] }
+// The `revenue` value is read from `revenue_snapshots.tier_revenue[tier_id]`
+// when present, falling back to null (UI shows "no data" for that point).
+function emptyTierSeries() {
+  return MONEY_PAGE_TIERS.map(t => ({
+    tier_id: t.id,
+    tier_label: t.label,
+    monthly_target: t.monthlyTarget,
+    points: []
+  }));
+}
+
+function tierMapOf(row) {
+  if (row.tier_revenue && typeof row.tier_revenue === 'object') return row.tier_revenue;
+  return null;
+}
+
+function tierPoint(row, tierMap, series) {
+  const revenue = tierMap ? Number(tierMap[series.tier_id]) : null;
+  const isNum = Number.isFinite(revenue);
+  return {
+    month: row.period_start.slice(0, 7),
+    revenue: isNum ? revenue : null,
+    target: series.monthly_target,
+    variance_pct: isNum ? variancePct(revenue, series.monthly_target) : null,
+    is_partial: row.is_partial,
+    has_tier_breakdown: tierMap !== null
+  };
+}
+
+function buildTierHistory(history) {
+  const out = emptyTierSeries();
+  for (const row of history || []) {
+    const tierMap = tierMapOf(row);
+    for (const series of out) series.points.push(tierPoint(row, tierMap, series));
+  }
+  return out;
 }
 
 // -----------------------------------------------------------------
@@ -600,6 +652,7 @@ export default async function handler(req, res) {
     const moneyPagePerformance = pickMoneyPagePerformance(pageRows, aiMap);
     const kpiTargets = computeKpiTargets(kpis, revenueSnap);
     const revenueHistoryDecorated = decorateHistoryWithTargets(revenueHistory);
+    const tierHistory = buildTierHistory(revenueHistoryDecorated);
     return send(res, 200, {
       property_url: propertyUrl,
       generated_at: new Date().toISOString(),
@@ -614,6 +667,7 @@ export default async function handler(req, res) {
       money_page_performance: moneyPagePerformance,
       latest_revenue: revenueSnap,
       revenue_history: revenueHistoryDecorated,
+      tier_history: tierHistory,
       tiers: MONEY_PAGE_TIERS.map(t => ({ id: t.id, label: t.label, hub_url: t.hubUrl, monthly_target: t.monthlyTarget }))
     });
   } catch (err) {
