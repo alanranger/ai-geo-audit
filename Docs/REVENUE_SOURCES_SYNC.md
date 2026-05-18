@@ -31,9 +31,43 @@ hold one row per source without collisions.
   match Squarespace API's PayPal-at-checkout orders almost exactly.
   Run with `--include-paypal` if you have direct PayPal invoices that
   bypass Squarespace.
-- **Booking Sheet importer ignores Gift Voucher Out / PicknMix**. Those
-  are net-zero accounting entries (redemption against an earlier sale)
-  and would inflate totals.
+- **Booking Sheet importer ignores `Funding = PicknMix`** (since 2026-05-18).
+  Squarespace orders that redeem a Pick n Mix plan come through the SQ
+  Orders API as 100%-discount orders with a `PICKNMIX` promo code, and
+  `squarespace-revenue-sync.js` now splits them into the correct workshop
+  tiers + a `services` debit deterministically. Including the spreadsheet's
+  manual `PicknMix Out` / `PicknMix In` rows here as well would double-
+  count the reallocation. (See `splitPickNMixRedemption` in
+  `api/aigeo/squarespace-revenue-sync.js`.)
+- **Booking Sheet importer still INCLUDES `Funding = Gift Voucher Out`**.
+  These rows model voucher-redemption debits and credits between tiers
+  (e.g. -£100 from the `services` voucher pool plus +£100 to a workshop
+  tier when a customer pays with a £100 voucher). The SQ Orders API
+  cannot see this debit/credit pattern, so the spreadsheet remains the
+  source of truth here.
+
+## Product → tier classification
+
+The `commercial-tier.js` classifier consults `lib/product-tier-map.js`
+first, which builds a lookup from two Supabase tables in the AI-chat
+project:
+
+- `csv_metadata` (workshop_products + course_products rows) drives most
+  classifications from the products' own categories — e.g. anything
+  tagged `- weekend residential photo workshops` lands in
+  `workshops_residential`.
+- `product_tier_override` provides manual overrides keyed on any one of
+  three lookup keys:
+  - `url_slug` — exact path match (use for products with a stable URL).
+  - `product_id` — Squarespace product GUID match (use for SQ Commerce
+    Orders line items, which return blank `productUrl`, so url_slug
+    matching is impossible).
+  - `title_prefix` — lowercased `titlePrefix()` match (use for products
+    whose name is stable but URL/ID are not — e.g. custom one-off
+    commission lines, academy/services add-ons).
+
+Each row's `tier_id` wins over the csv_metadata classification. Add new
+rows directly in Supabase; the in-process cache refreshes every 5 min.
 
 ## How the dashboard merges them
 

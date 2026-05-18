@@ -88,14 +88,18 @@ console.log('\nSpreadsheet 2026 YTD per tier (Jan-May, all funding sources):');
 for (const k of Object.keys(sheet).sort()) console.log(`  ${k.padEnd(22)} \u00a3${sheet[k].toFixed(2).padStart(10)}`);
 
 // Dashboard side: post-fix figures from Supabase revenue_snapshots.
-const SQ     = { workshops_residential: 7310, workshops_nonres: 3342, courses: 2150, services:  750, hire:  770, academy:   20, unidentified: 205 };
+// SQ values updated 2026-05-18 after applying product_tier_override
+// rows for Foundation Plus / Premium Membership / Photo Edits / #3208
+// Ben Lucy commission, and resyncing 2026-01-01..2026-05-31.
+const SQ     = { workshops_residential: 7310, workshops_nonres: 3342, courses: 2150, services:  880, hire:  845, academy:   20, unidentified:   0 };
 const STRIPE = { workshops_residential:    0, workshops_nonres:    0, courses:    0, services:  405, hire:  500, academy: 1263, unidentified:   0 };
-// Booking-sheet 2026 YTD = sum of 4 monthly snapshots from Supabase:
-//   Jan: res 575,    nonres 610, hire 436.67, services -1020
-//   Feb:             nonres 170,              services 286
-//   Mar:             nonres 110, hire 591.62
-//   Apr: res 100,    nonres 965, hire 232.75, courses 100, services -325
-const BOOKSHEET = { workshops_residential: 675, workshops_nonres: 1855, courses: 100, services: -1059, hire: 1261.04, academy: 0, unidentified: 0 };
+// Booking-sheet 2026 YTD = sum of 4 monthly snapshots from Supabase
+// AFTER the PicknMix dedup (re-uploaded 2026-05-18):
+//   Jan:                          nonres 165, hire 436.67
+//   Feb:                          nonres 170, services 286
+//   Mar:                          nonres 110, hire 591.62
+//   Apr: res 100, courses 100,    nonres 965, hire 232.75, services -325
+const BOOKSHEET = { workshops_residential: 100, workshops_nonres: 1410, courses: 100, services: -39, hire: 1261.04, academy: 0, unidentified: 0 };
 
 console.log('\n--- 2026 YTD reconciliation by tier ---');
 console.log('  Tier                    | SQ       | Stripe  | Book-sheet | Dashboard | Spreadsheet | Diff');
