@@ -157,7 +157,8 @@ function lineNetValue(item) {
 function lineProductInfo(item) {
   return {
     productName: item?.productName || item?.lineItemType || '',
-    productUrl: item?.productUrl || item?.product_url || ''
+    productUrl: item?.productUrl || item?.product_url || '',
+    productId: item?.productId || item?.product_id || ''
   };
 }
 

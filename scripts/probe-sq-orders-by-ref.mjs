@@ -11,16 +11,8 @@ dotenvConfig({ path: '.env.local' });
 const KEY = process.env.SQUARESPACE_API_KEY;
 if (!KEY) { console.error('No SQUARESPACE_API_KEY'); process.exit(1); }
 
-const WANTED = new Set([
-  '#03189', // Penelope Ulander - Hartland Quay
-  '#03203', // Chris Stamp - Yorkshire Dales
-  '#03207', // Jo Galloway - originally Lake Vyrnwy, swapped to Anglesey
-  '#03217', // Sofia Garza - Yorkshire Dales
-  '#03243', // Dale Creaser - Snowdonia
-  '#03251', // Peter Orton - Hartland Quay devon
-  '#03261', // Mahesh Patel - Lake Vyrnwy
-  '#03291', // Michael White - Anglesey 3-day residential
-]);
+const WANTED = new Set();
+const FIND_UNIDENTIFIED = true;
 
 const BASE = 'https://api.squarespace.com/1.0/commerce/orders';
 // Widen the modification window backwards to make sure orders #03189-#03291

@@ -277,22 +277,27 @@ function workshopSubTier(path, name) {
 // product types start landing in the catch-all.
 //
 // Accepts either:
-//   classifyCommercialTier({ productUrl, productName })
+//   classifyCommercialTier({ productUrl, productName, productId })
 //   classifyCommercialTier(productUrl, productName)
 //
-// Either argument can be empty - one signal is enough.
+// Any argument can be empty - one signal is enough. productId is the SQ
+// product GUID and lets product_tier_override match line items whose
+// productUrl comes back blank from the SQ Commerce Orders API (which it
+// always does).
 export function classifyCommercialTier(arg1, arg2) {
   let productUrl = '';
   let productName = '';
+  let productId = '';
   if (typeof arg1 === 'object' && arg1 !== null) {
     productUrl = arg1.productUrl || arg1.product_url || arg1.url || '';
     productName = arg1.productName || arg1.product_name || arg1.title || arg1.product_title || '';
+    productId = arg1.productId || arg1.product_id || '';
   } else {
     productUrl = arg1 || '';
     productName = arg2 || '';
   }
   if (PRODUCT_TIER_MAP) {
-    const mapped = classifyByMap(PRODUCT_TIER_MAP, productUrl, productName);
+    const mapped = classifyByMap(PRODUCT_TIER_MAP, productUrl, productName, productId);
     if (mapped) return promoteResidentialIfMislabelled(mapped, productName);
   }
   const path = pathOf(productUrl);
