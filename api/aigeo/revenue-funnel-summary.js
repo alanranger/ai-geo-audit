@@ -367,20 +367,30 @@ function addTierMaps(target, source) {
 }
 
 function mergeRevenueRows(base, others) {
+  const baseRev = Number(base.revenue_amount) || 0;
+  const baseTxn = Number(base.transactions) || 0;
+  const sourceBreakdown = { [base.source]: { revenue: baseRev, transactions: baseTxn } };
   const merged = {
     ...base,
-    revenue_amount: Number(base.revenue_amount) || 0,
-    transactions: Number(base.transactions) || 0,
+    revenue_amount: baseRev,
+    transactions: baseTxn,
     tier_revenue: { ...(base.tier_revenue || {}) },
     tier_transactions: { ...(base.tier_transactions || {}) },
-    sources: [base.source]
+    sources: [base.source],
+    source_breakdown: sourceBreakdown
   };
   for (const row of others || []) {
-    merged.revenue_amount += Number(row.revenue_amount) || 0;
-    merged.transactions += Number(row.transactions) || 0;
+    const rev = Number(row.revenue_amount) || 0;
+    const txn = Number(row.transactions) || 0;
+    merged.revenue_amount += rev;
+    merged.transactions += txn;
     addTierMaps(merged.tier_revenue, row.tier_revenue);
     addTierMaps(merged.tier_transactions, row.tier_transactions);
     merged.sources.push(row.source);
+    const slot = sourceBreakdown[row.source] || { revenue: 0, transactions: 0 };
+    slot.revenue += rev;
+    slot.transactions += txn;
+    sourceBreakdown[row.source] = slot;
   }
   return merged;
 }
