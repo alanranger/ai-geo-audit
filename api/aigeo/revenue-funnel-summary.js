@@ -845,6 +845,14 @@ function finaliseTierBucket(bucket) {
   const aov = AOV_BY_TIER[bucket.tier_id] || 150;
   bucket.aov_assumed = aov;
   bucket.revenue_potential_28d = Math.round(bucket.clicks_28d * TARGET_CONVERSION * aov);
+  // GP-weighted potential: how much PROFIT (not revenue) is on the table
+  // if we capture the 1%-of-clicks "industry baseline" conversion. This
+  // is the metric the smart-priorities engine + UI should sort on, not
+  // raw revenue, because £1k revenue at 35% GP buys less than £600
+  // revenue at 99% GP.
+  bucket.gross_profit_potential_28d = bucket.gross_profit_pct != null
+    ? Math.round(bucket.revenue_potential_28d * (bucket.gross_profit_pct / 100))
+    : null;
   bucket.pages = bucket.pages.slice(0, 5);
   return bucket;
 }

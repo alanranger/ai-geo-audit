@@ -150,6 +150,9 @@ function ctrPriorityForTier(tierId, tierMetrics) {
   if (!scored.length) return null;
   const top = scored[0];
   const cleanedUrl = cleanUrl(top.row.page_url);
+  const revLift = Math.round(top.uplift * estimatedAovPerClick(tierId));
+  const gpLift = Math.round(top.uplift * estimatedGpPerClick(tierId));
+  const gpPct = estimatedGpPctForTier(tierId);
   return {
     signature: `ctr|${cleanedUrl}`,
     title: `Lift CTR on ${labelOf(cleanedUrl)}`,
@@ -159,7 +162,9 @@ function ctrPriorityForTier(tierId, tierMetrics) {
     kpi_baseline_value: top.ctrPct,
     kpi_target_value: top.targetPct,
     kpi_target_direction: 'up',
-    estimated_lift: `+${top.uplift} clicks/28d (~£${Math.round(top.uplift * estimatedAovPerClick(tierId)).toLocaleString()} potential)`
+    estimated_lift: `+${top.uplift} clicks/28d → ~£${revLift.toLocaleString()} revenue / ~£${gpLift.toLocaleString()} profit (${gpPct}% GP)`,
+    estimated_lift_gbp_revenue: revLift,
+    estimated_lift_gbp_profit: gpLift
   };
 }
 
@@ -188,22 +193,36 @@ function rankPriorityForTier(tierId, tierKeywords, _hubUrl) {
 }
 
 function aioCitationPriority(tierId, tierKeywords) {
+  // Re-rank uncited AIO keywords by GP-weighted potential rather than
+  // raw search volume. A 1k/mo academy keyword (99% GP) outranks a
+  // 5k/mo residential workshops keyword (35% GP) because the profit
+  // captured per click is dramatically higher even at lower volume.
+  const gpPct = estimatedGpPctForTier(tierId);
+  const aov = estimatedAovPerClick(tierId);
   const uncited = tierKeywords
     .filter(k => k.has_ai_overview && !(Number(k.ai_alan_citations_count) > 0))
-    .sort((a, b) => (Number(b.search_volume) || 0) - (Number(a.search_volume) || 0));
+    .map(k => ({ kw: k, vol: Number(k.search_volume) || 0 }))
+    // Assume an AIO citation captures ~3% of the AIO query volume as
+    // an aggressive-but-realistic monthly click lift, then convert to
+    // monthly profit via the tier's GP%.
+    .map(x => ({ ...x, gpLift: Math.round(x.vol * 0.03 * aov * (gpPct / 100)) }))
+    .sort((a, b) => b.gpLift - a.gpLift);
   if (!uncited.length) return null;
   const top = uncited[0];
-  const cleanedUrl = cleanUrl(top.best_url || '');
+  const cleanedUrl = cleanUrl(top.kw.best_url || '');
+  const revLift = Math.round(top.vol * 0.03 * aov);
   return {
-    signature: `aio|${top.keyword}`,
-    title: `Get cited in Google's AI Overview for "${top.keyword}"`,
-    description: `An AI Overview exists for "${top.keyword}" (${Number(top.search_volume).toLocaleString()}/mo) but no alanranger.com citation. Add a short, structured answer block on ${cleanedUrl || 'the best matching page'} that directly answers the AIO query, followed by 3-5 supporting FAQs using question/answer schema markup mirroring the AIO summary.`,
+    signature: `aio|${top.kw.keyword}`,
+    title: `Get cited in Google's AI Overview for "${top.kw.keyword}"`,
+    description: `An AI Overview exists for "${top.kw.keyword}" (${top.vol.toLocaleString()}/mo) but no alanranger.com citation. Add a short, structured answer block on ${cleanedUrl || 'the best matching page'} that directly answers the AIO query, followed by 3-5 supporting FAQs using question/answer schema markup mirroring the AIO summary.`,
     pages_affected: cleanedUrl ? [cleanedUrl] : [],
     primary_kpi: 'aio_citations',
     kpi_baseline_value: 0,
     kpi_target_value: 1,
     kpi_target_direction: 'up',
-    estimated_lift: `Citation on a ${Number(top.search_volume).toLocaleString()}/mo AIO query in the ${tierId} tier`
+    estimated_lift: `${top.vol.toLocaleString()}/mo AIO query · ~£${revLift.toLocaleString()}/mo revenue → ~£${top.gpLift.toLocaleString()}/mo profit at ${gpPct}% GP`,
+    estimated_lift_gbp_revenue: revLift,
+    estimated_lift_gbp_profit: top.gpLift
   };
 }
 
@@ -314,6 +333,29 @@ function estimatedAovPerClick(tierId) {
   return AOV_PER_CLICK[tierId] || 1.5;
 }
 
+// GP% per tier — mirrors the constants in revenue-funnel-summary.js.
+// Used to convert revenue-side lift estimates ("£X potential")
+// into PROFIT-side lift ("£X profit kept"), which is what the
+// smart-priorities ranker should optimise for. Workshops splits
+// residential (35%) vs nonres (75%); the smart-priorities engine still
+// uses the legacy "workshops" mega-tier, so we use the conservative 55%
+// blend until that's refactored. Hire blends prints+commissions.
+const GP_PCT_PER_TIER = {
+  workshops: 55,
+  workshops_residential: 35,
+  workshops_nonres: 75,
+  courses: 90,
+  services: 78,
+  hire: 92,
+  academy: 99
+};
+function estimatedGpPctForTier(tierId) {
+  return GP_PCT_PER_TIER[tierId] != null ? GP_PCT_PER_TIER[tierId] : 60;
+}
+function estimatedGpPerClick(tierId) {
+  return estimatedAovPerClick(tierId) * (estimatedGpPctForTier(tierId) / 100);
+}
+
 // ----------------------------------------------------------------------
 // Master builder
 // ----------------------------------------------------------------------
@@ -329,8 +371,13 @@ function buildPrioritiesForTier(tierId, tierData) {
 }
 
 function buildAllPriorities(snapshot) {
-  const out = [];
-  let sortOrder = 0;
+  // First, collect every tier's candidates without sort_order. We then
+  // sort ALL candidates by GP-weighted lift (estimated_lift_gbp_profit)
+  // so the top of the priority queue is "biggest profit win" rather
+  // than "first tier in COMMERCIAL_TIERS order". Candidates without a
+  // numeric lift estimate (rank-improvement, orphan, schema-gap) keep
+  // their relative order at the back of the queue.
+  const collected = [];
   for (const tier of COMMERCIAL_TIERS) {
     const tierId = tier.id;
     const tierData = {
@@ -343,18 +390,22 @@ function buildAllPriorities(snapshot) {
     };
     const cands = buildPrioritiesForTier(tierId, tierData);
     for (const c of cands) {
-      sortOrder += 10;
-      out.push({
+      collected.push({
         ...c,
         property_url: snapshot.propertyUrl,
         tier_id: tierId,
         tier_label: tier.label,
-        sort_order: sortOrder,
         status: 'not_started'
       });
     }
   }
-  return out;
+  collected.sort((a, b) => {
+    const aProf = Number(a.estimated_lift_gbp_profit) || 0;
+    const bProf = Number(b.estimated_lift_gbp_profit) || 0;
+    if (aProf !== bProf) return bProf - aProf;
+    return 0;
+  });
+  return collected.map((c, i) => ({ ...c, sort_order: (i + 1) * 10 }));
 }
 
 // ----------------------------------------------------------------------
@@ -468,7 +519,9 @@ export default async function handler(req, res) {
           title: c.title, description: c.description, pages_affected: c.pages_affected,
           primary_kpi: c.primary_kpi, kpi_baseline_value: c.kpi_baseline_value,
           kpi_target_value: c.kpi_target_value, kpi_target_direction: c.kpi_target_direction,
-          estimated_lift: c.estimated_lift
+          estimated_lift: c.estimated_lift,
+          estimated_lift_gbp_revenue: c.estimated_lift_gbp_revenue ?? null,
+          estimated_lift_gbp_profit: c.estimated_lift_gbp_profit ?? null
         }))
       });
     }
