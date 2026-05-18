@@ -27,8 +27,13 @@ export const COMMERCIAL_TIERS = [
   { id: 'workshops_nonres',      label: 'Workshops (Non-Res)' },
   { id: 'courses',               label: 'Courses' },
   { id: 'services',              label: '1-2-1 & Services' },
-  { id: 'hire',                  label: 'Hire / Commercial' },
-  { id: 'academy',               label: 'Academy' }
+  { id: 'hire',                  label: 'Hire (Commercial)' },
+  { id: 'academy',               label: 'Academy' },
+  // Safety-net bucket: anything the classifier can't confidently assign
+  // lands here so it's visible on the dashboard for review (replaces the
+  // old silent 'other' fallback). When a new product type starts landing
+  // here we add a name/url token to the rules above.
+  { id: 'unidentified',          label: 'Unidentified (needs review)' }
 ];
 
 // Residential workshop URL slugs (canonical list, sourced from
@@ -90,13 +95,38 @@ const RULES = [
     nameTokens: ['foundation digital', 'field checklist', 'pocket guide', 'ebook', 'e-book', 'academy membership', 'academy subscription'],
     urlTokens: ['/free-photography-course', '/free-online-photography-course', '/academy'] },
 
-  // Hire / Commercial: physical prints + hire/headshots/property/commercial.
+  // Hire / Commercial: physical prints + hire/headshots/property/commercial
+  // + bespoke services (commissions invoiced manually via Squarespace SERVICE
+  // products or Acuity bookings). Almost every commercial gig is a Service
+  // product or Acuity booking with a free-text name, so the nameTokens
+  // below are tuned to recognise those patterns.
+  //
   // NB: keep nameTokens unambiguous - "portrait photography" alone is too
   // wide because it also matches "Beginners Portrait Photography Course".
-  // Rely on URL tokens + physical-only product nouns instead.
+  // Always prefer multi-word tokens or distinctive nouns.
   { id: 'hire',
-    nameTokens: ['fine art print', 'canvas wrap', 'framed print', 'framed fine art', 'unframed print', 'a3 mounted', 'mounted print', 'mounted fine art', 'headshot session', 'headshot photography', 'portrait shoot', 'portrait session', 'commercial shoot', 'product photography shoot', 'property photography shoot'],
-    urlTokens: ['/hire-a-professional', '/portrait-photography', '/property-photography', '/commercial-photography', '/headshots', '/professional-commercial-photographer', '/product-photographer', '/property-photographer', '/fine-art-prints', '/corporate-photography-training'] },
+    nameTokens: [
+      // physical prints
+      'fine art print', 'canvas wrap', 'framed print', 'framed fine art',
+      'unframed print', 'a3 mounted', 'mounted print', 'mounted fine art',
+      // headshots / portrait shoots
+      'headshot session', 'headshot photography', 'portrait shoot',
+      'portrait session', 'portraits - 1 hr', 'portraits - 2 hr',
+      'taking photos',
+      // commercial / product / property shoots
+      'commercial shoot', 'product photography shoot',
+      'property photography shoot', 'commercial photography',
+      // bespoke services sold as Squarespace SERVICE products
+      'photo editing', 'image editing', 'image retouching',
+      'sculpture photo', 'sclupture photo', 'author photo',
+      'photo shoot', 'photography consultation', 'photography training',
+      'staff training', 'staff - photography', 'staff photography',
+      'pwa training',
+      // commission / venue-specific catch-alls
+      'commission', 'commissioned',
+      'biggin hall', 'enquiry and fact finding'
+    ],
+    urlTokens: ['/hire-a-professional', '/portrait-photography', '/property-photography', '/commercial-photography', '/headshots', '/professional-commercial-photographer', '/product-photographer', '/property-photographer', '/fine-art-prints', '/corporate-photography-training', '/staff-training-on-photography'] },
 
   // Services: subscriptions, 1-2-1 / private, mentoring, vouchers,
   // sensor clean, print prep
@@ -110,9 +140,13 @@ const RULES = [
     urlTokens: ['/photo-workshops-uk', '/photography-workshops', '/landscape-photography-workshops', '/one-day-landscape-photography-workshops', '/photographic-workshops-near-me'] },
 
   // Courses: in-person and online classes / lightroom / masterclass /
-  // beginners course / portrait course
+  // beginners course / portrait course.
+  //
+  // NB: nameToken 'photo editing' was tightened to 'photo editing course'
+  // so it no longer collides with the bespoke commercial "Photo Editing"
+  // service product (which belongs in Hire).
   { id: 'courses',
-    nameTokens: ['course', 'class', 'lightroom', 'masterclass', 'photo editing', 'black and white', 'photography lessons', 'three weekly evening'],
+    nameTokens: ['course', 'class', 'lightroom', 'masterclass', 'photo editing course', 'black and white', 'photography lessons', 'three weekly evening'],
     urlTokens: ['/photography-courses', '/beginners-photography-lessons', '/beginners-photography-classes', '/beginners-photography-course', '/photo-editing-course', '/beginners-portrait-photography-course', '/photography-classes', '/black-and-white-photography-course', '/lightroom-courses-for-beginners-coventry', '/intermediates-intentions', '/intermediates-lightroom', '/photography-masterclasses'] }
 ];
 
@@ -178,7 +212,11 @@ function workshopSubTier(path, name) {
 
 // Main classifier. Returns one of:
 //   'workshops_residential' | 'workshops_nonres' | 'courses' |
-//   'services' | 'hire' | 'academy' | 'other'
+//   'services' | 'hire' | 'academy' | 'unidentified'
+//
+// The fallback used to be 'other' (silent). It's now 'unidentified' so
+// the dashboard can show it on a dedicated tile and we notice when new
+// product types start landing in the catch-all.
 //
 // Accepts either:
 //   classifyCommercialTier({ productUrl, productName })
@@ -203,7 +241,7 @@ export function classifyCommercialTier(arg1, arg2) {
       return rule.id;
     }
   }
-  return 'other';
+  return 'unidentified';
 }
 
 // Empty per-tier accumulator. Use as `{ ...emptyTierAccumulator() }` so
@@ -211,6 +249,5 @@ export function classifyCommercialTier(arg1, arg2) {
 export function emptyTierAccumulator() {
   const acc = {};
   for (const id of COMMERCIAL_TIER_IDS) acc[id] = 0;
-  acc.other = 0;
   return acc;
 }

@@ -76,6 +76,17 @@ const MONEY_PAGE_TIERS = [
     hubUrl: '/free-photography-course',
     prefixes: ['/free-photography-course', '/academy', '/free-online-photography-course', '/online-photography-course'],
     monthlyTarget: 667
+  },
+  {
+    // Safety-net bucket. Anything the classifier can't confidently tier
+    // lands here. Target 0 so any value > 0 shows as an over-target red
+    // signal on the dashboard - prompts a review and a name-token update
+    // in api/aigeo/commercial-tier.js.
+    id: 'unidentified',
+    label: 'Unidentified (needs review)',
+    hubUrl: '',
+    prefixes: [],
+    monthlyTarget: 0
   }
 ];
 

@@ -62,12 +62,12 @@ function findBookingSheet() {
 // ---------- pretty-print ----------
 function printAggregates(byMonth) {
   console.log(`\nMonthly aggregates (will become ${byMonth.size} revenue_snapshots rows):`);
-  console.log('  month     | wkshop-res | wkshop-NR | courses  | services | hire     | academy  | other    | total    | txn');
+  console.log('  month     | wkshop-res | wkshop-NR | courses  | services | hire     | academy  | unident  | total    | txn');
   console.log('  ---------- + ---------- + --------- + -------- + -------- + -------- + -------- + -------- + -------- + ----');
   for (const key of [...byMonth.keys()].sort((a, b) => a.localeCompare(b))) {
     const b = byMonth.get(key);
     const f = (n) => `£${(n || 0).toFixed(2)}`.padStart(9);
-    console.log(`  ${key}   | ${f(b.tierRevenue.workshops_residential)} | ${f(b.tierRevenue.workshops_nonres)} | ${f(b.tierRevenue.courses)} | ${f(b.tierRevenue.services)} | ${f(b.tierRevenue.hire)} | ${f(b.tierRevenue.academy)} | ${f(b.tierRevenue.other)} | ${f(b.revenue)} | ${b.transactions}`);
+    console.log(`  ${key}   | ${f(b.tierRevenue.workshops_residential)} | ${f(b.tierRevenue.workshops_nonres)} | ${f(b.tierRevenue.courses)} | ${f(b.tierRevenue.services)} | ${f(b.tierRevenue.hire)} | ${f(b.tierRevenue.academy)} | ${f(b.tierRevenue.unidentified)} | ${f(b.revenue)} | ${b.transactions}`);
   }
 }
 
