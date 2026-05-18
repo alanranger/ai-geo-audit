@@ -1,7 +1,26 @@
 // commercial-tier.js
 //
-// Classifies a product or page into one of the 5 commercial tiers the
-// business actually sells:
+// Classifies a product or page into one of the commercial tiers the
+// business actually sells.
+//
+// PRIMARY CLASSIFIER (preferred):
+//   lib/product-tier-map.js builds a deterministic productUrl-slug ->
+//   tier map from `csv_metadata` (workshop_products + course_products)
+//   plus a manual `product_tier_override` table. Long-running serverless
+//   handlers call setProductTierMap() once after they create their
+//   Supabase client; classifyCommercialTier() consults that map first
+//   (by URL slug, then by canonical title prefix) for an authoritative
+//   answer that doesn't require code edits when a new product is added.
+//
+// LEGACY FALLBACK (this file):
+//   The name/url-token rules below still run when no map is set OR when
+//   the product doesn't exist in csv_metadata yet (e.g. an Acuity
+//   description that says "Photography Training - 2hr"). The final
+//   fallback is the `unidentified` tier so the dashboard surfaces
+//   anything that escaped both passes.
+//
+// ----------------------------------------------------------------------
+// Tiers the business sells:
 //
 //   workshops  - photo-workshops-uk/* + photography-workshops*
 //   courses    - in-person + online classes (Beginners, Lightroom, B&W, etc)
@@ -13,10 +32,19 @@
 // to the page tier in tier-segmentation.js (Landing / Product / Event /
 // Blog / Academy / Unmapped), which describes WHICH SITE LAYER the URL
 // lives on.
-//
-// Both classifiers can be called on the same URL — e.g.
-// `/beginners-photography-lessons/camera-courses-for-beginners-coventry-2k99k`
-// is page_tier=event, commercial_tier=courses.
+
+import { classifyByMap } from '../../lib/product-tier-map.js';
+
+// ----------------------------------------------------------------------
+// Product-tier map (set by sync endpoints before classifying)
+// ----------------------------------------------------------------------
+let PRODUCT_TIER_MAP = null;
+
+// Inject the deterministic productUrl-slug -> tier map built from
+// csv_metadata + product_tier_override. Pass null to clear (tests).
+export function setProductTierMap(map) {
+  PRODUCT_TIER_MAP = map || null;
+}
 
 // ----------------------------------------------------------------------
 // Tier definitions
@@ -247,6 +275,10 @@ export function classifyCommercialTier(arg1, arg2) {
   } else {
     productUrl = arg1 || '';
     productName = arg2 || '';
+  }
+  if (PRODUCT_TIER_MAP) {
+    const mapped = classifyByMap(PRODUCT_TIER_MAP, productUrl, productName);
+    if (mapped) return mapped;
   }
   const path = pathOf(productUrl);
   const name = String(productName || '');

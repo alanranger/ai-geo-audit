@@ -29,7 +29,8 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
-import { emptyTierAccumulator, classifyCommercialTier } from './commercial-tier.js';
+import { emptyTierAccumulator, classifyCommercialTier, setProductTierMap } from './commercial-tier.js';
+import { loadProductTierMap } from '../../lib/product-tier-map.js';
 
 const STRIPE_BASE = 'https://api.stripe.com/v1';
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
@@ -413,6 +414,7 @@ function handleSyncError(res, err) {
 async function runSync(propertyUrl, modes, range) {
   const apiKey = need('STRIPE_SECRET_KEY');
   const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
+  setProductTierMap(await loadProductTierMap(supabase));
   const charges = await fetchAllCharges(apiKey, range);
   const summary = aggregateCharges(charges, range);
   const rows = buildRowsToSave(propertyUrl, summary, range, modes);

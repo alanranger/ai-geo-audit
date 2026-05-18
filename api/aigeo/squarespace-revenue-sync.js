@@ -25,7 +25,8 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
-import { classifyCommercialTier, emptyTierAccumulator } from './commercial-tier.js';
+import { classifyCommercialTier, emptyTierAccumulator, setProductTierMap } from './commercial-tier.js';
+import { loadProductTierMap } from '../../lib/product-tier-map.js';
 
 const SQS_BASE = 'https://api.squarespace.com/1.0/commerce/orders';
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
@@ -352,6 +353,8 @@ export default async function handler(req, res) {
     const apiKey = need('SQUARESPACE_API_KEY');
     const userAgent = (process.env.SQUARESPACE_USER_AGENT || DEFAULT_USER_AGENT).trim();
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
+
+    setProductTierMap(await loadProductTierMap(supabase));
 
     const orders = await fetchAllOrders(apiKey, userAgent, range);
     const summary = aggregateOrders(orders, range, includeCancelled);
