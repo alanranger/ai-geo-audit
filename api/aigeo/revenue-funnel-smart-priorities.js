@@ -162,8 +162,13 @@ function ctrPriorityForTier(tierId, tierMetrics) {
   if (!scored.length) return null;
   const top = scored[0];
   const cleanedUrl = cleanUrl(top.row.page_url);
-  const revLift = Math.round(top.uplift * estimatedAovPerClick(tierId));
-  const gpLift = Math.round(top.uplift * estimatedGpPerClick(tierId));
+  // The CTR uplift is measured per-28d (the GSC window), but every other
+  // priority generator (AIO etc.) returns MONTHLY values. Normalise to
+  // monthly so the dashboard can treat `estimated_lift_gbp_*` as a single
+  // unit everywhere (and so the annual figure is just × 12, no fudge).
+  const upliftMonthly = top.uplift * (30 / 28);
+  const revLift = Math.round(upliftMonthly * estimatedAovPerClick(tierId));
+  const gpLift = Math.round(upliftMonthly * estimatedGpPerClick(tierId));
   const gpPct = estimatedGpPctForTier(tierId);
   return {
     signature: `ctr|${cleanedUrl}`,
@@ -174,7 +179,7 @@ function ctrPriorityForTier(tierId, tierMetrics) {
     kpi_baseline_value: top.ctrPct,
     kpi_target_value: top.targetPct,
     kpi_target_direction: 'up',
-    estimated_lift: `+${top.uplift} clicks/28d → ~£${revLift.toLocaleString()} revenue / ~£${gpLift.toLocaleString()} profit (${gpPct}% GP)`,
+    estimated_lift: `~£${revLift.toLocaleString()}/mo revenue → ~£${gpLift.toLocaleString()}/mo profit at ${gpPct}% GP (from +${Math.round(upliftMonthly)} clicks/mo)`,
     estimated_lift_gbp_revenue: revLift,
     estimated_lift_gbp_profit: gpLift
   };

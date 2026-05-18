@@ -37,6 +37,12 @@ import { createClient } from '@supabase/supabase-js';
 
 const ACADEMY_ANNUAL_FEE_GBP = 79;
 const ACADEMY_GP_PCT = 99;
+// The Academy switched from the legacy trial-to-monthly model to the
+// current trial → annual-membership model in January 2026. Anything
+// before that month is a different product and would muddy the trend
+// chart, so the top-of-funnel chart starts from this cutover.
+const TRIAL_MODEL_CUTOVER_YEAR = 2026;
+const TRIAL_MODEL_CUTOVER_MONTH = 1; // January
 
 const send = (res, status, body) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -55,25 +61,35 @@ function buildClient() {
 }
 
 // Reduce a list of trial rows into a {YYYY-MM: {started, converted}} map
-// covering the last 12 months. Months with no activity are still
+// starting at the trial-to-annual model cutover (Jan 2026) and running
+// forward through the current month. Months with no activity are still
 // emitted with zeros so the UI sparkline has a continuous x-axis.
+// Pre-cutover months are excluded because that was a different product
+// (trial → monthly) and would distort the trend.
 function monthlyTrialBuckets(trials) {
   const now = new Date();
   const months = [];
-  for (let i = 11; i >= 0; i -= 1) {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
-    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  const startY = TRIAL_MODEL_CUTOVER_YEAR;
+  const startM = TRIAL_MODEL_CUTOVER_MONTH - 1; // 0-indexed
+  const endY = now.getUTCFullYear();
+  const endM = now.getUTCMonth();
+  let y = startY;
+  let m = startM;
+  while (y < endY || (y === endY && m <= endM)) {
+    const key = `${y}-${String(m + 1).padStart(2, '0')}`;
     months.push({ month: key, trials_started: 0, converted: 0 });
+    m += 1;
+    if (m > 11) { m = 0; y += 1; }
   }
-  const idx = new Map(months.map((m, i) => [m.month, i]));
+  const idx = new Map(months.map((b, i) => [b.month, i]));
   for (const t of trials) {
     const startStr = t.trial_start_at;
     if (!startStr) continue;
     const key = String(startStr).slice(0, 7);
     if (!idx.has(key)) continue;
-    const m = months[idx.get(key)];
-    m.trials_started += 1;
-    if (t.converted_at) m.converted += 1;
+    const bucket = months[idx.get(key)];
+    bucket.trials_started += 1;
+    if (t.converted_at) bucket.converted += 1;
   }
   return months;
 }
