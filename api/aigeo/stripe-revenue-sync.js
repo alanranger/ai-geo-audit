@@ -29,7 +29,7 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
-import { emptyTierAccumulator } from './commercial-tier.js';
+import { emptyTierAccumulator, classifyCommercialTier } from './commercial-tier.js';
 
 const STRIPE_BASE = 'https://api.stripe.com/v1';
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
@@ -203,13 +203,29 @@ function looksLikeSquarespaceCommerce(charge) {
   return false;
 }
 
+// Pass an Acuity / ad-hoc Stripe charge through the shared product-name
+// classifier so commercial bookings (e.g. "Staff - Photography Training",
+// "Author Photos") reach the Hire tier instead of being lumped under
+// services / unidentified. Falls back to a default if the classifier
+// can't tier the description.
+function classifyByDescription(charge, fallbackTier) {
+  const desc = String(charge?.description || '').trim();
+  if (!desc) return fallbackTier;
+  const tier = classifyCommercialTier({ productName: desc });
+  if (tier === 'unidentified') return fallbackTier;
+  return tier;
+}
+
 // Returns { skip: true, reason } OR { skip: false, tier, source }
 function classifyStripeCharge(charge) {
   // 1. Acuity must win BEFORE the Squarespace-Commerce check — historically
   //    safe (Acuity has its own application ID and never sets websiteId),
-  //    but defensively explicit.
+  //    but defensively explicit. Acuity charges default to `services`
+  //    (typical 1-2-1 session) but commercial bookings (Staff Training,
+  //    Author Photos, Sculpture Photos etc.) are routed to Hire via the
+  //    shared classifier.
   if (charge.application === STRIPE_APP_ACUITY || chargeMetaSourceIs(charge, 'acuity scheduling')) {
-    return { skip: false, tier: 'services', source: 'acuity' };
+    return { skip: false, tier: classifyByDescription(charge, 'services'), source: 'acuity' };
   }
   // 2. Anything that smells like a Squarespace Commerce charge is skipped —
   //    those are already in the Squarespace Orders sync (which sees orders
@@ -226,9 +242,10 @@ function classifyStripeCharge(charge) {
   if (chargeHasSubscription(charge)) {
     return { skip: false, tier: 'academy', source: 'stripe_subscription' };
   }
-  // 5. Anything left = ad-hoc / manual charges. Bucketed to "other" for
-  //    visibility (e.g. bespoke commercial invoices).
-  return { skip: false, tier: 'other', source: 'stripe_other' };
+  // 5. Anything left = ad-hoc / manual charges (e.g. direct invoice payments
+  //    for commissions). Try the shared classifier first; if it can't tier
+  //    the description, surface in the Unidentified bucket for review.
+  return { skip: false, tier: classifyByDescription(charge, 'unidentified'), source: 'stripe_other' };
 }
 
 function chargeNetAmount(charge) {
