@@ -23,11 +23,47 @@
 // ----------------------------------------------------------------------
 
 export const COMMERCIAL_TIERS = [
-  { id: 'workshops', label: 'Workshops' },
-  { id: 'courses',   label: 'Courses' },
-  { id: 'services',  label: '1-2-1 & Services' },
-  { id: 'hire',      label: 'Hire / Commercial' },
-  { id: 'academy',   label: 'Academy' }
+  { id: 'workshops_residential', label: 'Workshops (Residential)' },
+  { id: 'workshops_nonres',      label: 'Workshops (Non-Res)' },
+  { id: 'courses',               label: 'Courses' },
+  { id: 'services',              label: '1-2-1 & Services' },
+  { id: 'hire',                  label: 'Hire / Commercial' },
+  { id: 'academy',               label: 'Academy' }
+];
+
+// Residential workshop URL slugs (canonical list, sourced from
+// csv_metadata.categories containing "- weekend residential photo workshops").
+// Order doesn't matter; matches use endsWith on path so any host works.
+// To refresh: run probe-booking-sheet / query csv_metadata in ai-chat Supabase.
+const WORKSHOP_RESIDENTIAL_PATHS = new Set([
+  '/photo-workshops-uk/coastal-northumberland-photography-workshops',
+  '/photo-workshops-uk/dartmoor-photography-landscape-workshop',
+  '/photo-workshops-uk/dorset-landscape-photography-workshop',
+  '/photo-workshops-uk/exmoor-photography-workshops-lynmouth',
+  '/photo-workshops-uk/ireland-photography-workshops-dingle',
+  '/photo-workshops-uk/lake-district-photography-workshop',
+  '/photo-workshops-uk/landscape-photography-devon-hartland-quay',
+  '/photo-workshops-uk/landscape-photography-wales-photo-workshop',
+  '/photo-workshops-uk/landscape-photography-workshop-norfolk',
+  '/photo-workshops-uk/landscape-photography-workshops-anglesey',
+  '/photo-workshops-uk/landscape-photography-workshops-glencoe',
+  '/photo-workshops-uk/landscape-photography-snowdonia-workshops',
+  '/photo-workshops-uk/north-yorkshire-landscape-photography',
+  '/photo-workshops-uk/somerset-landscape-photography-workshops',
+  '/photo-workshops-uk/suffolk-landscape-photography-workshops',
+  '/photo-workshops-uk/wales-photography-workshop-pistyll-rhaeadr',
+  '/photo-workshops-uk/yorkshire-dales-photography-workshops'
+]);
+
+// Title-token fallbacks: if the URL is missing or generic (e.g. an Acuity
+// charge referencing only the product name), we can still detect a
+// residential workshop from these phrases in the product name.
+const WORKSHOP_RESIDENTIAL_NAME_TOKENS = [
+  'residential', 'weekend retreat', 'photography retreat',
+  'hartland quay', 'lake district', 'snowdonia', 'yorkshire dales',
+  'anglesey', 'northumberland', 'glencoe', 'suffolk', 'norfolk',
+  'dartmoor', 'dorset', 'gower', 'exmoor', 'kerry', 'dingle',
+  'lake vyrnwy'
 ];
 
 export const COMMERCIAL_TIER_IDS = COMMERCIAL_TIERS.map(t => t.id);
@@ -128,8 +164,21 @@ function ruleMatches(rule, path, name) {
   return false;
 }
 
+// Workshops sub-classifier. Called only when the main classifier has
+// already decided "this is a workshop". Decides between Residential
+// (multi-day, hotel included, ~£600-£1,500 per booking) and
+// Non-Residential (half-day or one-day, ~£35-£200 per booking).
+function workshopSubTier(path, name) {
+  // 1) Authoritative: exact path match against the residential catalog.
+  if (path && WORKSHOP_RESIDENTIAL_PATHS.has(path)) return 'workshops_residential';
+  // 2) Fallback: name contains a residential location or the word itself.
+  if (nameHasAnyToken(name, WORKSHOP_RESIDENTIAL_NAME_TOKENS)) return 'workshops_residential';
+  return 'workshops_nonres';
+}
+
 // Main classifier. Returns one of:
-//   'workshops' | 'courses' | 'services' | 'hire' | 'academy' | 'other'
+//   'workshops_residential' | 'workshops_nonres' | 'courses' |
+//   'services' | 'hire' | 'academy' | 'other'
 //
 // Accepts either:
 //   classifyCommercialTier({ productUrl, productName })
@@ -149,7 +198,10 @@ export function classifyCommercialTier(arg1, arg2) {
   const path = pathOf(productUrl);
   const name = String(productName || '');
   for (const rule of RULES) {
-    if (ruleMatches(rule, path, name)) return rule.id;
+    if (ruleMatches(rule, path, name)) {
+      if (rule.id === 'workshops') return workshopSubTier(path, name);
+      return rule.id;
+    }
   }
   return 'other';
 }

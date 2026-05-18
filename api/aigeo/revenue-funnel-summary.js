@@ -38,11 +38,23 @@ const MONEY_PAGE_TIERS = [
     monthlyTarget: 667
   },
   {
-    id: 'workshops',
-    label: 'Workshops',
+    // Non-Residential = "2. Workshops Non Residential" in the Booking Sheet
+    // = the bigger of the two splits (half-day + one-day workshops).
+    id: 'workshops_nonres',
+    label: 'Workshops (Non-Res)',
     hubUrl: '/photography-workshops',
-    prefixes: ['/photography-workshops', '/landscape-photography-workshops', '/2-5hr-workshops', '/2.5hr-4hr-workshops', '/one-day-workshops', '/residential-workshops', '/workshops-calendar'],
-    monthlyTarget: 2500
+    prefixes: ['/photography-workshops', '/landscape-photography-workshops', '/2-5hr-workshops', '/2.5hr-4hr-workshops', '/one-day-workshops', '/workshops-calendar'],
+    monthlyTarget: 1667
+  },
+  {
+    // Residential = "3. Workshops Residential" in the Booking Sheet
+    // = weekend/multi-day workshops with hotel accommodation included.
+    // Slug list is in commercial-tier.js WORKSHOP_RESIDENTIAL_PATHS.
+    id: 'workshops_residential',
+    label: 'Workshops (Residential)',
+    hubUrl: '/photography-workshops-near-me',
+    prefixes: ['/photography-workshops-near-me', '/residential-workshops'],
+    monthlyTarget: 833
   },
   {
     id: 'services',
