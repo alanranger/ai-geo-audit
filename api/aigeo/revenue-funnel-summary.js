@@ -35,7 +35,8 @@ const MONEY_PAGE_TIERS = [
     label: 'Courses',
     hubUrl: '/photography-courses-coventry',
     prefixes: ['/photography-courses', '/beginners-photography-class', '/beginners-photography-course', '/photography-classes', '/photography-lessons'],
-    monthlyTarget: 667
+    monthlyTarget: 667,
+    grossProfitPct: 90
   },
   {
     // Non-Residential = "2. Workshops Non Residential" in the Booking Sheet
@@ -44,7 +45,8 @@ const MONEY_PAGE_TIERS = [
     label: 'Workshops (Non-Res)',
     hubUrl: '/photography-workshops',
     prefixes: ['/photography-workshops', '/landscape-photography-workshops', '/2-5hr-workshops', '/2.5hr-4hr-workshops', '/one-day-workshops', '/workshops-calendar'],
-    monthlyTarget: 1667
+    monthlyTarget: 1667,
+    grossProfitPct: 75
   },
   {
     // Residential = "3. Workshops Residential" in the Booking Sheet
@@ -54,28 +56,38 @@ const MONEY_PAGE_TIERS = [
     label: 'Workshops (Residential)',
     hubUrl: '/photography-workshops-near-me',
     prefixes: ['/photography-workshops-near-me', '/residential-workshops'],
-    monthlyTarget: 833
+    monthlyTarget: 833,
+    grossProfitPct: 35
   },
   {
     id: 'services',
     label: '1-2-1 & Services',
     hubUrl: '/photography-tuition-services',
     prefixes: ['/photography-tuition-services', '/photography-services', '/1-2-1-photography-tuition', '/1-2-1-private-photography-tuition', '/photography-lessons-online-1-2-1', '/private-photography-lessons', '/mentoring', '/rps-mentoring', '/gift-vouchers', '/pick-n-mix'],
-    monthlyTarget: 863
+    monthlyTarget: 863,
+    // Weighted blend of: 1-2-1 95% + Mentoring 95% + PicknMix Inc 50% +
+    // Gift Vouchers Inc 60% (ignoring the negative debit/credit "Out"
+    // entries which are reallocation, not real margin). Per 2026 YTD
+    // proportions this lands at ~78% effective GP.
+    grossProfitPct: 78
   },
   {
     id: 'hire',
     label: 'Hire / Commercial',
     hubUrl: '/hire-a-professional-photographer-in-coventry',
     prefixes: ['/hire-a-professional-photographer', '/products-services-property-photography', '/portrait-photography', '/staff-training-on-photography', '/commercial-photography', '/headshots'],
-    monthlyTarget: 350
+    monthlyTarget: 350,
+    // Weighted blend of Prints & Royalties 99% + Commissions 90%.
+    // Commissions dominate revenue so the effective blend lands at ~92%.
+    grossProfitPct: 92
   },
   {
     id: 'academy',
     label: 'Academy',
     hubUrl: '/free-photography-course',
     prefixes: ['/free-photography-course', '/academy', '/free-online-photography-course', '/online-photography-course'],
-    monthlyTarget: 667
+    monthlyTarget: 667,
+    grossProfitPct: 99
   },
   {
     // Safety-net bucket. Anything the classifier can't confidently tier
@@ -86,7 +98,8 @@ const MONEY_PAGE_TIERS = [
     label: 'Unidentified (needs review)',
     hubUrl: '',
     prefixes: [],
-    monthlyTarget: 0
+    monthlyTarget: 0,
+    grossProfitPct: null
   }
 ];
 
@@ -106,6 +119,29 @@ const KPI_BASELINES = {
   click_to_sale_pct: { target: 0.5, warn: 0.25 },
   revenue_per_1k_impressions: { target: 1, warn: 0.5 }
 };
+
+// Gross-profit RAG thresholds. Numbers are gross-profit-margin percentages
+// taken from Alan's 2026 Booking Sheet (per category): 99% Academy & Prints
+// at the top, 35% Residential Workshops at the bottom (travel + hotel +
+// meals consume two thirds of the gross fee). Green = sit-back margin,
+// Amber = decent but not passive, Red = revenue is doing all the work
+// and you're keeping very little. Used by tile chips + the new
+// profit-pyramid panel.
+const GROSS_PROFIT_RAG = { green: 80, amber: 50 };
+
+function gpRagBucket(pct) {
+  if (pct === null || pct === undefined || Number.isNaN(pct)) return 'unknown';
+  if (pct >= GROSS_PROFIT_RAG.green) return 'green';
+  if (pct >= GROSS_PROFIT_RAG.amber) return 'amber';
+  return 'red';
+}
+
+function grossProfitAmount(revenue, pct) {
+  const r = Number(revenue) || 0;
+  const p = Number(pct);
+  if (!Number.isFinite(p)) return null;
+  return Number((r * (p / 100)).toFixed(2));
+}
 
 function tierOf(pageUrl) {
   const p = pathOf(pageUrl);
@@ -500,6 +536,8 @@ function emptyTierSeries() {
     tier_id: t.id,
     tier_label: t.label,
     monthly_target: t.monthlyTarget,
+    gross_profit_pct: t.grossProfitPct ?? null,
+    gross_profit_rag: gpRagBucket(t.grossProfitPct ?? null),
     points: []
   }));
 }
@@ -535,6 +573,50 @@ function buildTierHistory(history) {
   return out;
 }
 
+// Profit pyramid: re-rank tiers by annualised gross profit so the UI
+// can answer "where is profit actually coming from?" — which is NOT the
+// same as "where is revenue coming from?". Residential workshops top
+// revenue but bottom GP, while Academy and Hire (Prints + Commissions)
+// punch above their revenue weight. We also expose the share-of-profit
+// vs share-of-revenue gap so the UI can highlight the imbalance.
+function buildProfitPyramid(tierHistory) {
+  const rows = (tierHistory || [])
+    .filter(s => s.tier_id !== 'unidentified' && s.gross_profit_pct != null)
+    .map(s => {
+      const annualGp = s.ytd?.run_rate_annual_gp_gbp || 0;
+      const annualRev = s.ytd?.run_rate_annual_revenue_gbp || 0;
+      return {
+        tier_id: s.tier_id,
+        tier_label: s.tier_label,
+        gross_profit_pct: s.gross_profit_pct,
+        gross_profit_rag: s.gross_profit_rag,
+        ytd_revenue_gbp: s.ytd?.revenue_gbp || 0,
+        ytd_gp_gbp: s.ytd?.gross_profit_ytd_gbp || 0,
+        annualised_revenue_gbp: annualRev,
+        annualised_gp_gbp: annualGp
+      };
+    });
+  const totalAnnualGp = rows.reduce((a, b) => a + (b.annualised_gp_gbp || 0), 0);
+  const totalAnnualRev = rows.reduce((a, b) => a + (b.annualised_revenue_gbp || 0), 0);
+  for (const r of rows) {
+    r.share_of_gp_pct = totalAnnualGp > 0 ? Number(((r.annualised_gp_gbp / totalAnnualGp) * 100).toFixed(1)) : 0;
+    r.share_of_revenue_pct = totalAnnualRev > 0 ? Number(((r.annualised_revenue_gbp / totalAnnualRev) * 100).toFixed(1)) : 0;
+    r.share_gap_pp = Number((r.share_of_gp_pct - r.share_of_revenue_pct).toFixed(1));
+  }
+  rows.sort((a, b) => b.annualised_gp_gbp - a.annualised_gp_gbp);
+  return {
+    rows,
+    annualised_gp_total_gbp: Number(totalAnnualGp.toFixed(2)),
+    annualised_revenue_total_gbp: Number(totalAnnualRev.toFixed(2)),
+    // Profit goal benchmarks (per the user's "£4-5k/mo" target).
+    monthly_gp_target_low_gbp: 4000,
+    monthly_gp_target_high_gbp: 5000,
+    annual_gp_target_low_gbp: 48000,
+    annual_gp_target_high_gbp: 60000,
+    profit_goal_progress_pct: Number(((totalAnnualGp / 48000) * 100).toFixed(1))
+  };
+}
+
 // Per-tier "current month" tile data:
 //   - the most recent point that has revenue (partial month is fine —
 //     that's literally "month-to-date so far")
@@ -568,6 +650,10 @@ function computeTierCurrentMonth(series) {
 // Per-tier YTD tile data:
 //   - sum revenue across all current-year points
 //   - target = monthly_target × months_elapsed_prorata
+//   - gross_profit_ytd_gbp = revenue × tier GP%
+//   - run_rate_annual_gp_gbp = simple ×(12/months_with_data) projection
+//     so a partial YTD still gives a reasonable "if you stayed on this
+//     pace" annual profit estimate for the profit-pyramid view.
 function computeTierYtd(series) {
   const points = Array.isArray(series.points) ? series.points : [];
   const now = new Date();
@@ -585,13 +671,19 @@ function computeTierYtd(series) {
   const flat = series.monthly_target || 0;
   const target = flat * (monthIdx + (dayInMonth / dim));
   const variance = target > 0 ? ((revenue - target) / target) * 100 : null;
+  const gpYtd = grossProfitAmount(revenue, series.gross_profit_pct);
+  const monthsElapsed = monthIdx + (dayInMonth / dim);
+  const annualisedRevenue = monthsElapsed > 0 ? (revenue / monthsElapsed) * 12 : null;
   return {
     year,
     months_with_data: monthsWithData,
     revenue_gbp: revenue,
     target_prorata_gbp: target,
     target_full_year_gbp: flat * 12,
-    variance_pct: variance
+    variance_pct: variance,
+    gross_profit_ytd_gbp: gpYtd,
+    run_rate_annual_revenue_gbp: annualisedRevenue == null ? null : Number(annualisedRevenue.toFixed(2)),
+    run_rate_annual_gp_gbp: grossProfitAmount(annualisedRevenue || 0, series.gross_profit_pct)
   };
 }
 
@@ -704,6 +796,8 @@ function initTierBucket(tier) {
     tier_label: tier.label,
     hub_url: tier.hubUrl,
     monthly_target: tier.monthlyTarget,
+    gross_profit_pct: tier.grossProfitPct ?? null,
+    gross_profit_rag: gpRagBucket(tier.grossProfitPct ?? null),
     pages: [],
     clicks_28d: 0,
     impressions_28d: 0,
@@ -778,6 +872,8 @@ function attachActualRevenueToTier(bucket, latestSnap, monthlyHistory) {
   bucket.actual_vs_target_28d_pct = target28d > 0
     ? Math.round((bucket.revenue_actual_28d / target28d) * 1000) / 10
     : null;
+  bucket.gross_profit_28d = grossProfitAmount(bucket.revenue_actual_28d, bucket.gross_profit_pct);
+  bucket.gross_profit_12m = grossProfitAmount(bucket.revenue_actual_12m, bucket.gross_profit_pct);
   return bucket;
 }
 
@@ -941,6 +1037,7 @@ export default async function handler(req, res) {
     const kpiTargets = computeKpiTargets(kpis, revenueSnap);
     const tierHistory = buildTierHistory(revenueHistoryDecorated);
     const ytdSummary = buildYtdSummary(revenueHistoryDecorated);
+    const profitPyramid = buildProfitPyramid(tierHistory);
     return send(res, 200, {
       property_url: propertyUrl,
       generated_at: new Date().toISOString(),
@@ -957,7 +1054,15 @@ export default async function handler(req, res) {
       revenue_history: revenueHistoryDecorated,
       tier_history: tierHistory,
       ytd_summary: ytdSummary,
-      tiers: MONEY_PAGE_TIERS.map(t => ({ id: t.id, label: t.label, hub_url: t.hubUrl, monthly_target: t.monthlyTarget }))
+      profit_pyramid: profitPyramid,
+      tiers: MONEY_PAGE_TIERS.map(t => ({
+        id: t.id,
+        label: t.label,
+        hub_url: t.hubUrl,
+        monthly_target: t.monthlyTarget,
+        gross_profit_pct: t.grossProfitPct ?? null,
+        gross_profit_rag: gpRagBucket(t.grossProfitPct ?? null)
+      }))
     });
   } catch (err) {
     return send(res, 500, { error: 'summary_failed', message: err?.message || String(err) });
