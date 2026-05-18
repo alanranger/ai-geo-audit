@@ -161,19 +161,56 @@ function lineProductInfo(item) {
   };
 }
 
+// Pick n Mix is a pre-paid plan: customer buys £X of credit (counted in
+// the `services` tier when sold) and later draws down individual workshop
+// bookings, which Squarespace records as 100%-discount orders with promo
+// code PICKNMIX (grandTotal = £0). The spreadsheet handles draw-downs by
+// debiting "Pick n Mix Out" and crediting the actual workshop tier, net
+// zero. We mirror that here so the dashboard's per-tier split matches.
+function isPickNMixRedemption(order) {
+  if (Number(order?.grandTotal?.value || 0) !== 0) return false;
+  const discounts = Array.isArray(order?.discountLines) ? order.discountLines : [];
+  return discounts.some(d => /picknmix/i.test(String(d?.promoCode || d?.name || '')));
+}
+
+function splitPickNMixRedemption(lines, grossPerLine) {
+  const revenue = emptyTierAccumulator();
+  const transactions = emptyTierAccumulator();
+  const tiersHit = new Set();
+  let totalDebit = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const gross = grossPerLine[i];
+    if (gross <= 0) continue;
+    const tier = classifyCommercialTier(lineProductInfo(lines[i]));
+    revenue[tier] = (revenue[tier] || 0) + gross;
+    tiersHit.add(tier);
+    totalDebit += gross;
+  }
+  if (totalDebit > 0) {
+    revenue.services = (revenue.services || 0) - totalDebit;
+    tiersHit.add('services');
+  }
+  for (const tier of tiersHit) transactions[tier] = 1;
+  return { revenue, transactions };
+}
+
 // Split an order's net value across its line items by tier. Returns
-// { workshops: 0, courses: 0, services: 0, hire: 0, academy: 0, other: 0 }
-// and matching transactions ({ workshops: 0|1, ... } using "any line in tier"
-// as the rule so an order with mixed tiers counts in each tier it touched).
+// { workshops_residential: 0, ..., services: 0, hire: 0, academy: 0,
+// unidentified: 0 } and matching transactions ({ workshops_residential:
+// 0|1, ... } using "any line in tier" as the rule so an order with
+// mixed tiers counts in each tier it touched).
 function splitOrderByTier(order) {
   const lines = Array.isArray(order?.lineItems) ? order.lineItems : [];
   const orderNet = orderNetValue(order);
   const grossPerLine = lines.map(lineNetValue);
   const grossTotal = grossPerLine.reduce((a, b) => a + b, 0);
+  if (isPickNMixRedemption(order) && grossTotal > 0) {
+    return splitPickNMixRedemption(lines, grossPerLine);
+  }
   const revenue = emptyTierAccumulator();
   const transactions = emptyTierAccumulator();
   if (!lines.length || grossTotal <= 0) {
-    revenue.other += orderNet;
+    revenue.other = (revenue.other || 0) + orderNet;
     if (orderNet > 0) transactions.other = 1;
     return { revenue, transactions };
   }

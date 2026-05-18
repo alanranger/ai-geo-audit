@@ -241,6 +241,21 @@ function ruleMatches(rule, path, name) {
   return false;
 }
 
+// Map safety net: Squarespace's product CSV sometimes mis-tags a
+// residential workshop (e.g. Snowdonia is only tagged "Landscape", not
+// "- weekend residential photo workshops") which makes the CSV-driven
+// map return `workshops_nonres`. When the SQ Commerce API returns no
+// productUrl (it never does on Orders), the URL-based override can't
+// rescue us either. We therefore promote any `workshops_nonres` result
+// to `workshops_residential` if the product name contains a known
+// residential location token. This is the same WORKSHOP_RESIDENTIAL_-
+// NAME_TOKENS list the legacy fallback already uses.
+function promoteResidentialIfMislabelled(mappedTier, productName) {
+  if (mappedTier !== 'workshops_nonres') return mappedTier;
+  if (!nameHasAnyToken(productName, WORKSHOP_RESIDENTIAL_NAME_TOKENS)) return mappedTier;
+  return 'workshops_residential';
+}
+
 // Workshops sub-classifier. Called only when the main classifier has
 // already decided "this is a workshop". Decides between Residential
 // (multi-day, hotel included, ~£600-£1,500 per booking) and
@@ -278,7 +293,7 @@ export function classifyCommercialTier(arg1, arg2) {
   }
   if (PRODUCT_TIER_MAP) {
     const mapped = classifyByMap(PRODUCT_TIER_MAP, productUrl, productName);
-    if (mapped) return mapped;
+    if (mapped) return promoteResidentialIfMislabelled(mapped, productName);
   }
   const path = pathOf(productUrl);
   const name = String(productName || '');
