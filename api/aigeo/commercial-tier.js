@@ -63,12 +63,22 @@ const WORKSHOP_RESIDENTIAL_PATHS = new Set([
 // Title-token fallbacks: if the URL is missing or generic (e.g. an Acuity
 // charge referencing only the product name), we can still detect a
 // residential workshop from these phrases in the product name.
+//
+// IMPORTANT: this list is ALSO spread into the workshops main rule
+// (see RULES below), so a product called e.g. "Landscape Photography
+// SNOWDONIA - Sat 26 - Sun 27 Sep 2026" - which does NOT contain the
+// word "workshop" - still triggers the workshops rule via "snowdonia".
 const WORKSHOP_RESIDENTIAL_NAME_TOKENS = [
   'residential', 'weekend retreat', 'photography retreat',
   'hartland quay', 'lake district', 'snowdonia', 'yorkshire dales',
   'anglesey', 'northumberland', 'glencoe', 'suffolk', 'norfolk',
   'dartmoor', 'dorset', 'gower', 'exmoor', 'kerry', 'dingle',
-  'lake vyrnwy'
+  'lake vyrnwy',
+  // 'devon' covers the "Landscape Photography DEVON Workshops - Various
+  // Dates" catch-all SQ product, which is the umbrella listing for
+  // Hartland Quay / Exmoor / Lynmouth weekend trips. Confirmed
+  // residential by Alan via spreadsheet row-by-row.
+  'devon'
 ];
 
 export const COMMERCIAL_TIER_IDS = COMMERCIAL_TIERS.map(t => t.id);
@@ -134,9 +144,14 @@ const RULES = [
     nameTokens: ['pick n mix', 'pickn mix', 'subscription', '1-2-1', '121', 'private', 'mentoring', 'gift voucher', 'sensor clean', 'print preparation', 'monthly online', 'quarterly', 'annual pick', 'four private'],
     urlTokens: ['/photography-tuition-services', '/pick-n-mix', '/gift-vouchers', '/mentoring', '/rps-mentoring', '/1-2-1', '/private-photography', '/photography-lessons-online-121', '/monthly-online-photography-mentoring', '/annual-pick-n-mix', '/quarterly-pick-n-mix', '/four-private-photography-classes'] },
 
-  // Workshops: title says "workshop" OR product page is /photo-workshops-uk/*
+  // Workshops: title says "workshop" / "photo walk" OR contains a known
+  // residential location name (so a SERVICE product titled e.g.
+  // "Landscape Photography SNOWDONIA - Sat 26 - Sun 27 Sep 2026", with no
+  // /photo-workshops-uk/* URL and no "workshop" token in the title, still
+  // reaches the workshops tier). workshopSubTier() then splits res vs
+  // non-res using the same location list.
   { id: 'workshops',
-    nameTokens: ['workshop', 'photo walk', 'photo-walk'],
+    nameTokens: ['workshop', 'photo walk', 'photo-walk', ...WORKSHOP_RESIDENTIAL_NAME_TOKENS],
     urlTokens: ['/photo-workshops-uk', '/photography-workshops', '/landscape-photography-workshops', '/one-day-landscape-photography-workshops', '/photographic-workshops-near-me'] },
 
   // Courses: in-person and online classes / lightroom / masterclass /
