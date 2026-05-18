@@ -48,13 +48,25 @@ function parseBody(req) {
 // ----------------------------------------------------------------------
 // Tier hub configuration
 // ----------------------------------------------------------------------
+// Hub URLs per tier. COMMERCIAL_TIERS now splits workshops into
+// residential / non-residential, but both still funnel through the
+// single /photography-workshops hub, so we alias them here. Without
+// these aliases the iteration over COMMERCIAL_TIERS crashes with
+// "Cannot read properties of undefined (reading 'hubUrl')".
 const TIER_HUBS = {
-  workshops: { hubUrl: 'https://www.alanranger.com/photography-workshops', label: 'Workshops' },
-  courses:   { hubUrl: 'https://www.alanranger.com/photography-courses-coventry', label: 'Courses' },
-  services:  { hubUrl: 'https://www.alanranger.com/photography-tuition-services', label: 'Services / 1-2-1' },
-  hire:      { hubUrl: 'https://www.alanranger.com/hire-a-professional-photographer-in-coventry', label: 'Hire / Commercial' },
-  academy:   { hubUrl: 'https://www.alanranger.com/free-online-photography-course', label: 'Academy' }
+  workshops:              { hubUrl: 'https://www.alanranger.com/photography-workshops', label: 'Workshops' },
+  workshops_residential:  { hubUrl: 'https://www.alanranger.com/photography-workshops', label: 'Workshops (Residential)' },
+  workshops_nonres:       { hubUrl: 'https://www.alanranger.com/photography-workshops', label: 'Workshops (Non-Res)' },
+  courses:                { hubUrl: 'https://www.alanranger.com/photography-courses-coventry', label: 'Courses' },
+  services:               { hubUrl: 'https://www.alanranger.com/photography-tuition-services', label: 'Services / 1-2-1' },
+  hire:                   { hubUrl: 'https://www.alanranger.com/hire-a-professional-photographer-in-coventry', label: 'Hire / Commercial' },
+  academy:                { hubUrl: 'https://www.alanranger.com/free-online-photography-course', label: 'Academy' }
 };
+// Defensive: if a future tier appears without a hub, skip it instead of
+// crashing the whole endpoint.
+function tierHub(tierId) {
+  return TIER_HUBS[tierId] || null;
+}
 
 // ----------------------------------------------------------------------
 // Data fetching helpers
@@ -380,8 +392,10 @@ function buildAllPriorities(snapshot) {
   const collected = [];
   for (const tier of COMMERCIAL_TIERS) {
     const tierId = tier.id;
+    const hub = tierHub(tierId);
+    if (!hub) continue;
     const tierData = {
-      hubUrl: TIER_HUBS[tierId].hubUrl,
+      hubUrl: hub.hubUrl,
       schemaDetail: snapshot.schemaDetail,
       pages: snapshot.pagesByTier.get(tierId) || [],
       pagesByUrl: snapshot.pagesByUrl,
