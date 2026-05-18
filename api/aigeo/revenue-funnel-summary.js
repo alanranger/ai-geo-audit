@@ -505,7 +505,71 @@ function buildTierHistory(history) {
     const tierMap = tierMapOf(row);
     for (const series of out) series.points.push(tierPoint(row, tierMap, series));
   }
+  for (const series of out) {
+    series.current_month = computeTierCurrentMonth(series);
+    series.ytd = computeTierYtd(series);
+  }
   return out;
+}
+
+// Per-tier "current month" tile data:
+//   - the most recent point that has revenue (partial month is fine —
+//     that's literally "month-to-date so far")
+//   - target is pro-rated by days-elapsed so variance is fair
+function computeTierCurrentMonth(series) {
+  const points = Array.isArray(series.points) ? series.points : [];
+  let latest = null;
+  for (let i = points.length - 1; i >= 0; i -= 1) {
+    if (Number.isFinite(Number(points[i].revenue))) { latest = points[i]; break; }
+  }
+  if (!latest) return null;
+  const revenue = Number(latest.revenue) || 0;
+  const monthFull = series.monthly_target || 0;
+  const now = new Date();
+  let target = monthFull;
+  if (latest.is_partial) {
+    const dim = daysInMonth(now.getUTCFullYear(), now.getUTCMonth());
+    target = monthFull * (now.getUTCDate() / dim);
+  }
+  const variance = target > 0 ? ((revenue - target) / target) * 100 : null;
+  return {
+    month: latest.month,
+    is_partial: !!latest.is_partial,
+    revenue_gbp: revenue,
+    target_gbp: target,
+    target_full_gbp: monthFull,
+    variance_pct: variance
+  };
+}
+
+// Per-tier YTD tile data:
+//   - sum revenue across all current-year points
+//   - target = monthly_target × months_elapsed_prorata
+function computeTierYtd(series) {
+  const points = Array.isArray(series.points) ? series.points : [];
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const monthIdx = now.getUTCMonth();
+  const dim = daysInMonth(year, monthIdx);
+  const dayInMonth = now.getUTCDate();
+  let revenue = 0;
+  let monthsWithData = 0;
+  for (const p of points) {
+    if (!p.month || !p.month.startsWith(String(year))) continue;
+    const v = Number(p.revenue);
+    if (Number.isFinite(v)) { revenue += v; monthsWithData += 1; }
+  }
+  const flat = series.monthly_target || 0;
+  const target = flat * (monthIdx + (dayInMonth / dim));
+  const variance = target > 0 ? ((revenue - target) / target) * 100 : null;
+  return {
+    year,
+    months_with_data: monthsWithData,
+    revenue_gbp: revenue,
+    target_prorata_gbp: target,
+    target_full_year_gbp: flat * 12,
+    variance_pct: variance
+  };
 }
 
 // ---------------------------------------------------------------
