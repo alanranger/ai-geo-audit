@@ -598,22 +598,45 @@ function buildProfitPyramid(tierHistory) {
     });
   const totalAnnualGp = rows.reduce((a, b) => a + (b.annualised_gp_gbp || 0), 0);
   const totalAnnualRev = rows.reduce((a, b) => a + (b.annualised_revenue_gbp || 0), 0);
+  const totalYtdGp = rows.reduce((a, b) => a + (b.ytd_gp_gbp || 0), 0);
+  const totalYtdRev = rows.reduce((a, b) => a + (b.ytd_revenue_gbp || 0), 0);
   for (const r of rows) {
     r.share_of_gp_pct = totalAnnualGp > 0 ? Number(((r.annualised_gp_gbp / totalAnnualGp) * 100).toFixed(1)) : 0;
     r.share_of_revenue_pct = totalAnnualRev > 0 ? Number(((r.annualised_revenue_gbp / totalAnnualRev) * 100).toFixed(1)) : 0;
     r.share_gap_pp = Number((r.share_of_gp_pct - r.share_of_revenue_pct).toFixed(1));
   }
   rows.sort((a, b) => b.annualised_gp_gbp - a.annualised_gp_gbp);
+  // GP target = £2.5k–£4k/month (£30k–£48k/yr) — the actual cash-profit
+  // floor and ceiling Alan needs to live off, after costs.
+  // Revenue target = £4k–£5k/month (£48k–£60k/yr) — the gross turnover
+  // that should deliver the GP target at the current product mix.
+  const MONTHLY_GP_MIN = 2500;
+  const MONTHLY_GP_MAX = 4000;
+  const ANNUAL_GP_MIN = MONTHLY_GP_MIN * 12;
+  const ANNUAL_GP_MAX = MONTHLY_GP_MAX * 12;
+  const MONTHLY_REV_MIN = 4000;
+  const MONTHLY_REV_MAX = 5000;
+  const ANNUAL_REV_MIN = MONTHLY_REV_MIN * 12;
+  const ANNUAL_REV_MAX = MONTHLY_REV_MAX * 12;
   return {
     rows,
     annualised_gp_total_gbp: Number(totalAnnualGp.toFixed(2)),
     annualised_revenue_total_gbp: Number(totalAnnualRev.toFixed(2)),
-    // Profit goal benchmarks (per the user's "£4-5k/mo" target).
-    monthly_gp_target_low_gbp: 4000,
-    monthly_gp_target_high_gbp: 5000,
-    annual_gp_target_low_gbp: 48000,
-    annual_gp_target_high_gbp: 60000,
-    profit_goal_progress_pct: Number(((totalAnnualGp / 48000) * 100).toFixed(1))
+    ytd_gp_total_gbp: Number(totalYtdGp.toFixed(2)),
+    ytd_revenue_total_gbp: Number(totalYtdRev.toFixed(2)),
+    projected_remainder_gp_gbp: Number(Math.max(0, totalAnnualGp - totalYtdGp).toFixed(2)),
+    projected_remainder_revenue_gbp: Number(Math.max(0, totalAnnualRev - totalYtdRev).toFixed(2)),
+    monthly_gp_target_low_gbp: MONTHLY_GP_MIN,
+    monthly_gp_target_high_gbp: MONTHLY_GP_MAX,
+    annual_gp_target_low_gbp: ANNUAL_GP_MIN,
+    annual_gp_target_high_gbp: ANNUAL_GP_MAX,
+    monthly_revenue_target_low_gbp: MONTHLY_REV_MIN,
+    monthly_revenue_target_high_gbp: MONTHLY_REV_MAX,
+    annual_revenue_target_low_gbp: ANNUAL_REV_MIN,
+    annual_revenue_target_high_gbp: ANNUAL_REV_MAX,
+    gp_gap_to_min_annual_gbp: Number(Math.max(0, ANNUAL_GP_MIN - totalAnnualGp).toFixed(2)),
+    revenue_gap_to_min_annual_gbp: Number(Math.max(0, ANNUAL_REV_MIN - totalAnnualRev).toFixed(2)),
+    profit_goal_progress_pct: Number(((totalAnnualGp / ANNUAL_GP_MIN) * 100).toFixed(1))
   };
 }
 
