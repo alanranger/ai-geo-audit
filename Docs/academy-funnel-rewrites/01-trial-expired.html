@@ -1,45 +1,61 @@
 <!--
-  /academy/trial-expired — REVISED CONTENT (v3)
+  /academy/trial-expired - REVISED CONTENT (v4)
   ===============================================
-  CRITICAL — Memberstack / upgrade flow
+  How this works
   ------------------------------------------------
-  Why v3 and not v1: An expired-trial member CANNOT simply log in via
-  /academy/login and regain access — the account exists in Memberstack
-  but the plan is expired, so the dashboard still blocks them. Alan
-  already built /academy/upgrade specifically to solve this: it pairs a
-  "Log in" button (Memberstack modal) with an "Upgrade now" button that
-  triggers checkout for the annual plan in the same session. That is the
-  *only* working route back for expired trials.
+  Members can only reach /academy/trial-expired in one way: they are
+  logged into Memberstack as a member whose only active plan is the
+  trial, the trial period has ended, and they tried to load any
+  annual-only gated page (e.g. /academy/online-photography-course).
+  Memberstack's gated-content rule on the Trial plan redirects them
+  here. At that moment the Memberstack session cookie is still valid -
+  so we can drive a Stripe checkout for the annual price using the
+  current member's session, with no extra "log in again" step.
 
-  Therefore this block MUST use the SAME button IDs that /academy/upgrade
-  uses, so the site-wide ARP Memberstack v2 JS (loaded site-wide via
-  Squarespace Code Injection) finds the button and wires up the click
-  handler:
+  The button mechanic
+  ------------------------------------------------
+  This block recreates the working /academy/upgrade pattern verbatim:
 
-      id="arp-upgrade-checkout-btn"  — primary CTA, triggers Memberstack
-                                        login (if needed) then opens
-                                        Stripe checkout for the annual
-                                        plan (prc_annual-membership-jj7y0h89).
-      data-ms-modal="login"          — "Log in" fallback for users who
-                                        landed here from email in a
-                                        different browser.
+      <div id="arp-academy-upgrade"> ...
+        <button id="arp-upgrade-checkout-btn"> ... </button>
+      </div>
+      <script>
+        // page-scoped IIFE that on click calls
+        //   $memberstackDom.purchasePlansWithCheckout({ priceId, successUrl, cancelUrl })
+        // then redirects window.location to the returned Stripe checkout URL.
+        // If $memberstackDom is unavailable or the call rejects (e.g. somebody
+        // is logged out and arrived here via a stale email link), it shows
+        // the same friendly alert /academy/upgrade uses.
+      </script>
+
+  Memberstack v2 ($memberstackDom) is already loaded site-wide via the
+  Squarespace site-wide install snippet, so this works on any page that
+  includes the markup + script combo.
+
+  Differences vs the /academy/upgrade copy:
+      - cancelUrl points back to /academy/trial-expired so an aborted
+        checkout brings the member here, not over to /academy/upgrade.
+      - Copy is reframed around the SAVE20 / £59 first-year offer.
+      - "Log in" button kept as a small fallback for the edge case where
+        somebody followed an emailed link in a different browser and
+        therefore has no session.
 
   Pricing rules (per user, 2026-05-19):
-      - SAVE20 (£59 first year) shown ONLY here and in post-expiry
-        re-engagement emails. Every pre-trial page must show full £79.
-      - Stripe / Memberstack applies the discount automatically at
-        checkout when the user is within 7 days of trial expiry — no
-        manual code entry needed. (See FAQ on /free-online-photography-course.)
+      - SAVE20 / £59 first year appears ONLY here and in post-expiry
+        re-engagement emails. Every pre-trial page shows full £79.
+      - The discount is applied automatically at Stripe checkout when
+        the member is within 7 days of trial expiry. No manual code
+        entry. If SAVE20 is not yet auto-applying server-side, see the
+        comment near the script tag for where to add a `promotionCode`
+        argument to purchasePlansWithCheckout.
 
-  IMPORTANT do-NOT-changes:
-      - Do not change #arp-upgrade-checkout-btn to a plain <a href> link
-        — the site JS depends on the click handler it attaches.
-      - Do not link the primary CTA to /academy/login — that is the
-        sign-up page; expired trials get blocked there.
-      - Do not add data-ms-price attributes to #arp-upgrade-checkout-btn
-        — the site JS handles the price purchase itself; adding
-        data-ms-price would trigger Memberstack's separate "add price"
-        flow alongside it and double-fire the checkout.
+  Do-NOT changes:
+      - Do not change #arp-academy-upgrade or #arp-upgrade-checkout-btn
+        IDs. The script keys off both.
+      - Do not add data-ms-price* attributes to #arp-upgrade-checkout-btn.
+        The script drives Memberstack directly; data-ms-price would
+        trigger an additional native "add price" flow alongside it and
+        double-fire the checkout.
 -->
 
 <style>
@@ -227,7 +243,13 @@
   }
 </style>
 
-<div class="ar-reactivate-wrap">
+<!--
+  Outer wrapper id="arp-academy-upgrade" is required - the inline script
+  at the end of this block is page-scoped and only runs when both this
+  ID and #arp-upgrade-checkout-btn are present (identical contract to
+  /academy/upgrade so the two pages stay symmetrical).
+-->
+<div id="arp-academy-upgrade" class="ar-reactivate-wrap">
 
   <div class="ar-reactivate-banner">
     Limited offer &mdash; <strong>£20 off your first year auto-applied at checkout</strong>
@@ -255,8 +277,12 @@
     </p>
 
     <!--
-      Buttons mirror /academy/upgrade so the site-wide ARP Memberstack v2 JS
-      wires up the checkout click handler on #arp-upgrade-checkout-btn.
+      Buttons mirror /academy/upgrade. The "Reactivate" button is wired
+      up by the inline script at the end of this block - identical to
+      the click handler that already runs on /academy/upgrade.
+      The "Log in" button is a small fallback for the edge case where
+      somebody landed here from an email link in a different browser
+      and has no Memberstack session.
     -->
     <div class="ar-cta-row">
       <button type="button"
@@ -311,3 +337,85 @@
   </p>
 
 </div>
+
+<!--
+  Memberstack v2 checkout wiring for #arp-upgrade-checkout-btn.
+  This is a verbatim adaptation of the script that already runs on
+  /academy/upgrade (extracted from the live page source). Only the
+  cancelUrl differs - it returns to /academy/trial-expired so an
+  aborted checkout brings the member back here, not over to
+  /academy/upgrade.
+
+  If SAVE20 ever needs to be passed explicitly (e.g. if Stripe is not
+  auto-applying the promo for the 7-day post-trial window), add a
+  `promotionCode: "SAVE20"` argument to the purchasePlansWithCheckout
+  call below. Right now we trust the existing Stripe / Memberstack
+  promo rule to do that.
+-->
+<script>
+(function () {
+  var PRICE_ID = "prc_annual-membership-jj7y0h89";
+  var root = document.getElementById("arp-academy-upgrade");
+  var btn = document.getElementById("arp-upgrade-checkout-btn");
+  if (!root || !btn || btn.getAttribute("data-arp-upgrade-wired") === "1") return;
+  btn.setAttribute("data-arp-upgrade-wired", "1");
+
+  function originBase() {
+    return (window.location && window.location.origin) ? window.location.origin : "https://www.alanranger.com";
+  }
+
+  function waitMs(fn, tries) {
+    tries = tries || 0;
+    var ms = window.$memberstackDom;
+    if (ms && typeof ms.purchasePlansWithCheckout === "function") {
+      fn(ms);
+      return;
+    }
+    if (tries > 80) {
+      fn(null);
+      return;
+    }
+    setTimeout(function () { waitMs(fn, tries + 1); }, 100);
+  }
+
+  btn.addEventListener(
+    "click",
+    function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Opening checkout...";
+      waitMs(function (ms) {
+        if (!ms) {
+          btn.disabled = false;
+          btn.textContent = label;
+          window.alert("Checkout is not ready yet. Please refresh the page and try again.");
+          return;
+        }
+        ms.purchasePlansWithCheckout({
+          priceId: PRICE_ID,
+          successUrl: originBase() + "/academy/dashboard?upgrade=success",
+          cancelUrl: originBase() + "/academy/trial-expired"
+        })
+          .then(function (result) {
+            var url = result && result.data && result.data.url;
+            if (url) {
+              window.location.assign(url);
+              return;
+            }
+            throw new Error("no checkout url");
+          })
+          .catch(function () {
+            btn.disabled = false;
+            btn.textContent = label;
+            window.alert(
+              "Could not start checkout. Tap Log in, sign in with your Academy email, then tap Reactivate again."
+            );
+          });
+      });
+    },
+    true
+  );
+})();
+</script>

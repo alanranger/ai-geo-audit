@@ -2,6 +2,16 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-19] - Academy funnel rewrites v4: inline the working /academy/upgrade checkout script on /academy/trial-expired
+
+### Fixed
+- **`Docs/academy-funnel-rewrites/01-trial-expired.html` v3 button did nothing on click.** v3 used `id="arp-upgrade-checkout-btn"` without the click-handler script, on the (now disproved) assumption that the handler was loaded site-wide. Live test confirmed otherwise: the `/academy/upgrade` page-level Code Injection holds the only copy of the click handler (IIFE that calls `$memberstackDom.purchasePlansWithCheckout({ priceId, successUrl, cancelUrl })` and shows a friendly alert if the member is not authenticated). On `/academy/trial-expired` the same button ID exists but no listener is attached, so clicks fall through with no UX feedback at all. v4 inlines the verbatim handler in the Code Block itself, with `cancelUrl` rewritten to `/academy/trial-expired` so an aborted checkout returns the member here instead of `/academy/upgrade`. The outer wrapper now carries `id="arp-academy-upgrade"` to match the script's two required hooks (root + button).
+
+### Notes
+- The fix preserves Alan's architecture point: a member can only land on `/academy/trial-expired` if Memberstack's gated-content rule on the Trial plan redirected them there from an annual-only page, which means the member is still authenticated. The handler therefore goes straight to `purchasePlansWithCheckout` with no extra login step — same behaviour as `/academy/upgrade`. The "Log in" button is kept solely as a fallback for the edge case where someone followed an email link in a different browser and has no Memberstack session.
+- SAVE20 / £59 first-year framing in the copy assumes the Stripe promo rule auto-applies inside the 7-day post-trial window. If that rule is not yet active server-side, add `promotionCode: "SAVE20"` to the `purchasePlansWithCheckout` call (commented in the HTML).
+- Source extraction: live `/academy/upgrade` HTML pulled via `Invoke-WebRequest` (228 KB), 94 inline `<script>` blocks scanned, four relevant ones logged — Memberstack v2 install (site-wide), the upgrade-button IIFE (page-scoped, replicated here), the Academy router/UI suppressor, and a member-history tracker. Click test against the live button (logged out) caught the expected `alert("Could not start checkout. Open Log in, sign in with your trial email, then tap Upgrade again.")` confirming the handler reaches Memberstack and fails the auth check correctly.
+
 ## [2026-05-19] - Academy funnel follow-up: GSC dedup bug, /academy/upgrade discovery, Memberstack button mechanics in rewrites
 
 ### Fixed
