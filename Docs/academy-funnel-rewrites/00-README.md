@@ -15,12 +15,25 @@ untouched — these blocks are intended to replace only the page-body content.
 
 ## Files
 
-| File | Page | Priority |
+| File | Page | Status |
 |---|---|---|
-| `01-trial-expired.html` | `/academy/trial-expired` | **1 — highest impact** |
-| `02-free-online-photography-course.html` | `/free-online-photography-course` | 2 — biggest top-of-funnel |
-| `03-free-photography-course.html` | `/free-photography-course` | 3 — canonical decision needed |
-| `04-academy-login.html` | `/academy/login` | 4 — gate page |
+| `01-trial-expired.html` | `/academy/trial-expired` | **DEPRECATED** (2026-05-19) — superseded by the patched dashboard modal in `Academy/alanranger-academy-assesment/academy-dashboard-squarespace-snippet-v1.html`. Do not deploy. See file header and `CHANGELOG.md` for the full reason. |
+| `02-free-online-photography-course.html` | `/free-online-photography-course` | Active — top-of-funnel rewrite |
+| `03-free-photography-course.html` | `/free-photography-course` | Active — canonical decision needed (see `CANONICAL-DECISION.md`) |
+| `04-academy-login.html` | `/academy/login` | Active — gate-page CTA hierarchy fix |
+
+### `/academy/trial-expired` deployment (replaces the deprecated `01` rewrite)
+
+Add a Squarespace URL Mapping at *Pages → Not Linked → settings (cog) → Advanced → URL Mappings*:
+
+```
+/academy/trial-expired -> /academy/dashboard 301
+```
+
+That hops members straight through to the patched dashboard modal. The
+underlying Squarespace page can stay live for now (Memberstack's
+gated-content redirect on the Trial plan still routes through it); the
+301 just sits in front of it for direct hits.
 
 ## Pricing rules (per user clarification, 2026-05-19)
 
