@@ -102,6 +102,27 @@ function monthlyTrialBuckets(trials) {
   return months;
 }
 
+// Per-month NEW PAID MEMBERS (first-ever annual_start per member). This
+// is what people actually mean by "Academy signups" — distinct from
+// "trials started", which is the top of the funnel. Surfaced on the
+// chart so the trial→paid bleed is unambiguous at a glance.
+function monthlyPaidBuckets(annuals, months) {
+  const idx = new Map(months.map((b, i) => [b.month, i]));
+  const firstStartByMember = new Map();
+  for (const a of annuals) {
+    if (!a.member_id || !a.annual_start_at) continue;
+    const t = new Date(a.annual_start_at).getTime();
+    const prev = firstStartByMember.get(a.member_id);
+    if (prev == null || t < prev) firstStartByMember.set(a.member_id, t);
+  }
+  const result = months.map(m => ({ month: m.month, new_paid: 0 }));
+  firstStartByMember.forEach(t => {
+    const key = new Date(t).toISOString().slice(0, 7);
+    if (idx.has(key)) result[idx.get(key)].new_paid += 1;
+  });
+  return result;
+}
+
 // Compute current/recent counts from the raw rowsets. Done in one place
 // so the handler stays simple.
 //
@@ -256,7 +277,15 @@ export default async function handler(req, res) {
   try {
     const data = await fetchData(supabase);
     const summary = summariseNow(data.trials, data.annuals, data.events);
-    const monthly = monthlyTrialBuckets(data.trials);
+        const monthly = monthlyTrialBuckets(data.trials);
+        const monthlyPaid = monthlyPaidBuckets(data.annuals, monthly);
+        // Merge the paid-signup count onto each month so the dashboard
+        // chart can render trials + paid side by side without making a
+        // second API call. (Chart consumers can rely on m.new_paid being
+        // present even if zero.)
+        for (let i = 0; i < monthly.length; i += 1) {
+          monthly[i].new_paid = monthlyPaid[i]?.new_paid || 0;
+        }
     const gap = computeGapAnalysis(summary, gapGbp);
     return send(res, 200, {
       configured: true,
