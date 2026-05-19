@@ -18,8 +18,8 @@ untouched — these blocks are intended to replace only the page-body content.
 | File | Page | Status |
 |---|---|---|
 | `01-trial-expired.html` | `/academy/trial-expired` | **DEPRECATED** (2026-05-19) — superseded by the patched dashboard modal in `Academy/alanranger-academy-assesment/academy-dashboard-squarespace-snippet-v1.html`. Do not deploy. See file header and `CHANGELOG.md` for the full reason. |
-| `02-free-online-photography-course.html` | `/free-online-photography-course` | Active — top-of-funnel rewrite |
-| `03-free-photography-course.html` | `/free-photography-course` | Active — canonical decision needed (see `CANONICAL-DECISION.md`) |
+| `02-free-online-photography-course.html` | `/free-online-photography-course` | Active **v3** — canonical lead-magnet page. Adds Course + FAQPage JSON-LD, author trust block, YouTube comparison table, six-question FAQ, three CTAs. Targets the AIO citation gap documented in `ACADEMY_FUNNEL_INVESTIGATION_2026-05.md`. |
+| `03-free-photography-course.html` | `/free-photography-course` | **Stub (v3)** — page is 301-redirected to `/free-online-photography-course` (Alan applied the redirect on 2026-05-19). File kept as a minimal working CTA stub on the underlying Squarespace page in case the URL Mapping is ever removed. See `CANONICAL-DECISION.md`. |
 | `04-academy-login.html` | `/academy/login` | Active — gate-page CTA hierarchy fix |
 
 ### `/academy/trial-expired` deployment (replaces the deprecated `01` rewrite)

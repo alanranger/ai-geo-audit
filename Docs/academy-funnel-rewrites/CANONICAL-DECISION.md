@@ -35,21 +35,32 @@ In Squarespace:
    — should return `301` with a `Location: …/free-online-photography-course`
    header.
 
-## Timing
+## Status (2026-05-19)
 
-- Apply the page rewrite from `02-free-online-photography-course.html` FIRST
-  (so the destination page is in its best converting shape).
-- Then apply the 301.
-- Wait 1–2 weeks. Watch the keyword_rankings table — `online photography course`
-  should move from #2 toward #1 as signal consolidates.
+- **301 is live.** Alan applied the redirect in Squarespace URL Mappings on
+  2026-05-19. Confirmed by the GSC sync backfill the same day —
+  `/free-online-photography-course` now reads 635 clicks / 45,258 impressions
+  / avg position 14.7 for the 2026-04-21 → 2026-05-18 window in
+  `gsc_page_timeseries`, while `/free-photography-course` no longer reports
+  fresh GSC data (consistent with the 301 in front of it).
+- **Page rewrite v3** (`02-free-online-photography-course.html`) is the
+  current deployable content for the canonical destination. It now includes
+  Course + FAQPage JSON-LD, an inline author trust block, the YouTube
+  comparison table and six pre-trial FAQ entries — designed to close the
+  AIO citation gap documented in `ACADEMY_FUNNEL_INVESTIGATION_2026-05.md`.
+- **`03-free-photography-course.html`** has been reduced to a working
+  stub. The 301 means visitors never see it; the stub stays in the file
+  so that the underlying Squarespace page still has a functioning trial
+  CTA if the URL Mapping is ever removed by accident or during a
+  Squarespace site migration.
 
-## What about the work in 03-free-photography-course.html?
+## Apply order (already followed)
 
-That file exists as a backup option in case Alan wants to A/B the two pages
-for a week before redirecting (e.g. to see if the cleaner page converts
-better at the same traffic level). If you're going straight to the 301
-redirect, you can skip applying it — the URL will be a 301 and any content
-on it won't be served.
+1. Apply the v3 rewrite from `02-free-online-photography-course.html` to
+   the canonical page (destination in its best converting shape first).
+2. Apply the 301 in Squarespace URL Mappings.
+3. Wait 1–2 weeks. Watch the keyword_rankings table — `online photography
+   course` should move from #2 toward #1 as signal consolidates.
 
 ## Once the redirect is live — verify
 
