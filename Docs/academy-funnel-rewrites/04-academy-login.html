@@ -1,0 +1,257 @@
+<!--
+  /academy/login — REVISED HERO + CTA HIERARCHY (v2)
+  ===================================================
+  Current state: three buttons of identical visual weight
+    [ Log in ] [ Start 14-Day Free Trial ] [ Annual Membership ]
+  A new visitor (the ones from GSC, position ~6.7, CTR ~2.7%) does not
+  know which button is for them. Most-likely default click is "Log in"
+  because it is first — but they do not have an account yet.
+
+  Fix: split into two clear paths.
+    - Primary (large, green): Start free 14-day trial
+    - Secondary (medium, outline): Buy annual membership (£79/year)
+    - Tertiary (small text link, off to the side): Already a member — log in
+
+  Pricing: pre-trial page, so £79/year only (no SAVE20 here).
+
+  CRITICAL — Memberstack button mechanics:
+  ----------------------------------------
+  The buttons MUST keep the same Memberstack data-ms-* attributes as the
+  current live /academy/login page (#arpLoginBtn, #arpTrialBtn,
+  #arpAnnualBtn). The button IDs are referenced by the site-wide ARP
+  Memberstack v2 install that also handles:
+      - The "/academy/login?start=trial" query-string auto-open of the
+        signup modal (see academy_config / academyTrial helper).
+      - The "data-ms-modal" + "data-ms-price:add" pattern that opens the
+        Memberstack signup modal AND attaches the chosen Stripe price so
+        checkout flows from the same modal.
+
+  Price IDs (do not change):
+      prc_30-day-free-trial-mg18p0u9z   — Trial (priceId legacy-named;
+                                          actual duration is now 14 days
+                                          enforced by Supabase
+                                          academy_config + lib/academyTrial).
+      prc_annual-membership-jj7y0h89   — Annual £79/yr (SAVE20 promo
+                                          applies automatically inside
+                                          7-day post-trial window).
+-->
+
+<style>
+  .ar-login-wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 1.25rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1f2937;
+  }
+  .ar-login-hero {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    padding: 1.75rem 1.5rem;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+    margin-bottom: 1.25rem;
+  }
+  .ar-login-hero h1 {
+    font-size: 1.6rem;
+    line-height: 1.2;
+    margin: 0 0 0.5rem 0;
+    color: #0f172a;
+    font-weight: 800;
+  }
+  .ar-login-sub {
+    font-size: 1rem;
+    color: #475569;
+    margin: 0 0 1.25rem 0;
+  }
+  .ar-login-paths {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.85rem;
+    margin: 1rem 0 0.5rem 0;
+  }
+  .ar-login-path {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 1.1rem 1.1rem;
+    border-radius: 12px;
+    border: 1.5px solid #e2e8f0;
+    background: #f8fafc;
+  }
+  .ar-login-path.is-primary {
+    border-color: #15803d;
+    background: linear-gradient(180deg, #ecfdf5 0%, #ffffff 70%);
+  }
+  .ar-login-path-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #475569;
+  }
+  .ar-login-path.is-primary .ar-login-path-label {
+    color: #15803d;
+  }
+  .ar-login-path-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.3;
+  }
+  .ar-login-path-meta {
+    font-size: 0.9rem;
+    color: #475569;
+    line-height: 1.5;
+  }
+  /*
+    Buttons (not links) so Memberstack's data-ms-modal / data-ms-price:add
+    attributes can fire the signup modal in-place.
+  */
+  button.ar-login-cta {
+    font-family: inherit;
+    cursor: pointer;
+    border: none;
+    line-height: 1.2;
+  }
+  .ar-login-cta {
+    display: inline-block;
+    margin-top: 0.5rem;
+    font-weight: 700;
+    font-size: 1rem;
+    padding: 0.85rem 1.25rem;
+    border-radius: 10px;
+    text-decoration: none;
+    text-align: center;
+  }
+  .ar-login-cta.is-primary {
+    background: #15803d;
+    color: #ffffff !important;
+    box-shadow: 0 4px 10px rgba(21, 128, 61, 0.25);
+  }
+  .ar-login-cta.is-secondary {
+    background: #ffffff;
+    color: #0f172a !important;
+    border: 1.5px solid #cbd5e1;
+  }
+  .ar-login-existing {
+    text-align: center;
+    margin-top: 0.75rem;
+    font-size: 0.95rem;
+    color: #475569;
+  }
+  .ar-login-existing button.ar-login-existing-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    color: #2563eb;
+    font: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .ar-login-fud {
+    background: #fef3c7;
+    border: 1px solid #fcd34d;
+    color: #78350f;
+    padding: 0.85rem 1rem;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    margin: 1.25rem 0 0 0;
+    line-height: 1.5;
+  }
+  .ar-login-fud strong { color: #92400e; }
+</style>
+
+<!--
+  Outer wrapper keeps id="arp-academy-login" so any page-level JS or
+  CSS selectors that target the academy-login section continue to match.
+-->
+<div id="arp-academy-login" class="ar-login-wrap">
+
+  <div class="ar-login-hero">
+
+    <h1>Academy &mdash; sign in or get started</h1>
+    <p class="ar-login-sub">
+      Pick the option that matches you. Two-week free trial available
+      to new members &mdash; no card required.
+    </p>
+
+    <div class="ar-login-paths">
+
+      <!-- Path 1: New visitor — PRIMARY (trial signup modal) -->
+      <div class="ar-login-path is-primary">
+        <span class="ar-login-path-label">New here</span>
+        <span class="ar-login-path-title">Start a free 14-day trial</span>
+        <span class="ar-login-path-meta">
+          Instant access to all 60 modules and 15 exams. No card details
+          needed. Cancel any time during the 14 days &mdash; nothing is
+          charged on a trial.
+        </span>
+        <!--
+          #arpTrialBtn — Memberstack signup modal + attach trial price.
+          Site JS also auto-opens this modal when the URL contains
+          ?start=trial (e.g. links from external pages or emails).
+        -->
+        <button type="button"
+                id="arpTrialBtn"
+                class="ar-login-cta is-primary"
+                data-ms-modal="signup"
+                data-ms-price:add="prc_30-day-free-trial-mg18p0u9z"
+                aria-label="Start free 14-day Academy trial"
+                data-cta="login-start-trial">
+          Start my free trial
+        </button>
+      </div>
+
+      <!-- Path 2: Knows they want to buy — SECONDARY (annual signup modal) -->
+      <div class="ar-login-path">
+        <span class="ar-login-path-label">Skip the trial</span>
+        <span class="ar-login-path-title">Annual Membership &mdash; &pound;79/year</span>
+        <span class="ar-login-path-meta">
+          Everything in the trial plus the full downloads library: 30 Practice
+          Pack PDFs, 35 field checklists and the 741-page Academy eBook.
+          Cancel anytime.
+        </span>
+        <!--
+          #arpAnnualBtn — Memberstack signup modal + attach annual price.
+        -->
+        <button type="button"
+                id="arpAnnualBtn"
+                class="ar-login-cta is-secondary"
+                data-ms-modal="signup"
+                data-ms-price:add="prc_annual-membership-jj7y0h89"
+                aria-label="Buy annual Academy membership at 79 pounds per year"
+                data-cta="login-buy-annual">
+          Buy annual membership
+        </button>
+      </div>
+
+    </div>
+
+    <p class="ar-login-existing">
+      Already a member?
+      <!--
+        #arpLoginBtn — Memberstack login modal. The current live page uses
+        the exact same data-ms-modal="login" attribute so existing
+        Memberstack hooks continue to work.
+      -->
+      <button type="button"
+              id="arpLoginBtn"
+              class="ar-login-existing-btn"
+              data-ms-modal="login"
+              aria-label="Log in to the Academy"
+              data-cta="login-existing">Log in here</button>
+      &nbsp;&middot;&nbsp; Forgot your password? Use <strong>&ldquo;Forgot Password&rdquo;</strong> inside the login modal.
+    </p>
+
+    <div class="ar-login-fud">
+      <strong>One small note about the trial:</strong> your free trial is
+      activated when you complete the &pound;0 Stripe checkout. No card
+      details are required &mdash; you just confirm. If you close the window
+      first, just re-open this page and try again.
+    </div>
+
+  </div>
+
+</div>

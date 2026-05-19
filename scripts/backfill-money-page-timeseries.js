@@ -16,6 +16,8 @@ import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 import { getGSCAccessToken, normalizePropertyUrl, getGscDateRange } from '../api/aigeo/utils.js';
 
+const TAG = '[Backfill Money Page Timeseries]';
+
 const need = (k) => {
   const v = process.env[k];
   if (!v || !String(v).trim()) throw new Error(`missing_env:${k}`);
@@ -43,120 +45,172 @@ const normalizeUrl = (url) => {
   return normalized.replace(/^\/+/, '').replace(/\/+$/, '');
 };
 
-async function main() {
-  const propertyUrl = getArg('propertyUrl', 'https://www.alanranger.com');
-  const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
-  const siteUrl = normalizePropertyUrl(propertyUrl);
-  const { startDate, endDate } = getGscDateRange({ daysBack: 28, endOffsetDays: 1 });
+// Keep in sync with api/cron/backfill-money-page-timeseries.js — strategic pages
+// that must be synced even when the audit's "money pages" classifier excludes
+// them (Academy funnel entry points).
+// See Docs/ACADEMY_FUNNEL_INVESTIGATION_2026-05.md.
+const STRATEGIC_PAGES = [
+  'academy/login',
+  'academy/trial-expired',
+  'academy/upgrade',
+  'trial-expired',
+  'free-online-photography-course',
+  'free-photography-course',
+  'free-online-photography-academy',
+  'online-photography-course'
+];
 
-  console.log(`[Backfill Money Page Timeseries] property=${siteUrl} range=${startDate}..${endDate}`);
+function parseMoneyPagesMetrics(rawValue) {
+  if (typeof rawValue === 'string') {
+    try { return JSON.parse(rawValue); } catch { return null; }
+  }
+  return rawValue;
+}
 
-  const { data: latestAudit, error: auditError } = await supabase
+function buildPageSet(auditMoneyPages, strategicPages) {
+  const combinedSet = new Set();
+  for (const url of auditMoneyPages) {
+    const norm = normalizeUrl(url);
+    if (norm) combinedSet.add(norm);
+  }
+  for (const slug of strategicPages) {
+    const norm = normalizeUrl(slug);
+    if (norm) combinedSet.add(norm);
+  }
+  return combinedSet;
+}
+
+async function fetchLatestMoneyPages(supabase, siteUrl) {
+  const { data, error } = await supabase
     .from('audit_results')
     .select('audit_date, money_pages_metrics')
     .eq('property_url', siteUrl)
     .order('audit_date', { ascending: false })
     .limit(1)
     .maybeSingle();
-
-  if (auditError || !latestAudit) {
-    throw new Error(`latest_audit_missing:${auditError?.message || 'no_audit'}`);
+  if (error || !data) {
+    throw new Error(`latest_audit_missing:${error?.message || 'no_audit'}`);
   }
+  const metrics = parseMoneyPagesMetrics(data.money_pages_metrics);
+  return Array.isArray(metrics?.rows) ? metrics.rows.map((row) => row.url).filter(Boolean) : [];
+}
 
-  let moneyPagesMetrics = latestAudit.money_pages_metrics;
-  if (typeof moneyPagesMetrics === 'string') {
-    try { moneyPagesMetrics = JSON.parse(moneyPagesMetrics); } catch { moneyPagesMetrics = null; }
-  }
-
-  const moneyPages = Array.isArray(moneyPagesMetrics?.rows)
-    ? moneyPagesMetrics.rows.map((row) => row.url).filter(Boolean)
-    : [];
-
-  if (moneyPages.length === 0) {
-    console.log('[Backfill Money Page Timeseries] No money pages found in latest audit.');
-    return;
-  }
-
-  console.log(`[Backfill Money Page Timeseries] Money pages: ${moneyPages.length}`);
-
+async function fetchGscRows(siteUrl, startDate, endDate) {
   const accessToken = await getGSCAccessToken();
   const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
-
   const response = await fetch(searchConsoleUrl, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({
-      startDate,
-      endDate,
-      dimensions: ['date', 'page'],
-      rowLimit: 25000
-    })
+    body: JSON.stringify({ startDate, endDate, dimensions: ['date', 'page'], rowLimit: 25000 })
   });
-
   if (!response.ok) {
     const errorText = await response.text().catch(() => '');
     throw new Error(`gsc_api_error:${response.status}:${errorText.slice(0, 400)}`);
   }
-
   const data = await response.json().catch(() => ({}));
-  const rows = Array.isArray(data.rows) ? data.rows : [];
+  return Array.isArray(data.rows) ? data.rows : [];
+}
 
-  const moneyPageSet = new Set(moneyPages.map((url) => normalizeUrl(url)).filter(Boolean));
-  const records = rows
-    .map((row) => ({
-      date: row.keys?.[0] || null,
-      page: row.keys?.[1] || null,
-      clicks: row.clicks || 0,
-      impressions: row.impressions || 0,
-      ctr: row.ctr ? row.ctr * 100 : 0,
-      position: row.position ?? null
-    }))
-    .filter((row) => row.date && row.page)
-    .filter((row) => moneyPageSet.has(normalizeUrl(row.page)))
-    .map((row) => ({
+function mapGscRowsToRecords(rows, siteUrl, pageSet) {
+  const result = [];
+  for (const row of rows) {
+    const date = row.keys?.[0] || null;
+    const page = row.keys?.[1] || null;
+    if (!date || !page) continue;
+    const pageUrl = normalizeUrl(page);
+    if (!pageSet.has(pageUrl)) continue;
+    result.push({
       property_url: siteUrl,
-      page_url: normalizeUrl(row.page),
-      date: row.date,
+      page_url: pageUrl,
+      date,
       clicks: Number(row.clicks || 0),
       impressions: Number(row.impressions || 0),
-      ctr: Number(row.ctr || 0),
+      ctr: Number(row.ctr ? row.ctr * 100 : 0),
       position: row.position != null ? Number(row.position) : null,
       updated_at: new Date().toISOString()
-    }));
-
-  if (records.length === 0) {
-    console.log('[Backfill Money Page Timeseries] No matching rows to save.');
-    return;
+    });
   }
+  return result;
+}
 
-  console.log(`[Backfill Money Page Timeseries] Saving ${records.length} rows...`);
+function pickBetterRecord(a, b) {
+  if (a.clicks !== b.clicks) return a.clicks > b.clicks ? a : b;
+  if (a.impressions !== b.impressions) return a.impressions > b.impressions ? a : b;
+  return a;
+}
 
-  const batchSize = 1000;
+function dedupeRecords(records) {
+  const byKey = new Map();
+  let collisions = 0;
+  for (const r of records) {
+    const key = `${r.property_url}|${r.page_url}|${r.date}`;
+    const existing = byKey.get(key);
+    if (existing) {
+      collisions += 1;
+      byKey.set(key, pickBetterRecord(existing, r));
+    } else {
+      byKey.set(key, r);
+    }
+  }
+  return { records: Array.from(byKey.values()), collisions };
+}
+
+async function upsertInBatches(supabase, records, batchSize = 1000) {
   let inserted = 0;
   let errors = 0;
-
   for (let i = 0; i < records.length; i += batchSize) {
     const batch = records.slice(i, i + batchSize);
     const { error } = await supabase
       .from('gsc_page_timeseries')
       .upsert(batch, { onConflict: 'property_url,page_url,date', ignoreDuplicates: false });
-
     if (error) {
       errors += 1;
-      console.warn(`[Backfill Money Page Timeseries] Batch ${i / batchSize + 1} error: ${error.message}`);
+      console.warn(`${TAG} Batch ${i / batchSize + 1} error: ${error.message}`);
     } else {
       inserted += batch.length;
     }
   }
+  return { inserted, errors };
+}
 
-  console.log(`[Backfill Money Page Timeseries] done: saved=${inserted} errors=${errors}`);
+async function main() {
+  const propertyUrl = getArg('propertyUrl', 'https://www.alanranger.com');
+  const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
+  const siteUrl = normalizePropertyUrl(propertyUrl);
+  const { startDate, endDate } = getGscDateRange({ daysBack: 28, endOffsetDays: 1 });
+
+  console.log(`${TAG} property=${siteUrl} range=${startDate}..${endDate}`);
+
+  const auditMoneyPages = await fetchLatestMoneyPages(supabase, siteUrl);
+  const pageSet = buildPageSet(auditMoneyPages, STRATEGIC_PAGES);
+
+  if (pageSet.size === 0) {
+    console.log(`${TAG} No money pages or strategic pages configured.`);
+    return;
+  }
+  console.log(`${TAG} Pages: audit=${auditMoneyPages.length} strategic=${STRATEGIC_PAGES.length} combined=${pageSet.size}`);
+
+  const rows = await fetchGscRows(siteUrl, startDate, endDate);
+  const rawRecords = mapGscRowsToRecords(rows, siteUrl, pageSet);
+  const { records, collisions } = dedupeRecords(rawRecords);
+
+  if (collisions > 0) {
+    console.log(`${TAG} Deduped ${collisions} collision(s) before upsert`);
+  }
+  if (records.length === 0) {
+    console.log(`${TAG} No matching rows to save.`);
+    return;
+  }
+
+  console.log(`${TAG} Saving ${records.length} rows...`);
+  const { inserted, errors } = await upsertInBatches(supabase, records);
+  console.log(`${TAG} done: saved=${inserted} errors=${errors}`);
 }
 
 main().catch((e) => {
-  console.error('[Backfill Money Page Timeseries] fatal:', e?.message || e);
+  console.error(`${TAG} fatal:`, e?.message || e);
   process.exit(1);
 });
-

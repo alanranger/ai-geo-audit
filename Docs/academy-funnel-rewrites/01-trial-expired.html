@@ -1,0 +1,313 @@
+<!--
+  /academy/trial-expired — REVISED CONTENT (v3)
+  ===============================================
+  CRITICAL — Memberstack / upgrade flow
+  ------------------------------------------------
+  Why v3 and not v1: An expired-trial member CANNOT simply log in via
+  /academy/login and regain access — the account exists in Memberstack
+  but the plan is expired, so the dashboard still blocks them. Alan
+  already built /academy/upgrade specifically to solve this: it pairs a
+  "Log in" button (Memberstack modal) with an "Upgrade now" button that
+  triggers checkout for the annual plan in the same session. That is the
+  *only* working route back for expired trials.
+
+  Therefore this block MUST use the SAME button IDs that /academy/upgrade
+  uses, so the site-wide ARP Memberstack v2 JS (loaded site-wide via
+  Squarespace Code Injection) finds the button and wires up the click
+  handler:
+
+      id="arp-upgrade-checkout-btn"  — primary CTA, triggers Memberstack
+                                        login (if needed) then opens
+                                        Stripe checkout for the annual
+                                        plan (prc_annual-membership-jj7y0h89).
+      data-ms-modal="login"          — "Log in" fallback for users who
+                                        landed here from email in a
+                                        different browser.
+
+  Pricing rules (per user, 2026-05-19):
+      - SAVE20 (£59 first year) shown ONLY here and in post-expiry
+        re-engagement emails. Every pre-trial page must show full £79.
+      - Stripe / Memberstack applies the discount automatically at
+        checkout when the user is within 7 days of trial expiry — no
+        manual code entry needed. (See FAQ on /free-online-photography-course.)
+
+  IMPORTANT do-NOT-changes:
+      - Do not change #arp-upgrade-checkout-btn to a plain <a href> link
+        — the site JS depends on the click handler it attaches.
+      - Do not link the primary CTA to /academy/login — that is the
+        sign-up page; expired trials get blocked there.
+      - Do not add data-ms-price attributes to #arp-upgrade-checkout-btn
+        — the site JS handles the price purchase itself; adding
+        data-ms-price would trigger Memberstack's separate "add price"
+        flow alongside it and double-fire the checkout.
+-->
+
+<style>
+  .ar-reactivate-wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 1.25rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1f2937;
+  }
+  .ar-reactivate-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    border: 2px solid #f59e0b;
+    color: #78350f;
+    padding: 0.85rem 1rem;
+    border-radius: 10px;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 1.25rem;
+    font-size: 0.95rem;
+  }
+  .ar-reactivate-banner strong { color: #92400e; }
+  .ar-reactivate-hero {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    padding: 1.75rem 1.5rem;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+    margin-bottom: 1rem;
+  }
+  .ar-reactivate-hero h1 {
+    font-size: 1.6rem;
+    margin: 0 0 0.5rem 0;
+    color: #0f172a;
+    line-height: 1.2;
+  }
+  .ar-reactivate-hero p.ar-lead {
+    font-size: 1.05rem;
+    color: #334155;
+    margin: 0 0 1rem 0;
+  }
+  .ar-price-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin: 0.5rem 0 1rem 0;
+  }
+  .ar-price-new {
+    font-size: 2rem;
+    font-weight: 800;
+    color: #15803d;
+    line-height: 1;
+  }
+  .ar-price-old {
+    font-size: 1.1rem;
+    color: #64748b;
+    text-decoration: line-through;
+    text-decoration-thickness: 2px;
+  }
+  .ar-price-meta {
+    font-size: 0.85rem;
+    color: #475569;
+  }
+  /*
+    Use the same `.arp-btn` / `.arp-btn--primary` / `.arp-btn--secondary`
+    class hooks as /academy/upgrade so the site stylesheet styling stays
+    consistent and so that any global event delegation by class matches.
+  */
+  .arp-btn {
+    display: inline-block;
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 1.05rem;
+    padding: 0.95rem 1.5rem;
+    border-radius: 10px;
+    border: 1.5px solid transparent;
+    cursor: pointer;
+    box-sizing: border-box;
+    text-decoration: none;
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+    line-height: 1.2;
+  }
+  .arp-btn--primary {
+    background: #15803d;
+    color: #ffffff !important;
+    box-shadow: 0 4px 10px rgba(21, 128, 61, 0.25);
+  }
+  .arp-btn--primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 14px rgba(21, 128, 61, 0.35);
+  }
+  .arp-btn--secondary {
+    background: transparent;
+    color: #1f2937;
+    border-color: #cbd5e1;
+    font-weight: 600;
+    font-size: 0.95rem;
+    padding: 0.85rem 1.25rem;
+  }
+  .ar-cta-instructions {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1e3a8a;
+    padding: 0.85rem 1rem;
+    border-radius: 10px;
+    font-size: 0.92rem;
+    margin: 0.5rem 0 1rem 0;
+    line-height: 1.5;
+  }
+  .ar-cta-row {
+    margin: 0.75rem 0 0.5rem 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+  }
+  .ar-cta-foot {
+    margin-top: 0.6rem;
+    font-size: 0.85rem;
+    color: #64748b;
+  }
+  .ar-value-recap {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 1.25rem;
+    margin: 1.25rem 0;
+  }
+  .ar-value-recap h2 {
+    font-size: 1.1rem;
+    margin: 0 0 0.75rem 0;
+    color: #0f172a;
+  }
+  .ar-value-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.85rem;
+  }
+  .ar-value-item {
+    display: flex;
+    gap: 0.6rem;
+    align-items: flex-start;
+    font-size: 0.95rem;
+    color: #334155;
+    line-height: 1.45;
+  }
+  .ar-value-tick {
+    color: #15803d;
+    font-weight: 800;
+    font-size: 1.1rem;
+    line-height: 1.3;
+    flex-shrink: 0;
+  }
+  .ar-quote {
+    background: #ffffff;
+    border-left: 4px solid #2563eb;
+    padding: 1rem 1.1rem;
+    margin: 1.25rem 0;
+    border-radius: 0 10px 10px 0;
+    color: #1e293b;
+    font-style: italic;
+    font-size: 0.98rem;
+    line-height: 1.55;
+  }
+  .ar-quote cite {
+    display: block;
+    margin-top: 0.5rem;
+    font-style: normal;
+    font-size: 0.85rem;
+    color: #64748b;
+    font-weight: 600;
+  }
+  .ar-fineprint {
+    text-align: center;
+    font-size: 0.8rem;
+    color: #94a3b8;
+    margin-top: 1.5rem;
+    line-height: 1.5;
+  }
+  @media (max-width: 540px) {
+    .ar-reactivate-hero { padding: 1.25rem 1rem; }
+    .ar-reactivate-hero h1 { font-size: 1.35rem; }
+    .arp-btn { width: 100%; text-align: center; }
+  }
+</style>
+
+<div class="ar-reactivate-wrap">
+
+  <div class="ar-reactivate-banner">
+    Limited offer &mdash; <strong>£20 off your first year auto-applied at checkout</strong>
+    when you reactivate within 7 days of your trial ending
+  </div>
+
+  <div class="ar-reactivate-hero">
+    <h1>Welcome back &mdash; pick up where you left off</h1>
+    <p class="ar-lead">
+      Your 14-day Academy trial has ended. Reactivate within 7 days and you
+      keep your progress, bookmarks, exam results and certificates &mdash;
+      and you save <strong>£20 on your first year</strong>.
+    </p>
+
+    <div class="ar-price-row">
+      <span class="ar-price-new">£59</span>
+      <span class="ar-price-old">£79</span>
+      <span class="ar-price-meta">first year &middot; renews at £79/yr &middot; cancel anytime</span>
+    </div>
+
+    <p class="ar-cta-instructions">
+      Use the <strong>same email and password</strong> as your Academy trial.
+      If you&rsquo;re not logged in yet, log in first &mdash; then tap
+      <em>Reactivate</em>. Secure checkout runs through Memberstack and Stripe.
+    </p>
+
+    <!--
+      Buttons mirror /academy/upgrade so the site-wide ARP Memberstack v2 JS
+      wires up the checkout click handler on #arp-upgrade-checkout-btn.
+    -->
+    <div class="ar-cta-row">
+      <button type="button"
+              class="arp-btn arp-btn--secondary"
+              data-ms-modal="login"
+              aria-label="Log in to the Academy"
+              data-cta="trial-expired-login">
+        Log in
+      </button>
+
+      <button type="button"
+              id="arp-upgrade-checkout-btn"
+              class="arp-btn arp-btn--primary"
+              aria-label="Reactivate annual membership at 59 pounds for the first year"
+              data-cta="trial-expired-reactivate-primary">
+        Reactivate now &mdash; £59 first year
+      </button>
+    </div>
+
+    <p class="ar-cta-foot">
+      The £20 discount (SAVE20) is applied automatically at Stripe checkout
+      &mdash; you don&rsquo;t need to enter a code. Offer ends 7 days after
+      your trial expired; after that the annual rate returns to £79/year.
+      Your trial plan is replaced by annual membership the moment payment
+      completes successfully.
+    </p>
+  </div>
+
+  <div class="ar-value-recap">
+    <h2>What you get back the moment you reactivate</h2>
+    <div class="ar-value-grid">
+      <div class="ar-value-item"><span class="ar-value-tick">&#10003;</span><span><strong>60 modules</strong> across camera settings, gear, composition and genres</span></div>
+      <div class="ar-value-item"><span class="ar-value-tick">&#10003;</span><span><strong>15 exam modules</strong> with certificates for passed exams</span></div>
+      <div class="ar-value-item"><span class="ar-value-tick">&#10003;</span><span><strong>30 Practice Pack PDFs</strong> + <strong>35 one-page field checklists</strong></span></div>
+      <div class="ar-value-item"><span class="ar-value-tick">&#10003;</span><span><strong>741-page Academy eBook</strong> + Applied Learning Library</span></div>
+      <div class="ar-value-item"><span class="ar-value-tick">&#10003;</span><span>Your <strong>saved progress, bookmarks and notes</strong> &mdash; nothing was deleted</span></div>
+      <div class="ar-value-item"><span class="ar-value-tick">&#10003;</span><span>Less than <strong>£5/month</strong> at the £59 first-year rate</span></div>
+    </div>
+  </div>
+
+  <blockquote class="ar-quote">
+    &ldquo;I just wanted to thank you for this course&hellip; I&rsquo;m a
+    retired Veteran with plenty of time but no money and you&rsquo;ve made it
+    possible for me to follow my new passion.&rdquo;
+    <cite>&mdash; Academy member, via online chat</cite>
+  </blockquote>
+
+  <p class="ar-fineprint">
+    If you just paid and you still see this page, wait a few seconds and
+    refresh. Need help? Use the
+    <a href="/contact-us-alan-ranger-photography">contact form</a>.
+  </p>
+
+</div>
