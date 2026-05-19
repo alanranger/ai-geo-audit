@@ -82,11 +82,19 @@ function monthlyTrialBuckets(trials) {
     if (m > 11) { m = 0; y += 1; }
   }
   const idx = new Map(months.map((b, i) => [b.month, i]));
+  // Per month: count UNIQUE members who started a trial that month, not
+  // raw row count. A member who started two trials in the same month is
+  // still one trial start for funnel-volume purposes.
+  const seenStartByMonth = new Map();
   for (const t of trials) {
     const startStr = t.trial_start_at;
     if (!startStr) continue;
     const key = String(startStr).slice(0, 7);
     if (!idx.has(key)) continue;
+    const memberId = t.member_id || `_${t.trial_start_at}`;
+    const dedupeKey = `${key}|${memberId}`;
+    if (seenStartByMonth.has(dedupeKey)) continue;
+    seenStartByMonth.set(dedupeKey, true);
     const bucket = months[idx.get(key)];
     bucket.trials_started += 1;
     if (t.converted_at) bucket.converted += 1;
@@ -96,26 +104,62 @@ function monthlyTrialBuckets(trials) {
 
 // Compute current/recent counts from the raw rowsets. Done in one place
 // so the handler stays simple.
+//
+// IMPORTANT: `academy_annual_history` has multiple rows per member
+// (renewals create extra rows), so anything that should be a "member
+// count" has to dedupe by `member_id`. Total rows in May 2026 are 27
+// for only 15 unique members. Naive `.length` over the table gives the
+// wrong (inflated) figure for active members + new paying.
 function summariseNow(trials, annuals, events) {
   const now = Date.now();
   const ms30 = 30 * 86400 * 1000;
   const ms90 = 90 * 86400 * 1000;
   const inLast = (iso, ms) => iso && (now - new Date(iso).getTime()) <= ms;
   const isFuture = iso => iso && new Date(iso).getTime() > now;
+
+  // Count unique member_ids in a rowset matching a predicate.
+  const uniqMembers = (rows, predicate) => {
+    const seen = new Set();
+    for (const r of rows) {
+      if (!predicate(r)) continue;
+      const id = r.member_id;
+      if (!id) continue;
+      seen.add(id);
+    }
+    return seen.size;
+  };
+
+  // First-ever annual_start_at per member, so "new paying" only counts
+  // truly new customers — renewals (member's 2nd / 3rd annual_start) are
+  // retention events, not new paying.
+  const firstAnnualStart = new Map();
+  for (const a of annuals) {
+    if (!a.member_id || !a.annual_start_at) continue;
+    const t = new Date(a.annual_start_at).getTime();
+    const prev = firstAnnualStart.get(a.member_id);
+    if (prev == null || t < prev) firstAnnualStart.set(a.member_id, t);
+  }
+  let newMembers30 = 0;
+  let newMembers90 = 0;
+  firstAnnualStart.forEach(t => {
+    if ((now - t) <= ms30) newMembers30 += 1;
+    if ((now - t) <= ms90) newMembers90 += 1;
+  });
+
   const trial = {
-    active_now: trials.filter(t => isFuture(t.trial_end_at) && !t.converted_at).length,
+    active_now: uniqMembers(trials, t => isFuture(t.trial_end_at) && !t.converted_at),
     started_30d: trials.filter(t => inLast(t.trial_start_at, ms30)).length,
     started_90d: trials.filter(t => inLast(t.trial_start_at, ms90)).length,
     converted_30d: trials.filter(t => inLast(t.converted_at, ms30)).length,
     converted_90d: trials.filter(t => inLast(t.converted_at, ms90)).length,
-    total: trials.length,
-    converted_total: trials.filter(t => !!t.converted_at).length
+    total: new Set(trials.map(t => t.member_id).filter(Boolean)).size,
+    converted_total: uniqMembers(trials, t => !!t.converted_at)
   };
   const annual = {
-    active_now: annuals.filter(a => !a.annual_end_at || new Date(a.annual_end_at).getTime() > now).length,
-    new_30d: annuals.filter(a => inLast(a.annual_start_at, ms30)).length,
-    new_90d: annuals.filter(a => inLast(a.annual_start_at, ms90)).length,
-    total: annuals.length
+    active_now: uniqMembers(annuals, a => !a.annual_end_at || new Date(a.annual_end_at).getTime() > now),
+    new_30d: newMembers30,
+    new_90d: newMembers90,
+    total: firstAnnualStart.size
   };
   const ev = (type, ms) => events.filter(e => e.event_type === type && inLast(e.created_at, ms)).length;
   const eventCounts = {
@@ -164,15 +208,18 @@ function computeGapAnalysis(summary, annualGpGapGbp) {
 }
 
 async function fetchData(supabase) {
+  // We always select `member_id` because both trial + annual history
+  // tables can hold multiple rows per member (renewals, re-trials).
+  // Every "member count" later dedupes on this column.
   const [trialsRes, annualsRes, eventsRes] = await Promise.all([
     supabase
       .from('academy_trial_history')
-      .select('trial_start_at, trial_end_at, converted_at, source')
+      .select('member_id, trial_start_at, trial_end_at, converted_at, source')
       .order('trial_start_at', { ascending: false })
       .limit(1000),
     supabase
       .from('academy_annual_history')
-      .select('annual_start_at, annual_end_at, source')
+      .select('member_id, annual_start_at, annual_end_at, source')
       .order('annual_start_at', { ascending: false })
       .limit(500),
     supabase
