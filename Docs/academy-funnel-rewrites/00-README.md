@@ -13,14 +13,61 @@ untouched — these blocks are intended to replace only the page-body content.
 3. Replace its contents with the corresponding `.html` file below.
 4. Preview, then publish.
 
+### Canonical lead-magnet page: `/free-online-photography-course`
+
+When pasting `02-free-online-photography-course.html` v3.1 onto the live
+Squarespace page, **delete every existing body block except** the
+"Take a look at a sample of lessons" 6-link grid and the bottom-of-page
+"Get Access to Free Online Course / Join today" newsletter form. Paste
+the v3.1 Code Block at the top of the body, leaving those two existing
+sections in place at the bottom (sample-lessons block keeps SEO
+internal-link equity; the newsletter form is a legitimate lower-commitment
+alternative path that redirects to the canonical destination on submit).
+
+The full delete checklist (11 blocks) is in the v3.1 file header,
+including the duplicate hero card, the broken thumbnail row, the
+"Academy Login / Join" triple-button card, the 5 numbered marketing
+sections with broken images, the "Practice with a Tool" card, the
+"Continue Learning" card, and the cross-sell "Still Shooting on Auto?"
+promo for the in-person Beginners course.
+
+### Special case: `/free-photography-course` (banner page)
+
+This one is different. The native Squarespace **Banner / Poster section** at
+the top of the page stays in place (it's the visual anchor that matches the
+home-page banner cadence). The new copy goes into the Squarespace editor:
+
+- **Heading**: `FREE Online Photography Course` (unchanged)
+- **Body**: `60 self-paced modules, 15 exams with downloadable certificates and 15 practical assignments — free for 14 days. Written by a BIPP-qualified tutor. No card needed; cancel anytime.`
+- **Button label**: `Start free trial` (was `ENROL NOW`)
+- **Button URL**: `/academy/login`
+
+Then delete every other body section on the live page (the "Start Your FREE
+Photography Course Today" 4-bullet card with duplicate `Join Now` /
+`Log in to Academy` buttons, the 5-image module grid, the "Sign up in
+minutes" steps card, the "Academy Login / Join" triple-button card, the
+orange "IMPORTANT: Your trial is only activated…" FUD card, and the
+9-question FAQ block), and paste `03-free-photography-course.html` in their
+place. The file contains two clearly-marked Code Blocks — paste both into a
+single Squarespace Code Block, or split them into two Code Blocks if you
+want visual whitespace between them.
+
+**Keep** the "Get Access to Free Online Course / Join today" Squarespace
+newsletter form near the bottom of the page. The form post-submit redirects
+to `/free-online-photography-course`, so it's a legitimate
+lower-commitment path: warm-lead email capture (Squarespace mailing list,
+double opt-in) + redirect to the canonical Academy page where the
+Memberstack signup CTAs live. It sits below the new in-content CTA so the
+"Start my free 14-day trial" button still gets primary visual weight.
+
 ## Files
 
 | File | Page | Status |
 |---|---|---|
 | `01-trial-expired.html` | `/academy/trial-expired` | **DEPRECATED** (2026-05-19) — superseded by the patched dashboard modal in `Academy/alanranger-academy-assesment/academy-dashboard-squarespace-snippet-v1.html`. Do not deploy. See file header and `CHANGELOG.md` for the full reason. |
-| `02-free-online-photography-course.html` | `/free-online-photography-course` | Active **v3** — canonical lead-magnet page. Adds Course + FAQPage JSON-LD, author trust block, YouTube comparison table, six-question FAQ, three CTAs. Targets the AIO citation gap documented in `ACADEMY_FUNNEL_INVESTIGATION_2026-05.md`. |
-| `03-free-photography-course.html` | `/free-photography-course` | **Stub (v3)** — page is 301-redirected to `/free-online-photography-course` (Alan applied the redirect on 2026-05-19). File kept as a minimal working CTA stub on the underlying Squarespace page in case the URL Mapping is ever removed. See `CANONICAL-DECISION.md`. |
-| `04-academy-login.html` | `/academy/login` | Active — gate-page CTA hierarchy fix |
+| `02-free-online-photography-course.html` | `/free-online-photography-course` | Active **v3.2** — canonical lead-magnet page. Course + FAQPage JSON-LD; hero with price strip + dual-CTA; 6-pill trust grid (matches `03`); modules grid; inline author trust block (BIPP / 15+ years / RPS / UK-made / Direct Q&A); **"Choose your access" dual-tier pricing card** (Trial £0 / Annual £79 side-by-side with 8-row benefits comparison table, "BEST VALUE" ribbon on annual); YouTube comparison; testimonial; six-question FAQ; final footer CTA; FUD note below. Three Memberstack signup price IDs wired (trial `prc_30-day-free-trial-mg18p0u9z`, annual `prc_annual-membership-jj7y0h89`). Targets the AIO citation gap documented in `ACADEMY_FUNNEL_INVESTIGATION_2026-05.md`. |
+| `03-free-photography-course.html` | `/free-photography-course` | Active **v4** — banner page anchoring the home-page Academy banner. Two Code Blocks (Benefits + testimonial; CTA + teaser) that sit **below the native Squarespace Banner / Poster section** (poster text + button are edited via the Squarespace editor, not via this file). Canonical 301 reversed 2026-05-19 — see `CANONICAL-DECISION.md`. |
+| `04-academy-login.html` | `/academy/login` | **SUPERSEDED** (2026-05-19) — 2-path hero draft abandoned in favour of the 3-equal-button layout (Memberstack site JS depends on `#arpLoginBtn` / `#arpTrialBtn` / `#arpAnnualBtn` IDs). Canonical source is now `Academy/academy-login-squarespace-snippet-v1.html` v4 (price strip + 3-paragraph reassurance prose + dark-black/brand-orange H2 banner, native `data-ms-modal="signup"` + `data-ms-price:add=...` trial flow replacing the bespoke ~200-line JS signup form). See file header and `CHANGELOG.md` for the full reason. |
 
 ### `/academy/trial-expired` deployment (replaces the deprecated `01` rewrite)
 
