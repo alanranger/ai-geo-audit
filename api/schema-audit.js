@@ -490,12 +490,34 @@ function longestJsonLdDescriptionFromSchemas(schemas, depthLimit = 12) {
   return best;
 }
 
-/** Prefer longer normalized string: meta tags vs JSON-LD description (fixes blog excerpt vs truncated meta). */
+/**
+ * Return what the SERP will actually show — i.e. the real
+ * <meta name="description"> tag — and fall back to a JSON-LD
+ * `description` field ONLY when no meta tag exists.
+ *
+ * Old behaviour preferred whichever string was LONGER, on the
+ * assumption that blog meta tags get truncated and the JSON-LD copy
+ * is fuller. That assumption breaks badly on Squarespace landing
+ * pages that emit multiple Event/Course/Service JSON-LD blocks with
+ * lengthy auto-generated descriptions: the function returned a 236ch
+ * JSON-LD blob for /free-online-photography-course while the real
+ * <meta> tag was 158ch — exactly what Google indexes. Downstream
+ * recommenders (Top Actions picker, lever scenario engine) then
+ * complained the meta was "truncated in SERP" when in fact the meta
+ * was fine and the picker was reading the wrong field.
+ *
+ * The SERP shows the meta tag (or Google's auto-snippet) — never a
+ * JSON-LD `description` field directly — so the meta tag is the
+ * authoritative source. JSON-LD `description` is only a useful
+ * fallback when the page genuinely has no meta tag at all.
+ *
+ * See Docs/CHANGELOG.md 2026-05-20 v5 for the diagnosis.
+ */
 function bestMetaDescriptionFromPage(htmlString, schemas) {
-  const fromTags = extractMetaDescription(htmlString) || '';
+  const fromTags = extractMetaDescription(htmlString);
+  if (fromTags && fromTags.trim()) return fromTags.trim();
   const fromLd = longestJsonLdDescriptionFromSchemas(schemas);
-  if (fromLd.length > fromTags.length) return fromLd || null;
-  return fromTags || fromLd || null;
+  return fromLd || null;
 }
 
 /**

@@ -18,6 +18,7 @@ export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
 import { COMMERCIAL_TIERS, classifyCommercialTier } from './commercial-tier.js';
+import { validateUrlsLive } from './lib/live-page-validator.js';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 const MIN_IMPRESSIONS_FOR_CTR_TASK = 500;
@@ -234,6 +235,45 @@ function diagnoseLowCtr({ ctrPct, avgPosition, title, meta, topKw }) {
 }
 
 // ----------------------------------------------------------------------
+// Description builders (live-validation aware, Phase 2.0)
+// ----------------------------------------------------------------------
+// The description string the dashboard renders in the "Why" row of each
+// Top Actions card is built from BOTH "stable" data (impressions, CTR,
+// rank, search volume — these come from GSC/keyword tables and the
+// snapshot is the source of truth) and "page state" data (current
+// title, current meta, current schema types — these can change between
+// audits, so we live-fetch them for the Top N picks in a post-pass).
+//
+// Each lever has its own description builder that takes the stable
+// args + a pageState object (whichever source — live or audit). The
+// post-pass calls the SAME builder with live data after fanning out
+// validateUrlsLive(), so the audit→live swap is one line, not a
+// re-implementation.
+function buildCtrDescription(args, pageState, sourceTag) {
+  const { cleanedUrl, top, posTxt, kwInfo } = args;
+  const title = pageState && pageState.title;
+  const meta = pageState && pageState.metaDescription;
+  const schemaTypes = (pageState && pageState.schemaTypes) || [];
+  const kwLine = kwInfo
+    ? `Top ranking keyword: "${kwInfo.keyword}" at rank #${kwInfo.rank ?? '?'} (${Number(kwInfo.searchVolume || 0).toLocaleString()}/mo).`
+    : 'No tracked keyword found for this page yet.';
+  const titleLine = title ? `Current title: "${title}" (${title.length}ch).` : 'Current title: (not captured).';
+  const metaShort = meta ? (meta.length > 140 ? meta.slice(0, 137) + '…' : meta) : null;
+  const metaLine = metaShort ? `Current meta: "${metaShort}" (${meta.length}ch).` : 'Current meta: (not captured).';
+  const schemaLine = schemaTypes.length
+    ? `Schema present: ${schemaTypes.slice(0, 8).join(', ')}.`
+    : 'Schema present: none captured.';
+  const diag = diagnoseLowCtr({
+    ctrPct: top.ctrPct,
+    avgPosition: (args.pos != null ? args.pos : null),
+    title, meta,
+    topKw: kwInfo ? { keyword: kwInfo.keyword } : null
+  });
+  const base = `${cleanedUrl} — ${top.impr.toLocaleString()} impressions/28d, ${top.ctrPct.toFixed(2)}% CTR, ${posTxt}. ${kwLine} ${titleLine} ${metaLine} ${schemaLine} Diagnosis: ${diag} Target: ${top.targetPct.toFixed(2)}% CTR.`;
+  return sourceTag ? `${base} ${sourceTag}` : base;
+}
+
+// ----------------------------------------------------------------------
 // Candidate builders - one per priority type
 // ----------------------------------------------------------------------
 function ctrPriorityForTier(tierId, tierMetrics, ctx) {
@@ -256,29 +296,21 @@ function ctrPriorityForTier(tierId, tierMetrics, ctx) {
   const revLift = Math.round(upliftMonthly * estimatedAovPerClick(tierId));
   const gpLift = Math.round(upliftMonthly * estimatedGpPerClick(tierId));
   const gpPct = estimatedGpPctForTier(tierId);
-  // Enrichment: pull what the page actually has so the description is
-  // data-driven, not boilerplate.
-  const e = pageEnrichment(cleanedUrl, ctx.schemaDetail, ctx.keywords);
+  // Audit-derived enrichment is the seed value used when the live
+  // post-pass either isn't run (e.g. low-priority candidates) or fails
+  // to fetch the URL. The Top N candidates get this overwritten with
+  // live data before the response is sent.
+  const auditState = pageEnrichment(cleanedUrl, ctx.schemaDetail, ctx.keywords);
   const pos = top.row.position_28d != null ? Number(top.row.position_28d) : null;
   const posTxt = pos != null ? `avg pos ${pos.toFixed(1)}` : 'pos n/a';
-  const kwLine = e.topKw
-    ? `Top ranking keyword: "${e.topKw.keyword}" at rank #${e.topKw.best_rank_group ?? '?'} (${Number(e.topKw.search_volume || 0).toLocaleString()}/mo).`
-    : 'No tracked keyword found for this page yet.';
-  const titleLine = e.title
-    ? `Current title: "${e.title}" (${e.title.length}ch).`
-    : 'Current title: (not captured in last audit).';
-  const metaShort = e.meta ? (e.meta.length > 140 ? e.meta.slice(0, 137) + '…' : e.meta) : null;
-  const metaLine = metaShort
-    ? `Current meta: "${metaShort}" (${e.meta.length}ch).`
-    : 'Current meta: (not captured in last audit).';
-  const schemaLine = e.schemaTypes.length
-    ? `Schema present: ${e.schemaTypes.slice(0, 6).join(', ')}.`
-    : 'Schema present: none captured.';
-  const diag = diagnoseLowCtr({ ctrPct: top.ctrPct, avgPosition: pos, title: e.title, meta: e.meta, topKw: e.topKw });
+  const kwInfo = auditState.topKw
+    ? { keyword: auditState.topKw.keyword, rank: auditState.topKw.best_rank_group, searchVolume: auditState.topKw.search_volume }
+    : null;
+  const builderArgs = { cleanedUrl, top, posTxt, pos, kwInfo };
   return {
     signature: `ctr|${cleanedUrl}`,
     title: `Lift CTR on ${labelOf(cleanedUrl)}`,
-    description: `${cleanedUrl} — ${top.impr.toLocaleString()} impressions/28d, ${top.ctrPct.toFixed(2)}% CTR, ${posTxt}. ${kwLine} ${titleLine} ${metaLine} ${schemaLine} Diagnosis: ${diag} Target: ${top.targetPct.toFixed(2)}% CTR.`,
+    description: buildCtrDescription(builderArgs, { title: auditState.title, metaDescription: auditState.meta, schemaTypes: auditState.schemaTypes }, '[data: last audit]'),
     pages_affected: [cleanedUrl],
     primary_kpi: 'ctr_28d_pct',
     kpi_baseline_value: top.ctrPct,
@@ -286,8 +318,28 @@ function ctrPriorityForTier(tierId, tierMetrics, ctx) {
     kpi_target_direction: 'up',
     estimated_lift: `~£${revLift.toLocaleString()}/mo revenue → ~£${gpLift.toLocaleString()}/mo profit at ${gpPct}% GP (from +${Math.round(upliftMonthly)} clicks/mo)`,
     estimated_lift_gbp_revenue: revLift,
-    estimated_lift_gbp_profit: gpLift
+    estimated_lift_gbp_profit: gpLift,
+    _rebuild: { type: 'ctr', args: builderArgs }
   };
+}
+
+function buildRankDescription(args, pageState, sourceTag) {
+  const { cleanedUrl, keyword, rank, sv } = args;
+  const title = pageState && pageState.title;
+  const h1 = pageState && pageState.h1;
+  const schemaTypes = (pageState && pageState.schemaTypes) || [];
+  const headInTitle = title ? title.toLowerCase().includes(String(keyword).toLowerCase()) : false;
+  const headInH1 = h1 ? h1.toLowerCase().includes(String(keyword).toLowerCase()) : false;
+  const titleLine = title ? `Current title: "${title}" (${title.length}ch, head term ${headInTitle ? 'present' : 'MISSING'}).` : 'Current title: (not captured).';
+  const h1Line = h1 ? `Current H1: "${h1}" (head term ${headInH1 ? 'present' : 'MISSING'}).` : '';
+  const schemaLine = schemaTypes.length
+    ? `Schema present: ${schemaTypes.slice(0, 8).join(', ')}.`
+    : 'Schema present: none captured — adding FAQPage + Service is the cheapest first step.';
+  const action = (headInTitle && headInH1)
+    ? 'Action: head term is in title + H1 already, so focus on depth — add a comparison table, customer-outcome paragraphs, 6–8 People-Also-Ask FAQ items, and rebuild internal links from the tier hub.'
+    : 'Action: lift the head term into the H1 + page title first (cheapest move), then add comparison table + 6–8 FAQ items + tier-hub internal links.';
+  const base = `${cleanedUrl || '(no URL)'} ranks #${rank} for "${keyword}" (${Number(sv).toLocaleString()}/mo). ${titleLine} ${h1Line} ${schemaLine} ${action}`.replace(/\s{2,}/g, ' ');
+  return sourceTag ? `${base} ${sourceTag}` : base;
 }
 
 function rankPriorityForTier(tierId, tierKeywords, ctx) {
@@ -302,22 +354,35 @@ function rankPriorityForTier(tierId, tierKeywords, ctx) {
   const top = eligible[0];
   const targetRank = Math.max(3, Math.floor(Number(top.best_rank_group) / 2));
   const cleanedUrl = cleanUrl(top.best_url || '');
-  const e = pageEnrichment(cleanedUrl, ctx.schemaDetail, ctx.keywords);
-  const titleLine = e.title ? `Current title: "${e.title}" (${e.title.length}ch).` : 'Current title: (not captured).';
-  const schemaLine = e.schemaTypes.length
-    ? `Schema present: ${e.schemaTypes.slice(0, 6).join(', ')}.`
-    : 'Schema present: none captured — adding FAQPage + Service is the cheapest first step.';
+  const auditState = pageEnrichment(cleanedUrl, ctx.schemaDetail, ctx.keywords);
+  const builderArgs = { cleanedUrl, keyword: top.keyword, rank: top.best_rank_group, sv: top.search_volume };
   return {
     signature: `rank|${top.keyword}|${cleanedUrl}`,
     title: `Lift "${top.keyword}" from rank ${top.best_rank_group} to top ${targetRank}`,
-    description: `${cleanedUrl || '(no URL)'} ranks #${top.best_rank_group} for "${top.keyword}" (${Number(top.search_volume).toLocaleString()}/mo). ${titleLine} ${schemaLine} Action: lift the head term into the H1 + first 60 words, add a comparison table + customer outcome paragraphs, 6–8 FAQ items mirroring People-Also-Ask, and rebuild internal links from the tier hub.`,
+    description: buildRankDescription(builderArgs, { title: auditState.title, schemaTypes: auditState.schemaTypes }, '[data: last audit]'),
     pages_affected: cleanedUrl ? [cleanedUrl] : [],
     primary_kpi: 'rank_position',
     kpi_baseline_value: Number(top.best_rank_group),
     kpi_target_value: targetRank,
     kpi_target_direction: 'down',
-    estimated_lift: `Rank ${top.best_rank_group} -> top ${targetRank} on a ${Number(top.search_volume).toLocaleString()}/mo keyword`
+    estimated_lift: `Rank ${top.best_rank_group} -> top ${targetRank} on a ${Number(top.search_volume).toLocaleString()}/mo keyword`,
+    _rebuild: { type: 'rank', args: builderArgs }
   };
+}
+
+function buildAioDescription(args, pageState, sourceTag) {
+  const { cleanedUrl, keyword, sv, rankInfo } = args;
+  const schemaTypes = (pageState && pageState.schemaTypes) || [];
+  const hasFaq = schemaTypes.includes('FAQPage');
+  const hasCourse = schemaTypes.includes('Course');
+  const schemaLine = schemaTypes.length
+    ? `Schema present: ${schemaTypes.slice(0, 8).join(', ')}${hasFaq ? '' : ' — FAQPage missing.'}`
+    : 'Schema present: none captured — FAQPage + the actual answer block both need adding.';
+  const action = hasFaq
+    ? `Action: FAQPage already present — append a 60–90 word direct-answer block at the top of the page mirroring the AIO summary, then extend the existing FAQPage with 3–5 question/answer pairs that match the People-Also-Ask cluster for "${keyword}".`
+    : `Action: add a 60–90 word direct-answer block at the top of the page mirroring the AIO summary, then publish 5 question/answer pairs in FAQPage JSON-LD${hasCourse ? ' (you already have Course schema — extend with FAQPage in the same block)' : ''}.`;
+  const base = `AI Overview exists for "${keyword}" (${sv.toLocaleString()}/mo) — you ${rankInfo} but aren't cited. Target page: ${cleanedUrl || '(no URL)'}. ${schemaLine} ${action}`;
+  return sourceTag ? `${base} ${sourceTag}` : base;
 }
 
 function aioCitationPriority(tierId, tierKeywords, ctx) {
@@ -340,16 +405,13 @@ function aioCitationPriority(tierId, tierKeywords, ctx) {
   const top = uncited[0];
   const cleanedUrl = cleanUrl(top.kw.best_url || '');
   const revLift = Math.round(top.vol * 0.03 * aov);
-  const e = pageEnrichment(cleanedUrl, ctx.schemaDetail, ctx.keywords);
-  const hasFaq = e.schemaTypes.includes('FAQPage');
-  const schemaLine = e.schemaTypes.length
-    ? `Schema present: ${e.schemaTypes.slice(0, 6).join(', ')}${hasFaq ? '' : ' (no FAQPage — needed for AIO citation).'}`
-    : 'Schema present: none captured — FAQPage + the actual answer block both need adding.';
-  const rankInfo = top.kw.best_rank_group != null ? `currently ranks #${top.kw.best_rank_group}` : 'not ranking yet';
+  const auditState = pageEnrichment(cleanedUrl, ctx.schemaDetail, ctx.keywords);
+  const rankInfo = top.kw.best_rank_group != null ? `currently rank #${top.kw.best_rank_group}` : 'are not ranking yet';
+  const builderArgs = { cleanedUrl, keyword: top.kw.keyword, sv: top.vol, rankInfo };
   return {
     signature: `aio|${top.kw.keyword}`,
     title: `Get cited in Google's AI Overview for "${top.kw.keyword}"`,
-    description: `AI Overview exists for "${top.kw.keyword}" (${top.vol.toLocaleString()}/mo) — you ${rankInfo} but aren't cited. Target page: ${cleanedUrl || '(no URL)'}. ${schemaLine} Action: add a 60–90-word direct-answer block at the top of the page mirroring the AIO summary, followed by 5 question/answer items in FAQPage schema.`,
+    description: buildAioDescription(builderArgs, { schemaTypes: auditState.schemaTypes }, '[data: last audit]'),
     pages_affected: cleanedUrl ? [cleanedUrl] : [],
     primary_kpi: 'aio_citations',
     kpi_baseline_value: 0,
@@ -357,7 +419,8 @@ function aioCitationPriority(tierId, tierKeywords, ctx) {
     kpi_target_direction: 'up',
     estimated_lift: `${top.vol.toLocaleString()}/mo AIO query · ~£${revLift.toLocaleString()}/mo revenue → ~£${top.gpLift.toLocaleString()}/mo profit at ${gpPct}% GP`,
     estimated_lift_gbp_revenue: revLift,
-    estimated_lift_gbp_profit: top.gpLift
+    estimated_lift_gbp_profit: top.gpLift,
+    _rebuild: { type: 'aio', args: builderArgs }
   };
 }
 
@@ -553,6 +616,65 @@ function buildAllPriorities(snapshot) {
 }
 
 // ----------------------------------------------------------------------
+// Live-validation post-pass (Phase 2.0)
+// ----------------------------------------------------------------------
+// The top N candidates (those actually rendered in the "Do these 3
+// things this week" card and the rest of the priority queue UI) get
+// their pageState refreshed from a live fetch of the target URL. The
+// description body is then regenerated using the live data so the
+// card never recommends "add FAQPage schema" when FAQPage is already
+// on the live page (the audit row may be hours out of date).
+//
+// Candidates BEYOND the top N keep their audit-derived description
+// with a [data: last audit] tag so the user can see why those facts
+// might be stale.
+const LIVE_VALIDATE_TOP_N = 8;
+const REBUILDERS = { ctr: buildCtrDescription, rank: buildRankDescription, aio: buildAioDescription };
+
+async function liveEnrichTopCandidates(candidates) {
+  const head = candidates.slice(0, LIVE_VALIDATE_TOP_N).filter(c => c._rebuild);
+  if (!head.length) return candidates;
+  const urls = head.map(c => Array.isArray(c.pages_affected) ? c.pages_affected[0] : null).filter(Boolean);
+  const liveMap = await validateUrlsLive(urls);
+  for (const c of head) {
+    const url = Array.isArray(c.pages_affected) ? c.pages_affected[0] : null;
+    if (!url) continue;
+    const live = liveMap.get(url);
+    const rebuilder = REBUILDERS[c._rebuild.type];
+    if (!rebuilder) continue;
+    if (live && live.ok) {
+      c.description = rebuilder(c._rebuild.args, {
+        title: live.title,
+        metaDescription: live.metaDescription,
+        h1: live.h1,
+        schemaTypes: live.schemaTypes
+      }, `[live · fetched ${shortIso(live.fetchedAt)}]`);
+      c.live_data_source = 'live';
+      c.live_fetched_at = live.fetchedAt;
+    } else {
+      c.live_data_source = 'audit_fallback';
+      c.live_fetch_error = live && live.error;
+    }
+  }
+  return candidates;
+}
+
+function shortIso(iso) {
+  if (!iso) return '';
+  // 2026-05-20T13:42:09.123Z -> 2026-05-20 13:42Z
+  return String(iso).replace('T', ' ').slice(0, 16) + 'Z';
+}
+
+// Strip internal-only fields from a candidate before it goes over the
+// wire. `_rebuild` carries the data the live-enrichment post-pass uses
+// to regenerate the description; it's an implementation detail.
+function sanitiseForResponse(c) {
+  const out = { ...c };
+  delete out._rebuild;
+  return out;
+}
+
+// ----------------------------------------------------------------------
 // Data assembly
 // ----------------------------------------------------------------------
 async function buildSnapshot(supabase, propertyUrl) {
@@ -659,6 +781,10 @@ export default async function handler(req, res) {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
     const snapshot = await buildSnapshot(supabase, propertyUrl);
     const candidates = buildAllPriorities(snapshot);
+    // Live-validate the top N candidates so their descriptions cite
+    // the current live page state, not a possibly-stale audit row.
+    // See Docs/CHANGELOG.md 2026-05-20 v5 for why this is non-optional.
+    await liveEnrichTopCandidates(candidates);
 
     if (req.method === 'GET') {
       return send(res, 200, {
@@ -672,14 +798,18 @@ export default async function handler(req, res) {
           kpi_target_value: c.kpi_target_value, kpi_target_direction: c.kpi_target_direction,
           estimated_lift: c.estimated_lift,
           estimated_lift_gbp_revenue: c.estimated_lift_gbp_revenue ?? null,
-          estimated_lift_gbp_profit: c.estimated_lift_gbp_profit ?? null
+          estimated_lift_gbp_profit: c.estimated_lift_gbp_profit ?? null,
+          live_data_source: c.live_data_source ?? 'audit',
+          live_fetched_at: c.live_fetched_at ?? null,
+          live_fetch_error: c.live_fetch_error ?? null
         }))
       });
     }
 
+    const cleanCandidates = candidates.map(sanitiseForResponse);
     let saved;
-    if (mode === 'append') saved = await applyAppend(supabase, propertyUrl, candidates);
-    else saved = await applyReplace(supabase, propertyUrl, candidates);
+    if (mode === 'append') saved = await applyAppend(supabase, propertyUrl, cleanCandidates);
+    else saved = await applyReplace(supabase, propertyUrl, cleanCandidates);
 
     return send(res, 200, {
       ok: true,
