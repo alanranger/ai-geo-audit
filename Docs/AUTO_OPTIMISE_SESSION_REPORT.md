@@ -238,7 +238,124 @@ sensitivity baseline but you don't need them as live options).
 
 ---
 
-## 6. What I'd improve next (if you want me to keep going)
+## 6. Post-19:00 follow-up (5 of 4 follow-ups shipped)
+
+Status of the follow-ups proposed in the original §6 below, plus
+one I added during the second pass:
+
+| # | Follow-up | Status |
+|---|---|---|
+| 1 | Rich action cards on Revenue Funnel Top 3 (parity with Auto-Optimise) | ✅ shipped `05a163d` + `ca1a029` |
+| 2 | One-action-per-tier cap to dilute CTR/Academy dominance | ❌ deferred — quadratic weights now do most of the same job (see #5) |
+| 3 | Live Revenue Funnel refresh on scenario activation (no page reload) | ✅ shipped `cd1cd7e` |
+| 4 | Decay sensitivity slider for per-lever persistence | ❌ deferred — bigger product call (do we want a "what if competitors react faster" mode at all?) |
+| 5 | **NEW** Quadratic weight shape in the picker so realistic 0.2–2.0 weights actually move top 3 | ✅ shipped `67199d4` + `1d08a9b` |
+| 6 | **NEW** "Save & Activate" button on every Auto-Optimise preset card | ✅ shipped `cd1cd7e` |
+| 7 | **NEW** STRESS scenarios cleaned from the live dropdown | ✅ done via Supabase (DELETE WHERE name LIKE 'STRESS:%') |
+
+### What landed under #5 (quadratic weights, the most user-visible change)
+
+`api/aigeo/revenue-funnel-smart-priorities.js` now uses
+`weightedScore = effLift × tier_weight² × lever_weight²` instead
+of the linear product. With `Auto: Hard path` (rank=1.5, others=1.0)
+this moves `rank/academy` from outside the top 5 into **slot #2**:
+
+```
+Auto: Hard path (full-commit compound):
+  1. ctr/academy   £275 (score=275)
+  2. rank/academy  £49  (score=110.3)   <- promoted by 1.5² = 2.25
+  3. ctr/courses   £102 (score=102)
+```
+
+Whereas `Auto: Easy path` (ctr=2.0, others≤0.5) now produces:
+
+```
+Auto: Easy path (quick wins):
+  1. ctr/academy            £275 (score=1100)   <- 2² = 4× boost
+  2. ctr/courses            £102 (score=408)
+  3. ctr/hire               £99  (score=396)
+  4. ctr/workshops_nonres   £46  (score=184)
+  5. ctr/services           £11  (score=44)
+```
+
+The previously-identical top 3 across all three Auto presets now
+genuinely differs by strategy: Easy = 5 CTR quick wins, Balanced =
+4 CTR + 1 AIO, Hard = 3 CTR + 2 rank. STRESS profiles continue to
+work as before (extreme weights cubed produce extreme rankings).
+
+`applied_tier_weight_shaped` and `applied_lever_weight_shaped` are
+now returned by the API so the UI (and tests) can show how the
+shape contributed when needed.
+
+### What landed under #1 (Revenue Funnel rich cards)
+
+`audit-dashboard.html` now renders an **Evidence** row (KPI
+baseline → target, formatted by lever via the new
+`rfActionKpiEvidence` helper that mirrors the Auto-Optimise one)
+and an **Action** row (the picker's `effort_label`, e.g. "Rewrite
+title + meta description (in Squarespace).") above the click-to-
+expand detail block. The full description + KPI + Pages still
+expand on click. Visually verified live at `ca1a029`:
+
+> Card #1 / Academy / ×3.41 — Lift CTR on free online photography
+> course • CTR 1.38% → 2.07% • ACTION: Rewrite title + meta
+> description (in Squarespace).
+
+### What landed under #3 (live RF refresh)
+
+`window.rfFetchSummary = rfFetchSummary;` exposed inside `rfInit()`.
+The Auto-Optimise `saveAndActivate(preset)` flow now calls it after
+activating the new scenario, so the Revenue Funnel surface re-reads
+its data **without** a page reload. Visually: clicking
+"Save & Activate" on the Easy preset card produces a status pill
+("Activated 'Auto: Easy path ...'") and triggers a fresh
+`/revenue-funnel-summary` call.
+
+### What landed under #6 (Save & Activate button)
+
+Every preset card now has two CTA buttons:
+- `Save as new scenario` (neutral grey, just creates the scenario)
+- `Save & Activate` (solid orange primary, creates + activates +
+  refreshes Revenue Funnel)
+
+The visual contrast tells the user which button actually applies
+the strategy vs which one just saves it for later.
+
+### What landed under #7 (STRESS cleanup)
+
+Direct Supabase: 4 statements deleted the 6 STRESS scenarios and
+their child rows from `revenue_funnel_targets`,
+`revenue_funnel_tier_weights`, `revenue_funnel_lever_weights`, and
+`revenue_funnel_scenarios`. The live dropdown now shows the 6
+scenarios that matter: Baseline, May 2026, May 20 2026, Auto: Easy
+/ Balanced / Hard.
+
+### How the post-19:00 work was tested
+
+- `scripts/verify-quadratic-weights.mjs` (new): re-activates each
+  Auto + remaining STRESS scenario and prints the picker's top 5,
+  confirming the shape took effect.
+- `scripts/reset-auto-scenarios.mjs` (new): re-pushes canonical
+  Easy / Balanced / Hard weights so any in-session drift is reverted
+  before re-verifying.
+- Browser MCP: navigated to `#revenue-funnel` and `#scenario-planning`
+  on a cache-busted URL, screenshotted the Top 3 cards and the
+  Auto-Optimise cards, confirmed the new Evidence/Action rows and
+  Save & Activate button render correctly.
+
+### Post-19:00 commits
+
+| Commit | What |
+|---|---|
+| `67199d4` | Picker: quadratic weight sensitivity for tier + lever |
+| `1d08a9b` | Expose shaped weights in API + reset tooling for auto scenarios |
+| `05a163d` | Revenue Funnel Top 3: surface KPI evidence + Action callout |
+| `cd1cd7e` | Auto-Optimise: "Save & Activate" button + live RF refresh hook |
+| `ca1a029` | RF cards: format KPI evidence by lever (1.38% not 1.379119...) |
+
+---
+
+## 7. Original §6: What I'd improve next (if you want me to keep going)
 
 1. **Action card improvements still landing.** The Auto-Optimise UI
    in the Scenario Planning tab now renders KPI evidence + concrete
