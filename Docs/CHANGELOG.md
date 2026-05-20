@@ -2,6 +2,60 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-20 v5.2] - Top Actions config: dark theme, hover tips, per-tier totals + RAG
+
+### Why
+
+Alan opened the relocated Top Actions config inside the Revenue Funnel tab and reported the section was "blank in many fields". Diagnosed in two minutes:
+
+- The `<input type="number">` fields and the `<td>` tier labels WERE populated with the seeded API data (confirmed by an explicit `GET /api/aigeo/revenue-funnel-config?propertyUrl=https://www.alanranger.com` — returned master £4000 / £2800 and full per-tier rows). The text just wasn't visible.
+- Root cause: the Revenue Funnel panel has `section[data-panel="revenue-funnel"] * { color: inherit; }`, which forces every descendant element to take the dark-theme `--dark-text` colour. The previously-styled section used `background: white` inputs with no explicit foreground colour, so the inputs rendered as white text on a near-white background.
+- Same applies to all per-tier `<td>` labels (white text on a `#f8fafc` row) and to the slider value-readouts.
+
+While in there, Alan asked for two more things:
+
+1. **Hover tips on every lever and every section** so he doesn't have to guess what each control does.
+2. **Totals row on monthly Rev / GP** so he can see if his per-tier breakdown actually adds up to the master target.
+
+### Changed - `audit-dashboard.html`
+
+#### Visuals (dark theme parity)
+
+- Section restyled top-to-bottom using the existing `--dark-bg / --dark-panel / --dark-border / --dark-text / --dark-text-muted / --dark-brand` CSS variables that the rest of the funnel uses. Outer `<details>` is now a `var(--dark-panel)` card with a `#0b1118` header bar; inner sub-sections use `#0b1118` with a `var(--dark-border)` outline.
+- All inputs get `background: #141b29`, `color: var(--dark-text) !important`, `border: 1px solid var(--dark-border)` so they're legible against the dark page. Focus state shows the brand-orange ring used elsewhere.
+- Per-tier targets table reuses the `.rf-table`-style cell padding and zebra striping but is namespaced `table.rf-cfg-targets` so it doesn't fight the bigger Funnel tables that use `.rf-table`.
+- Slider cards use a `#141b29` background with the brand-orange `accent-color` on `<input type="range">` — same look as the existing `.rf-tier-card` pattern elsewhere in the panel.
+- Default-marker triangles on `<summary>` replaced with a custom brand-orange `▸ / ▾` indicator that rotates on open, matching the rest of the funnel panel.
+
+#### Hover tips on everything Alan asked about
+
+- Outer `<details>` carries a top-level `title=` explaining what the whole section does and why it's collapsed by default.
+- Each sub-section `<summary>` carries its own `title=` plus a one-line italic "what's inside" hint (e.g. *"monthly Rev + GP, master & per-tier"* / *"0 = ignore · 1 = default · 2 = double"*).
+- Each tier card carries a per-tier `title=` lifted to a new `RF_TIERS[i].tip` field so the hover explains *what that tier actually sells, why its GP% is what it is, and the strategic note* (e.g. Hire: *"Photographer in Coventry, commercial photography, corporate training. Very high GP% per job but historically <0.5% of revenue — set the weight low unless you actively want to grow this."*).
+- Each lever card carries a per-lever `title=` lifted to a new `RF_LEVERS[i].tip` field so the hover explains *when that lever actually fires* (e.g. CTR: *"Highest leverage when current CTR is well below the position-expected curve. Doesn't fire when CTR is normal-for-rank — we tell you to fix Rank instead."*).
+- Each range slider and each effort-cap `<select>` also gets its own `title=` so even mid-drag the user can see what they're adjusting.
+- Master Rev / GP inputs carry their own `title=` explaining what each value drives in the engine.
+
+#### Per-tier totals + "vs master" RAG row
+
+- New `<tfoot>` rows under the per-tier targets table:
+  - **Per-tier total** — `£X` sum of all six tier Rev / GP cells. Updates on every keystroke.
+  - **vs master** — `(per-tier sum) - (master target)`, shown as `+£N` (green) when the per-tier breakdown matches or beats master, `−£N` amber when within 10% under, red when more than 10% under. So Alan can immediately see *"my per-tier rev breakdown adds up to £3,999 but my master target is £4,000 — fine"* vs *"my per-tier breakdown is £2,500 but master is £4,000 — I've not allocated £1,500 of my own target across tiers"*.
+- Implemented as a single `recomputeTotals()` function (complexity 6, well under the 15-cap rule) that's wired to `input` events on every relevant input via `inputs.forEach(el => el.addEventListener('input', recomputeTotals))`. No reactive framework needed.
+- `applyConfigToForm()` calls `recomputeTotals()` at the end so the first load already shows the right totals.
+- Helper `ragClass(diff, master)` returns `'rag-ok' | 'rag-warn' | 'rag-bad'` so the column-class assignment stays a single line in `recomputeTotals`.
+- All RAG colours pulled from the existing dark-theme `--dark-rag-*` palette (`#4ade80`, `#fbbf24`, `#f87171`) so they match the KPI cards above.
+
+### Files touched
+
+- `audit-dashboard.html` (+220 / -75 net: dark-theme CSS block + restructured HTML + tip strings on tier/lever arrays + recomputeTotals + ragClass helpers).
+- `Docs/CHANGELOG.md` (this entry).
+
+### What did NOT change
+
+- Supabase tables. IDs (`rfTgtMasterRev`, `rfTier_*_wt`, `rfLever_*_cap`, etc.) and the API contract are bit-for-bit identical. `loadConfig()` / `saveConfig()` are unchanged.
+- The picker (smart-priorities API). It still doesn't read these weights yet — that's the P2.2 scenario-engine consumer work, intentionally not in this commit because the user is still validating the inputs before we wire the consumer side.
+
 ## [2026-05-20 v5.1] - Top Actions config moved to Revenue Funnel tab (collapsed by default)
 
 ### Why
