@@ -824,12 +824,42 @@ function initTierBucket(tier) {
     pages: [],
     clicks_28d: 0,
     impressions_28d: 0,
+    // Legacy: MIN rank across ALL tracked keywords for this tier (brand included).
+    // Kept for back-compat — UI now prefers best_rank_non_brand.
     best_rank: null,
+    // MIN rank across NON-brand tracked keywords (excludes "alan ranger" terms).
+    // This is what the dashboard's "Best rank" column should show, because
+    // brand-prefixed head terms always rank #1 and hide commercial-intent gaps.
+    best_rank_non_brand: null,
+    // The actual keyword that achieved best_rank_non_brand — so the user can
+    // see WHICH non-brand query is winning, not just the position.
+    best_rank_keyword: null,
+    // All rank values seen, used to compute median_rank in finaliseTierBucket.
+    // Removed from the response payload before send.
+    tier_keyword_ranks: [],
+    median_rank: null,
     total_search_volume: 0,
     ai_keywords_total: 0,
     ai_keywords_cited: 0,
     ai_keywords_uncited: 0
   };
+}
+
+// A keyword counts as "brand" if it mentions Alan Ranger. Brand-prefixed head
+// terms reliably hit #1 and drag the tier's MIN rank to 1, which makes the
+// money-pages table useless for spotting real commercial-intent gaps.
+function isBrandKeyword(keyword) {
+  if (!keyword) return false;
+  const k = String(keyword).toLowerCase();
+  return k.includes('alan ranger') || k.includes('alanranger');
+}
+
+function medianOf(arr) {
+  if (!arr || !arr.length) return null;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2) return sorted[mid];
+  return Math.round((sorted[mid - 1] + sorted[mid]) / 2);
 }
 
 function accumulatePageIntoBucket(bucket, row) {
@@ -853,8 +883,16 @@ function accumulateKeywordIntoBucket(bucket, kw) {
   if (kw.bucket === 'overview_cited') bucket.ai_keywords_cited += 1;
   if (kw.bucket === 'overview_uncited') bucket.ai_keywords_uncited += 1;
   const r = kw.rank;
-  if (r != null && (bucket.best_rank == null || r < bucket.best_rank)) {
+  if (r == null) return;
+  bucket.tier_keyword_ranks.push(r);
+  if (bucket.best_rank == null || r < bucket.best_rank) {
     bucket.best_rank = r;
+  }
+  if (!isBrandKeyword(kw.keyword)) {
+    if (bucket.best_rank_non_brand == null || r < bucket.best_rank_non_brand) {
+      bucket.best_rank_non_brand = r;
+      bucket.best_rank_keyword = kw.keyword;
+    }
   }
 }
 
@@ -862,6 +900,8 @@ function finaliseTierBucket(bucket) {
   bucket.pages.sort((a, b) => b.clicks_28d - a.clicks_28d);
   bucket.top_page = bucket.pages[0] || null;
   bucket.page_count = bucket.pages.length;
+  bucket.median_rank = medianOf(bucket.tier_keyword_ranks);
+  delete bucket.tier_keyword_ranks;
   bucket.ctr_28d_pct = bucket.impressions_28d > 0
     ? (bucket.clicks_28d / bucket.impressions_28d) * 100
     : null;

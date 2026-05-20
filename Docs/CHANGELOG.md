@@ -2,6 +2,41 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-20] - Revenue Funnel: "Best rank" column — exclude brand keywords + surface the winning query
+
+### Problem
+
+Alan flagged that the "Money pages performance" table on the Revenue Funnel tab was showing **`#1` for every tier** (except Workshops Residential which was blank). Cross-checked against the Keyword & Ranking AI tab and `keyword_rankings` in Supabase — the table was **technically correct but operationally useless**: a single brand-prefixed head term like "alan ranger photography workshops" or "alan ranger photography courses" hits #1 and drags the tier's MIN-aggregated rank to 1, hiding the fact the actual commercial-intent terms behind it are mid-page. Real positions per the Keyword tab: "photography workshops" #13, "photography courses" #33, "photography lessons online" #8, "beginners photography course near me" #4 — none of which were visible because brand terms were dominating the aggregation.
+
+### Root cause
+
+`api/aigeo/revenue-funnel-summary.js` → `accumulateKeywordIntoBucket()` was doing `bucket.best_rank = MIN(rank)` across **every** keyword whose ranking URL fell inside the tier's URL-prefix set, with **no brand filter**. The source keyword list is the top 200 highest-volume tracked AI Overview keywords from `keyword_rankings`, which inevitably includes "alan ranger" branded variants because they have the highest impression counts.
+
+### Changed
+
+- **`api/aigeo/revenue-funnel-summary.js`**: extended `initTierBucket()` to add three new fields per tier — `best_rank_non_brand` (MIN rank across keywords whose name doesn't contain "alan ranger" / "alanranger"), `best_rank_keyword` (the actual non-brand query that achieved that rank, e.g. "photography workshops uk"), and `median_rank` (median across all tracked tier keywords, surfaced in the tooltip to show whether `#1` is one outlier or a tier-wide reality). Legacy `best_rank` is kept for back-compat. Added two new helpers — `isBrandKeyword()` (lowercase substring match on "alan ranger" / "alanranger") and `medianOf()` (sort + middle element with even-count averaging) — both well under the 15-complexity limit. `accumulateKeywordIntoBucket()` now early-returns when `r == null`, pushes every rank into `tier_keyword_ranks` for median calculation, and only updates `best_rank_non_brand` + `best_rank_keyword` when the keyword passes the brand filter. `finaliseTierBucket()` computes `median_rank` then `delete`s the raw `tier_keyword_ranks` array so it doesn't bloat the response payload.
+- **`audit-dashboard.html`**: added `rfBestRankCellHtml(t)` (two-line cell: large coloured `#N` on top — green ≤3, yellow ≤10, red >10 — plus a small grey caption with the winning non-brand keyword truncated to 24 chars) and `rfBestRankTooltip(t)` (full tooltip showing the keyword, the rank, the keyword count, and the median — with two fallback messages for "only brand keywords tracked" and "no tracked keywords" so users know what to do next). `rfMoneyTableRow()` now uses these helpers and escapes double-quotes for the `title` attribute. `rfTierTile()` (the smaller tile above the table) was updated to read `tier.best_rank_non_brand` instead of `tier.best_rank` so the tile and the table agree. The `<th data-sort="best_rank">` was renamed to `data-sort="best_rank_non_brand"` so column-header sorting matches what's actually displayed, and a `title` attribute was added to the header explaining the methodology in one sentence.
+
+### Files touched
+
+- `api/aigeo/revenue-funnel-summary.js` (+30 lines: helpers + new bucket fields + accumulator extension).
+- `audit-dashboard.html` (+30 lines for cell/tooltip helpers; 3 line changes for tile/header/cell wiring).
+
+### Verification
+
+After deploy, the Revenue Funnel tab's Money pages performance table should now show genuine commercial-intent positions instead of a column of `#1`s. Expected reads based on the current `keyword_rankings` snapshot Alan screenshotted:
+- **Academy** — likely `#1` (e.g. "free online photography course") or low-single-digit, with the actual winning query visible.
+- **Workshops (Non-Res)** — `#1` from "landscape photography workshop" / "landscape workshops" (genuine #1 ranking, not brand-driven), tooltip will show median ≈ #13 reflecting that "photography workshops" head term still needs work.
+- **Workshops (Residential)** — still `—` (no tracked keywords map to `/photography-workshops-near-me` or `/residential-workshops`); this is the highest-value follow-up flag — tier earned £775 in 28d with zero ranking-data observability.
+- **Courses** — expected `#4` from "beginners photography course near me" with tooltip showing median ≈ #16-#33 reflecting the head-term gap on "photography courses" (#33) and "photography lessons online" (#8).
+- **1-2-1 & Services** — should drop from `#1` to whatever the best non-brand long-tail is (e.g. "1-2-1 photography tuition coventry").
+- **Hire / Commercial** — should drop from `#1` to the best non-brand commission/headshot term (e.g. "headshots coventry").
+- **Unidentified** — still `—` (no `prefixes` array so no keywords accumulate; this row exists for revenue catching, not keyword counting).
+
+### Strategic intent
+
+The Revenue Funnel tab is the conversion-and-profit dashboard — every column on the Money pages performance table should answer "where is the leak?" at a glance. A column where every tier reads `#1` answers no questions (it just says "you have a strong brand", which Alan already knows). A column showing the best non-brand commercial-intent rank + the actual query immediately surfaces the gap between brand strength and commercial-intent strength — e.g. tier `Workshops (Non-Res)` showing `#1 (landscape workshops)` with a tooltip median of #13 tells Alan instantly that the long-tail is doing the work and the head term "photography workshops" needs SEO attention. Same logic exposes the Courses gap (#33 on the head term despite a #4 on a long-tail) and the Residential blind spot (zero keyword coverage despite £775/28d revenue). Brand-keyword exclusion uses a deliberately tight allow-list pattern (`alan ranger` / `alanranger` substring match) — anything else stays in the calculation so legitimate descriptive long-tails ("alan ranger" wouldn't be in "best UK landscape photographer near me" so it counts as non-brand and is eligible to be the winning keyword).
+
 ## [2026-05-19] - Academy funnel: /academy/login v4 — native Memberstack signup-modal pattern, 14-day display fix, consolidated card, dark-black/brand-orange H2 banner
 
 ### Changed
