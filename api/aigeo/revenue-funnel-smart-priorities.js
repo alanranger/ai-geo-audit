@@ -665,6 +665,27 @@ function makeWeightLookups(weights) {
   };
 }
 
+// Quadratic weight sensitivity. Squaring both tier and lever weights
+// inside the score formula means a 2.0 weight counts 4x (not 2x) and
+// a 0.5 weight counts 0.25 (not 0.5). This makes the picker much
+// more responsive to realistic strategic preferences (Easy/Balanced/
+// Hard weights typically span 0.2 - 2.0) without hiding the obvious
+// data-driven leaders. A 1.0 default stays at 1.0 so it remains the
+// neutral pivot.
+//
+// Rationale: with linear weighting (effLift * tier * lever) the
+// absolute-lift gap of ~5x between CTR/academy (~£275) and the next
+// candidate dominates everything except deliberately extreme weights
+// (>3.0 or <0.05). Squaring tightens the strategic distinction so a
+// modest 1.5 vs 0.5 difference (a 3x linear ratio) becomes a 9x
+// quadratic ratio - meaningful enough to re-rank candidates with
+// similar absolute lifts.
+function applyWeightShape(w) {
+  const n = Number(w);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n * n;
+}
+
 // Decorates a raw picker candidate with the scenario-applied weights,
 // the weighted_score the sorter uses, and the Phase C effort + £/hr
 // heuristics. Returns null when the candidate's lever has been zeroed
@@ -673,7 +694,9 @@ function enrichCandidate(c, tier, tierWeight, leverWeightOf, snapshotPropertyUrl
   const leverWeight = leverWeightOf(c.lever_id);
   if (leverWeight <= WEIGHT_ZERO_THRESHOLD) return null;
   const effLift = effectiveLiftForSort(c);
-  const weightedScore = effLift * tierWeight * leverWeight;
+  const shapedTier  = applyWeightShape(tierWeight);
+  const shapedLever = applyWeightShape(leverWeight);
+  const weightedScore = effLift * shapedTier * shapedLever;
   const eff = effortFor(c.lever_id);
   const liftPerHour = (eff.effort_hours && eff.effort_hours > 0)
     ? Math.round(weightedScore / eff.effort_hours)
@@ -686,6 +709,8 @@ function enrichCandidate(c, tier, tierWeight, leverWeightOf, snapshotPropertyUrl
     status: 'not_started',
     applied_tier_weight: tierWeight,
     applied_lever_weight: leverWeight,
+    applied_tier_weight_shaped: shapedTier,
+    applied_lever_weight_shaped: shapedLever,
     weighted_score: weightedScore,
     effort_hours: eff.effort_hours,
     time_to_realise_days: eff.time_to_realise_days,
