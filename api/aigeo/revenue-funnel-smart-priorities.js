@@ -614,7 +614,7 @@ function buildPrioritiesForTier(tierId, tierData) {
 }
 
 // ----------------------------------------------------------------------
-// Scenario-weighted sort (Phase F)
+// Scenario-weighted sort (Phase F) + effort heuristics (Phase C)
 // ----------------------------------------------------------------------
 // Baseline GP-lift estimates for candidates that don't carry a numeric
 // estimated_lift_gbp_profit (rank/schema/orphan are qualitative). These
@@ -628,7 +628,24 @@ const BASELINE_LIFT_GBP_PROFIT_BY_LEVER = {
   schema: 60,
   surfacing: 50
 };
+// Phase C: time-and-effort heuristics keyed by lever_id. effort_hours
+// is "person-time to do the action once" (Alan's hands on keyboard).
+// time_to_realise_days is "calendar days from action ship to measurable
+// move" (so the user sees not just the lift but how long they have to
+// wait for it). Values are conservative averages tuned against Alan's
+// own playbook on alanranger.com.
+const EFFORT_BY_LEVER = {
+  ctr:       { effort_hours: 0.5, time_to_realise_days: 14, label: 'Rewrite title + meta description (in Squarespace).' },
+  rank:      { effort_hours: 4.0, time_to_realise_days: 60, label: 'Content depth pass: head term into title + H1, 250-400w body extension, 6-8 FAQ items, hub backlinks.' },
+  aio:       { effort_hours: 2.0, time_to_realise_days: 30, label: '60-90 word direct-answer block + FAQPage JSON-LD with 5 Q/A pairs.' },
+  schema:    { effort_hours: 1.0, time_to_realise_days: 14, label: 'Drop the missing JSON-LD block into the hub page <head>.' },
+  surfacing: { effort_hours: 2.0, time_to_realise_days: 21, label: 'Add to hub product grid + 250-400w product page + one blog backlink.' }
+};
 const WEIGHT_ZERO_THRESHOLD = 0.05; // <= treat as "park this tier/lever"
+
+function effortFor(leverId) {
+  return EFFORT_BY_LEVER[leverId] || { effort_hours: null, time_to_realise_days: null, label: null };
+}
 
 function effectiveLiftForSort(candidate) {
   const numeric = Number(candidate.estimated_lift_gbp_profit);
@@ -674,6 +691,13 @@ function buildAllPriorities(snapshot, weights) {
       const tierWeight = tierWeightOf(tierId);
       const effLift = effectiveLiftForSort(c);
       const weightedScore = effLift * tierWeight * leverWeight;
+      // Phase C: attach effort and time-to-realise heuristics, plus
+      // lift_per_hour_gbp = weighted_score / effort_hours so the UI can
+      // surface "biggest £/hr" alongside "biggest absolute £" prioritisation.
+      const eff = effortFor(c.lever_id);
+      const liftPerHour = (eff.effort_hours && eff.effort_hours > 0)
+        ? Math.round(weightedScore / eff.effort_hours)
+        : null;
       collected.push({
         ...c,
         property_url: snapshot.propertyUrl,
@@ -682,7 +706,11 @@ function buildAllPriorities(snapshot, weights) {
         status: 'not_started',
         applied_tier_weight: tierWeight,
         applied_lever_weight: leverWeight,
-        weighted_score: weightedScore
+        weighted_score: weightedScore,
+        effort_hours: eff.effort_hours,
+        time_to_realise_days: eff.time_to_realise_days,
+        effort_label: eff.label,
+        lift_per_hour_gbp: liftPerHour
       });
     }
   }
@@ -942,6 +970,10 @@ export default async function handler(req, res) {
           applied_tier_weight: c.applied_tier_weight ?? null,
           applied_lever_weight: c.applied_lever_weight ?? null,
           weighted_score: c.weighted_score ?? null,
+          effort_hours: c.effort_hours ?? null,
+          time_to_realise_days: c.time_to_realise_days ?? null,
+          effort_label: c.effort_label ?? null,
+          lift_per_hour_gbp: c.lift_per_hour_gbp ?? null,
           live_data_source: c.live_data_source ?? 'audit',
           live_fetched_at: c.live_fetched_at ?? null,
           live_fetch_error: c.live_fetch_error ?? null
