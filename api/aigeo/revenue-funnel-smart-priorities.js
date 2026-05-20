@@ -1021,6 +1021,8 @@ export default async function handler(req, res) {
           lever_id: c.lever_id ?? null,
           applied_tier_weight: c.applied_tier_weight ?? null,
           applied_lever_weight: c.applied_lever_weight ?? null,
+          applied_tier_weight_shaped: c.applied_tier_weight_shaped ?? null,
+          applied_lever_weight_shaped: c.applied_lever_weight_shaped ?? null,
           weighted_score: c.weighted_score ?? null,
           effort_hours: c.effort_hours ?? null,
           time_to_realise_days: c.time_to_realise_days ?? null,
