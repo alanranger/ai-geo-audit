@@ -2,6 +2,104 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-20 Phase H+] - Optimisation-tracking suppression + per-tier seasonality + banner
+
+Addresses Alan's most direct critique of the picker: it kept
+recommending title rewrites for URLs that he had ALREADY rewritten,
+and it had no concept of "May is bluebell-workshop season, December
+is a gap month for hire". Four commits on `main`:
+
+- `0eab3e2` Picker: monitoring suppression + per-tier seasonality + banner
+- `99e80dc` Picker: use getters for MONTH_NAMES + SEASONALITY_BY_TIER (TDZ fix)
+- `ff1bfb0` Picker: fix silent suppression failure on enum mismatch
+- `44671a0` Picker: apply suppression penalty inside the scoring pass
+
+### Suppression layer
+
+`api/aigeo/revenue-funnel-smart-priorities.js` now reads active
+monitoring cycles from `optimisation_task_cycles` joined to
+`optimisation_tasks` (statuses `monitoring` / `planned`). Each
+candidate URL is matched against the cycles by `primary_kpi` -> lever
+mapping (`ctr_28d`/`clicks` -> ctr, `rank` -> rank, `ai_citations`
+-> aio). The verdict:
+
+- `< 30d` in monitoring -> BLOCK: actions dropped entirely,
+  candidate score x 0.10. Card surfaces a red "ALREADY IN MONITORING
+  (cycle N, 'objective' started Nd ago)" pill.
+- `30-90d` -> DOWNGRADE: title/meta/content actions kept but
+  flagged LOW confidence, score x 0.45. Amber "STILL IN MONITORING"
+  pill.
+- `> 90d` -> STALE: actions reframed as "in monitoring Nd with no
+  closure - try a DIFFERENT angle", score x 0.65. Purple
+  "STALLED - TRY ANOTHER ANGLE" pill.
+
+On prod the database has 35 active cycles across 19 URLs. Every
+Top 3 candidate from the live picker now carries a STALE flag
+because the same URLs have been recommended (and edited)
+repeatedly since January 2026.
+
+A silent-failure trap was fixed: the initial `.in('status',
+['monitoring','planned','active'])` filter crashed on the enum
+because `'active'` isn't a legal value, and the `try/catch` was
+swallowing the error so suppression silently returned zero URLs.
+There's now an `ACTIVE_CYCLE_STATUSES` constant and `console.warn`
+on errors so a future enum mismatch is visible in Vercel logs.
+
+### Seasonality layer
+
+`SEASONALITY_BY_TIER` (per-tier per-month multiplier array) is
+seeded from Alan's stated activity calendar:
+
+- `courses` 60%+ Jan-May + Sep-Nov, sub-50% Jun-Aug
+- `workshops_nonres` 80%+ Apr-May + Sep-Nov (bluebells / autumn)
+- `workshops_residential` similar shape, broader shoulders
+- `services` flat 1.0 (constant + opportunity)
+- `hire` flat 1.0 (sporadic + opportunity)
+- `academy` slight winter boost (1.15-1.20), summer dip (0.85-0.90)
+
+`estimated_lift_gbp_revenue/profit` on each candidate is multiplied
+by the current month's factor; the raw `*_unscaled` values are kept
+on the candidate so the UI can render both.
+
+### Banner endpoint
+
+`api/aigeo/revenue-funnel-seasonality.js` (NEW) returns the per-tier
+seasonality bands for the current month + the count of URLs in
+monitoring with per-KPI breakdown. The Revenue Funnel tab renders
+this as a banner above the Top 3 cards: month badge, per-tier band
+grid (peak / above / steady / below / gap), and a "Push: ... /
+Defer: ..." recommendation line.
+
+### Per-card pills
+
+Each action card on the Revenue Funnel + Auto-Optimise tabs now
+shows:
+- A small `SEASON +60%` pill in the tier row when the tier is not
+  in the neutral band.
+- A coloured suppression pill (red / amber / purple) above the
+  lift box when an active monitoring cycle is detected.
+
+### Self-test
+
+`scripts/multi-scenario-validation.mjs` (NEW) calls the prod
+endpoints and captures the top 3 of baseline + each Auto-Optimise
+preset, counts suppression flags + seasonality scaling, and writes
+a markdown report under `Docs/MULTI_SCENARIO_VALIDATION_<ts>.md`.
+Latest run: `Docs/MULTI_SCENARIO_VALIDATION_2026-05-20T22-07-08.md`.
+
+### Known gap (carried forward in handover)
+
+All three Auto-Optimise presets still pick the SAME top 3 URLs -
+the raw GP gap between those URLs and the rest of the portfolio
+is so large that even after a x0.65 stale penalty they still beat
+the fresh `surfacing` candidates that score ~50. The differentiation
+appears in the £ totals further down each preset. Tightening this
+requires a stricter `rerankForPreset` step inside
+`api/aigeo/revenue-funnel-auto-optimise.js`. Tracked in
+`Docs/HANDOVER_REVENUE_FUNNEL_2026-05-20.md` task #4.
+
+---
+
 ## [2026-05-20 v5.3 Phase A.2 DB hotfix] - Drop legacy targets index + repair orphan May 2026 scenario
 
 ### What was wrong

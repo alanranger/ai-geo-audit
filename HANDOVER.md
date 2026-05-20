@@ -1,10 +1,12 @@
 # AI GEO Audit - Comprehensive Handover Document
 
-**Last Updated**: 2026-03-13  
-**Current Commit**: *not auto-synced — run `git log -1 --oneline` (feature: Traditional SEO KE cache landed ~2026-03-13)*  
+**Last Updated**: 2026-05-20  
+**Current Commit**: *not auto-synced — run `git log -1 --oneline`*  
 **Purpose**: Single source of truth for all projects, phases, tasks, fixes, and key information for any new chat thread.
 
-**New chat agents:** skim **`AGENTS.md`** first, then **`Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md`** for the Keywords Everywhere / Traditional SEO column feature.
+**New chat agents:** skim **`AGENTS.md`** first.
+- For the **Revenue Funnel / Scenario Planning / picker / suppression / seasonality** work that just landed (2026-05-20), read **`Docs/HANDOVER_REVENUE_FUNNEL_2026-05-20.md`** FIRST — it has Alan's latest asks, the open task list in priority order, and the known pitfalls.
+- For the Traditional SEO Keywords Everywhere feature, read **`Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md`**.
 
 ---
 
