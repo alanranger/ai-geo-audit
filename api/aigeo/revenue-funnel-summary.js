@@ -22,7 +22,18 @@ const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 //   - id          stable key used in API responses + UI filters
 //   - label       human-readable
 //   - hubUrl      the primary money page the user wants to convert on
-//   - prefixes    path prefixes that count as part of this tier
+//   - prefixes    path prefixes that count as part of this tier (drives the
+//                 PAGE-aggregation columns: clicks_28d, impressions_28d,
+//                 revenue_actual_28d, page_count etc.)
+//   - keywords    CURATED commercial-intent queries that DEFINE the tier
+//                 for the keyword-aggregation columns (best_rank,
+//                 best_rank_non_brand, ai_keywords_total, total_search_volume,
+//                 ai_keywords_uncited). Stored lowercase, matched
+//                 case-insensitively against `keyword_rankings.keyword`.
+//                 Edit this list when you want to change which queries the
+//                 "Best rank" / "Search vol" / "AIO miss" columns score
+//                 against. Keep them commercial-intent only (no brand-prefix
+//                 variants — those always rank #1 and drown out real gaps).
 //   - monthlyTarget  £ per month target from Booking Sheet 2026 ("flat")
 //
 // Order matters: more-specific tiers come first so a URL like
@@ -35,6 +46,7 @@ const MONEY_PAGE_TIERS = [
     label: 'Courses',
     hubUrl: '/photography-courses-coventry',
     prefixes: ['/photography-courses', '/beginners-photography-class', '/beginners-photography-course', '/photography-classes', '/photography-lessons'],
+    keywords: ['photography courses', 'beginner photography courses'],
     monthlyTarget: 667,
     grossProfitPct: 90
   },
@@ -45,6 +57,7 @@ const MONEY_PAGE_TIERS = [
     label: 'Workshops (Non-Res)',
     hubUrl: '/photography-workshops',
     prefixes: ['/photography-workshops', '/landscape-photography-workshops', '/2-5hr-workshops', '/2.5hr-4hr-workshops', '/one-day-workshops', '/workshops-calendar'],
+    keywords: ['landscape photography workshops', 'one-day photography workshops'],
     monthlyTarget: 1667,
     grossProfitPct: 75
   },
@@ -56,6 +69,7 @@ const MONEY_PAGE_TIERS = [
     label: 'Workshops (Residential)',
     hubUrl: '/photography-workshops-near-me',
     prefixes: ['/photography-workshops-near-me', '/residential-workshops'],
+    keywords: ['photography workshops', 'photography workshops near me'],
     monthlyTarget: 833,
     grossProfitPct: 35
   },
@@ -64,6 +78,7 @@ const MONEY_PAGE_TIERS = [
     label: '1-2-1 & Services',
     hubUrl: '/photography-tuition-services',
     prefixes: ['/photography-tuition-services', '/photography-services', '/1-2-1-photography-tuition', '/1-2-1-private-photography-tuition', '/photography-lessons-online-1-2-1', '/private-photography-lessons', '/mentoring', '/rps-mentoring', '/gift-vouchers', '/pick-n-mix'],
+    keywords: ['private photography lessons', 'private photography lessons online', 'photography gift vouchers'],
     monthlyTarget: 863,
     // Weighted blend of: 1-2-1 95% + Mentoring 95% + PicknMix Inc 50% +
     // Gift Vouchers Inc 60% (ignoring the negative debit/credit "Out"
@@ -76,6 +91,7 @@ const MONEY_PAGE_TIERS = [
     label: 'Hire / Commercial',
     hubUrl: '/hire-a-professional-photographer-in-coventry',
     prefixes: ['/hire-a-professional-photographer', '/products-services-property-photography', '/portrait-photography', '/staff-training-on-photography', '/commercial-photography', '/headshots'],
+    keywords: ['photographer in coventry', 'commercial photography coventry', 'professional photographer near me', 'corporate photography training'],
     monthlyTarget: 350,
     // Weighted blend of Prints & Royalties 99% + Commissions 90%.
     // Commissions dominate revenue so the effective blend lands at ~92%.
@@ -86,6 +102,7 @@ const MONEY_PAGE_TIERS = [
     label: 'Academy',
     hubUrl: '/free-photography-course',
     prefixes: ['/free-photography-course', '/academy', '/free-online-photography-course', '/online-photography-course'],
+    keywords: ['online photography course', 'free online photography course'],
     monthlyTarget: 667,
     grossProfitPct: 99
   },
@@ -98,6 +115,7 @@ const MONEY_PAGE_TIERS = [
     label: 'Unidentified (needs review)',
     hubUrl: '',
     prefixes: [],
+    keywords: [],
     monthlyTarget: 0,
     grossProfitPct: null
   }
@@ -824,24 +842,26 @@ function initTierBucket(tier) {
     pages: [],
     clicks_28d: 0,
     impressions_28d: 0,
-    // Legacy: MIN rank across ALL tracked keywords for this tier (brand included).
+    // Legacy: MIN rank across ALL curated tier keywords (brand included).
     // Kept for back-compat — UI now prefers best_rank_non_brand.
     best_rank: null,
-    // MIN rank across NON-brand tracked keywords (excludes "alan ranger" terms).
-    // This is what the dashboard's "Best rank" column should show, because
-    // brand-prefixed head terms always rank #1 and hide commercial-intent gaps.
+    // MIN rank across NON-brand curated tier keywords. With the curated list
+    // approach (added 2026-05-20 v2), brand variants are excluded by curation
+    // rather than by string filter, so best_rank === best_rank_non_brand in
+    // practice — but the brand-exclusion safety net is kept just in case.
     best_rank_non_brand: null,
-    // The actual keyword that achieved best_rank_non_brand — so the user can
-    // see WHICH non-brand query is winning, not just the position.
     best_rank_keyword: null,
-    // All rank values seen, used to compute median_rank in finaliseTierBucket.
-    // Removed from the response payload before send.
     tier_keyword_ranks: [],
     median_rank: null,
     total_search_volume: 0,
     ai_keywords_total: 0,
     ai_keywords_cited: 0,
-    ai_keywords_uncited: 0
+    ai_keywords_uncited: 0,
+    // NEW (2026-05-20 v2): how many of the tier's curated keywords are
+    // actually in keyword_rankings. Surfaces tracking gaps in the tooltip.
+    curated_keywords_total: 0,
+    curated_keywords_missing: [],
+    curated_keywords_not_ranking: []
   };
 }
 
@@ -883,7 +903,10 @@ function accumulateKeywordIntoBucket(bucket, kw) {
   if (kw.bucket === 'overview_cited') bucket.ai_keywords_cited += 1;
   if (kw.bucket === 'overview_uncited') bucket.ai_keywords_uncited += 1;
   const r = kw.rank;
-  if (r == null) return;
+  if (r == null) {
+    bucket.curated_keywords_not_ranking.push(kw.keyword);
+    return;
+  }
   bucket.tier_keyword_ranks.push(r);
   if (bucket.best_rank == null || r < bucket.best_rank) {
     bucket.best_rank = r;
@@ -948,16 +971,48 @@ function attachActualRevenueToTier(bucket, latestSnap, monthlyHistory) {
   return bucket;
 }
 
+// Build a case-insensitive {keyword -> aiMap row} index so curated-keyword
+// matching is one hash lookup per query, not a linear scan.
+function indexAiMapByKeyword(aiMap) {
+  const byName = new Map();
+  for (const kw of (aiMap || [])) {
+    if (kw && kw.keyword) {
+      const key = String(kw.keyword).toLowerCase();
+      if (!byName.has(key)) byName.set(key, kw);
+    }
+  }
+  return byName;
+}
+
+// For each tier, walk its curated keyword list and accumulate the matching
+// aiMap row. Curated-but-not-found queries get pushed onto
+// curated_keywords_missing so the UI tooltip can prompt the user to add
+// them to keyword_rankings.
+function accumulateCuratedKeywords(bucket, tier, kwByName) {
+  const curated = tier.keywords || [];
+  bucket.curated_keywords_total = curated.length;
+  for (const name of curated) {
+    const kw = kwByName.get(String(name).toLowerCase());
+    if (kw) accumulateKeywordIntoBucket(bucket, kw);
+    else bucket.curated_keywords_missing.push(name);
+  }
+}
+
 function pickMoneyPagePerformance(pageRows, aiMap, latestSnap, monthlyHistory) {
   const byTier = new Map();
   for (const tier of MONEY_PAGE_TIERS) byTier.set(tier.id, initTierBucket(tier));
+  // PAGE aggregation by URL prefix (drives clicks/impr/revenue columns).
   for (const row of (pageRows || [])) {
     const tierId = tierOf(row.page_url);
     if (tierId) accumulatePageIntoBucket(byTier.get(tierId), row);
   }
-  for (const kw of (aiMap || [])) {
-    const tierId = tierOf(kw.best_url || '');
-    if (tierId) accumulateKeywordIntoBucket(byTier.get(tierId), kw);
+  // KEYWORD aggregation by curated list (drives best rank / SV / AIO miss).
+  // Previous URL-prefix-based keyword bucketing produced a misleading
+  // "#1 everywhere" column because brand-prefixed head terms drowned out
+  // the commercial-intent gaps — see CHANGELOG 2026-05-20 v1.
+  const kwByName = indexAiMapByKeyword(aiMap);
+  for (const tier of MONEY_PAGE_TIERS) {
+    accumulateCuratedKeywords(byTier.get(tier.id), tier, kwByName);
   }
   return MONEY_PAGE_TIERS.map(t => {
     const bucket = finaliseTierBucket(byTier.get(t.id));

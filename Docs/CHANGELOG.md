@@ -2,7 +2,50 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
-## [2026-05-20] - Revenue Funnel: "Best rank" column — exclude brand keywords + surface the winning query
+## [2026-05-20 v2] - Revenue Funnel: "Best rank" — curated keyword list per tier (replaces URL-prefix keyword matching)
+
+### Problem (continued from v1)
+
+v1 swapped MIN-rank for "MIN non-brand rank" which fixed the "#1 everywhere" symptom but the underlying logic was still **URL-prefix-based keyword bucketing**: keywords were assigned to a tier by `tierOf(kw.best_url)`. That meant the "Best rank" column reflected "what's the best position any tracked keyword reached on any page that happens to match a tier prefix?" — which is the wrong question. The right question is "what's our position on the commercial-intent queries that DEFINE this tier?". Alan's actual SEO intent for each tier was:
+
+- **Courses**: `photography courses`, `beginner photography courses`
+- **Academy**: `online photography course`, `free online photography course`
+- **Workshops (Non-Res)**: `landscape photography workshops`, `one-day photography workshops`
+- **Workshops (Residential)**: `photography workshops`, `photography workshops near me`
+- **Hire / Commercial**: `photographer in coventry`, `commercial photography coventry`, `professional photographer near me`, `corporate photography training`
+- **1-2-1 & Services**: `private photography lessons`, `private photography lessons online`, `photography gift vouchers`
+
+These deliberate lists could not emerge from URL-prefix bucketing because (a) some of the keywords rank against non-tier URLs (e.g. `beginner photography courses` currently ranks against `/free-online-photography-course`, not `/photography-courses-coventry`), (b) some don't rank anywhere yet (null `best_url`) so URL matching can't classify them, and (c) the URL set is wider than the curated set so unrelated head-terms get aggregated alongside.
+
+### Changed
+
+- **`api/aigeo/revenue-funnel-summary.js`**: added a `keywords` array to every entry in `MONEY_PAGE_TIERS` containing the exact lowercase commercial-intent queries Alan wants each tier scored against. Rewrote `pickMoneyPagePerformance()` into two helpers — `indexAiMapByKeyword()` (one-pass case-insensitive `{keyword -> aiMap row}` index for O(1) curated lookups) and `accumulateCuratedKeywords()` (walks a tier's curated list, accumulates each matching aiMap row via `accumulateKeywordIntoBucket()`, pushes unmatched queries onto `curated_keywords_missing`). Page-aggregation columns (`clicks_28d`, `impressions_28d`, `revenue_actual_28d`, `page_count`) are still URL-prefix-based — only the keyword-aggregation columns changed. `accumulateKeywordIntoBucket()` now pushes `kw.keyword` onto `curated_keywords_not_ranking` when the rank is null (e.g. `photography workshops near me` and `professional photographer near me` are both tracked but Google doesn't currently rank Alan anywhere — useful signal). Added three new fields per tier in `initTierBucket()`: `curated_keywords_total`, `curated_keywords_missing` (in curated list but not in `keyword_rankings`), `curated_keywords_not_ranking` (tracked but rank is null). All helpers stay under the 15-complexity rule (the new ones are 2-3 each).
+- **`audit-dashboard.html`**: rewrote `rfBestRankTooltip(t)` to surface the new curated-list metadata instead of generic "best non-brand keyword" prose. Tooltip now reports: (a) winning curated keyword and rank, (b) median rank across the ranked-curated subset, (c) list of curated keywords missing from `keyword_rankings` (so user knows what to add in the Keyword & Ranking AI tab), (d) list of curated keywords that ARE tracked but currently have no rank (so user knows where Google doesn't see them), (e) "tracked / total" curated-keyword count footer. Cell display unchanged from v1 (rank + truncated winning keyword, colour-coded green/yellow/red).
+
+### Files touched
+
+- `api/aigeo/revenue-funnel-summary.js` (+30 lines for new helpers + curated-list fields; `keywords` arrays added to 7 tier entries).
+- `audit-dashboard.html` (~20 line tooltip rewrite).
+
+### Expected dashboard reads after deploy
+
+Verified against the 2026-05-19 `keyword_rankings` snapshot (production property `https://www.alanranger.com`):
+
+| Tier | Best rank | Best curated keyword | Tracking gaps surfaced |
+|---|---|---|---|
+| Courses | **#14** | beginner photography courses | None (2/2 tracked, head term `photography courses` #33 with SV 6,600 is the biggest commercial gap) |
+| Academy | **#1** | free online photography course | None (2/2 tracked, `online photography course` SV 1,000 at #2) |
+| Workshops (Non-Res) | **#1** | landscape photography workshops | `one-day photography workshops` missing (tracked variant is `one day photography workshops` without hyphen at #39 — exact-match means it shows as missing) |
+| Workshops (Residential) | **#13** | photography workshops | `photography workshops near me` (SV 260) tracked but not ranking |
+| Hire / Commercial | **#2** | photographer in coventry | `commercial photography coventry` missing entirely; `professional photographer near me` (SV 590) tracked but not ranking |
+| 1-2-1 & Services | **#4** | photography gift vouchers | `private photography lessons online` missing entirely |
+| Unidentified | — | (empty curated list) | n/a |
+
+### Strategic intent
+
+The dashboard is now **deterministic** — Alan controls exactly which queries each tier is scored against by editing `MONEY_PAGE_TIERS.keywords` in `revenue-funnel-summary.js`. The previous URL-prefix approach was non-deterministic (depended on which URL Google chose to rank a keyword against) and over-inclusive (any tracked keyword whose `best_url` happened to fall in a tier's prefix set counted, including brand variants and one-off long-tails). The curated-list approach also surfaces tracking gaps directly: if Alan wants `commercial photography coventry` to be a Hire/Commercial KPI but the column shows "Missing from tracking", that's an actionable signal to add it in the Keyword & Ranking AI tab. Same for keywords tracked but not ranking — the tooltip's "Tracked but not ranking" list is essentially the SEO backlog for that tier.
+
+## [2026-05-20 v1] - Revenue Funnel: "Best rank" column — exclude brand keywords + surface the winning query
 
 ### Problem
 
