@@ -2,6 +2,50 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-21 v5.3 Phase A.1 hotfix] - Drop legacy targets unique index
+
+### What broke
+
+Live smoke-test of the new `revenue-funnel-scenarios` endpoint flagged that `POST { action: 'duplicate' }` fails when copying the source scenario's targets rows:
+
+```
+{"error":"scenario_error","detail":"duplicate key value violates unique constraint \"revenue_funnel_targets_property_tier_uidx\""}
+```
+
+The Create / Patch / Delete / Activate / Rename operations work; only Duplicate hit this. The orphan parent row (the duplicate scenario itself) does get created, so a failed duplicate leaves a stub scenario with no config rows. Cleaned up in this hotfix.
+
+### Root cause
+
+The v5.0 migration (`2026-05-20-scenario-engine-tables.sql`) created `revenue_funnel_targets_property_tier_uidx` ON `(property_url, COALESCE(tier_id, ''))`. My v5.3 migration added a new scenario-scoped equivalent `revenue_funnel_targets_scenario_tier_idx` ON `(scenario_id, COALESCE(tier_id, ''))` but **didn't drop the old one**. So when Duplicate inserts copies of the source scenario's targets rows (same `property_url`, same `tier_id`, new `scenario_id`), the legacy index sees a property+tier collision and rejects the insert.
+
+### Fix - DB
+
+Created `Docs/migrations/2026-05-21b-drop-legacy-targets-index.sql`. One statement:
+
+```sql
+DROP INDEX IF EXISTS public.revenue_funnel_targets_property_tier_uidx;
+```
+
+**Run via Supabase SQL editor** (project `igzvwbvgvmzvvzoclufx`, MCP `user-supabase-ai-chat`). Idempotent.
+
+Also updated `2026-05-21-scenario-planning-tables.sql` to include the same DROP INDEX so a future fresh-DB replay doesn't reintroduce the bug.
+
+### Fix - cleanup
+
+Wrote `scripts/fix-duplicate-targets-index-2026-05-21.mjs` which:
+
+1. Attempts the DROP INDEX via `rpc('exec_sql')` (fails on standard Supabase setups because `exec_sql` isn't a known function — script then prints the manual SQL).
+2. Lists and deletes any `SmokeDup-*` / `SmokeTest-*` orphan scenarios (the 2026-05-21 smoke test left one). This part DOES work via the JS client because plain deletes are supported.
+
+Ran the script live; it cleaned up the orphan `SmokeDup-2026-05-21` scenario successfully.
+
+### Files
+
+- `Docs/migrations/2026-05-21-scenario-planning-tables.sql` (updated to also drop legacy index)
+- `Docs/migrations/2026-05-21b-drop-legacy-targets-index.sql` (new, one-statement remediation)
+- `scripts/fix-duplicate-targets-index-2026-05-21.mjs` (new, orphan cleanup helper)
+- `Docs/CHANGELOG.md` (this entry)
+
 ## [2026-05-21 v5.3 Phase A.1] - Scenario Planning foundation (new tab, library, scenarios CRUD)
 
 ### Why

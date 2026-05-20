@@ -168,11 +168,15 @@ ALTER TABLE public.revenue_funnel_lever_weights
   ADD CONSTRAINT revenue_funnel_lever_weights_scenario_lever_key
     UNIQUE (scenario_id, lever_id);
 
--- The targets table never had a (property_url, COALESCE(tier_id, '')) unique
--- constraint - the v5.1 config API worked around the absence using a manual
--- delete-then-insert. Now we add the proper functional unique index, scoped
--- to scenario_id, so future config-save code can use a plain upsert.
-DROP INDEX IF EXISTS revenue_funnel_targets_scenario_tier_idx;
+-- v5.0 created a unique index on (property_url, COALESCE(tier_id, '')) named
+-- revenue_funnel_targets_property_tier_uidx. With scenario_id in play that
+-- index is wrong: duplicating a scenario copies (same property_url, same
+-- tier_id, new scenario_id) rows and the OLD index would reject the second
+-- row because it doesn't know about scenario_id. Drop the legacy index and
+-- replace it with a scenario-scoped equivalent so config-save and duplicate
+-- both work.
+DROP INDEX IF EXISTS public.revenue_funnel_targets_property_tier_uidx;
+DROP INDEX IF EXISTS public.revenue_funnel_targets_scenario_tier_idx;
 CREATE UNIQUE INDEX revenue_funnel_targets_scenario_tier_idx
   ON public.revenue_funnel_targets (scenario_id, COALESCE(tier_id, ''));
 
