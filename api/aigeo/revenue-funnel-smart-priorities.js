@@ -146,10 +146,100 @@ async function fetchProducts(supabase) {
 }
 
 // ----------------------------------------------------------------------
+// Page-content validation helpers (Phase 1, 2026-05-20 v4)
+// ----------------------------------------------------------------------
+// Filter blog posts out of money-page picks. Blog posts can rank and earn
+// AIO citations but they are NOT money pages — Alan flagged that the picker
+// was surfacing /blog-on-photography/headshots-at-home-guide as a Top 3
+// "Lift CTR" candidate, which both duplicates the Money Pages Opportunity
+// Table view and pushes him toward a sub-tier (portraits/headshots are
+// <0.5% of revenue) instead of his real high-profit tiers.
+function isBlogUrl(url) {
+  if (!url) return false;
+  const s = String(url);
+  return /\/blog-on-photography\//i.test(s);
+}
+
+// Find the top-ranking keyword (by search volume) whose `best_url` matches
+// this page. Used so the picker description can say WHICH commercial-intent
+// query the page is competing on, not just "rewrite the title".
+function topKeywordForPage(cleanedUrl, keywords) {
+  if (!cleanedUrl || !keywords) return null;
+  let best = null;
+  let bestVol = -1;
+  for (const k of keywords) {
+    if (cleanUrl(k.best_url || '') !== cleanedUrl) continue;
+    const v = Number(k.search_volume) || 0;
+    if (v > bestVol) { best = k; bestVol = v; }
+  }
+  return best;
+}
+
+// Pull what the latest audit captured for this page: current title, current
+// meta description, schema types it carries. This is what makes the picker
+// recommendations data-driven instead of generic — we can SEE what's there
+// and only suggest changes that the data justifies.
+function pageEnrichment(cleanedUrl, schemaDetail, keywords) {
+  const schema = schemaDetail.get(cleanedUrl);
+  return {
+    title: (schema && schema.title) || null,
+    meta: (schema && schema.metaDescription) || null,
+    schemaTypes: schema && schema.schemaTypes ? Array.from(schema.schemaTypes) : [],
+    topKw: topKeywordForPage(cleanedUrl, keywords)
+  };
+}
+
+// Three small diagnostic helpers so the parent stays under the 15-complexity
+// limit. Each returns either a string describing a specific issue, or null.
+function diagnoseTitleIssue(title, topKw) {
+  if (!title) return 'Title not captured in last audit (likely missing or blocked).';
+  const len = title.length;
+  if (len > 60) return `Title is ${len}ch — Google truncates at ~60.`;
+  if (len < 30) return `Title is only ${len}ch — under-using SERP real estate.`;
+  if (topKw && topKw.keyword && !title.toLowerCase().includes(String(topKw.keyword).toLowerCase())) {
+    return `Title doesn't lead with head term "${topKw.keyword}" (the query you actually rank for).`;
+  }
+  return null;
+}
+function diagnoseMetaIssue(meta) {
+  if (!meta) return 'No meta description captured — Google will auto-snippet (usually badly).';
+  const len = meta.length;
+  if (len > 160) return `Meta is ${len}ch — truncated in SERP.`;
+  if (len < 120) return `Meta is only ${len}ch — under-using SERP real estate.`;
+  return null;
+}
+function diagnosePositionIssue(avgPosition, ctrPct) {
+  const pos = Number(avgPosition);
+  if (!Number.isFinite(pos)) return null;
+  if (pos <= 3 && ctrPct < 5) {
+    return `Position ${pos.toFixed(1)} should drive ~10–30% CTR; you're at ${ctrPct.toFixed(2)}% — almost certainly AIO / rich-snippet features eating the clicks. Fix that first, not the title.`;
+  }
+  if (pos >= 11 && ctrPct >= 1) {
+    return `CTR ${ctrPct.toFixed(2)}% is normal for position ${pos.toFixed(1)} — focus on rank improvement (page 1) before title rewrites.`;
+  }
+  return null;
+}
+function diagnoseLowCtr({ ctrPct, avgPosition, title, meta, topKw }) {
+  const issues = [];
+  const tIssue = diagnoseTitleIssue(title, topKw);
+  if (tIssue) issues.push(tIssue);
+  const mIssue = diagnoseMetaIssue(meta);
+  if (mIssue) issues.push(mIssue);
+  const pIssue = diagnosePositionIssue(avgPosition, ctrPct);
+  if (pIssue) issues.push(pIssue);
+  if (!issues.length) {
+    issues.push('Title + meta look reasonable for length and contain the head term. Lift is likely from schema enrichment or AIO citation, not a title rewrite.');
+  }
+  return issues.join(' ');
+}
+
+// ----------------------------------------------------------------------
 // Candidate builders - one per priority type
 // ----------------------------------------------------------------------
-function ctrPriorityForTier(tierId, tierMetrics) {
-  const eligible = tierMetrics.filter(r => (Number(r.impressions_28d) || 0) >= MIN_IMPRESSIONS_FOR_CTR_TASK);
+function ctrPriorityForTier(tierId, tierMetrics, ctx) {
+  const eligible = tierMetrics
+    .filter(r => !isBlogUrl(r.page_url))
+    .filter(r => (Number(r.impressions_28d) || 0) >= MIN_IMPRESSIONS_FOR_CTR_TASK);
   if (!eligible.length) return null;
   const scored = eligible.map(r => {
     const impr = Number(r.impressions_28d) || 0;
@@ -162,18 +252,33 @@ function ctrPriorityForTier(tierId, tierMetrics) {
   if (!scored.length) return null;
   const top = scored[0];
   const cleanedUrl = cleanUrl(top.row.page_url);
-  // The CTR uplift is measured per-28d (the GSC window), but every other
-  // priority generator (AIO etc.) returns MONTHLY values. Normalise to
-  // monthly so the dashboard can treat `estimated_lift_gbp_*` as a single
-  // unit everywhere (and so the annual figure is just × 12, no fudge).
   const upliftMonthly = top.uplift * (30 / 28);
   const revLift = Math.round(upliftMonthly * estimatedAovPerClick(tierId));
   const gpLift = Math.round(upliftMonthly * estimatedGpPerClick(tierId));
   const gpPct = estimatedGpPctForTier(tierId);
+  // Enrichment: pull what the page actually has so the description is
+  // data-driven, not boilerplate.
+  const e = pageEnrichment(cleanedUrl, ctx.schemaDetail, ctx.keywords);
+  const pos = top.row.position_28d != null ? Number(top.row.position_28d) : null;
+  const posTxt = pos != null ? `avg pos ${pos.toFixed(1)}` : 'pos n/a';
+  const kwLine = e.topKw
+    ? `Top ranking keyword: "${e.topKw.keyword}" at rank #${e.topKw.best_rank_group ?? '?'} (${Number(e.topKw.search_volume || 0).toLocaleString()}/mo).`
+    : 'No tracked keyword found for this page yet.';
+  const titleLine = e.title
+    ? `Current title: "${e.title}" (${e.title.length}ch).`
+    : 'Current title: (not captured in last audit).';
+  const metaShort = e.meta ? (e.meta.length > 140 ? e.meta.slice(0, 137) + '…' : e.meta) : null;
+  const metaLine = metaShort
+    ? `Current meta: "${metaShort}" (${e.meta.length}ch).`
+    : 'Current meta: (not captured in last audit).';
+  const schemaLine = e.schemaTypes.length
+    ? `Schema present: ${e.schemaTypes.slice(0, 6).join(', ')}.`
+    : 'Schema present: none captured.';
+  const diag = diagnoseLowCtr({ ctrPct: top.ctrPct, avgPosition: pos, title: e.title, meta: e.meta, topKw: e.topKw });
   return {
     signature: `ctr|${cleanedUrl}`,
     title: `Lift CTR on ${labelOf(cleanedUrl)}`,
-    description: `${cleanedUrl} has ${top.impr.toLocaleString()} impressions/28d at ${top.ctrPct.toFixed(2)}% CTR. Rewrite the SERP title (~60ch) and meta description (~155ch) to lead with the customer's outcome + price + location. Target ${top.targetPct.toFixed(1)}% CTR.`,
+    description: `${cleanedUrl} — ${top.impr.toLocaleString()} impressions/28d, ${top.ctrPct.toFixed(2)}% CTR, ${posTxt}. ${kwLine} ${titleLine} ${metaLine} ${schemaLine} Diagnosis: ${diag} Target: ${top.targetPct.toFixed(2)}% CTR.`,
     pages_affected: [cleanedUrl],
     primary_kpi: 'ctr_28d_pct',
     kpi_baseline_value: top.ctrPct,
@@ -185,8 +290,9 @@ function ctrPriorityForTier(tierId, tierMetrics) {
   };
 }
 
-function rankPriorityForTier(tierId, tierKeywords, _hubUrl) {
+function rankPriorityForTier(tierId, tierKeywords, ctx) {
   const eligible = tierKeywords
+    .filter(k => !isBlogUrl(k.best_url || ''))
     .filter(k => {
       const r = k.best_rank_group;
       return r != null && r >= 5 && r <= 20 && (Number(k.search_volume) || 0) >= MIN_KEYWORD_VOL_FOR_RANK_TASK;
@@ -196,10 +302,15 @@ function rankPriorityForTier(tierId, tierKeywords, _hubUrl) {
   const top = eligible[0];
   const targetRank = Math.max(3, Math.floor(Number(top.best_rank_group) / 2));
   const cleanedUrl = cleanUrl(top.best_url || '');
+  const e = pageEnrichment(cleanedUrl, ctx.schemaDetail, ctx.keywords);
+  const titleLine = e.title ? `Current title: "${e.title}" (${e.title.length}ch).` : 'Current title: (not captured).';
+  const schemaLine = e.schemaTypes.length
+    ? `Schema present: ${e.schemaTypes.slice(0, 6).join(', ')}.`
+    : 'Schema present: none captured — adding FAQPage + Service is the cheapest first step.';
   return {
     signature: `rank|${top.keyword}|${cleanedUrl}`,
     title: `Lift "${top.keyword}" from rank ${top.best_rank_group} to top ${targetRank}`,
-    description: `${cleanedUrl || '(no URL)'} ranks #${top.best_rank_group} for "${top.keyword}" (${Number(top.search_volume).toLocaleString()} searches/mo). Strengthen the page: add a comparison table, customer outcome paragraphs, and 6-8 FAQ items mirroring the People-Also-Ask block. Re-build the internal link block from the tier hub.`,
+    description: `${cleanedUrl || '(no URL)'} ranks #${top.best_rank_group} for "${top.keyword}" (${Number(top.search_volume).toLocaleString()}/mo). ${titleLine} ${schemaLine} Action: lift the head term into the H1 + first 60 words, add a comparison table + customer outcome paragraphs, 6–8 FAQ items mirroring People-Also-Ask, and rebuild internal links from the tier hub.`,
     pages_affected: cleanedUrl ? [cleanedUrl] : [],
     primary_kpi: 'rank_position',
     kpi_baseline_value: Number(top.best_rank_group),
@@ -209,7 +320,7 @@ function rankPriorityForTier(tierId, tierKeywords, _hubUrl) {
   };
 }
 
-function aioCitationPriority(tierId, tierKeywords) {
+function aioCitationPriority(tierId, tierKeywords, ctx) {
   // Re-rank uncited AIO keywords by GP-weighted potential rather than
   // raw search volume. A 1k/mo academy keyword (99% GP) outranks a
   // 5k/mo residential workshops keyword (35% GP) because the profit
@@ -217,6 +328,7 @@ function aioCitationPriority(tierId, tierKeywords) {
   const gpPct = estimatedGpPctForTier(tierId);
   const aov = estimatedAovPerClick(tierId);
   const uncited = tierKeywords
+    .filter(k => !isBlogUrl(k.best_url || ''))
     .filter(k => k.has_ai_overview && !(Number(k.ai_alan_citations_count) > 0))
     .map(k => ({ kw: k, vol: Number(k.search_volume) || 0 }))
     // Assume an AIO citation captures ~3% of the AIO query volume as
@@ -228,10 +340,16 @@ function aioCitationPriority(tierId, tierKeywords) {
   const top = uncited[0];
   const cleanedUrl = cleanUrl(top.kw.best_url || '');
   const revLift = Math.round(top.vol * 0.03 * aov);
+  const e = pageEnrichment(cleanedUrl, ctx.schemaDetail, ctx.keywords);
+  const hasFaq = e.schemaTypes.includes('FAQPage');
+  const schemaLine = e.schemaTypes.length
+    ? `Schema present: ${e.schemaTypes.slice(0, 6).join(', ')}${hasFaq ? '' : ' (no FAQPage — needed for AIO citation).'}`
+    : 'Schema present: none captured — FAQPage + the actual answer block both need adding.';
+  const rankInfo = top.kw.best_rank_group != null ? `currently ranks #${top.kw.best_rank_group}` : 'not ranking yet';
   return {
     signature: `aio|${top.kw.keyword}`,
     title: `Get cited in Google's AI Overview for "${top.kw.keyword}"`,
-    description: `An AI Overview exists for "${top.kw.keyword}" (${top.vol.toLocaleString()}/mo) but no alanranger.com citation. Add a short, structured answer block on ${cleanedUrl || 'the best matching page'} that directly answers the AIO query, followed by 3-5 supporting FAQs using question/answer schema markup mirroring the AIO summary.`,
+    description: `AI Overview exists for "${top.kw.keyword}" (${top.vol.toLocaleString()}/mo) — you ${rankInfo} but aren't cited. Target page: ${cleanedUrl || '(no URL)'}. ${schemaLine} Action: add a 60–90-word direct-answer block at the top of the page mirroring the AIO summary, followed by 5 question/answer items in FAQPage schema.`,
     pages_affected: cleanedUrl ? [cleanedUrl] : [],
     primary_kpi: 'aio_citations',
     kpi_baseline_value: 0,
@@ -377,11 +495,17 @@ function estimatedGpPerClick(tierId) {
 // Master builder
 // ----------------------------------------------------------------------
 function buildPrioritiesForTier(tierId, tierData) {
+  // ctx bundles the cross-page data the enrichment helpers need so each
+  // picker can produce a research-validated description without re-fetching.
+  const ctx = {
+    schemaDetail: tierData.schemaDetail,
+    keywords: tierData.allKeywords || tierData.keywords
+  };
   const candidates = [
     schemaGapPriority(tierId, tierData.schemaDetail),
-    ctrPriorityForTier(tierId, tierData.pages),
-    rankPriorityForTier(tierId, tierData.keywords, tierData.hubUrl),
-    aioCitationPriority(tierId, tierData.keywords),
+    ctrPriorityForTier(tierId, tierData.pages, ctx),
+    rankPriorityForTier(tierId, tierData.keywords, ctx),
+    aioCitationPriority(tierId, tierData.keywords, ctx),
     orphanProductPriority(tierId, tierData.products, tierData.pagesByUrl)
   ].filter(Boolean);
   return candidates;
@@ -405,6 +529,7 @@ function buildAllPriorities(snapshot) {
       pages: snapshot.pagesByTier.get(tierId) || [],
       pagesByUrl: snapshot.pagesByUrl,
       keywords: snapshot.keywordsByTier.get(tierId) || [],
+      allKeywords: snapshot.allKeywords || [],
       products: snapshot.productsByTier.get(tierId) || []
     };
     const cands = buildPrioritiesForTier(tierId, tierData);
@@ -442,7 +567,14 @@ async function buildSnapshot(supabase, propertyUrl) {
   const pagesByTier = groupByTier(pages, 'page_url');
   const keywordsByTier = groupByTier(keywords, 'best_url');
   const productsByTier = groupByTier(products, 'product_url', 'product_title');
-  return { propertyUrl, schemaDetail, pagesByUrl, pagesByTier, keywordsByTier, productsByTier };
+  // allKeywords is the un-tier-grouped keyword list. The page-enrichment
+  // helper (topKeywordForPage) needs to find a keyword for a CTR-picked
+  // page even when that page sits in a different tier than the keyword's
+  // tier classification — e.g. the academy free-online-photography-course
+  // hub ranks for "online photography course" which keyword-classifies as
+  // 'courses' on URL prefix. Without the global pool, the enricher misses
+  // the head term entirely and we're back to generic prose.
+  return { propertyUrl, schemaDetail, pagesByUrl, pagesByTier, keywordsByTier, productsByTier, allKeywords: keywords };
 }
 
 // ----------------------------------------------------------------------

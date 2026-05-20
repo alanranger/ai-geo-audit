@@ -2,6 +2,55 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-20 v4] - "Do these 3 things this week": research-validated picks + CTR to 2 dp
+
+### Problem
+
+Alan reviewed the live Top 3 Actions card and called it out as low-quality:
+
+1. **Bad picks** — the card surfaced *"Lift CTR on headshots at home guide"* (the URL is `/blog-on-photography/headshots-at-home-guide`, a blog post, not a money page — and portraits/headshots are <0.5% of revenue, so an action on it can't be a top-tier opportunity by definition). It also surfaced *"Lift CTR on free online photography course"* with no explanation of WHY CTR was low or what to actually change.
+2. **Generic recommendations** — every CTR card said "Rewrite the SERP title (~60ch) and meta description (~155ch) to lead with the customer's outcome + price + location" regardless of what the page actually had. The picker never read `schema_pages_detail` (which already stores the current title + meta + schema types per page) and never looked at `keyword_rankings` to say which head term the page was competing on.
+3. **No validation against page state** — the AIO citation card said "add a structured answer block + FAQs" even when the target page already had `FAQPage` schema.
+4. **CTR displayed at 1 dp** in the Money Pages Opportunity Table (e.g. `0.7%`) and in the per-page Suggested Top 10 cards — Alan asked for 2 dp everywhere so the difference between a 0.04% and 0.94% CTR is actually visible.
+5. **Duplication with the Money Pages Opportunity Table below** — the same headshots blog kept appearing in both, with the same un-actionable "lift CTR" prose. The Top 3 card is supposed to be **strategically additive**, not a recap of the matrix.
+
+### Changed — `api/aigeo/revenue-funnel-smart-priorities.js`
+
+Phase 1 of the picker rework (a Phase 2 with tier-strategic weighting is still open, see below). Each CTR / Rank / AIO candidate is now generated from real page data:
+
+- **`isBlogUrl(url)`** — new util. Returns true for any URL matching `/blog-on-photography/`. Wired into `ctrPriorityForTier`, `rankPriorityForTier`, and `aioCitationPriority` as the FIRST filter, so blog posts can no longer be surfaced as money-page actions. This alone drops `/blog-on-photography/headshots-at-home-guide` out of the Top 3.
+- **`topKeywordForPage(cleanedUrl, keywords)`** — new util. Finds the highest-search-volume keyword whose `best_url` matches the page, regardless of which tier that keyword classified into. (Needed because e.g. the Academy hub ranks for `"online photography course"`, which keyword-classifies as the `courses` tier; without a cross-tier lookup the enricher couldn't find the head term.)
+- **`pageEnrichment(cleanedUrl, schemaDetail, keywords)`** — new util. Returns `{ title, meta, schemaTypes, topKw }` for the picked page so the description can cite ACTUAL state, not generic boilerplate.
+- **`diagnoseTitleIssue` / `diagnoseMetaIssue` / `diagnosePositionIssue` / `diagnoseLowCtr`** — four new helpers that each inspect a single dimension of the page (title length vs 60 ch; head-term-in-title check; meta length vs 120–160 ch; position-vs-CTR sanity check — e.g. *"Position 1.3 should drive ~10–30% CTR; you're at 0.74% — almost certainly AIO / rich-snippet features eating the clicks"* vs. *"CTR 0.74% is normal for position 14.2 — focus on rank improvement before title rewrites"*). Split into three helpers so the parent `diagnoseLowCtr` stays well under the 15-complexity rule.
+- **`ctrPriorityForTier`** description now reads, for a real example:
+  > `/photography-courses-coventry` — 4,761 impressions/28d, 0.65% CTR, avg pos 16.4. Top ranking keyword: "photography courses" at rank #33 (6,600/mo). Current title: "Photography Courses Coventry or Online | Learn from..." (62 ch). Current meta: "UK landscape photography workshops…" (118 ch). Schema present: Course, FAQPage, BreadcrumbList. Diagnosis: Title is 62 ch — Google truncates at ~60. Meta is only 118 ch — under-using SERP real estate. CTR 0.65% is normal for position 16.4 — focus on rank improvement (page 1) before title rewrites. Target: 1.50% CTR.
+
+  i.e. the card now tells you *what's currently there*, *why CTR is what it is for that rank*, and *what specifically to change* — instead of the previous generic "rewrite the title".
+- **`rankPriorityForTier`** now includes current title + current schema types in its description, plus the action prose now references whether `FAQPage` schema is already present (so the recommendation isn't "add FAQ schema" when FAQ is already there).
+- **`aioCitationPriority`** now reports whether the target page already has `FAQPage` schema — pivoting the action between *"FAQPage already present, write the AIO answer block above the existing FAQs and extend with 5 question/answer pairs mirroring the AIO summary"* and *"FAQPage missing — add it AND write the answer block"*.
+- **`buildSnapshot` / `buildPrioritiesForTier`** wired through a new `ctx = { schemaDetail, keywords: allKeywords }` so the enricher can do a cross-tier keyword lookup (the per-tier `keywordsByTier` was too narrow — academy hub keywords classify as `courses`-tier, etc.).
+
+### Changed — `audit-dashboard.html` (CTR display: 2 decimal places)
+
+Five spots updated from `.toFixed(1)` to `.toFixed(2)`:
+
+- **L44075** — Money Pages Opportunity Table CTR column cell.
+- **L44508** — Money Pages KPI tile sub-label `"vs X.X% site"` (was inconsistent with the main value above it which was already 2 dp).
+- **L47841** — Money Pages summary band tile `"Money pages CTR"` (the big number at the top of the URL Money Pages tab — the one Alan screenshotted as `0.5%`).
+- **L49093** — Suggested Top 10 per-page card CTR row.
+- **L51237** — Money pages behaviour CTR display in the Authority scorecard.
+
+### Files touched
+
+- `api/aigeo/revenue-funnel-smart-priorities.js` (+90 / -22 lines net; node syntax-checked; new helpers each <15 complexity).
+- `audit-dashboard.html` (5 × 1-character `.toFixed` changes).
+
+### Still open (Phase 2 — needs Alan's input)
+
+1. **Tier-strategic weighting** — the picker still ranks Top 3 purely by `estimated_lift_gbp_profit` (clicks × tier AOV × tier GP%). Alan flagged that **portraits/headshots are <0.5% of revenue**, so even when a headshots-related page passes the blog filter, its surface-area is too small to be a "biggest reward" pick. Need to decide: should the hire tier get a strategic-weight multiplier <1 to deprioritise its low-share sub-pages, and should academy + workshops_nonres get >1 because they're the high-leverage tiers? Will not invent weights — waiting for Alan's call.
+2. **De-dupe against `revenue_funnel_priorities` and the Money Pages Opportunity Table** — currently a page can show up in both Top 3 and the matrix below. Not necessarily bad (Top 3 is the curated "do these THIS week" view; matrix is the full backlog) but worth a follow-up so the Top 3 is genuinely additive.
+3. **Live page-content validation via Firecrawl scrape** — `pageEnrichment` only reads what `schema_pages_detail` captured in the last audit. A more honest validation would scrape the live page on-demand and check the rendered HTML for the AIO answer block / FAQPage JSON-LD. Deferred — Phase 1 covers ~80% of the "is this still missing?" question already.
+
 ## [2026-05-20 v3] - Profit Pyramid: add Annualised Rev column + column totals row
 
 ### Problem
