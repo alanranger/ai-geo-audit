@@ -316,9 +316,10 @@ function ctrPriorityForTier(tierId, tierMetrics, ctx) {
     kpi_baseline_value: top.ctrPct,
     kpi_target_value: top.targetPct,
     kpi_target_direction: 'up',
-    estimated_lift: `~£${revLift.toLocaleString()}/mo revenue → ~£${gpLift.toLocaleString()}/mo profit at ${gpPct}% GP (from +${Math.round(upliftMonthly)} clicks/mo)`,
+    estimated_lift: `~£${revLift.toLocaleString()}/mo revenue \u2192 ~£${gpLift.toLocaleString()}/mo profit at ${gpPct}% GP (from +${Math.round(upliftMonthly)} clicks/mo)`,
     estimated_lift_gbp_revenue: revLift,
     estimated_lift_gbp_profit: gpLift,
+    lever_id: 'ctr',
     _rebuild: { type: 'ctr', args: builderArgs }
   };
 }
@@ -366,6 +367,7 @@ function rankPriorityForTier(tierId, tierKeywords, ctx) {
     kpi_target_value: targetRank,
     kpi_target_direction: 'down',
     estimated_lift: `Rank ${top.best_rank_group} -> top ${targetRank} on a ${Number(top.search_volume).toLocaleString()}/mo keyword`,
+    lever_id: 'rank',
     _rebuild: { type: 'rank', args: builderArgs }
   };
 }
@@ -417,9 +419,10 @@ function aioCitationPriority(tierId, tierKeywords, ctx) {
     kpi_baseline_value: 0,
     kpi_target_value: 1,
     kpi_target_direction: 'up',
-    estimated_lift: `${top.vol.toLocaleString()}/mo AIO query · ~£${revLift.toLocaleString()}/mo revenue → ~£${top.gpLift.toLocaleString()}/mo profit at ${gpPct}% GP`,
+    estimated_lift: `${top.vol.toLocaleString()}/mo AIO query \u00b7 ~£${revLift.toLocaleString()}/mo revenue \u2192 ~£${top.gpLift.toLocaleString()}/mo profit at ${gpPct}% GP`,
     estimated_lift_gbp_revenue: revLift,
     estimated_lift_gbp_profit: top.gpLift,
+    lever_id: 'aio',
     _rebuild: { type: 'aio', args: builderArgs }
   };
 }
@@ -443,7 +446,8 @@ function orphanProductPriority(tierId, products, tierMetricsByUrl) {
     kpi_baseline_value: 0,
     kpi_target_value: 100,
     kpi_target_direction: 'up',
-    estimated_lift: `Recover a £${Number(top.display_price_gbp) || 0} price-point product from zero-impression status`
+    estimated_lift: `Recover a £${Number(top.display_price_gbp) || 0} price-point product from zero-impression status`,
+    lever_id: 'surfacing'
   };
 }
 
@@ -463,7 +467,8 @@ function schemaGapPriority(tierId, schemaDetail) {
     kpi_baseline_value: null,
     kpi_target_value: 100,
     kpi_target_direction: 'up',
-    estimated_lift: `Unlock SERP rich result for ${missing.join('/')}`
+    estimated_lift: `Unlock SERP rich result for ${missing.join('/')}`,
+    lever_id: 'schema'
   };
 }
 
@@ -574,18 +579,50 @@ function buildPrioritiesForTier(tierId, tierData) {
   return candidates;
 }
 
-function buildAllPriorities(snapshot) {
+// ----------------------------------------------------------------------
+// Scenario-weighted sort (Phase F)
+// ----------------------------------------------------------------------
+// Baseline GP-lift estimates for candidates that don't carry a numeric
+// estimated_lift_gbp_profit (rank/schema/orphan are qualitative). These
+// constants are NEVER displayed to the user - they exist only so the
+// candidate participates in the weighted sort against tier_weight and
+// lever_weight from the active scenario. Tuned so a baseline qualitative
+// action sits below a typical CTR/AIO lift (~£100-300/mo) but can be
+// boosted ABOVE them by a high tier+lever weight combination.
+const BASELINE_LIFT_GBP_PROFIT_BY_LEVER = {
+  rank: 120,
+  schema: 60,
+  surfacing: 50
+};
+const WEIGHT_ZERO_THRESHOLD = 0.05; // <= treat as "park this tier/lever"
+
+function effectiveLiftForSort(candidate) {
+  const numeric = Number(candidate.estimated_lift_gbp_profit);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  return BASELINE_LIFT_GBP_PROFIT_BY_LEVER[candidate.lever_id] || 0;
+}
+
+function buildAllPriorities(snapshot, weights) {
   // First, collect every tier's candidates without sort_order. We then
-  // sort ALL candidates by GP-weighted lift (estimated_lift_gbp_profit)
-  // so the top of the priority queue is "biggest profit win" rather
-  // than "first tier in COMMERCIAL_TIERS order". Candidates without a
-  // numeric lift estimate (rank-improvement, orphan, schema-gap) keep
-  // their relative order at the back of the queue.
+  // sort ALL candidates by scenario-WEIGHTED GP lift so the top of the
+  // priority queue reflects the active scenario's tier + lever
+  // strategic weights, not just raw GP-per-month estimates.
+  //
+  // weights = { tier: Map<tier_id, weight>, lever: Map<lever_id, weight>,
+  //             scenario_id, scenario_name } - or null for flat weighting.
+  const tierMap  = (weights && weights.tier)  || new Map();
+  const leverMap = (weights && weights.lever) || new Map();
+  const tierWeightOf  = id => (tierMap.has(id)  ? Number(tierMap.get(id))  : 1);
+  const leverWeightOf = id => (leverMap.has(id) ? Number(leverMap.get(id)) : 1);
+
   const collected = [];
   for (const tier of COMMERCIAL_TIERS) {
     const tierId = tier.id;
     const hub = tierHub(tierId);
     if (!hub) continue;
+    // Skip the whole tier if the user has explicitly zeroed it.
+    if (tierWeightOf(tierId) <= WEIGHT_ZERO_THRESHOLD) continue;
+
     const tierData = {
       hubUrl: hub.hubUrl,
       schemaDetail: snapshot.schemaDetail,
@@ -597,22 +634,76 @@ function buildAllPriorities(snapshot) {
     };
     const cands = buildPrioritiesForTier(tierId, tierData);
     for (const c of cands) {
+      // Skip candidates whose lever has been explicitly zeroed.
+      const leverWeight = leverWeightOf(c.lever_id);
+      if (leverWeight <= WEIGHT_ZERO_THRESHOLD) continue;
+      const tierWeight = tierWeightOf(tierId);
+      const effLift = effectiveLiftForSort(c);
+      const weightedScore = effLift * tierWeight * leverWeight;
       collected.push({
         ...c,
         property_url: snapshot.propertyUrl,
         tier_id: tierId,
         tier_label: tier.label,
-        status: 'not_started'
+        status: 'not_started',
+        applied_tier_weight: tierWeight,
+        applied_lever_weight: leverWeight,
+        weighted_score: weightedScore
       });
     }
   }
   collected.sort((a, b) => {
+    const aScore = Number(a.weighted_score) || 0;
+    const bScore = Number(b.weighted_score) || 0;
+    if (aScore !== bScore) return bScore - aScore;
+    // Secondary tiebreaker: raw numeric profit lift (so genuinely-bigger
+    // numeric actions beat baseline-lift qualitative ones when scores tie).
     const aProf = Number(a.estimated_lift_gbp_profit) || 0;
     const bProf = Number(b.estimated_lift_gbp_profit) || 0;
     if (aProf !== bProf) return bProf - aProf;
     return 0;
   });
   return collected.map((c, i) => ({ ...c, sort_order: (i + 1) * 10 }));
+}
+
+// Fetches the active scenario's tier + lever weights for a property,
+// or returns null if no active scenario exists or the engine tables
+// are empty. The caller (handler) must tolerate null and fall back to
+// flat 1.0 weighting so smart-priorities stays usable on a fresh
+// install.
+async function fetchActiveScenarioWeights(supabase, propertyUrl) {
+  try {
+    const { data: scenarioRows, error: sErr } = await supabase
+      .from('revenue_funnel_scenarios')
+      .select('id, name')
+      .eq('property_url', propertyUrl)
+      .eq('is_active', true)
+      .limit(1);
+    if (sErr) throw sErr;
+    const scenario = (scenarioRows || [])[0];
+    if (!scenario) return null;
+
+    const [{ data: tierRows }, { data: leverRows }] = await Promise.all([
+      supabase
+        .from('revenue_funnel_tier_weights')
+        .select('tier_id, strategic_weight')
+        .eq('scenario_id', scenario.id),
+      supabase
+        .from('revenue_funnel_lever_weights')
+        .select('lever_id, strategic_weight')
+        .eq('scenario_id', scenario.id)
+    ]);
+    const tier  = new Map();
+    const lever = new Map();
+    for (const r of (tierRows  || [])) tier.set(r.tier_id,  Number(r.strategic_weight));
+    for (const r of (leverRows || [])) lever.set(r.lever_id, Number(r.strategic_weight));
+    return { scenario_id: scenario.id, scenario_name: scenario.name, tier, lever };
+  } catch (e) {
+    // If the scenario tables don't exist yet (fresh install) or any other
+    // read error happens, fall back to flat weighting so the picker
+    // continues to produce candidates instead of 500-ing.
+    return null;
+  }
 }
 
 // ----------------------------------------------------------------------
@@ -779,18 +870,32 @@ export default async function handler(req, res) {
 
   try {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
-    const snapshot = await buildSnapshot(supabase, propertyUrl);
-    const candidates = buildAllPriorities(snapshot);
+    const [snapshot, weights] = await Promise.all([
+      buildSnapshot(supabase, propertyUrl),
+      fetchActiveScenarioWeights(supabase, propertyUrl)
+    ]);
+    const candidates = buildAllPriorities(snapshot, weights);
     // Live-validate the top N candidates so their descriptions cite
     // the current live page state, not a possibly-stale audit row.
     // See Docs/CHANGELOG.md 2026-05-20 v5 for why this is non-optional.
     await liveEnrichTopCandidates(candidates);
+
+    // Convert the weights Maps into plain objects so the response is
+    // JSON-serialisable. null when no active scenario exists - caller
+    // can detect that case and not render "Boosted by scenario X" UI.
+    const scenarioContext = weights ? {
+      scenario_id: weights.scenario_id,
+      scenario_name: weights.scenario_name,
+      tier_weights: Object.fromEntries(weights.tier),
+      lever_weights: Object.fromEntries(weights.lever)
+    } : null;
 
     if (req.method === 'GET') {
       return send(res, 200, {
         property_url: propertyUrl,
         generated_at: new Date().toISOString(),
         candidate_count: candidates.length,
+        active_scenario: scenarioContext,
         candidates: candidates.map(c => ({
           tier_id: c.tier_id, tier_label: c.tier_label, signature: c.signature,
           title: c.title, description: c.description, pages_affected: c.pages_affected,
@@ -799,6 +904,10 @@ export default async function handler(req, res) {
           estimated_lift: c.estimated_lift,
           estimated_lift_gbp_revenue: c.estimated_lift_gbp_revenue ?? null,
           estimated_lift_gbp_profit: c.estimated_lift_gbp_profit ?? null,
+          lever_id: c.lever_id ?? null,
+          applied_tier_weight: c.applied_tier_weight ?? null,
+          applied_lever_weight: c.applied_lever_weight ?? null,
+          weighted_score: c.weighted_score ?? null,
           live_data_source: c.live_data_source ?? 'audit',
           live_fetched_at: c.live_fetched_at ?? null,
           live_fetch_error: c.live_fetch_error ?? null
