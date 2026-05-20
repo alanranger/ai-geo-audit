@@ -4,9 +4,19 @@
 **Current Commit**: *not auto-synced — run `git log -1 --oneline`*  
 **Purpose**: Single source of truth for all projects, phases, tasks, fixes, and key information for any new chat thread.
 
-**New chat agents:** skim **`AGENTS.md`** first.
-- For the **Revenue Funnel / Scenario Planning / picker / suppression / seasonality** work that just landed (2026-05-20), read **`Docs/HANDOVER_REVENUE_FUNNEL_2026-05-20.md`** FIRST — it has Alan's latest asks, the open task list in priority order, and the known pitfalls.
-- For the Traditional SEO Keywords Everywhere feature, read **`Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md`**.
+**🚀 NEW CHAT AGENTS — start here:**
+
+Read **`Docs/AGENT_ONBOARDING.md`** in full **before touching any code**. It's the
+single soup-to-nuts brief: business mission, commercial tiers + GP%, Vercel +
+Supabase setup, repo layout, key DB tables, the 8 open tasks in priority order,
+hard rules, communication rules, and verification commands.
+
+Then on demand:
+- `Docs/HANDOVER_REVENUE_FUNNEL_2026-05-20.md` — file-by-file pitfalls for the
+  most recent Revenue Funnel / Scenario Planning work.
+- `Docs/CHANGELOG.md` — chronological history (read the top entry first).
+- `Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md` — Keywords Everywhere feature.
+- `AGENTS.md` — workspace-level conventions.
 
 ---
 

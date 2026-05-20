@@ -1,12 +1,15 @@
 # AI GEO Audit — notes for AI coding agents
 
-## Read first
+## Read first (in this order — DO NOT skip)
 
-1. **`HANDOVER.md`** — architecture, buttons, Supabase projects, user preferences (no `console.log`; complexity preference; diagnose-before-change).
-2. **`Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md`** — Traditional SEO **③** Keywords Everywhere cache, API, DB, deploy pitfalls.
-3. **`Docs/TRADITIONAL_SEO_BACKLINKS_DFS.md`** — Backlinks product spec: DFS summary tile, per-URL modal, disavow toggle, explicit fetch (no auto-spend on load).
-4. **`Docs/DATAFORSEO_BACKLINK_SPAM_FILTERS.md`** — Spam URL filters, domain index tables, **`POST /api/aigeo/dataforseo-backlink-domain`** (`full` / `delta` / `status`), `npm run test:dfs-backlink-filters`.
-5. **Backlinks tab tile aggregates:** **`GET /api/aigeo/dfs-domain-backlink-tiles`**; audit baseline **`GET` / `POST` / `DELETE /api/aigeo/dfs-backlink-tile-baseline`** + Supabase **`dfs_backlink_tile_baseline`** (see **`Docs/CHANGELOG.md` 2026-03-23**).
+1. **`Docs/AGENT_ONBOARDING.md`** — **the soup-to-nuts brief.** Business mission, commercial tiers + GP%, Vercel + Supabase setup, repo layout, key DB tables, current open task list, hard rules, communication rules, and verification commands. **Read this in full before touching code.**
+2. **`Docs/HANDOVER_REVENUE_FUNNEL_2026-05-20.md`** — file-by-file pitfalls + open task list for the most recent Revenue Funnel / Scenario Planning work (Phase H+: suppression + seasonality).
+3. **`Docs/CHANGELOG.md`** — chronological history. Read the top entry first.
+4. **`HANDOVER.md`** (root) — entry-point only; links here.
+5. **`Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md`** — Traditional SEO **③** Keywords Everywhere cache, API, DB, deploy pitfalls.
+6. **`Docs/TRADITIONAL_SEO_BACKLINKS_DFS.md`** — Backlinks product spec: DFS summary tile, per-URL modal, disavow toggle, explicit fetch (no auto-spend on load).
+7. **`Docs/DATAFORSEO_BACKLINK_SPAM_FILTERS.md`** — Spam URL filters, domain index tables, **`POST /api/aigeo/dataforseo-backlink-domain`** (`full` / `delta` / `status`), `npm run test:dfs-backlink-filters`.
+8. **Backlinks tab tile aggregates:** **`GET /api/aigeo/dfs-domain-backlink-tiles`**; audit baseline **`GET` / `POST` / `DELETE /api/aigeo/dfs-backlink-tile-baseline`** + Supabase **`dfs_backlink_tile_baseline`** (see **`Docs/CHANGELOG.md` 2026-03-23**).
 
 ## Critical gotchas
 
