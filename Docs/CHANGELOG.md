@@ -2,6 +2,30 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-20 v3] - Profit Pyramid: add Annualised Rev column + column totals row
+
+### Problem
+
+Alan flagged that the "Profit Pyramid — where the money actually sticks" panel had an `Annualised GP` column but no matching `Annualised Rev` (revenue) column, even though the API already returned the revenue projection per row. Same panel had no totals row, so the user couldn't see the business-wide YTD/annualised position at a glance — they had to mentally add up the six tier rows every time. The data was sitting unused in `revenue_funnel_summary.profit_pyramid.rows[].annualised_revenue_gbp` and `revenue_funnel_summary.profit_pyramid.annualised_revenue_total_gbp` (both have been emitted by the API since the panel was first built).
+
+### Changed
+
+- **`audit-dashboard.html`**: added an `Annualised Rev` column between `YTD GP` and `Annualised GP` in the Profit Pyramid table. Updated the table's `<colgroup>` from 7 columns (28/9/12/12/15/12/12) to 8 columns (24/8/11/11/13/13/10/10) so the new column doesn't squeeze the existing ones. Added a `<tfoot id="rf-pyramid-tfoot">` populated by a new `rfPyramidTotalsRow(rows, p)` helper which emits a labelled "TOTAL (all tiers)" row with:
+  - **GP %**: business-wide BLENDED GP% = sum(YTD GP) / sum(YTD Rev), RAG-coloured by the same green/amber/red thresholds as individual tiers — sanity check vs the tier-level chips above.
+  - **YTD Rev / YTD GP / Annualised Rev / Annualised GP**: column sums, prefers the API-supplied totals (`annualised_revenue_total_gbp`, `annualised_gp_total_gbp`) when present, falls back to row-sum otherwise.
+  - **% of profit**: sum of `share_of_gp_pct` across rows (should always be ~100.0% — a maths sanity check that surfaces rounding drift).
+  - **GP–Rev gap**: sum of `share_gap_pp` across rows (should always be ~0.0 pp by construction).
+- Added three CSS rules under `.rf-pyramid-table` to visually separate the totals row from the data rows: 2px-thick top border, slightly lifted grey background, uppercased "TOTAL" label text.
+- The new column's header carries a tooltip describing the projection: *"Projected revenue for the full year, based on YTD run-rate × (12 / months elapsed). Lets you see the revenue side of the same projection that drives the Annualised GP column next to it."*
+
+### Files touched
+
+- `audit-dashboard.html` — Profit Pyramid `<thead>` + `<colgroup>` + `<tfoot>` markup (~10 line change), new `rfPyramidTotalsRow(rows, p)` helper (~24 lines, complexity 7), `rfRenderProfitPyramid` updated to populate the new `tfoot`, three new CSS rules.
+
+### No backend change required
+
+The API contract was already complete — `revenue-funnel-summary.js` has been emitting `annualised_revenue_gbp` per row and `annualised_revenue_total_gbp` at the top level since the Profit Pyramid was first introduced (L611-642). This change is pure frontend wiring.
+
 ## [2026-05-20 v2] - Revenue Funnel: "Best rank" — curated keyword list per tier (replaces URL-prefix keyword matching)
 
 ### Problem (continued from v1)
