@@ -949,26 +949,43 @@ const KPI_TO_LEVERS = {
 const SUPPRESSION_WINDOW_DAYS = 30;   // < this since start = full suppression
 const SUPPRESSION_STALE_DAYS  = 90;   // > this since start = "stalled, try a different angle"
 
+// Active optimisation cycle statuses - these are the only legal values
+// of the `optim_task_status` enum, do NOT add others or the query
+// returns an enum-cast error and the whole suppression layer silently
+// drops to zero (which is what happened the first time we shipped
+// this).
+const ACTIVE_CYCLE_STATUSES = ['monitoring', 'planned'];
+
 async function fetchActiveOptimisationCycles(supabase) {
   try {
     const { data, error } = await supabase
       .from('optimisation_task_cycles')
       .select('task_id, cycle_no, status, primary_kpi, objective_title, start_date, end_date')
-      .in('status', ['monitoring', 'planned', 'active']);
-    if (error || !Array.isArray(data) || data.length === 0) return [];
+      .in('status', ACTIVE_CYCLE_STATUSES);
+    if (error) {
+      // Don't swallow silently - log so a future broken enum value
+      // shows up in Vercel logs instead of just zero suppression.
+      console.warn('[smart-priorities] fetchActiveOptimisationCycles cycles error:', error.message);
+      return [];
+    }
+    if (!Array.isArray(data) || data.length === 0) return [];
     const taskIds = Array.from(new Set(data.map(r => r.task_id).filter(Boolean)));
     if (!taskIds.length) return [];
     const { data: tasks, error: taskErr } = await supabase
       .from('optimisation_tasks')
       .select('id, target_url_clean, task_type, title, keyword_text')
       .in('id', taskIds);
-    if (taskErr) return [];
+    if (taskErr) {
+      console.warn('[smart-priorities] fetchActiveOptimisationCycles tasks error:', taskErr.message);
+      return [];
+    }
     const byTaskId = new Map();
     for (const t of (tasks || [])) byTaskId.set(t.id, t);
     return data
       .map(cycle => ({ cycle, task: byTaskId.get(cycle.task_id) }))
       .filter(x => x.task && x.task.target_url_clean && !x.task.target_url_clean.startsWith('/test-'));
-  } catch (_) {
+  } catch (e) {
+    console.warn('[smart-priorities] fetchActiveOptimisationCycles threw:', e && e.message);
     return [];
   }
 }
