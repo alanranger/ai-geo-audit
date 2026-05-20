@@ -330,13 +330,13 @@ function pctDelta(lift, baseline) {
 }
 
 // Resolve all preset summaries against the same snapshot in one pass.
-function runAllPresets(snapshot) {
+function runAllPresets(snapshot, suppressionMap) {
   return PRESETS.map(meta => {
     const weights = {
       tier:  mapFromObj(meta.tier_weights),
       lever: mapFromObj(meta.lever_weights)
     };
-    const allRanked = SP.buildAllPriorities(snapshot, weights);
+    const allRanked = SP.buildAllPriorities(snapshot, weights, suppressionMap);
     const reranked  = rerankForPreset(allRanked, meta);
     const { picked, hours_used } = pickWithinBudget(reranked, meta.budget_hours);
     return summarisePreset(meta, picked, hours_used, allRanked.length);
@@ -378,10 +378,10 @@ export default async function handler(req, res) {
       SP.buildSnapshot(supabase, propertyUrl),
       fetchDoNothingBaseline(propertyUrl, req)
     ]);
-    const presetResults = runAllPresets(snapshot);
     const optimCycles = await SP.fetchActiveOptimisationCycles(supabase);
     const suppressionMap = SP.buildSuppressionMap(optimCycles);
     const monthIdx = SP.currentMonthIndex();
+    const presetResults = runAllPresets(snapshot, suppressionMap);
     await enrichPresetCandidates(presetResults, { suppressionMap, monthIdx });
     sanitisePresetCandidates(presetResults);
     const withDelta = applyBaselineDeltas(presetResults, baseline);

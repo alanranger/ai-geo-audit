@@ -731,7 +731,41 @@ function tierSnapshotSlice(snapshot, tierId, hub) {
   };
 }
 
-function buildAllPriorities(snapshot, weights) {
+// Penalty applied to weighted_score when a candidate URL is already in
+// active monitoring for the matching KPI. The point isn't to hide the
+// candidate - it's to let GENUINELY FRESH opportunities below it in
+// the rank list bubble up to the Top 3.
+//
+// block (<30d):   0.10  - kill ranking, the user has just changed it
+// downgrade:      0.45  - half-rank, give the existing change air
+// stale (>90d):   0.65  - light penalty, still worth showing because
+//                         it now needs a different angle and a fresh
+//                         entry would still beat it unless the second-
+//                         best candidate is roughly half its lift
+const SUPPRESSION_SCORE_FACTOR = { block: 0.10, downgrade: 0.45, stale: 0.65 };
+
+function applySuppressionPenaltyToCandidate(c, suppressionMap) {
+  if (!suppressionMap || !suppressionMap.size) return c;
+  const url = Array.isArray(c.pages_affected) ? c.pages_affected[0] : null;
+  const supp = findSuppressionFor(suppressionMap, url, c.lever_id);
+  const verdict = suppressionVerdict(supp);
+  if (!verdict.suppress) return c;
+  const factor = SUPPRESSION_SCORE_FACTOR[verdict.severity] || 1.0;
+  c.weighted_score_raw = c.weighted_score;
+  c.weighted_score = (Number(c.weighted_score) || 0) * factor;
+  c.suppression_score_factor = factor;
+  c.suppression_preview = {
+    severity: verdict.severity,
+    note: verdict.note,
+    cycle_no: supp.cycle_no,
+    objective: supp.objective_title,
+    kpi: supp.primary_kpi,
+    days_running: supp.days_running
+  };
+  return c;
+}
+
+function buildAllPriorities(snapshot, weights, suppressionMap) {
   // First, collect every tier's candidates without sort_order. We then
   // sort ALL candidates by scenario-WEIGHTED GP lift so the top of the
   // priority queue reflects the active scenario's tier + lever
@@ -749,7 +783,10 @@ function buildAllPriorities(snapshot, weights) {
     const cands = buildPrioritiesForTier(tier.id, tierSnapshotSlice(snapshot, tier.id, hub));
     for (const c of cands) {
       const enriched = enrichCandidate(c, tier, tierWeight, leverWeightOf, snapshot.propertyUrl);
-      if (enriched) collected.push(enriched);
+      if (enriched) {
+        applySuppressionPenaltyToCandidate(enriched, suppressionMap);
+        collected.push(enriched);
+      }
     }
   }
   collected.sort((a, b) => {
@@ -778,7 +815,7 @@ function buildAllPriorities(snapshot, weights) {
 // module has finished evaluating.
 export const __INTERNAL = {
   buildSnapshot:                    (s, u)       => buildSnapshot(s, u),
-  buildAllPriorities:               (s, w)       => buildAllPriorities(s, w),
+  buildAllPriorities:               (s, w, sm)  => buildAllPriorities(s, w, sm),
   liveEnrichTopCandidates:          (c, ctx)     => liveEnrichTopCandidates(c, ctx),
   fetchActiveScenarioWeights:       (s, u)       => fetchActiveScenarioWeights(s, u),
   fetchActiveOptimisationCycles:    (s)          => fetchActiveOptimisationCycles(s),
@@ -1426,9 +1463,9 @@ export default async function handler(req, res) {
       fetchActiveScenarioWeights(supabase, propertyUrl),
       fetchActiveOptimisationCycles(supabase)
     ]);
-    const candidates = buildAllPriorities(snapshot, weights);
     const suppressionMap = buildSuppressionMap(optimCycles);
     const monthIdx = currentMonthIndex();
+    const candidates = buildAllPriorities(snapshot, weights, suppressionMap);
     // Live-validate the top N candidates so their descriptions cite
     // the current live page state, not a possibly-stale audit row.
     // The same pass now also: (a) builds per-page recommended_actions[]
