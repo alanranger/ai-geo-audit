@@ -772,10 +772,18 @@ function buildAllPriorities(snapshot, weights) {
 // Kept at module scope - resolved via dynamic `import()` from siblings
 // so the Vercel build still treesakes everything that's never used.
 export const __INTERNAL = {
-  buildSnapshot:                    (s, u) => buildSnapshot(s, u),
-  buildAllPriorities:               (s, w) => buildAllPriorities(s, w),
-  liveEnrichTopCandidates:          (c)    => liveEnrichTopCandidates(c),
-  fetchActiveScenarioWeights:       (s, u) => fetchActiveScenarioWeights(s, u),
+  buildSnapshot:                    (s, u)       => buildSnapshot(s, u),
+  buildAllPriorities:               (s, w)       => buildAllPriorities(s, w),
+  liveEnrichTopCandidates:          (c, ctx)     => liveEnrichTopCandidates(c, ctx),
+  fetchActiveScenarioWeights:       (s, u)       => fetchActiveScenarioWeights(s, u),
+  fetchActiveOptimisationCycles:    (s)          => fetchActiveOptimisationCycles(s),
+  buildSuppressionMap:              (rows)       => buildSuppressionMap(rows),
+  currentMonthIndex:                (d)          => currentMonthIndex(d),
+  seasonalityFor:                   (tier, m)    => seasonalityFor(tier, m),
+  seasonalityBandFor:               (tier, m)    => seasonalityBandFor(tier, m),
+  seasonalityLabel:                 (band)       => seasonalityLabel(band),
+  MONTH_NAMES:                      MONTH_NAMES,
+  SEASONALITY_BY_TIER:              SEASONALITY_BY_TIER,
   EFFORT_BY_LEVER:                  EFFORT_BY_LEVER,
   BASELINE_LIFT_GBP_PROFIT_BY_LEVER: BASELINE_LIFT_GBP_PROFIT_BY_LEVER
 };
@@ -856,19 +864,41 @@ function applyLiveDescription(c, live) {
   c.live_fetch_error = live && live.error;
 }
 
-async function liveEnrichTopCandidates(candidates) {
+function enrichOneCandidate(c, liveMap, suppressionMap, monthIdx) {
+  const live = liveStateFor(c, liveMap);
+  applyLiveDescription(c, live);
+  const liveForActions = (live && live.ok) ? live : null;
+  let actions = buildRecommendedActions(c, liveForActions);
+  // Suppression: if this URL has an active monitoring cycle for the
+  // matching KPI, downgrade or block the on-page actions.
+  const url = Array.isArray(c.pages_affected) ? c.pages_affected[0] : null;
+  const supp = findSuppressionFor(suppressionMap, url, c.lever_id);
+  const verdict = suppressionVerdict(supp);
+  if (verdict.suppress) {
+    c.suppression = {
+      severity: verdict.severity,
+      note: verdict.note,
+      cycle_no: supp.cycle_no,
+      objective: supp.objective_title,
+      kpi: supp.primary_kpi,
+      days_running: supp.days_running
+    };
+    actions = applySuppressionToActions(actions, verdict);
+  }
+  c.recommended_actions = actions;
+  // Seasonality scaling: applied LAST so suppression decisions are
+  // made on raw lift (we don't want December gap-month to mask a
+  // genuine on-page issue).
+  applySeasonalityToCandidate(c, monthIdx);
+}
+
+async function liveEnrichTopCandidates(candidates, ctx) {
   const head = candidates.slice(0, LIVE_VALIDATE_TOP_N);
   const urls = head.map(c => Array.isArray(c.pages_affected) ? c.pages_affected[0] : null).filter(Boolean);
   const liveMap = urls.length ? await validateUrlsLive(urls) : new Map();
-  for (const c of head) {
-    const live = liveStateFor(c, liveMap);
-    applyLiveDescription(c, live);
-    // Page-aware action plan: inspect the live page (or fall back to
-    // _rebuild args for non-fetchable levers like schema/surfacing) and
-    // emit only the actions THIS specific URL actually needs.
-    const liveForActions = (live && live.ok) ? live : null;
-    c.recommended_actions = buildRecommendedActions(c, liveForActions);
-  }
+  const suppressionMap = (ctx && ctx.suppressionMap) || new Map();
+  const monthIdx = (ctx && ctx.monthIdx != null) ? ctx.monthIdx : currentMonthIndex();
+  for (const c of head) enrichOneCandidate(c, liveMap, suppressionMap, monthIdx);
   return candidates;
 }
 
@@ -885,6 +915,212 @@ function sanitiseForResponse(c) {
   const out = { ...c };
   delete out._rebuild;
   return out;
+}
+
+// ----------------------------------------------------------------------
+// Optimisation-tracking suppression (2026-05-20 phase H+)
+// ----------------------------------------------------------------------
+// Alan correctly flagged that the picker was repeating recommendations
+// for URLs that are ALREADY in active monitoring cycles. e.g. the
+// "Free Online Photography Course" page has had a CTR>=2.5% cycle
+// running since 2026-01-11 - so dropping a fresh "rewrite the title"
+// card on it every week is exactly the "generic crap" he meant.
+//
+// This layer fetches the active monitoring cycles from
+// optimisation_task_cycles + optimisation_tasks and exposes per-URL
+// per-KPI metadata so the action builders can downgrade or annotate
+// candidates whose work is already in flight.
+
+const KPI_TO_LEVERS = {
+  'ctr_28d':       ['ctr'],
+  'ctr':           ['ctr'],
+  'clicks':        ['ctr', 'rank'],
+  'rank':          ['rank'],
+  'rank_position': ['rank'],
+  'ai_citations':  ['aio'],
+  'aio':           ['aio']
+};
+
+const SUPPRESSION_WINDOW_DAYS = 30;   // < this since start = full suppression
+const SUPPRESSION_STALE_DAYS  = 90;   // > this since start = "stalled, try a different angle"
+
+async function fetchActiveOptimisationCycles(supabase) {
+  try {
+    const { data, error } = await supabase
+      .from('optimisation_task_cycles')
+      .select('task_id, cycle_no, status, primary_kpi, objective_title, start_date, end_date')
+      .in('status', ['monitoring', 'planned', 'active']);
+    if (error || !Array.isArray(data) || data.length === 0) return [];
+    const taskIds = Array.from(new Set(data.map(r => r.task_id).filter(Boolean)));
+    if (!taskIds.length) return [];
+    const { data: tasks, error: taskErr } = await supabase
+      .from('optimisation_tasks')
+      .select('id, target_url_clean, task_type, title, keyword_text')
+      .in('id', taskIds);
+    if (taskErr) return [];
+    const byTaskId = new Map();
+    for (const t of (tasks || [])) byTaskId.set(t.id, t);
+    return data
+      .map(cycle => ({ cycle, task: byTaskId.get(cycle.task_id) }))
+      .filter(x => x.task && x.task.target_url_clean && !x.task.target_url_clean.startsWith('/test-'));
+  } catch (_) {
+    return [];
+  }
+}
+
+function normaliseTrackingUrl(raw) {
+  if (!raw) return '';
+  let s = String(raw).trim();
+  s = s.replace(/^https?:\/\//, '');
+  if (s.startsWith('www.')) s = s.slice(4);
+  return '/' + s.split('/').slice(1).join('/').replace(/\/$/, '');
+}
+
+// Map URL (cleaned to /path form) -> array of active cycle metadata.
+// Cards in the picker can look up by their pages_affected[0] and decide
+// whether to suppress/downgrade based on which KPIs are already in
+// monitoring.
+function buildSuppressionMap(rawCycles) {
+  const map = new Map();
+  const now = Date.now();
+  for (const { cycle, task } of rawCycles) {
+    const url = normaliseTrackingUrl(task.target_url_clean);
+    if (!url) continue;
+    const startTs = cycle.start_date ? new Date(cycle.start_date).getTime() : null;
+    const daysRunning = startTs ? Math.round((now - startTs) / 86400000) : null;
+    const entry = {
+      cycle_no: cycle.cycle_no,
+      status: cycle.status,
+      primary_kpi: cycle.primary_kpi,
+      objective_title: cycle.objective_title,
+      task_type: task.task_type,
+      days_running: daysRunning
+    };
+    if (!map.has(url)) map.set(url, []);
+    map.get(url).push(entry);
+  }
+  return map;
+}
+
+function findSuppressionFor(suppressionMap, candidateUrl, leverId) {
+  if (!suppressionMap || !candidateUrl) return null;
+  const key = normaliseTrackingUrl(candidateUrl);
+  const entries = suppressionMap.get(key);
+  if (!entries || !entries.length) return null;
+  for (const e of entries) {
+    const levers = KPI_TO_LEVERS[e.primary_kpi] || [];
+    if (levers.includes(leverId)) return e;
+  }
+  return null;
+}
+
+function suppressionVerdict(entry) {
+  if (!entry) return { suppress: false };
+  const d = entry.days_running;
+  if (d == null) return { suppress: false };
+  if (d < SUPPRESSION_WINDOW_DAYS) {
+    return {
+      suppress: true,
+      severity: 'block',
+      note: `Already in monitoring (cycle ${entry.cycle_no}, "${entry.objective_title || entry.primary_kpi}" started ${d}d ago). Give the previous change at least ${SUPPRESSION_WINDOW_DAYS}d before rewriting again — re-touching too soon makes the data unreadable.`
+    };
+  }
+  if (d <= SUPPRESSION_STALE_DAYS) {
+    return {
+      suppress: true,
+      severity: 'downgrade',
+      note: `In monitoring (cycle ${entry.cycle_no}, "${entry.objective_title || entry.primary_kpi}" running ${d}d). Previous change is still earning attribution — only re-rewrite if the SERP title shown for this URL is clearly mismatched.`
+    };
+  }
+  return {
+    suppress: true,
+    severity: 'stale',
+    note: `In monitoring ${d}d with no closure — the previous title/meta change hasn't moved this KPI. Try a DIFFERENT angle this time (different head term, different meta hook) rather than another tweak of the same idea.`
+  };
+}
+
+function applySuppressionToActions(actions, verdict) {
+  if (!actions || !actions.length || !verdict || !verdict.suppress) return actions;
+  if (verdict.severity === 'block') return [];
+  return actions.map(a => {
+    if (a.tag === 'title' || a.tag === 'meta' || a.tag === 'on-page' || a.tag === 'content') {
+      return { ...a, confidence: 'low', suppressed: true, suppression_note: verdict.note };
+    }
+    return a;
+  });
+}
+
+// ----------------------------------------------------------------------
+// Seasonality (2026-05-20 phase H+)
+// ----------------------------------------------------------------------
+// Alan's activity calendar (from his own words):
+//   Courses:         60% in Jan-May + Sep-Nov, lighter Jun-Aug + Dec
+//   Workshops (NR):  80% in Apr-May + Sep-Nov (bluebells + autumn)
+//   Workshops (Res): same shape as non-res, slightly broader shoulders
+//   1-2-1 / Services: constant year-round - OPPORTUNITY for slow months
+//   Hire / Commercial: sporadic year-round - OPPORTUNITY
+//   Academy:         slight winter boost (people indoors)
+//   Mentoring (RPS): year-round (zoom, weatherproof)
+//
+// This map multiplies the estimated_lift_gbp_* numbers per tier per
+// month so the projected lift reflects the realistic cash-in-the-door
+// shape rather than a flat annualised average. The model also feeds a
+// per-tier "this month is X" pill so cards can say "push CTR on
+// workshops NOW because Apr-May is your peak" vs "defer to next peak".
+
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const SEASONALITY_BY_TIER = {
+  courses:              [1.30, 1.30, 1.40, 1.30, 1.10, 0.60, 0.40, 0.40, 1.40, 1.40, 1.40, 0.50],
+  workshops_nonres:     [0.30, 0.30, 0.70, 1.60, 1.60, 1.10, 0.60, 0.50, 1.50, 1.60, 1.40, 0.30],
+  workshops_residential:[0.30, 0.40, 0.70, 1.60, 1.60, 1.10, 0.60, 0.60, 1.50, 1.60, 1.40, 0.30],
+  services:             [1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00],
+  hire:                 [1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00],
+  academy:              [1.15, 1.15, 1.05, 0.95, 0.90, 0.85, 0.85, 0.90, 1.00, 1.05, 1.15, 1.20]
+};
+
+function currentMonthIndex(now) {
+  const d = (now instanceof Date) ? now : new Date();
+  return d.getUTCMonth();
+}
+
+function seasonalityFor(tierId, monthIdx) {
+  const arr = SEASONALITY_BY_TIER[tierId];
+  if (!Array.isArray(arr)) return 1.0;
+  const i = Math.max(0, Math.min(11, Number(monthIdx) || 0));
+  return arr[i];
+}
+
+function seasonalityBandFor(tierId, monthIdx) {
+  const f = seasonalityFor(tierId, monthIdx);
+  if (f >= 1.3)  return 'peak';
+  if (f >= 1.05) return 'shoulder';
+  if (f <= 0.5)  return 'gap';
+  if (f <= 0.85) return 'low';
+  return 'steady';
+}
+
+function seasonalityLabel(band) {
+  if (band === 'peak')     return 'PEAK month';
+  if (band === 'shoulder') return 'Above-average month';
+  if (band === 'gap')      return 'GAP month';
+  if (band === 'low')      return 'Below-average month';
+  return 'Steady month';
+}
+
+function applySeasonalityToCandidate(c, monthIdx) {
+  const f = seasonalityFor(c.tier_id, monthIdx);
+  c.seasonality_factor = Number(f.toFixed(2));
+  c.seasonality_band   = seasonalityBandFor(c.tier_id, monthIdx);
+  if (typeof c.estimated_lift_gbp_revenue === 'number') {
+    c.estimated_lift_gbp_revenue_unscaled = c.estimated_lift_gbp_revenue;
+    c.estimated_lift_gbp_revenue = Math.round(c.estimated_lift_gbp_revenue * f);
+  }
+  if (typeof c.estimated_lift_gbp_profit === 'number') {
+    c.estimated_lift_gbp_profit_unscaled = c.estimated_lift_gbp_profit;
+    c.estimated_lift_gbp_profit = Math.round(c.estimated_lift_gbp_profit * f);
+  }
+  return c;
 }
 
 // ----------------------------------------------------------------------
@@ -1163,15 +1399,21 @@ export default async function handler(req, res) {
 
   try {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
-    const [snapshot, weights] = await Promise.all([
+    const [snapshot, weights, optimCycles] = await Promise.all([
       buildSnapshot(supabase, propertyUrl),
-      fetchActiveScenarioWeights(supabase, propertyUrl)
+      fetchActiveScenarioWeights(supabase, propertyUrl),
+      fetchActiveOptimisationCycles(supabase)
     ]);
     const candidates = buildAllPriorities(snapshot, weights);
+    const suppressionMap = buildSuppressionMap(optimCycles);
+    const monthIdx = currentMonthIndex();
     // Live-validate the top N candidates so their descriptions cite
     // the current live page state, not a possibly-stale audit row.
-    // See Docs/CHANGELOG.md 2026-05-20 v5 for why this is non-optional.
-    await liveEnrichTopCandidates(candidates);
+    // The same pass now also: (a) builds per-page recommended_actions[]
+    // (b) suppresses/downgrades actions whose URLs are already in
+    // active monitoring cycles, (c) scales projected lift by the
+    // current month's per-tier seasonality factor.
+    await liveEnrichTopCandidates(candidates, { suppressionMap, monthIdx });
 
     // Convert the weights Maps into plain objects so the response is
     // JSON-serialisable. null when no active scenario exists - caller
@@ -1207,6 +1449,11 @@ export default async function handler(req, res) {
           time_to_realise_days: c.time_to_realise_days ?? null,
           effort_label: c.effort_label ?? null,
           recommended_actions: c.recommended_actions ?? null,
+          suppression: c.suppression ?? null,
+          seasonality_factor: c.seasonality_factor ?? null,
+          seasonality_band: c.seasonality_band ?? null,
+          estimated_lift_gbp_revenue_unscaled: c.estimated_lift_gbp_revenue_unscaled ?? null,
+          estimated_lift_gbp_profit_unscaled: c.estimated_lift_gbp_profit_unscaled ?? null,
           lift_per_hour_gbp: c.lift_per_hour_gbp ?? null,
           live_data_source: c.live_data_source ?? 'audit',
           live_fetched_at: c.live_fetched_at ?? null,

@@ -350,10 +350,10 @@ function runAllPresets(snapshot) {
 // + meta description" hardcoded label on every candidate. Run the same
 // enrichment here on the picked candidates of every preset so the
 // numbered "do this in order" plan lands on the Auto-Optimise cards too.
-async function enrichPresetCandidates(presetResults) {
+async function enrichPresetCandidates(presetResults, ctx) {
   await Promise.all(presetResults.map(async (p) => {
     if (Array.isArray(p.top_candidates) && p.top_candidates.length) {
-      await SP.liveEnrichTopCandidates(p.top_candidates);
+      await SP.liveEnrichTopCandidates(p.top_candidates, ctx);
     }
   }));
   return presetResults;
@@ -379,7 +379,10 @@ export default async function handler(req, res) {
       fetchDoNothingBaseline(propertyUrl, req)
     ]);
     const presetResults = runAllPresets(snapshot);
-    await enrichPresetCandidates(presetResults);
+    const optimCycles = await SP.fetchActiveOptimisationCycles(supabase);
+    const suppressionMap = SP.buildSuppressionMap(optimCycles);
+    const monthIdx = SP.currentMonthIndex();
+    await enrichPresetCandidates(presetResults, { suppressionMap, monthIdx });
     sanitisePresetCandidates(presetResults);
     const withDelta = applyBaselineDeltas(presetResults, baseline);
     return send(res, 200, {
