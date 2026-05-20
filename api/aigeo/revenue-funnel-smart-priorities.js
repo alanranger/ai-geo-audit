@@ -771,6 +771,11 @@ function buildAllPriorities(snapshot, weights) {
 // combinations rather than having to hit this endpoint over HTTP.
 // Kept at module scope - resolved via dynamic `import()` from siblings
 // so the Vercel build still treesakes everything that's never used.
+// MONTH_NAMES + SEASONALITY_BY_TIER are declared further down so they
+// can't be referenced as bare bindings up here (temporal dead zone).
+// We expose them via getter functions so callers (the seasonality
+// endpoint + auto-optimise) can read the values at call-time when the
+// module has finished evaluating.
 export const __INTERNAL = {
   buildSnapshot:                    (s, u)       => buildSnapshot(s, u),
   buildAllPriorities:               (s, w)       => buildAllPriorities(s, w),
@@ -782,8 +787,8 @@ export const __INTERNAL = {
   seasonalityFor:                   (tier, m)    => seasonalityFor(tier, m),
   seasonalityBandFor:               (tier, m)    => seasonalityBandFor(tier, m),
   seasonalityLabel:                 (band)       => seasonalityLabel(band),
-  MONTH_NAMES:                      MONTH_NAMES,
-  SEASONALITY_BY_TIER:              SEASONALITY_BY_TIER,
+  get MONTH_NAMES()                              { return MONTH_NAMES; },
+  get SEASONALITY_BY_TIER()                      { return SEASONALITY_BY_TIER; },
   EFFORT_BY_LEVER:                  EFFORT_BY_LEVER,
   BASELINE_LIFT_GBP_PROFIT_BY_LEVER: BASELINE_LIFT_GBP_PROFIT_BY_LEVER
 };
