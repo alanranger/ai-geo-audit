@@ -2,6 +2,32 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-20 v5.1] - Top Actions config moved to Revenue Funnel tab (collapsed by default)
+
+### Why
+
+Alan reviewed v5.0 and pointed out the new "Top Actions - Targets, Tiers & Levers" controls had been parked in the generic `Configuration & Reporting` tab. That tab is meant for cross-cutting settings (run windows, API keys, sync defaults). The Top Actions targets / tier weights / lever weights only matter to the Revenue Funnel - that's where the engine output (the Top 3 cards) surfaces, so the controls that drive it belong in the same tab. Otherwise you have to flip between two tabs to adjust weights and see their effect.
+
+### Changed - `audit-dashboard.html`
+
+- The entire "Top Actions config" section (the HTML block + its companion IIFE) was lifted out of the `Configuration & Reporting` panel and dropped into the `Revenue Funnel` panel, immediately after the page header / sync buttons and before the "Do these 3 things this week" hero card. That ordering means as soon as you expand the config, the cards it drives are visible just below the config controls.
+- The section is wrapped in a NEW outer `<details id="rfTopActionsConfig">` with NO `open` attribute - so it ships **collapsed by default**. Existing Funnel tiles (12-month revenue, sparklines, KPI cards) stay above the fold. The outer `<summary>` reads *"Top Actions config - targets, tier weights & lever weights"* with a brand-orange gear glyph and a "(click to expand)" hint.
+- The three inner `<details open>` (Targets / Tier weights / Lever weights) stay open inside the outer wrapper, so one click on the outer chevron reveals all three sub-sections at once. Alan can then collapse individual sub-sections if he wants a more compact view, but the default expanded behaviour is "show everything I might tweak".
+- New **lazy-load**: the IIFE no longer calls `loadConfig()` unconditionally on `DOMContentLoaded`. Instead it wires a `toggle` listener on the outer `<details>` and only hits `/api/aigeo/revenue-funnel-config` the first time the section is expanded (cached after that). Net effect: collapsed-by-default doesn't cost a redundant API call on every Funnel-tab open for users who never adjust weights.
+- The old slot in `Configuration & Reporting` is replaced by a single one-line HTML comment (`<!-- Top Actions ... moved to the Revenue Funnel tab on 2026-05-20 ... -->`) plus a noop `<script>` placeholder block - kept so any stale browser bookmark / inline anchor that pointed at the old position still resolves to something, rather than a missing-section console error.
+- IDs are unchanged (`rfTgtMasterRev`, `rfTier_*_wt`, `rfLever_*_cap`, etc.) so the GET / POST contracts against `revenue-funnel-config.js` and the seeded Supabase rows remain bit-for-bit compatible. No DB or API changes were needed for this move.
+
+### Verified
+
+- `git diff --stat audit-dashboard.html` shows +290 / -265 (the net add is the wrapper `<details>` + lazy-load toggle handler; the rest is whitespace re-indent from `Configuration & Reporting` indentation depth to `Revenue Funnel` indentation depth).
+- Encoding sanity: zero mojibake markers (`Select-String ... 'a-tilde euro'` returns 0 occurrences). PowerShell-based `Set-Content` was deliberately avoided after one such attempt corrupted the file's en-dashes earlier in this session; the move was done entirely via `StrReplace` to preserve UTF-8 byte-for-byte.
+- Lint: 1186 findings post-edit are all pre-existing patterns (inline styles, Edge-Tools vendor-prefix warnings, sonarqube `Prefer globalThis over window` etc.) that match the rest of the file. Two warnings on the moved labels (`A form label must be associated with a control`) are unchanged from the pre-move state - same labels, different line numbers.
+
+### Files touched
+
+- `audit-dashboard.html` (relocation; no functional change to the config's load / save behaviour beyond lazy-loading and the outer collapsed wrapper).
+- `Docs/CHANGELOG.md` (this entry).
+
 ## [2026-05-20 v5] - Top Actions: live page validation + scenario-engine groundwork
 
 ### Problem
