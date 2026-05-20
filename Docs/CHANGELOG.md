@@ -2,6 +2,62 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-21 v5.3 Phase A.2] - Editor moved into Scenario Planning tab (runtime reparent)
+
+### Why
+
+Alan's feedback after Phase A.1:
+
+> "ok i dont understand why the levers section is still in revenue funnel page and not scenario planning tab? i created a scenario and saved it with minimum figures etc and when i clicked open editor in revenue funnel it didnt transfer those numbers. am i not being clear? i thought all the financial planning, what ifs and levers would all be in the new tab sceanrio planning?"
+
+He was clear. I split Phase A into A.1 + A.2 unilaterally on the basis that moving ~430 lines of HTML / JS via StrReplace is risky (we hit mojibake corruption doing exactly that on 2026-05-20). That risk-aversion was the wrong call for the user experience. Fixing now.
+
+### Approach: runtime DOM reparent (no file-level cut/paste)
+
+Instead of physically moving the `<details id="rfTopActionsConfig">` block (and its companion `<style>` and IIFE) in the source HTML, we move the rendered DOM at page load:
+
+```js
+function reparentEditor() {
+  const editor = document.getElementById('rfTopActionsConfig');
+  const mount  = document.getElementById('spEditorMount');
+  if (editor && mount) mount.appendChild(editor);
+}
+```
+
+`appendChild` MOVES the element rather than cloning it — all existing event listeners, IIFE closures and form state are preserved. The IIFE keeps working unchanged because it looks up form fields via `getElementById` (which finds them regardless of parent). The `#rfTopActionsConfig`-scoped CSS still applies because IDs are global.
+
+### Editor now follows the dropdown, not the active flag
+
+Phase A.1 had a subtle UX problem: the editor always loaded the ACTIVE scenario, so "edit this scenario" required activating first. With multiple named scenarios this is wrong. Now:
+
+- The library dropdown selection is the source of truth for what the editor edits.
+- Selecting a non-active scenario reloads the editor against THAT scenario's targets / weights.
+- The "Set as active" button stays separate so you can still flip which scenario the Top 3 picker reads.
+- The reparent runs at DOMContentLoaded so the editor never visibly appears in the Revenue Funnel tab.
+- `syncEditorToSelection()` runs BEFORE reparenting so the user never sees the editor flash active-scenario values then re-load.
+
+### Empty-state banner + Seed-from-Baseline
+
+If the selected scenario has all-zero targets (a fresh blank scenario), the editor shows a brand-orange banner explaining:
+
+> This scenario has no targets or weights yet. Use *Duplicate selected* on the Baseline scenario to fork its full config and tweak from there &mdash; or click *Seed defaults* below to copy Baseline's values into THIS scenario, then edit.
+
+The Seed-from-Baseline button loads Baseline's full config and POSTs it under the current scenario's id via `/api/aigeo/revenue-funnel-config`. The Create-blank prompt also now warns up-front that blank scenarios start with all zeros and suggests Duplicate as the better path for tweaks.
+
+### Lazy-load gate removed
+
+The Phase A.1 IIFE had a lazy-load gate that only fetched config when the `<details>` was first expanded. With the editor now the primary feature of the Scenario Planning tab (and forced open after reparent), that gate causes a brief race between toggle-driven load (active scenario) and dropdown-driven load (selected scenario). Removed; the library IIFE drives all loads explicitly via `setScenario(id)`.
+
+### Files changed
+
+- `audit-dashboard.html` &mdash; reparent helper, empty banner + Seed-from-Baseline UI/JS, dropdown-driven editor sync, Revenue Funnel comment updated to reflect runtime move, lazy-load gate removed, "Open editor on Revenue Funnel" shortcut removed.
+- `Docs/CHANGELOG.md` (this entry).
+
+### Still pending
+
+- The **legacy index `revenue_funnel_targets_property_tier_uidx`** still needs to be dropped on the live DB (see the hotfix entry below). Until then BOTH `Duplicate selected` AND `Seed from Baseline` AND saves on fresh scenarios will fail with `duplicate key value violates unique constraint`. Saves on the Baseline scenario continue to work fine.
+- Phases B (Survival Cockpit), C (effort heuristics), D (three-scenario solver), E (what-if).
+
 ## [2026-05-21 v5.3 Phase A.1 hotfix] - Drop legacy targets unique index
 
 ### What broke
