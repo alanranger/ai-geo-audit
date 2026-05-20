@@ -241,11 +241,23 @@ function summarisePreset(meta, picked, hoursUsed, totalCandidates) {
     persistence_months_by_lever: PERSISTENCE_BY_LEVER,
     tier_weights:  meta.tier_weights,
     lever_weights: meta.lever_weights,
-    top_candidates: picked.map(sanitiseCandidate),
+    // Carry _rebuild through here so liveEnrichTopCandidates can build
+    // page-aware recommended_actions[]. Sanitised AFTER enrichment by
+    // sanitisePresetCandidates() before the response is sent.
+    top_candidates: picked.slice(),
     candidate_count: totalCandidates,
     by_tier: aggregateByTier(picked),
     totals
   };
+}
+
+function sanitisePresetCandidates(presetResults) {
+  for (const p of presetResults) {
+    if (Array.isArray(p.top_candidates)) {
+      p.top_candidates = p.top_candidates.map(sanitiseCandidate);
+    }
+  }
+  return presetResults;
 }
 
 // --- Do-nothing baseline --------------------------------------------
@@ -331,6 +343,22 @@ function runAllPresets(snapshot) {
   });
 }
 
+// Phase H (2026-05-20): the smart-priorities endpoint live-enriches the
+// top-N candidates so each card surfaces a PAGE-SPECIFIC action plan.
+// The auto-optimise endpoint was bypassing that pass, which meant the
+// Easy / Balanced / Hard cards were rendering the legacy "Rewrite title
+// + meta description" hardcoded label on every candidate. Run the same
+// enrichment here on the picked candidates of every preset so the
+// numbered "do this in order" plan lands on the Auto-Optimise cards too.
+async function enrichPresetCandidates(presetResults) {
+  await Promise.all(presetResults.map(async (p) => {
+    if (Array.isArray(p.top_candidates) && p.top_candidates.length) {
+      await SP.liveEnrichTopCandidates(p.top_candidates);
+    }
+  }));
+  return presetResults;
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -351,6 +379,8 @@ export default async function handler(req, res) {
       fetchDoNothingBaseline(propertyUrl, req)
     ]);
     const presetResults = runAllPresets(snapshot);
+    await enrichPresetCandidates(presetResults);
+    sanitisePresetCandidates(presetResults);
     const withDelta = applyBaselineDeltas(presetResults, baseline);
     return send(res, 200, {
       property_url: propertyUrl,

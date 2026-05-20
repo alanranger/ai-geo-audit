@@ -836,30 +836,38 @@ async function fetchActiveScenarioWeights(supabase, propertyUrl) {
 const LIVE_VALIDATE_TOP_N = 8;
 const REBUILDERS = { ctr: buildCtrDescription, rank: buildRankDescription, aio: buildAioDescription };
 
+function liveStateFor(c, liveMap) {
+  const url = Array.isArray(c.pages_affected) ? c.pages_affected[0] : null;
+  return url ? liveMap.get(url) : null;
+}
+
+function applyLiveDescription(c, live) {
+  if (!c._rebuild) return;
+  const rebuilder = REBUILDERS[c._rebuild.type];
+  if (rebuilder && live && live.ok) {
+    c.description = rebuilder(c._rebuild.args, {
+      title: live.title, metaDescription: live.metaDescription, h1: live.h1, schemaTypes: live.schemaTypes
+    }, `[live · fetched ${shortIso(live.fetchedAt)}]`);
+    c.live_data_source = 'live';
+    c.live_fetched_at = live.fetchedAt;
+    return;
+  }
+  c.live_data_source = 'audit_fallback';
+  c.live_fetch_error = live && live.error;
+}
+
 async function liveEnrichTopCandidates(candidates) {
-  const head = candidates.slice(0, LIVE_VALIDATE_TOP_N).filter(c => c._rebuild);
-  if (!head.length) return candidates;
+  const head = candidates.slice(0, LIVE_VALIDATE_TOP_N);
   const urls = head.map(c => Array.isArray(c.pages_affected) ? c.pages_affected[0] : null).filter(Boolean);
-  const liveMap = await validateUrlsLive(urls);
+  const liveMap = urls.length ? await validateUrlsLive(urls) : new Map();
   for (const c of head) {
-    const url = Array.isArray(c.pages_affected) ? c.pages_affected[0] : null;
-    if (!url) continue;
-    const live = liveMap.get(url);
-    const rebuilder = REBUILDERS[c._rebuild.type];
-    if (!rebuilder) continue;
-    if (live && live.ok) {
-      c.description = rebuilder(c._rebuild.args, {
-        title: live.title,
-        metaDescription: live.metaDescription,
-        h1: live.h1,
-        schemaTypes: live.schemaTypes
-      }, `[live · fetched ${shortIso(live.fetchedAt)}]`);
-      c.live_data_source = 'live';
-      c.live_fetched_at = live.fetchedAt;
-    } else {
-      c.live_data_source = 'audit_fallback';
-      c.live_fetch_error = live && live.error;
-    }
+    const live = liveStateFor(c, liveMap);
+    applyLiveDescription(c, live);
+    // Page-aware action plan: inspect the live page (or fall back to
+    // _rebuild args for non-fetchable levers like schema/surfacing) and
+    // emit only the actions THIS specific URL actually needs.
+    const liveForActions = (live && live.ok) ? live : null;
+    c.recommended_actions = buildRecommendedActions(c, liveForActions);
   }
   return candidates;
 }
@@ -877,6 +885,177 @@ function sanitiseForResponse(c) {
   const out = { ...c };
   delete out._rebuild;
   return out;
+}
+
+// ----------------------------------------------------------------------
+// Per-candidate, page-aware action plans (2026-05-20 phase H)
+// ----------------------------------------------------------------------
+// The old `effort_label` was a single hardcoded line per lever — every
+// CTR card got "Rewrite title + meta description" regardless of whether
+// the title was already optimised. The user (correctly) called it
+// generic. These builders inspect the LIVE page state and emit only
+// the actions the page actually needs, prioritised + confidence-tagged.
+// Each builder returns at most ~4 items so the card stays scannable.
+
+function ctrTitleAction(c, kw, rank, title) {
+  if (!title) return null;
+  const lower = title.toLowerCase();
+  if (kw && !lower.includes(String(kw).toLowerCase())) {
+    return {
+      step: 1, effort_hours: 0.5, confidence: 'high', tag: 'title',
+      headline: `Lead the page title with "${kw}"`,
+      detail: `Current title is "${title}" (${title.length}ch). You actually rank #${rank} for "${kw}" but it isn't in the title — SERP CTR drops when the displayed title doesn't echo the query the user typed. Test a 55–60ch title that opens with "${kw}".`
+    };
+  }
+  if (title.length < 35) {
+    return {
+      step: 1, effort_hours: 0.5, confidence: 'medium', tag: 'title',
+      headline: `Lengthen the title to ~55–60ch (currently ${title.length}ch)`,
+      detail: `Title "${title}" leaves SERP real-estate empty. Competing results use the full 60ch — add a benefit modifier (e.g. "free 14-day trial", "near you", "for beginners") to win the click.`
+    };
+  }
+  return null;
+}
+
+function ctrMetaAction(c, meta) {
+  if (typeof meta !== 'string' || meta.length === 0) return null;
+  const len = meta.length;
+  if (len > 160) {
+    return {
+      effort_hours: 0.25, confidence: 'high', tag: 'meta',
+      headline: `Trim the meta description from ${len}ch to ~155ch`,
+      detail: `Google truncates around 155–160ch on desktop. Your last ${len - 155}ch is being cut mid-sentence which kills click-through. Rewrite tighter and keep the head term in the first 80ch.`
+    };
+  }
+  if (len < 110) {
+    return {
+      effort_hours: 0.25, confidence: 'medium', tag: 'meta',
+      headline: `Expand the meta description from ${len}ch to ~150ch`,
+      detail: `Short metas leave SERP real-estate empty. Add a USP, a CTA, and the head term. Target 140–155ch.`
+    };
+  }
+  return null;
+}
+
+function buildCtrActions(c, live) {
+  const args   = (c._rebuild && c._rebuild.args) || {};
+  const kwInfo = args.kwInfo || {};
+  const kw     = kwInfo.keyword;
+  const rank   = kwInfo.rank;
+  const title  = live && live.title;
+  const meta   = live && live.metaDescription;
+  const schema = (live && live.schemaTypes) || [];
+  const actions = [];
+  const t = ctrTitleAction(c, kw, rank, title); if (t) actions.push(t);
+  const m = ctrMetaAction(c, meta);             if (m) actions.push(m);
+  if (!schema.includes('FAQPage') && kw) {
+    actions.push({
+      effort_hours: 1.5, confidence: 'medium', tag: 'faq',
+      headline: `Add 5 FAQ entries answering the PAA box for "${kw}"`,
+      detail: `Pull the live People-Also-Ask cluster for "${kw}" and answer each one in 50–80 words on this page. Wrap in FAQPage JSON-LD. Wins both the FAQ rich result AND a likely AI Overview citation in one pass.`
+    });
+  }
+  if (actions.length === 0) {
+    actions.push({
+      effort_hours: 1, confidence: 'low', tag: 'links',
+      headline: 'Audit internal links into this page',
+      detail: `Title, meta and schema look healthy from this view. Next move is off-page signal: from your tier hub and your top-traffic blog posts, add 2–3 contextual links pointing at this URL with long-tail anchor variants of "${kw || 'the head term'}".`
+    });
+  }
+  return actions.map((a, i) => ({ step: i + 1, ...a }));
+}
+
+function rankCheapestAction(keyword, hasKwInTitle, hasKwInH1) {
+  if (hasKwInTitle && hasKwInH1) return null;
+  const titleNote = hasKwInTitle ? 'already contains' : 'is MISSING';
+  const h1Note    = hasKwInH1    ? 'already contains' : 'is MISSING';
+  return {
+    effort_hours: 0.5, confidence: 'high', tag: 'on-page',
+    headline: `Put "${keyword}" in BOTH the page title AND the H1`,
+    detail: `Current title ${titleNote} the head term. Current H1 ${h1Note} the head term. For top-3 ranking Google needs the head term in both — this is the cheapest move before any content work.`
+  };
+}
+
+function buildRankActions(c, live) {
+  const args        = (c._rebuild && c._rebuild.args) || {};
+  const keyword     = args.keyword;
+  const targetRank  = Number(c.kpi_target_value) || 0;
+  const title  = live && live.title;
+  const h1     = live && live.h1;
+  const schema = (live && live.schemaTypes) || [];
+  const hasKwInTitle = !!(title && keyword && title.toLowerCase().includes(String(keyword).toLowerCase()));
+  const hasKwInH1    = !!(h1    && keyword && h1.toLowerCase().includes(String(keyword).toLowerCase()));
+  const actions = [];
+  const cheap = rankCheapestAction(keyword, hasKwInTitle, hasKwInH1);
+  if (cheap) actions.push(cheap);
+  if (hasKwInTitle && hasKwInH1) {
+    actions.push({
+      effort_hours: 3, confidence: 'medium', tag: 'content',
+      headline: `Add 400–600 words of depth + 1 comparison table targeting "${keyword}"`,
+      detail: `Head term is already in title + H1, so on-page basics are done — next blocker for top-${targetRank} is depth and topical coverage. Add a comparison section ("our [product] vs alternatives"), a customer-outcome paragraph with real numbers, and a 6–8 item FAQ pulled from the live PAA box for "${keyword}".`
+    });
+  }
+  if (!schema.includes('FAQPage')) {
+    actions.push({
+      effort_hours: 1, confidence: 'medium', tag: 'schema',
+      headline: 'Add FAQPage JSON-LD with 5 PAA-aligned Q/A pairs',
+      detail: `Page is missing FAQPage schema. FAQ rich results lift CTR at this rank AND seed the AI Overview crawler. Pull questions verbatim from the People-Also-Ask box.`
+    });
+  }
+  actions.push({
+    effort_hours: 1, confidence: 'medium', tag: 'links',
+    headline: `Build 3 internal links pointing at this URL`,
+    detail: `From the tier hub + your top-traffic blog posts, add 3 contextual links with anchor-text variants of "${keyword}". Internal-link signal at the same anchor is one of the highest-leverage rank-pushes you can do without external work.`
+  });
+  return actions.map((a, i) => ({ step: i + 1, ...a }));
+}
+
+function buildAioActions(c, live) {
+  const args    = (c._rebuild && c._rebuild.args) || {};
+  const keyword = args.keyword;
+  const schema  = (live && live.schemaTypes) || [];
+  const hasFaq  = schema.includes('FAQPage');
+  const actions = [];
+  actions.push({
+    effort_hours: 1, confidence: 'high', tag: 'content',
+    headline: `Add a 60–90 word direct-answer block immediately under the H1`,
+    detail: `Write one paragraph that directly answers "${keyword}" in 60–90 words. Place it right under the H1 — Google's AIO crawler prefers the first answer it can extract from the page.`
+  });
+  if (!hasFaq) {
+    actions.push({
+      effort_hours: 1, confidence: 'high', tag: 'schema',
+      headline: 'Publish 5 Q/A pairs in FAQPage JSON-LD',
+      detail: `Page has no FAQPage schema. Pull the People-Also-Ask cluster for "${keyword}", answer each PAA question in 50–80 words, wrap in FAQPage JSON-LD. Wins the FAQ rich result AND seeds the AIO crawler.`
+    });
+  } else {
+    actions.push({
+      effort_hours: 0.5, confidence: 'medium', tag: 'schema',
+      headline: 'Extend the existing FAQPage with 3 PAA-aligned questions',
+      detail: `You already have FAQPage schema — add 3 more Q/A pairs whose questions match the live People-Also-Ask box for "${keyword}" verbatim.`
+    });
+  }
+  actions.push({
+    effort_hours: 0.5, confidence: 'low', tag: 'trust',
+    headline: 'Cite 1 authoritative source in the answer block',
+    detail: `AIO favours pages that cite recognised sources. In the direct-answer block, link out once to Royal Photographic Society / B&H Explora / DPReview / similar.`
+  });
+  return actions.map((a, i) => ({ step: i + 1, ...a }));
+}
+
+function buildSchemaActions(c) {
+  return [{
+    step: 1, effort_hours: 1, confidence: 'high', tag: 'schema',
+    headline: c.title || 'Add the missing schema block',
+    detail: c.description || 'Schema gap detected on the tier hub. Add the missing JSON-LD to <head>.'
+  }];
+}
+
+function buildRecommendedActions(c, live) {
+  if (c.lever_id === 'ctr')    return buildCtrActions(c, live);
+  if (c.lever_id === 'rank')   return buildRankActions(c, live);
+  if (c.lever_id === 'aio')    return buildAioActions(c, live);
+  if (c.lever_id === 'schema') return buildSchemaActions(c);
+  return [];
 }
 
 // ----------------------------------------------------------------------
@@ -1027,6 +1206,7 @@ export default async function handler(req, res) {
           effort_hours: c.effort_hours ?? null,
           time_to_realise_days: c.time_to_realise_days ?? null,
           effort_label: c.effort_label ?? null,
+          recommended_actions: c.recommended_actions ?? null,
           lift_per_hour_gbp: c.lift_per_hour_gbp ?? null,
           live_data_source: c.live_data_source ?? 'audit',
           live_fetched_at: c.live_fetched_at ?? null,
