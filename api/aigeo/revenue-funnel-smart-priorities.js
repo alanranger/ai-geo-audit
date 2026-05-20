@@ -653,6 +653,59 @@ function effectiveLiftForSort(candidate) {
   return BASELINE_LIFT_GBP_PROFIT_BY_LEVER[candidate.lever_id] || 0;
 }
 
+// Resolves a weights bundle into the {tier:Fn, lever:Fn} lookup pair
+// that the collector loop uses. Extracted from buildAllPriorities so
+// the main function's cognitive complexity stays under 15.
+function makeWeightLookups(weights) {
+  const tierMap  = (weights && weights.tier)  || new Map();
+  const leverMap = (weights && weights.lever) || new Map();
+  return {
+    tierWeightOf:  id => (tierMap.has(id)  ? Number(tierMap.get(id))  : 1),
+    leverWeightOf: id => (leverMap.has(id) ? Number(leverMap.get(id)) : 1)
+  };
+}
+
+// Decorates a raw picker candidate with the scenario-applied weights,
+// the weighted_score the sorter uses, and the Phase C effort + £/hr
+// heuristics. Returns null when the candidate's lever has been zeroed
+// by the active scenario (caller filters those out).
+function enrichCandidate(c, tier, tierWeight, leverWeightOf, snapshotPropertyUrl) {
+  const leverWeight = leverWeightOf(c.lever_id);
+  if (leverWeight <= WEIGHT_ZERO_THRESHOLD) return null;
+  const effLift = effectiveLiftForSort(c);
+  const weightedScore = effLift * tierWeight * leverWeight;
+  const eff = effortFor(c.lever_id);
+  const liftPerHour = (eff.effort_hours && eff.effort_hours > 0)
+    ? Math.round(weightedScore / eff.effort_hours)
+    : null;
+  return {
+    ...c,
+    property_url: snapshotPropertyUrl,
+    tier_id: tier.id,
+    tier_label: tier.label,
+    status: 'not_started',
+    applied_tier_weight: tierWeight,
+    applied_lever_weight: leverWeight,
+    weighted_score: weightedScore,
+    effort_hours: eff.effort_hours,
+    time_to_realise_days: eff.time_to_realise_days,
+    effort_label: eff.label,
+    lift_per_hour_gbp: liftPerHour
+  };
+}
+
+function tierSnapshotSlice(snapshot, tierId, hub) {
+  return {
+    hubUrl: hub.hubUrl,
+    schemaDetail: snapshot.schemaDetail,
+    pages: snapshot.pagesByTier.get(tierId) || [],
+    pagesByUrl: snapshot.pagesByUrl,
+    keywords: snapshot.keywordsByTier.get(tierId) || [],
+    allKeywords: snapshot.allKeywords || [],
+    products: snapshot.productsByTier.get(tierId) || []
+  };
+}
+
 function buildAllPriorities(snapshot, weights) {
   // First, collect every tier's candidates without sort_order. We then
   // sort ALL candidates by scenario-WEIGHTED GP lift so the top of the
@@ -661,57 +714,17 @@ function buildAllPriorities(snapshot, weights) {
   //
   // weights = { tier: Map<tier_id, weight>, lever: Map<lever_id, weight>,
   //             scenario_id, scenario_name } - or null for flat weighting.
-  const tierMap  = (weights && weights.tier)  || new Map();
-  const leverMap = (weights && weights.lever) || new Map();
-  const tierWeightOf  = id => (tierMap.has(id)  ? Number(tierMap.get(id))  : 1);
-  const leverWeightOf = id => (leverMap.has(id) ? Number(leverMap.get(id)) : 1);
-
+  const { tierWeightOf, leverWeightOf } = makeWeightLookups(weights);
   const collected = [];
   for (const tier of COMMERCIAL_TIERS) {
-    const tierId = tier.id;
-    const hub = tierHub(tierId);
+    const hub = tierHub(tier.id);
     if (!hub) continue;
-    // Skip the whole tier if the user has explicitly zeroed it.
-    if (tierWeightOf(tierId) <= WEIGHT_ZERO_THRESHOLD) continue;
-
-    const tierData = {
-      hubUrl: hub.hubUrl,
-      schemaDetail: snapshot.schemaDetail,
-      pages: snapshot.pagesByTier.get(tierId) || [],
-      pagesByUrl: snapshot.pagesByUrl,
-      keywords: snapshot.keywordsByTier.get(tierId) || [],
-      allKeywords: snapshot.allKeywords || [],
-      products: snapshot.productsByTier.get(tierId) || []
-    };
-    const cands = buildPrioritiesForTier(tierId, tierData);
+    const tierWeight = tierWeightOf(tier.id);
+    if (tierWeight <= WEIGHT_ZERO_THRESHOLD) continue;
+    const cands = buildPrioritiesForTier(tier.id, tierSnapshotSlice(snapshot, tier.id, hub));
     for (const c of cands) {
-      // Skip candidates whose lever has been explicitly zeroed.
-      const leverWeight = leverWeightOf(c.lever_id);
-      if (leverWeight <= WEIGHT_ZERO_THRESHOLD) continue;
-      const tierWeight = tierWeightOf(tierId);
-      const effLift = effectiveLiftForSort(c);
-      const weightedScore = effLift * tierWeight * leverWeight;
-      // Phase C: attach effort and time-to-realise heuristics, plus
-      // lift_per_hour_gbp = weighted_score / effort_hours so the UI can
-      // surface "biggest £/hr" alongside "biggest absolute £" prioritisation.
-      const eff = effortFor(c.lever_id);
-      const liftPerHour = (eff.effort_hours && eff.effort_hours > 0)
-        ? Math.round(weightedScore / eff.effort_hours)
-        : null;
-      collected.push({
-        ...c,
-        property_url: snapshot.propertyUrl,
-        tier_id: tierId,
-        tier_label: tier.label,
-        status: 'not_started',
-        applied_tier_weight: tierWeight,
-        applied_lever_weight: leverWeight,
-        weighted_score: weightedScore,
-        effort_hours: eff.effort_hours,
-        time_to_realise_days: eff.time_to_realise_days,
-        effort_label: eff.label,
-        lift_per_hour_gbp: liftPerHour
-      });
+      const enriched = enrichCandidate(c, tier, tierWeight, leverWeightOf, snapshot.propertyUrl);
+      if (enriched) collected.push(enriched);
     }
   }
   collected.sort((a, b) => {
@@ -727,6 +740,20 @@ function buildAllPriorities(snapshot, weights) {
   });
   return collected.map((c, i) => ({ ...c, sort_order: (i + 1) * 10 }));
 }
+
+// Named export bundle used by other endpoints (e.g. the auto-optimise
+// solver) so they can re-run the same picker with arbitrary weight
+// combinations rather than having to hit this endpoint over HTTP.
+// Kept at module scope - resolved via dynamic `import()` from siblings
+// so the Vercel build still treesakes everything that's never used.
+export const __INTERNAL = {
+  buildSnapshot:                    (s, u) => buildSnapshot(s, u),
+  buildAllPriorities:               (s, w) => buildAllPriorities(s, w),
+  liveEnrichTopCandidates:          (c)    => liveEnrichTopCandidates(c),
+  fetchActiveScenarioWeights:       (s, u) => fetchActiveScenarioWeights(s, u),
+  EFFORT_BY_LEVER:                  EFFORT_BY_LEVER,
+  BASELINE_LIFT_GBP_PROFIT_BY_LEVER: BASELINE_LIFT_GBP_PROFIT_BY_LEVER
+};
 
 // Fetches the active scenario's tier + lever weights for a property,
 // or returns null if no active scenario exists or the engine tables
