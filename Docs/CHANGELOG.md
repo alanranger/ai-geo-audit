@@ -2,6 +2,42 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-20 v5.3 Phase A.2 DB hotfix] - Drop legacy targets index + repair orphan May 2026 scenario
+
+### What was wrong
+
+Two interlocking issues left over from v5.0 once Alan started using Phase A.2:
+
+1. The v5.0 unique index `revenue_funnel_targets_property_tier_uidx` on `(property_url, COALESCE(tier_id, ''))` was never dropped when v5.3 added the scenario-scoped equivalent. Every non-Baseline scenario was sharing the same `(property_url, tier_id)` coordinates by design, so the legacy index rejected every Duplicate, Seed, and non-Baseline target save with `duplicate key value violates unique constraint`.
+
+2. Alan's "May 2026" scenario partially survived this: the `revenue_funnel_scenarios` row got written (with his survival baseline £3000, hours 12, notes), then the API's `INSERT ... SELECT` for child rows was rejected by the legacy index, leaving an orphan parent row. Worse, "Set as active" had flipped May 2026 to `is_active=true` and Baseline to `is_active=false`, so the Top 3 picker on Revenue Funnel was reading an empty config and rendering everything as zero.
+
+### Fix applied directly to production DB (via `apply_migration` MCP)
+
+Migration name: `drop_legacy_revenue_funnel_targets_property_tier_uidx`
+
+```sql
+DROP INDEX IF EXISTS public.revenue_funnel_targets_property_tier_uidx;
+```
+
+Migration name: `repair_may2026_orphan_and_reactivate_baseline`
+
+1. Flipped `is_active = false` on May 2026, then `is_active = true` on Baseline (must be in that order to satisfy the partial `revenue_funnel_scenarios_one_active` unique index).
+2. `INSERT ... SELECT` from Baseline into May 2026 across all three child tables (`revenue_funnel_targets`, `revenue_funnel_tier_weights`, `revenue_funnel_lever_weights`), guarded with `WHERE NOT EXISTS` so the script is safe to re-run.
+
+### State after repair
+
+| Scenario | Active | Survival | Hours | Targets | Tier weights | Lever weights |
+|---|---|---|---|---|---|---|
+| Baseline | yes | &pound;2500 | 6 | 7 | 6 | 6 |
+| May 2026 | no | &pound;3000 | 12 | 7 | 6 | 6 |
+
+Top 3 picker on Revenue Funnel is reading real numbers again. May 2026 has Alan's preferred meta and a full copy of Baseline's numeric values to tweak from before activating.
+
+### Repair vs delete
+
+I considered deleting the orphan May 2026 row and asking Alan to re-create. Repair was kinder because his `monthly_survival_baseline_gbp = 3000`, `hours_per_week = 12` and any notes were already persisted on the scenarios row, and re-creating would need a different name (the `revenue_funnel_scenarios_unique_name` index prevents duplicate names per property).
+
 ## [2026-05-21 v5.3 Phase A.2] - Editor moved into Scenario Planning tab (runtime reparent)
 
 ### Why
