@@ -50,24 +50,50 @@ function mapFromObj(obj) {
   return m;
 }
 
+// --- Per-lever persistence (decay) ----------------------------------
+// How many months a monthly lift is assumed to keep paying out before
+// competitive pressure or model churn erodes it. The asymmetry here is
+// what makes Easy vs Hard generate genuinely different annualised
+// numbers: a CTR win decays as soon as the competitor on rank #2
+// rewrites their title; a top-3 rank win persists until they catch up
+// on content depth, which is a much harder ask.
+const PERSISTENCE_BY_LEVER = {
+  ctr:        6,   // SERP CTR decay: competitor title rewrites in ~6mo
+  schema:     12,  // Technical schema: durable until you remove it
+  aio:        9,   // AI Overviews: model snapshot churns over ~9mo
+  rank:       12,  // Organic rank: depth-content wins persist 12mo+
+  surfacing:  12,  // Hub/orphan structural: durable
+  conversion: 12   // Funnel CRO: durable until pricing/positioning changes
+};
+
+function persistenceMonthsFor(candidate) {
+  const m = PERSISTENCE_BY_LEVER[candidate?.lever_id];
+  return Number.isFinite(m) ? m : 9;
+}
+
 // --- Strategic preset profiles --------------------------------------
 //
-// Easy    = quick wins, max £/hr, decay fastest (6mo persistence)
-// Balanced= most £ this month, mixed effort, 9mo persistence
-// Hard    = compound bets, longest payback, 12mo persistence
+// Three genuinely different strategies (not just three weight knobs):
+//   Easy     = "just do the quick wins"           - filter to <=1h actions, sort by L/hr, 6h budget
+//   Balanced = "best monthly cash at medium commit" - all candidates, sort by monthly GP, 12h budget
+//   Hard     = "max absolute return at full commit" - all candidates, sort by monthly GP, 24h budget
 //
-// The lever_weights here are still applied during buildAllPriorities to
-// keep the picker's weighted_score honest, but the real strategic
-// differentiation lives in `filter`, `score`, `budget_hours`, and
-// `persistence_months` below.
+// Hard does NOT filter out CTR - in reality if you have 24h to spend
+// you do the quick wins FIRST and then add the compound bets on top.
+// The differentiation between Balanced and Hard comes from the budget
+// alone: Hard fits more low-yield candidates that Balanced runs out of
+// hours for, AND the longer-persistence rank/AIO candidates compound
+// 12mo while Balanced still has shorter-decay CTR at 6mo.
+//
+// Annualised lift uses PER-LEVER persistence (see PERSISTENCE_BY_LEVER)
+// so the strategy mix - not a flat assumption - drives the year-1 number.
 const PRESETS = [
   {
     id: 'easy',
     name: 'Easy path (quick wins this month)',
-    description: 'Sub-1-hour title + meta rewrites and schema drops. Highest £-per-hour. Assumed 6-month persistence before competitors rewrite too.',
+    description: 'Sub-1-hour title + meta rewrites and schema drops only. Highest \u00A3-per-hour. CTR wins assumed to decay in ~6 months as competitors rewrite their titles.',
     horizon_days: 30,
     budget_hours: 6,
-    persistence_months: 6,
     tier_weights:  flatTierWeights(),
     lever_weights: { ctr: 2.0, schema: 1.5, aio: 0.5, rank: 0.2, surfacing: 0.5, conversion: 1.0 },
     filter: c => Number(c.effort_hours) <= 1 && Number(c.time_to_realise_days) <= 21,
@@ -75,11 +101,10 @@ const PRESETS = [
   },
   {
     id: 'balanced',
-    name: 'Balanced path (most £ this month)',
-    description: 'Mix of CTR + AIO + a few rank pushes. Sorted by absolute monthly GP lift. Assumed 9-month persistence (mixed-strategy decay).',
+    name: 'Balanced path (most \u00A3 this month)',
+    description: 'All levers eligible, picked by absolute monthly GP. Moderate 12-hour commit. Annualised numbers reflect per-lever persistence (CTR 6mo, AIO 9mo, rank/schema 12mo).',
     horizon_days: 90,
     budget_hours: 12,
-    persistence_months: 9,
     tier_weights:  flatTierWeights(),
     lever_weights: { ctr: 1.2, schema: 1.0, aio: 1.5, rank: 1.0, surfacing: 1.0, conversion: 1.2 },
     filter: ()=> true,
@@ -87,18 +112,14 @@ const PRESETS = [
   },
   {
     id: 'hard',
-    name: 'Hard path (compound 6-month bets)',
-    description: 'Rank lifts + AIO citation captures. 2-4 hour actions with 30-60 day payback that compound to 12-month persistence. Biggest annualised lifts.',
+    name: 'Hard path (full-commit compound)',
+    description: 'Do everything that fits a 24-hour commit: every quick CTR win PLUS every rank + AIO + schema pushup. Maximum absolute lift, with the long-persistence levers compounding for 12 months.',
     horizon_days: 180,
     budget_hours: 24,
-    persistence_months: 12,
     tier_weights:  flatTierWeights(),
-    lever_weights: { ctr: 0.5, schema: 0.6, aio: 2.0, rank: 2.0, surfacing: 1.2, conversion: 1.0 },
-    filter: c => Number(c.effort_hours) >= 1 && Number(c.time_to_realise_days) >= 30,
-    // Hard's sort favours bigger monthly lift AND longer payback so rank
-    // candidates with 60-day realise dominate even when their monthly
-    // number is smaller than a quick CTR win.
-    score:  c => (Number(c.estimated_lift_gbp_profit) || 0) * Math.max(1, (Number(c.time_to_realise_days) || 30) / 30)
+    lever_weights: { ctr: 1.0, schema: 1.0, aio: 1.5, rank: 1.5, surfacing: 1.2, conversion: 1.0 },
+    filter: ()=> true,
+    score:  c => Number(c.estimated_lift_gbp_profit) || 0
   }
 ];
 
@@ -136,20 +157,27 @@ function rerankForPreset(allRanked, preset) {
   return eligible;
 }
 
-// Aggregate the picked candidates: monthly + annualised revenue + GP,
-// using the preset's persistence_months as the annualisation multiplier
-// (this is what makes Easy vs Hard show genuinely different annual
-// numbers - quick wins decay faster).
-function aggregateTotals(picked, hoursUsed, persistenceMonths) {
-  let moRev = 0, moGp = 0, maxRealise = 0;
+// Aggregate the picked candidates: monthly + annualised revenue + GP.
+// Annualisation uses PER-LEVER persistence so a CTR win counts for
+// 6mo, schema for 12mo, etc. This is what makes Easy / Balanced / Hard
+// show genuinely different annual numbers - it's the candidate MIX
+// (not a flat preset multiplier) that drives the year-1 outcome.
+function aggregateTotals(picked, hoursUsed) {
+  let moRev = 0, moGp = 0, yrRev = 0, yrGp = 0, maxRealise = 0;
+  let weightedMonths = 0;
   for (const c of picked) {
-    moRev += Number(c.estimated_lift_gbp_revenue) || 0;
-    moGp  += Number(c.estimated_lift_gbp_profit)  || 0;
+    const r = Number(c.estimated_lift_gbp_revenue) || 0;
+    const g = Number(c.estimated_lift_gbp_profit)  || 0;
+    const pm = persistenceMonthsFor(c);
+    moRev += r;
+    moGp  += g;
+    yrRev += r * pm;
+    yrGp  += g * pm;
+    weightedMonths += g * pm;
     const td = Number(c.time_to_realise_days);
     if (Number.isFinite(td) && td > maxRealise) maxRealise = td;
   }
-  const yrRev = moRev * persistenceMonths;
-  const yrGp  = moGp  * persistenceMonths;
+  const blendedPersistence = moGp > 0 ? weightedMonths / moGp : null;
   return {
     monthly_revenue_lift_gbp: Math.round(moRev),
     monthly_gp_lift_gbp:      Math.round(moGp),
@@ -157,7 +185,9 @@ function aggregateTotals(picked, hoursUsed, persistenceMonths) {
     annualised_gp_lift_gbp:      Math.round(yrGp),
     effort_hours: hoursUsed,
     max_time_to_realise_days: maxRealise,
-    persistence_months: persistenceMonths,
+    blended_persistence_months: blendedPersistence == null
+      ? null
+      : Math.round(blendedPersistence * 10) / 10,
     lift_per_hour_gbp_annualised: hoursUsed > 0
       ? Math.round(yrGp / hoursUsed)
       : null
@@ -165,44 +195,55 @@ function aggregateTotals(picked, hoursUsed, persistenceMonths) {
 }
 
 // Sum the picked candidates by tier so the UI can show "Academy drives
-// £X, Courses drives £Y..." ranked. Surfaces the dominant tier as the
-// first row.
-function aggregateByTier(picked, persistenceMonths) {
+// £A rev / £B GP, Courses drives ..." ranked by monthly GP. Now exposes
+// monthly + annualised REVENUE alongside GP so the user can compare
+// segment contribution on both axes.
+function aggregateByTier(picked) {
   const byTier = new Map();
   for (const c of picked) {
     const t = c.tier_id || 'unknown';
     if (!byTier.has(t)) {
-      byTier.set(t, { tier_id: t, tier_label: c.tier_label || t, count: 0, monthly_revenue_gbp: 0, monthly_gp_gbp: 0 });
+      byTier.set(t, {
+        tier_id: t, tier_label: c.tier_label || t, count: 0,
+        monthly_revenue_gbp: 0, monthly_gp_gbp: 0,
+        annualised_revenue_gbp: 0, annualised_gp_gbp: 0
+      });
     }
     const row = byTier.get(t);
+    const r = Number(c.estimated_lift_gbp_revenue) || 0;
+    const g = Number(c.estimated_lift_gbp_profit)  || 0;
+    const pm = persistenceMonthsFor(c);
     row.count += 1;
-    row.monthly_revenue_gbp += Number(c.estimated_lift_gbp_revenue) || 0;
-    row.monthly_gp_gbp      += Number(c.estimated_lift_gbp_profit)  || 0;
+    row.monthly_revenue_gbp += r;
+    row.monthly_gp_gbp      += g;
+    row.annualised_revenue_gbp += r * pm;
+    row.annualised_gp_gbp      += g * pm;
   }
   const arr = Array.from(byTier.values()).map(r => ({
     ...r,
-    monthly_revenue_gbp: Math.round(r.monthly_revenue_gbp),
-    monthly_gp_gbp:      Math.round(r.monthly_gp_gbp),
-    annualised_gp_gbp:   Math.round(r.monthly_gp_gbp * persistenceMonths)
+    monthly_revenue_gbp:    Math.round(r.monthly_revenue_gbp),
+    monthly_gp_gbp:         Math.round(r.monthly_gp_gbp),
+    annualised_revenue_gbp: Math.round(r.annualised_revenue_gbp),
+    annualised_gp_gbp:      Math.round(r.annualised_gp_gbp)
   }));
-  arr.sort((a, b) => b.monthly_gp_gbp - a.monthly_gp_gbp);
+  arr.sort((a, b) => b.annualised_gp_gbp - a.annualised_gp_gbp);
   return arr;
 }
 
 function summarisePreset(meta, picked, hoursUsed, totalCandidates) {
-  const totals = aggregateTotals(picked, hoursUsed, meta.persistence_months);
+  const totals = aggregateTotals(picked, hoursUsed);
   return {
     preset_id: meta.id,
     preset_name: meta.name,
     preset_description: meta.description,
     horizon_days: meta.horizon_days,
     budget_hours: meta.budget_hours,
-    persistence_months: meta.persistence_months,
+    persistence_months_by_lever: PERSISTENCE_BY_LEVER,
     tier_weights:  meta.tier_weights,
     lever_weights: meta.lever_weights,
     top_candidates: picked.map(sanitiseCandidate),
     candidate_count: totalCandidates,
-    by_tier: aggregateByTier(picked, meta.persistence_months),
+    by_tier: aggregateByTier(picked),
     totals
   };
 }
