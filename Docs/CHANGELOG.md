@@ -2,6 +2,104 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-20 v5] - Top Actions: live page validation + scenario-engine groundwork
+
+### Problem
+
+Alan reviewed the v4 Top 3 Actions output and called out three concrete factual errors:
+
+1. **Card 1 (`/photography-courses-coventry`)** claimed the page had no FAQPage schema. The page demonstrably does — the live JSON-LD includes `WebPage, Organization, LocalBusiness, Person, WebSite, Service, FAQPage`.
+2. **Card 2 (`/free-online-photography-course`)** reported the current meta description was 236 characters. The actual `<meta name="description">` on the live page is 158 characters — the exact string Alan quoted: *"Free online photography course from the Alan Ranger photography academy. 60 Modules - Camera settings, gear, composition, genres and photo practical exercises."*
+3. **Card 3 (same URL)** repeated both the meta error AND the missing-FAQPage error.
+
+The picker was treating `audit_results.schema_pages_detail` as the source of truth for both. Diagnosis:
+
+- **Upstream meta-description bug**: `api/schema-audit.js` `bestMetaDescriptionFromPage()` preferred the LONGEST string between the real `<meta>` tag and any JSON-LD `description` field. On Squarespace landing pages that emit Event/Course/Service JSON-LD with long auto-generated description blobs, this returned a 236-character JSON-LD blob instead of the real 158-character meta tag. The SERP only ever shows the meta tag, so the captured "meta description" in `schema_pages_detail` was wrong for every Squarespace landing page in the audit.
+- **Stale schema row**: `audit_results.schema_pages_detail.schemaTypes` for the academy hub and `/photography-courses-coventry` listed only the dynamically-injected event/product schema and was missing the static page-level Course / FAQPage / Service blocks. The audit row was hours-to-days stale relative to the live page.
+- **The picker compounded both** by quoting the stale row as if it were authoritative ("Schema present: ItemList, BreadcrumbList... — no FAQPage, add one") when the live page already had FAQPage.
+
+Alan's call: **stop guessing. Live-validate every fact a Top Actions card states.** And separately: rethink the picker as a lever-driven scenario engine the user can pull levers on (tier weights, lever weights, effort caps) rather than a static profit-only sort.
+
+### Changed — `api/schema-audit.js`
+
+- `bestMetaDescriptionFromPage(htmlString, schemas)` now PREFERS the real `<meta>` tag and only falls back to a JSON-LD `description` when no meta tag is present at all. Fixes the 236-vs-158 root cause for future audit runs.
+
+### Added — `api/aigeo/lib/live-page-validator.js` (new)
+
+Single-purpose live-validation module the smart-priorities picker uses to verify what's actually on the live page before recommending changes.
+
+- `validateUrlLive(url)` — fetches the URL (4.5s timeout, AbortController-based) and extracts the real `<title>`, the real `<meta name="description">` content, the first `<h1>` text (with HTML-entity decoding for `&mdash;` / `&pound;` / `&times;` / numeric refs), and the union of all JSON-LD `@type` values across every `<script type="application/ld+json">` block (with @graph descent capped at 8 levels). Returns `{ url, source: 'live' | 'cache' | 'fallback', fetchedAt, title, metaDescription, h1, schemaTypes, ok, error }`.
+- `validateUrlsLive([urls])` — fans out in parallel via `Promise.all` so a single Top Actions render adds ~1–3s for 5–8 picks rather than 5–25s serial.
+- 5-minute in-memory cache keyed by URL so repeat dashboard loads on the same warm Node instance don't re-fetch.
+- Graceful fallback: on 4xx/5xx/timeout/abort the function returns `{ ok: false, error: '...' }` so callers can branch onto the audit-derived value with a `[data: last audit]` tag instead of failing.
+- Smoke-tested against `/free-online-photography-course` (correctly returned title 59 ch, meta 158 ch, schemaTypes including Course + FAQPage + LocalBusiness + Service + Organization — matching the schema.org validator screenshot) and `/photography-courses-coventry` (correctly returned title 57 ch, meta 151 ch, schemaTypes including FAQPage + Service + Organization + LocalBusiness).
+
+### Changed — `api/aigeo/revenue-funnel-smart-priorities.js`
+
+- Each picker's inline description-building code was extracted into a named builder: `buildCtrDescription / buildRankDescription / buildAioDescription`. Each builder takes a stable args object (impressions / CTR / position / rank / keyword info — these come from GSC + keyword tables and the snapshot is authoritative) plus a `pageState` object (title / meta / h1 / schemaTypes — which CAN change between audits, so we live-fetch for the top picks).
+- Each candidate now carries an internal `_rebuild = { type, args }` field that the post-pass uses to regenerate the description with live page state. `sanitiseForResponse()` strips `_rebuild` before write so it never escapes to the API consumer.
+- New `liveEnrichTopCandidates(candidates)` post-pass: takes the top 8 ranked candidates, fans out `validateUrlsLive` on their URLs in parallel, regenerates each description using the live `title / meta / h1 / schemaTypes` when the fetch succeeded, and tags the description with `[live · fetched 2026-05-20 13:42Z]`. On fetch failure the audit-derived description stays in place with a `[data: last audit]` tag and `live_data_source = 'audit_fallback'` is exposed on the response.
+- `buildRankDescription` now actively pivots the recommended action: if both title AND H1 already contain the head term, it tells you to focus on depth (comparison table, FAQ items, internal links from the tier hub); if either is missing the head term, it tells you to fix THAT first because it's the cheaper move and a necessary precondition.
+- `buildAioDescription` now checks for `FAQPage` in the live schema list and pivots between "extend existing FAQPage with N new Q&A pairs mirroring People-Also-Ask" vs "add FAQPage + answer block from scratch". Also checks for `Course` schema and adds the "extend in the same JSON-LD block" hint when present.
+- Response payload gains three fields per candidate so the dashboard can render a freshness chip: `live_data_source` (`live` | `audit` | `audit_fallback`), `live_fetched_at` (ISO ts), `live_fetch_error` (null on success; error code on failure — `timeout`, `http_404`, etc).
+
+### Live verification (post-deploy)
+
+Ran the deployed `/api/aigeo/revenue-funnel-smart-priorities` immediately after push and confirmed the three previously-wrong cards now return factually correct state:
+
+- `/free-online-photography-course`: `live_data_source = 'live'`, meta 158 ch (was 236), schemaTypes include `Course, FAQPage, ImageObject, ItemList, LocalBusiness, Organization, Person, Place`. CTR diagnosis pivoted from "rewrite the title" to *"CTR 1.38% is normal for position 14.6 — focus on rank improvement (page 1) before title rewrites"*.
+- `/photography-courses-coventry`: `live_data_source = 'live'`, schemaTypes include `FAQPage, ImageObject, LocalBusiness, Organization, Person, Place, Service, WebPage`. Diagnosis correctly identifies *"Title doesn't lead with head term 'photography lessons' (the query you actually rank for)"*.
+- `/hire-a-professional-photographer-in-coventry`: replaces the blog-post pick (headshots guide) with the actual money page. `live_data_source = 'live'`, FAQPage present, specific head-term-in-title diagnosis.
+
+### Added — scenario-engine config tables (Phase 2.1)
+
+Three Supabase tables back the new Configuration & Reporting controls. Applied via `Docs/migrations/2026-05-20-scenario-engine-tables.sql` to the `igzvwbvgvmzvvzoclufx` (ai-chat) project:
+
+- `public.revenue_funnel_targets` — monthly revenue + GP targets, both **master** (NULL tier_id) and **per-tier** (one row per commercial tier). UNIQUE on `(property_url, COALESCE(tier_id, ''))` so the master row and per-tier rows coexist. Seeded with placeholder targets (£4000/mo master, £667–1000/mo per-tier) Alan can overwrite from the UI.
+- `public.revenue_funnel_tier_weights` — per-tier `strategic_weight` (0..5, default 1.0). Hire is pre-set to 0.7 per Alan's flag that portraits/headshots are <0.5% of revenue. All others default to 1.0.
+- `public.revenue_funnel_lever_weights` — per-lever `strategic_weight` (0..5, default 1.0) and `effort_cap` (`low` | `medium` | `high` | NULL). Lever ids the engine understands: `rank`, `aio`, `ctr`, `schema`, `conversion`, `surfacing`. All seeded with weight 1.0 and no cap.
+- All three tables get a shared `tg_touch_updated_at()` trigger so `updated_at` auto-refreshes on UPDATE.
+
+### Added — `api/aigeo/revenue-funnel-config.js` (new)
+
+CRUD endpoint for the scenario-engine config:
+
+- `GET /api/aigeo/revenue-funnel-config?propertyUrl=...` → returns `{ targets: { master, byTier }, tier_weights, lever_weights }` plus a `loaded_at` timestamp.
+- `POST /api/aigeo/revenue-funnel-config` with `{ propertyUrl, targets?, tier_weights?, lever_weights? }` → upserts only the sections present in the body so partial saves (e.g. just-the-sliders) work cleanly.
+- Targets save uses manual delete-then-insert because PostgREST can't auto-detect the `COALESCE(tier_id, '')` composite uniqueness. Tier and lever weights use standard `upsert(..., { onConflict: 'property_url,tier_id|lever_id' })`.
+- Lever ids are validated against `VALID_LEVER_IDS = {rank, aio, ctr, schema, conversion, surfacing}`. Unknown ids are silently dropped. Weights are clamped to `[0, 5]` and rounded to 2 dp.
+
+### Added — Configuration & Reporting tab UI (Phase 2.1)
+
+New "Top Actions — Targets, Tiers & Levers" section appended to the existing `Configuration & Reporting` panel in `audit-dashboard.html`. Three collapsible `<details>` blocks:
+
+- **Targets** — master monthly revenue + GP inputs, plus a per-tier table (6 rows × 2 numeric inputs).
+- **Tier strategic weights** — 6 cards, each with a range slider (0–2, step 0.05), a live value readout in brand orange, and a one-line explainer.
+- **Lever weights** — 6 cards, each with a range slider + value readout AND a per-lever effort-cap dropdown (`(no cap)` / `low only` / `low+medium` / `all`).
+
+Save / Reload buttons at the bottom. The Save button POSTs the full form to `/api/aigeo/revenue-funnel-config` and re-applies the server response to the form so any server-side clamping is visible. A timestamp chip below the buttons shows "Last saved: HH:MM:SS" on success.
+
+### Still pending (Phase 2.2 — engine consumer)
+
+The sliders ship as a wired-up UI immediately (Alan can adjust weights right now), but the smart-priorities picker doesn't yet read these tables when sorting. P2.2 will:
+
+1. Read `revenue_funnel_tier_weights` and `revenue_funnel_lever_weights` inside `buildSnapshot()`.
+2. Compute `score = (estimated_lift_gbp_profit / monthly_gp_gap) × tier_weight × lever_weight × effort_factor × confidence` for each candidate.
+3. Apply the per-lever `effort_cap` filter before sorting.
+4. Expose the full score breakdown on each candidate so the dashboard can render a "× 1.3 academy weight × 0.8 schema lever × ... = score 0.087" audit trail per pick.
+
+Lever modules for the remaining four levers (L4 Schema, L5 Conversion, L6 Surfacing) also get implemented in P2.2 — currently only L1 Rank, L2 AIO, L3 CTR have working pickers.
+
+### Files touched
+
+- `api/schema-audit.js` (+15 / -4 lines: `bestMetaDescriptionFromPage` rewrite + diagnostic comment).
+- `api/aigeo/lib/live-page-validator.js` (new, 198 lines).
+- `api/aigeo/revenue-funnel-smart-priorities.js` (+200 / -50 lines: description-builder refactor + live-enrichment post-pass + new response fields).
+- `api/aigeo/revenue-funnel-config.js` (new, 213 lines).
+- `Docs/migrations/2026-05-20-scenario-engine-tables.sql` (new, 187 lines).
+- `audit-dashboard.html` (+260 lines: Top Actions config section inserted in Configuration & Reporting panel).
+- `Docs/CHANGELOG.md` (this entry).
+
 ## [2026-05-20 v4] - "Do these 3 things this week": research-validated picks + CTR to 2 dp
 
 ### Problem
