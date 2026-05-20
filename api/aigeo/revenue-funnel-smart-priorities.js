@@ -343,6 +343,26 @@ function buildRankDescription(args, pageState, sourceTag) {
   return sourceTag ? `${base} ${sourceTag}` : base;
 }
 
+// Approximate Google organic CTR by rank position. Used to model the
+// click uplift from a rank improvement so rank candidates can carry a
+// numeric estimated_lift_gbp_profit (without that the UI filter drops
+// them from the "Do these 3 things" grid and Phase F's reordering is
+// invisible to the user). Values are industry-published rough means;
+// they overstate top-3 and understate bottom-of-page slightly but
+// stay consistent enough for relative prioritisation.
+const CTR_BY_RANK = {
+  1: 0.275, 2: 0.155, 3: 0.110, 4: 0.083, 5: 0.063,
+  6: 0.049, 7: 0.038, 8: 0.030, 9: 0.024, 10: 0.020,
+  11: 0.017, 12: 0.014, 13: 0.012, 14: 0.011, 15: 0.010,
+  16: 0.009, 17: 0.008, 18: 0.008, 19: 0.007, 20: 0.007
+};
+function ctrForRank(rank) {
+  const r = Math.round(Number(rank) || 0);
+  if (r <= 0) return 0;
+  if (r >= 20) return CTR_BY_RANK[20];
+  return CTR_BY_RANK[r] || CTR_BY_RANK[20];
+}
+
 function rankPriorityForTier(tierId, tierKeywords, ctx) {
   const eligible = tierKeywords
     .filter(k => !isBlogUrl(k.best_url || ''))
@@ -356,6 +376,18 @@ function rankPriorityForTier(tierId, tierKeywords, ctx) {
   const targetRank = Math.max(3, Math.floor(Number(top.best_rank_group) / 2));
   const cleanedUrl = cleanUrl(top.best_url || '');
   const auditState = pageEnrichment(cleanedUrl, ctx.schemaDetail, ctx.keywords);
+  // Model the click uplift from the rank improvement so this
+  // candidate carries an estimated_lift_gbp_profit and survives the
+  // UI's >0 filter. Same dimensional analysis the CTR picker uses:
+  // uplift_clicks/mo * aov_per_click * gp_pct.
+  const currentCtr = ctrForRank(top.best_rank_group);
+  const targetCtr  = ctrForRank(targetRank);
+  const sv         = Number(top.search_volume) || 0;
+  const upliftMonthlyClicks = Math.max(0, sv * (targetCtr - currentCtr));
+  const aov   = estimatedAovPerClick(tierId);
+  const gpPct = estimatedGpPctForTier(tierId);
+  const revLift = Math.round(upliftMonthlyClicks * aov);
+  const gpLift  = Math.round(revLift * (gpPct / 100));
   const builderArgs = { cleanedUrl, keyword: top.keyword, rank: top.best_rank_group, sv: top.search_volume };
   return {
     signature: `rank|${top.keyword}|${cleanedUrl}`,
@@ -366,7 +398,9 @@ function rankPriorityForTier(tierId, tierKeywords, ctx) {
     kpi_baseline_value: Number(top.best_rank_group),
     kpi_target_value: targetRank,
     kpi_target_direction: 'down',
-    estimated_lift: `Rank ${top.best_rank_group} -> top ${targetRank} on a ${Number(top.search_volume).toLocaleString()}/mo keyword`,
+    estimated_lift: `Rank ${top.best_rank_group} \u2192 top ${targetRank} on a ${sv.toLocaleString()}/mo keyword \u2192 ~£${revLift.toLocaleString()}/mo revenue \u2192 ~£${gpLift.toLocaleString()}/mo profit at ${gpPct}% GP`,
+    estimated_lift_gbp_revenue: revLift,
+    estimated_lift_gbp_profit: gpLift,
     lever_id: 'rank',
     _rebuild: { type: 'rank', args: builderArgs }
   };
