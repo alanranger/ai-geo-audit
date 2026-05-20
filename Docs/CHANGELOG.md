@@ -2,6 +2,132 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-21 v5.3 Phase A.1] - Scenario Planning foundation (new tab, library, scenarios CRUD)
+
+### Why
+
+Alan asked for an **intelligent decision support system**, not just sliders. The dilemma he restated: bills have to be paid (working capital, survival), but he also needs to push above baseline (growth, GP). He has finite hours per week — every hour spent on a non-converting SEO action is an hour not spent on something that would have paid the gas bill. He wants:
+
+- **YTD vs target vs projected** revenue / GP, per tier and master, with shortfall/surplus and RAG
+- **What-if scenarios** — drag a slider, see projection update
+- **Tipping points** — "if you achieve X / Y / Z, you reach target"
+- **Three-scenario presentation** — Survival (lowest effort to hit baseline) / Stretch (current effort, current target) / Ambitious (more hours, higher target)
+- The ability to **build and switch between named scenarios** (e.g. "Survive Q3 2026", "Push Academy 30%", "Workshop-led 2027") and have one marked active that feeds the Top 3 Actions picker
+
+This is multi-phase work. We picked the architecture together (AskQuestion 2026-05-21): a new tab (not embedded in Revenue Funnel), rule-based effort heuristics for the solver, three-scenario presentation. Survival baseline = both a fixed £ field AND a 70%-of-master fallback. The seeded scenario is called "Baseline" and is marked active so nothing breaks.
+
+### Phase breakdown (committed phase highlighted)
+
+| Phase | What ships | Status |
+|---|---|---|
+| **A.1** | DB migration + scenarios CRUD API + new tab + library card + meta inputs + status pill on Funnel + scenario-scoped config API | **THIS COMMIT** |
+| A.2 | Physically relocate targets/sliders editor from Revenue Funnel into the Scenario Planning tab | next commit |
+| B | Survival Cockpit table: MTD / Projected / Target / Gap / YTD per tier with RAG | pending |
+| C | Effort + time-to-realise heuristics per lever; "baseline £X → £Y with Top 3" projection | pending |
+| D | Three-scenario solver (greedy attainability), side-by-side cards | pending |
+| E | What-if mode: debounced re-solve on every slider drag | pending |
+| F | Funnel Top 3 reads active scenario's solver output | pending |
+
+### Added - Database
+
+#### Migration `Docs/migrations/2026-05-21-scenario-planning-tables.sql`
+
+- New table `public.revenue_funnel_scenarios` (id, property_url, name, notes, is_active, monthly_survival_baseline_gbp, hours_per_week, created_at, updated_at).
+  - Unique index `(property_url, lower(name))` so case-variant duplicates can't sneak in.
+  - **Partial unique index** `(property_url) WHERE is_active = true` so only ONE active scenario per property is allowed at the DB layer (defence-in-depth; API also guards it).
+  - Reuses the `tg_touch_updated_at()` trigger function from the v5.0 migration.
+- `scenario_id uuid NOT NULL` added to `revenue_funnel_targets`, `revenue_funnel_tier_weights`, `revenue_funnel_lever_weights` (all FK with `ON DELETE CASCADE`).
+- Backfilled all existing rows (7 targets, 6 tier weights, 6 lever weights, all for `https://www.alanranger.com`) onto a seeded **Baseline** scenario marked active. Seed survival baseline = £2500; hours/week = 6.
+- Old per-property unique constraints on tier_weights / lever_weights replaced with `(scenario_id, tier_id)` / `(scenario_id, lever_id)` so different scenarios can hold different weights for the same tier/lever.
+- New functional unique index on targets: `(scenario_id, COALESCE(tier_id, ''))` so master + per-tier rows coexist cleanly under one scenario.
+- Applied via Supabase MCP (`apply_migration` named `scenario_planning_tables_phase_a`). Verified: `revenue_funnel_scenarios` has 1 row, all 19 config rows retagged.
+
+### Added - API
+
+#### `api/aigeo/revenue-funnel-scenarios.js` (new)
+
+Single endpoint, method-dispatched:
+
+- `GET ?propertyUrl=...` → `{ active_scenario_id, scenarios: [...] }` ordered by `is_active DESC, updated_at DESC`.
+- `POST` body `{ action: 'create', propertyUrl, name, notes?, monthlySurvivalBaselineGbp?, hoursPerWeek?, makeActive? }` → creates a blank scenario (no config rows yet). Optional makeActive.
+- `POST` body `{ action: 'duplicate', sourceScenarioId, newName, makeActive? }` → **deep-copies** the source scenario including all its targets / tier weights / lever weights into a new scenario_id. Returns counts of rows copied.
+- `PATCH` body `{ scenarioId, name?, notes?, monthlySurvivalBaselineGbp?, hoursPerWeek?, makeActive? }` → updates the scenario fields. `makeActive=true` triggers a 2-step transaction (clear is_active on all OTHER scenarios for the property, then set is_active=true on this one) so the partial unique index never sees two actives.
+- `DELETE ?scenarioId=...` → cascades to children. Refuses to delete the only remaining scenario for a property (returns 409 with `cannot_delete_only_scenario`).
+
+All handlers under complexity 15 (AGENTS.md rule).
+
+#### `api/aigeo/revenue-funnel-config.js` (rewritten - scenario-scoped)
+
+- New `resolveScenarioId(supabase, propertyUrl, explicitScenarioId)` helper: if `scenarioId` was passed (via `?scenarioId=` or body), validates it belongs to the property and returns it; otherwise looks up the active scenario. Throws `no_active_scenario` (400) or `scenario_property_mismatch` (400) on bad input.
+- All three load/save functions now filter by `scenario_id` and write `scenario_id` on every row.
+- `saveTierWeights` / `saveLeverWeights` upserts now use `onConflict: 'scenario_id,tier_id'` / `'scenario_id,lever_id'` matching the new unique constraints from the migration.
+- `saveTargets` still uses delete-then-insert (PostgREST can't reference the functional unique index `COALESCE(tier_id, '')`), but now scoped to `scenario_id` not `property_url` so multiple scenarios on the same property can't trample each other.
+- Response includes `scenario_id` so the calling form (the Top Actions config IIFE) can capture which scenario it just loaded / saved against.
+
+### Added - Dashboard UI
+
+#### New tab: "Scenario Planning"
+
+Added between Revenue Funnel and Configuration & Reporting in the sidebar nav, with a target icon. Title attribute previews what's coming in later phases.
+
+#### Active scenario pill on Revenue Funnel tab
+
+Sits at the very top of the Revenue Funnel panel (above the existing Top Actions config). Shows:
+
+- `Active scenario` label
+- Scenario name (bold)
+- Meta: `survival £N/mo · Nh/wk budget · N scenarios total`
+- Right-aligned `Manage scenarios →` link that programmatically clicks the new tab's nav button.
+
+Tiny inline IIFE controller exposing `window.rfActiveScenarioPill.refresh()` so the Scenario Planning tab can ask it to repaint after activating / creating / deleting.
+
+#### Scenario library card (new tab)
+
+Inside `section[data-panel="scenario-planning"]`. Dark theme using the existing `--dark-*` CSS variables (same palette as Revenue Funnel for consistency).
+
+- Dropdown of all scenarios for the property, with `(active)` suffix.
+- `Active / Inactive` pill showing whether the currently-selected scenario is the one feeding the picker.
+- Toolbar: `+ New blank scenario` / `Duplicate selected` / `Rename` / `Set as active` / `Delete`. Each button carries an explanatory `title=` hover tip.
+- Meta grid: monthly survival baseline (£), hours/week budget, free-text notes. Each field has a hover-tip explaining what it drives in the solver (Phase D).
+- `Save scenario settings` button persists the meta via PATCH.
+
+When the user clicks `Set as active`, the IIFE:
+1. PATCHes the scenario with `makeActive=true`.
+2. Tells the Revenue Funnel form to reload against the new active scenario (`window.rfTopActionsConfig.setScenario(id)`).
+3. Refreshes the Revenue Funnel pill (`window.rfActiveScenarioPill.refresh()`).
+
+The form on Revenue Funnel and the library on Scenario Planning stay in sync.
+
+#### Scenario-scoped Top Actions form (Revenue Funnel)
+
+The existing Top Actions config IIFE in the Revenue Funnel panel now:
+
+- Tracks `currentScenarioId` (starts `null` → captured from the first `GET /api/aigeo/revenue-funnel-config` response).
+- Passes `scenarioId` on every subsequent load / save so the form stays anchored to the scenario it opened against, even if the active scenario flips underneath it.
+- Exposes `window.rfTopActionsConfig.setScenario(id)` / `.reload()` / `.getCurrentScenarioId()` so the Scenario Planning library can drive it from the other tab.
+
+Phase A.1 keeps the editor PHYSICALLY in the Revenue Funnel tab (the move to Scenario Planning is Phase A.2). For now there's a `Open editor on Revenue Funnel →` shortcut button on the Scenario Planning tab that switches tabs + scrolls to + expands the editor.
+
+### Added - Files
+
+- `Docs/migrations/2026-05-21-scenario-planning-tables.sql` (migration source for review / rollback)
+- `api/aigeo/revenue-funnel-scenarios.js` (new endpoint)
+
+### Changed - Files
+
+- `api/aigeo/revenue-funnel-config.js` (rewritten scenario-scoped)
+- `audit-dashboard.html` (new tab + new panel + status pill + IIFE refactor)
+- `Docs/CHANGELOG.md` (this entry)
+
+### Not yet shipped (next commits)
+
+- **Phase A.2**: physically relocate the targets / tier-weight / lever-weight editor from Revenue Funnel into the Scenario Planning tab. The status pill stays on Revenue Funnel as a read-only summary.
+- **Phase B**: Survival Cockpit table (MTD / Projected / Target / Gap / YTD per tier).
+- **Phase C**: effort + time-to-realise heuristics on candidates.
+- **Phase D**: three-scenario solver (Survival / Stretch / Ambitious).
+- **Phase E**: what-if mode (debounced re-solve on slider drag).
+- **Phase F**: Revenue Funnel Top 3 reads active scenario's solver output (closes the loop).
+
 ## [2026-05-20 v5.2] - Top Actions config: dark theme, hover tips, per-tier totals + RAG
 
 ### Why
