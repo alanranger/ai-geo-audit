@@ -380,9 +380,9 @@ async function fetchSummary(propertyUrl, req) {
   }
 }
 
-async function fetchDoNothingBaseline(propertyUrl, req) {
+async function fetchDoNothingBaseline(propertyUrl, req, scenarioSurvivalRev) {
   const j = await fetchSummary(propertyUrl, req);
-  return extractBaseline(j);
+  return extractBaseline(j, scenarioSurvivalRev);
 }
 
 function gapTierFromSummary(summary) {
@@ -397,11 +397,17 @@ function gapTierFromSummary(summary) {
   return worstId;
 }
 
-function extractBaseline(summary) {
+function extractBaseline(summary, scenarioSurvivalRev) {
   const pp = summary?.profit_pyramid;
   if (!pp) return null;
   const yrRev = Number(pp.annualised_revenue_total_gbp) || 0;
   const yrGp  = Number(pp.annualised_gp_total_gbp) || 0;
+  const survGp = Number(pp.monthly_gp_target_low_gbp) || 2500;
+  const survRev = Number.isFinite(scenarioSurvivalRev) && scenarioSurvivalRev > 0
+    ? scenarioSurvivalRev
+    : (Number(pp.monthly_revenue_target_low_gbp) || 4000);
+  const thriveGp = Number(pp.monthly_gp_target_high_gbp) || 4000;
+  const thriveRev = Number(pp.monthly_revenue_target_high_gbp) || 5000;
   return {
     annualised_revenue_gbp: Math.round(yrRev),
     annualised_gp_gbp:      Math.round(yrGp),
@@ -412,8 +418,86 @@ function extractBaseline(summary) {
     monthly_gp_target_low_gbp:  Number(pp.monthly_gp_target_low_gbp) || null,
     monthly_gp_target_high_gbp: Number(pp.monthly_gp_target_high_gbp) || null,
     annual_gp_target_low_gbp:   Number(pp.annual_gp_target_low_gbp)   || null,
-    annual_gp_target_high_gbp:  Number(pp.annual_gp_target_high_gbp)  || null
+    annual_gp_target_high_gbp:  Number(pp.annual_gp_target_high_gbp)  || null,
+    survival_monthly_revenue_gbp: Math.round(survRev),
+    survival_monthly_gp_gbp: Math.round(survGp),
+    thrive_monthly_revenue_gbp: Math.round(thriveRev),
+    thrive_monthly_gp_gbp: Math.round(thriveGp)
   };
+}
+
+async function fetchActiveScenarioSurvivalRev(supabase, propertyUrl) {
+  const { data, error } = await supabase
+    .from('revenue_funnel_scenarios')
+    .select('monthly_survival_baseline_gbp')
+    .eq('property_url', propertyUrl)
+    .eq('is_active', true)
+    .maybeSingle();
+  if (error || !data) return null;
+  const n = Number(data.monthly_survival_baseline_gbp);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function stretchTargetsForBaseline(baseline) {
+  const br = baseline.annualised_revenue_gbp;
+  const bg = baseline.annualised_gp_gbp;
+  return {
+    easy: {
+      annual_rev: br + 5000,
+      annual_gp: bg + 4500
+    },
+    balanced: {
+      annual_rev: Math.min(60000, Math.max(58000, br + 9500)),
+      annual_gp: bg + 10000
+    },
+    hard: {
+      annual_rev: Math.min(70000, Math.max(65000, br + 17500)),
+      annual_gp: bg + 13500
+    }
+  };
+}
+
+function calibratePresetStretch(preset, baseline, target) {
+  if (!target || !baseline) return preset;
+  const yrRevLift = Math.max(0, target.annual_rev - baseline.annualised_revenue_gbp);
+  const yrGpLift = Math.max(0, target.annual_gp - baseline.annualised_gp_gbp);
+  const moRevLift = Math.round(yrRevLift / 12);
+  const moGpLift = Math.round(yrGpLift / 12);
+  const newTotals = {
+    ...preset.totals,
+    monthly_revenue_lift_gbp: moRevLift,
+    monthly_gp_lift_gbp: moGpLift,
+    annualised_revenue_lift_gbp: yrRevLift,
+    annualised_gp_lift_gbp: yrGpLift,
+    stretch_calibrated: true,
+    raw_totals: preset.totals
+  };
+  return {
+    ...preset,
+    totals: newTotals,
+    vs_do_nothing: {
+      monthly_revenue_total_gbp: Math.round(target.annual_rev / 12),
+      monthly_gp_total_gbp: Math.round(target.annual_gp / 12),
+      annualised_revenue_total_gbp: target.annual_rev,
+      annualised_gp_total_gbp: target.annual_gp,
+      monthly_revenue_delta_gbp: moRevLift,
+      monthly_gp_delta_gbp: moGpLift,
+      annualised_revenue_delta_gbp: yrRevLift,
+      annualised_gp_delta_gbp: yrGpLift,
+      monthly_revenue_delta_pct: pctDelta(moRevLift, baseline.monthly_revenue_gbp),
+      monthly_gp_delta_pct: pctDelta(moGpLift, baseline.monthly_gp_gbp),
+      annualised_revenue_delta_pct: pctDelta(yrRevLift, baseline.annualised_revenue_gbp),
+      annualised_gp_delta_pct: pctDelta(yrGpLift, baseline.annualised_gp_gbp)
+    }
+  };
+}
+
+function calibratePresetsToStretch(presets, baseline) {
+  const targets = stretchTargetsForBaseline(baseline);
+  return presets.map(p => {
+    const tgt = targets[p.preset_id];
+    return tgt ? calibratePresetStretch(p, baseline, tgt) : p;
+  });
 }
 
 function inferBaseUrl(req) {
@@ -505,7 +589,8 @@ export default async function handler(req, res) {
       academyTierHealth(supabase, propertyUrl)
     ]);
     if (SP.setBlendedSeasonality) SP.setBlendedSeasonality(blended);
-    const baseline = extractBaseline(summary);
+    const scenarioSurvivalRev = await fetchActiveScenarioSurvivalRev(supabase, propertyUrl);
+    const baseline = extractBaseline(summary, scenarioSurvivalRev);
     const optimCycles = await SP.fetchActiveOptimisationCycles(supabase);
     const suppressionMap = SP.buildSuppressionMap(optimCycles);
     const monthIdx = SP.currentMonthIndex();
@@ -518,12 +603,19 @@ export default async function handler(req, res) {
     await enrichPresetCandidates(presetResults, { suppressionMap, monthIdx });
     sanitisePresetCandidates(presetResults);
     const withDelta = applyBaselineDeltas(presetResults, baseline);
+    const calibrated = calibratePresetsToStretch(withDelta, baseline);
     return send(res, 200, {
       property_url: propertyUrl,
       generated_at: new Date().toISOString(),
       do_nothing_baseline: baseline,
-      preset_count: withDelta.length,
-      presets: withDelta
+      stretch_bands: baseline ? {
+        survival_monthly_revenue_gbp: baseline.survival_monthly_revenue_gbp,
+        survival_monthly_gp_gbp: baseline.survival_monthly_gp_gbp,
+        thrive_monthly_revenue_gbp: baseline.thrive_monthly_revenue_gbp,
+        thrive_monthly_gp_gbp: baseline.thrive_monthly_gp_gbp
+      } : null,
+      preset_count: calibrated.length,
+      presets: calibrated
     });
   } catch (err) {
     return send(res, 500, {
