@@ -149,27 +149,39 @@ function presetScore(c) {
   return Number(c.estimated_lift_gbp_profit) || Number(c.lift_per_hour_gbp) || 0;
 }
 
+const STALE_TOP_PATHS = new Set([
+  '/free-online-photography-course',
+  '/photography-courses-coventry',
+  '/hire-a-professional-photographer-in-coventry'
+]);
+
 function rerankForPreset(allRanked, preset, ctx) {
   const monthIdx = ctx?.monthIdx ?? 0;
   let eligible = allRanked.filter(preset.filter);
   if (preset.id === 'easy') {
     eligible = eligible.filter(c => c.lever_id !== 'surfacing');
     eligible.forEach(c => {
-      if (c.tier_id === 'hire' || c.tier_id === 'services') c._preset_score = preset.score(c) * 1.45;
+      let s = preset.score(c);
+      if (c.tier_id === 'hire' || c.tier_id === 'services') s *= 2.2;
+      if (STALE_TOP_PATHS.has(primaryUrl(c))) s *= 0.35;
+      c._preset_score = s;
     });
   } else if (preset.id === 'balanced' && ctx?.gapTierId) {
     eligible.forEach(c => {
-      if (c.tier_id === ctx.gapTierId) c._preset_score = preset.score(c) * 1.35;
+      let s = preset.score(c);
+      if (c.tier_id === ctx.gapTierId) s *= 1.5;
+      c._preset_score = s;
     });
   } else if (preset.id === 'hard') {
     const peakMo = [3, 4, 8, 9, 10];
-    if (peakMo.includes(monthIdx)) {
-      eligible.forEach(c => {
-        if (c.tier_id === 'workshops_nonres' || c.tier_id === 'workshops_residential') {
-          c._preset_score = preset.score(c) * 1.55;
-        }
-      });
-    }
+    eligible.forEach(c => {
+      let s = preset.score(c);
+      if (peakMo.includes(monthIdx) && (c.tier_id === 'workshops_nonres' || c.tier_id === 'workshops_residential')) {
+        s *= 2.8;
+      }
+      if (STALE_TOP_PATHS.has(primaryUrl(c))) s *= 0.4;
+      c._preset_score = s;
+    });
     eligible = eligible.filter(c => c.lever_id !== 'surfacing' || String(c.tier_id || '').startsWith('workshops'));
   }
   eligible.sort((a, b) => {
@@ -193,10 +205,7 @@ function pickWithinBudgetDiverse(ranked, budgetHours) {
     const eh = Number(c.effort_hours) || 0;
     if (eh + used > budgetHours) continue;
     const url = primaryUrl(c);
-    if (usedUrls.has(url) && picked.length >= 1) {
-      const alt = ranked.find(x => !usedUrls.has(primaryUrl(x)) && (Number(x.effort_hours) || 0) + used <= budgetHours);
-      if (alt && presetScore(alt) >= presetScore(c) * 0.55) continue;
-    }
+    if (usedUrls.has(url)) continue;
     picked.push(c);
     usedUrls.add(url);
     used += eh;
