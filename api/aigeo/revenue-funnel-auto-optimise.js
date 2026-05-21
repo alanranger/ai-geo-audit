@@ -124,12 +124,12 @@ const PRESETS = [
     name: 'Hard path (full-commit compound)',
     description: 'Stretch commit (~32h): stack quick wins AND 12-month compound bets (rank, schema, AIO) on multiple pages/levers. Sorted by annualised GP so year-end revenue can reach \u00A360k+ if executed.',
     horizon_days: 180,
-    budget_hours: 32,
+    budget_hours: 42,
     tier_weights:  flatTierWeights(),
-    lever_weights: { ctr: 1.0, schema: 1.4, aio: 1.8, rank: 1.8, surfacing: 1.0, conversion: 1.1 },
-    filter: c => Number(c.effort_hours) <= 12,
+    lever_weights: { ctr: 1.0, schema: 1.5, aio: 2.0, rank: 2.0, surfacing: 1.1, conversion: 1.1 },
+    filter: c => Number(c.effort_hours) <= 16,
     score:  c => annualisedGpScore(c),
-    pickOpts: { maxPerUrl: 2, keyByLever: true }
+    pickOpts: { maxPerUrl: 1, keyByLever: true, minTiers: 5 }
   }
 ];
 
@@ -184,7 +184,7 @@ function rerankForPreset(allRanked, preset, ctx) {
     const peakMo = [3, 4, 8, 9, 10];
     eligible.forEach(c => {
       let s = preset.score(c);
-      if (c.lever_id === 'rank' || c.lever_id === 'schema' || c.lever_id === 'aio') s *= 1.85;
+      if (c.lever_id === 'rank' || c.lever_id === 'schema' || c.lever_id === 'aio') s *= 2.15;
       if (peakMo.includes(monthIdx) && (c.tier_id === 'workshops_nonres' || c.tier_id === 'workshops_residential')) {
         s *= 2.5;
       }
