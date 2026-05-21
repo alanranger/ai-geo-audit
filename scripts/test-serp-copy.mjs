@@ -37,6 +37,16 @@ ok(advice.isHub, 'Coventry detected as hub');
 ok(advice.metaExample && advice.metaExampleLength >= META_MIN && advice.metaExampleLength <= META_MAX, 'Hub advice includes verified meta');
 ok(advice.h1Recommendation && advice.h1Recommendation.includes('Coventry'), 'Hub keeps H1');
 
+const done = buildSerpCopyAdvice({
+  pageUrl: COVENTRY,
+  rankingKw: 'photography courses',
+  rank: 12,
+  searchVolume: 6600,
+  title: 'Photography Courses Coventry - Beginners, 1-2-1, RPS',
+  meta: meta.text
+});
+ok(done.serpComplete, 'Matching live SERP marks complete');
+
 const em = normalizeSerpText('Coventry — test');
 ok(em === 'Coventry - test', 'normalizeSerpText fixes em dash');
 

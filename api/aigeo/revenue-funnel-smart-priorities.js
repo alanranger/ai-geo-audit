@@ -1027,6 +1027,17 @@ function enrichOneCandidate(c, liveMap, suppressionMap, monthIdx) {
     if (serp.note) c.serp_advice_note = serp.note;
     if (serp.lead) c.safe_title_lead = serp.lead;
     if (serp.isHub) c.serp_is_hub = true;
+    if (serp.serpComplete) {
+      c.serp_complete = true;
+      c.recommended_actions = [{
+        step: 1,
+        effort_hours: 0,
+        confidence: 'high',
+        tag: 'done',
+        headline: 'SERP copy already matches',
+        detail: 'Live title and meta match the recommended hub copy. This URL drops out of Top 3 until GSC shows a new lever (CTR move, rank, or AIO).'
+      }];
+    }
   }
   // Seasonality scaling: applied LAST so suppression decisions are
   // made on raw lift (we don't want December gap-month to mask a
@@ -1313,6 +1324,7 @@ function buildCtrActions(c, live) {
     meta
   });
   if (serp.blocked) return [];
+  if (serp.serpComplete) return [];
   const actions = serp.actions.map((a) => ({
     effort_hours: a.tag === 'meta' ? 0.25 : 0.5,
     confidence: a.confidence,
@@ -1625,7 +1637,8 @@ export default async function handler(req, res) {
           meta_example_length: c.meta_example_length ?? null,
           h1_recommendation: c.h1_recommendation ?? null,
           serp_advice_note: c.serp_advice_note ?? null,
-          serp_is_hub: !!c.serp_is_hub
+          serp_is_hub: !!c.serp_is_hub,
+          serp_complete: !!c.serp_complete
         }))
       });
     }
