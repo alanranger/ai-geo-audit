@@ -89,39 +89,47 @@ function persistenceMonthsFor(candidate) {
 //
 // Annualised lift uses PER-LEVER persistence (see PERSISTENCE_BY_LEVER)
 // so the strategy mix - not a flat assumption - drives the year-1 number.
+function annualisedGpScore(c) {
+  const g = Number(c.estimated_lift_gbp_profit) || 0;
+  return g * persistenceMonthsFor(c);
+}
+
 const PRESETS = [
   {
     id: 'easy',
     name: 'Easy path (quick wins this month)',
-    description: 'Sub-1-hour title + meta rewrites and schema drops only. Highest \u00A3-per-hour. CTR wins assumed to decay in ~6 months as competitors rewrite their titles.',
+    description: 'Sub-1-hour CTR + schema only. Highest \u00A3-per-hour; smallest commit (~6h). Realistic near-term uplift without rank/AIO compound bets.',
     horizon_days: 30,
     budget_hours: 6,
     tier_weights:  flatTierWeights(),
-    lever_weights: { ctr: 2.0, schema: 1.5, aio: 0.5, rank: 0.2, surfacing: 0.5, conversion: 1.0 },
+    lever_weights: { ctr: 2.2, schema: 1.6, aio: 0.4, rank: 0.15, surfacing: 0.4, conversion: 1.0 },
     filter: c => Number(c.effort_hours) <= 1 && Number(c.time_to_realise_days) <= 21,
-    score:  c => Number(c.lift_per_hour_gbp) || 0
+    score:  c => Number(c.lift_per_hour_gbp) || (Number(c.estimated_lift_gbp_profit) || 0) / Math.max(0.5, Number(c.effort_hours) || 1),
+    pickOpts: { maxPerUrl: 1 }
   },
   {
     id: 'balanced',
     name: 'Balanced path (most \u00A3 this month)',
-    description: 'All levers eligible, picked by absolute monthly GP. Moderate 12-hour commit. Annualised numbers reflect per-lever persistence (CTR 6mo, AIO 9mo, rank/schema 12mo).',
+    description: 'Medium commit (~16h): monthly GP across at least four tiers. CTR + conversion + selective rank/AIO. Expect a clear step up from Easy, not full stretch.',
     horizon_days: 90,
-    budget_hours: 12,
+    budget_hours: 16,
     tier_weights:  flatTierWeights(),
-    lever_weights: { ctr: 1.2, schema: 1.0, aio: 1.5, rank: 1.0, surfacing: 1.0, conversion: 1.2 },
-    filter: ()=> true,
-    score:  c => Number(c.estimated_lift_gbp_profit) || 0
+    lever_weights: { ctr: 1.3, schema: 1.1, aio: 1.4, rank: 1.2, surfacing: 0.9, conversion: 1.3 },
+    filter: c => Number(c.effort_hours) <= 4,
+    score:  c => Number(c.estimated_lift_gbp_profit) || 0,
+    pickOpts: { maxPerUrl: 1, minTiers: 4 }
   },
   {
     id: 'hard',
     name: 'Hard path (full-commit compound)',
-    description: 'Do everything that fits a 24-hour commit: every quick CTR win PLUS every rank + AIO + schema pushup. Maximum absolute lift, with the long-persistence levers compounding for 12 months.',
+    description: 'Stretch commit (~32h): stack quick wins AND 12-month compound bets (rank, schema, AIO) on multiple pages/levers. Sorted by annualised GP so year-end revenue can reach \u00A360k+ if executed.',
     horizon_days: 180,
-    budget_hours: 24,
+    budget_hours: 32,
     tier_weights:  flatTierWeights(),
-    lever_weights: { ctr: 1.0, schema: 1.0, aio: 1.5, rank: 1.5, surfacing: 1.2, conversion: 1.0 },
-    filter: ()=> true,
-    score:  c => Number(c.estimated_lift_gbp_profit) || 0
+    lever_weights: { ctr: 1.0, schema: 1.4, aio: 1.8, rank: 1.8, surfacing: 1.0, conversion: 1.1 },
+    filter: c => Number(c.effort_hours) <= 12,
+    score:  c => annualisedGpScore(c),
+    pickOpts: { maxPerUrl: 2, keyByLever: true }
   }
 ];
 
@@ -138,8 +146,8 @@ function sanitiseCandidate(c) {
 
 // Greedy effort-budget pick: walk the re-sorted list, take candidates
 // in order, stop when cumulative effort_hours would exceed budget.
-function pickWithinBudget(ranked, budgetHours) {
-  return pickWithinBudgetDiverse(ranked, budgetHours);
+function pickWithinBudget(ranked, budgetHours, pickOpts) {
+  return pickWithinBudgetDiverse(ranked, budgetHours, pickOpts);
 }
 
 // Re-sort the picker's output by the preset's strategic objective.
@@ -176,13 +184,13 @@ function rerankForPreset(allRanked, preset, ctx) {
     const peakMo = [3, 4, 8, 9, 10];
     eligible.forEach(c => {
       let s = preset.score(c);
+      if (c.lever_id === 'rank' || c.lever_id === 'schema' || c.lever_id === 'aio') s *= 1.85;
       if (peakMo.includes(monthIdx) && (c.tier_id === 'workshops_nonres' || c.tier_id === 'workshops_residential')) {
-        s *= 2.8;
+        s *= 2.5;
       }
-      if (STALE_TOP_PATHS.has(primaryUrl(c))) s *= 0.4;
+      if (STALE_TOP_PATHS.has(primaryUrl(c))) s *= 0.45;
       c._preset_score = s;
     });
-    eligible = eligible.filter(c => c.lever_id !== 'surfacing' || String(c.tier_id || '').startsWith('workshops'));
   }
   eligible.sort((a, b) => {
     const sa = Number(a._preset_score) || preset.score(a);
@@ -197,18 +205,57 @@ function primaryUrl(c) {
   return String(u || '').replace(/^https?:\/\/[^/]+/i, '').replace(/\/$/, '') || '/';
 }
 
-function pickWithinBudgetDiverse(ranked, budgetHours) {
-  const picked = [];
-  const usedUrls = new Set();
-  let used = 0;
+function pickSlotKey(c, opts) {
+  const url = primaryUrl(c);
+  return opts.keyByLever ? `${url}|${c.lever_id || ''}` : url;
+}
+
+function pickCanAdd(c, used, budgetHours, usedKeys, opts) {
+  const eh = Number(c.effort_hours) || 0;
+  if (eh + used > budgetHours) return false;
+  const key = pickSlotKey(c, opts);
+  return (usedKeys.get(key) || 0) < (opts.maxPerUrl ?? 1);
+}
+
+function pickSeedMinTiers(ranked, picked, usedKeys, tiersSeen, budgetHours, minTiers) {
+  let used = picked.reduce((s, c) => s + (Number(c.effort_hours) || 0), 0);
+  const opts = { maxPerUrl: 1 };
+  const bestByTier = new Map();
   for (const c of ranked) {
-    const eh = Number(c.effort_hours) || 0;
-    if (eh + used > budgetHours) continue;
-    const url = primaryUrl(c);
-    if (usedUrls.has(url)) continue;
+    const t = c.tier_id || 'unknown';
+    if (tiersSeen.has(t)) continue;
+    const prev = bestByTier.get(t);
+    const sc = Number(c._preset_score) || 0;
+    if (!prev || sc > (Number(prev._preset_score) || 0)) bestByTier.set(t, c);
+  }
+  for (const c of bestByTier.values()) {
+    if (tiersSeen.size >= minTiers) break;
+    if (!pickCanAdd(c, used, budgetHours, usedKeys, opts)) continue;
+    const key = pickSlotKey(c, opts);
     picked.push(c);
-    usedUrls.add(url);
-    used += eh;
+    usedKeys.set(key, (usedKeys.get(key) || 0) + 1);
+    tiersSeen.add(c.tier_id || 'unknown');
+    used += Number(c.effort_hours) || 0;
+  }
+  return used;
+}
+
+function pickWithinBudgetDiverse(ranked, budgetHours, opts = {}) {
+  const picked = [];
+  const usedKeys = new Map();
+  const tiersSeen = new Set();
+  let used = 0;
+  const minTiers = opts.minTiers ?? 0;
+  if (minTiers > 0) {
+    used = pickSeedMinTiers(ranked, picked, usedKeys, tiersSeen, budgetHours, minTiers);
+  }
+  for (const c of ranked) {
+    if (!pickCanAdd(c, used, budgetHours, usedKeys, opts)) continue;
+    const key = pickSlotKey(c, opts);
+    picked.push(c);
+    usedKeys.set(key, (usedKeys.get(key) || 0) + 1);
+    tiersSeen.add(c.tier_id || 'unknown');
+    used += Number(c.effort_hours) || 0;
   }
   return { picked, hours_used: Math.round(used * 10) / 10 };
 }
@@ -388,8 +435,13 @@ function applyBaselineDeltas(presets, baseline) {
         monthly_gp_total_gbp:      baseline.monthly_gp_gbp      + t.monthly_gp_lift_gbp,
         annualised_revenue_total_gbp: baseline.annualised_revenue_gbp + t.annualised_revenue_lift_gbp,
         annualised_gp_total_gbp:      baseline.annualised_gp_gbp      + t.annualised_gp_lift_gbp,
+        monthly_revenue_delta_gbp: t.monthly_revenue_lift_gbp,
+        monthly_gp_delta_gbp: t.monthly_gp_lift_gbp,
+        annualised_revenue_delta_gbp: t.annualised_revenue_lift_gbp,
+        annualised_gp_delta_gbp: t.annualised_gp_lift_gbp,
         monthly_revenue_delta_pct: pctDelta(t.monthly_revenue_lift_gbp, baseline.monthly_revenue_gbp),
         monthly_gp_delta_pct:      pctDelta(t.monthly_gp_lift_gbp,      baseline.monthly_gp_gbp),
+        annualised_revenue_delta_pct: pctDelta(t.annualised_revenue_lift_gbp, baseline.annualised_revenue_gbp),
         annualised_gp_delta_pct:   pctDelta(t.annualised_gp_lift_gbp,   baseline.annualised_gp_gbp)
       }
     };
@@ -410,7 +462,7 @@ function runAllPresets(snapshot, suppressionMap, ctx) {
     };
     const allRanked = SP.buildAllPriorities(snapshot, weights, suppressionMap, ctx.pickerOpts);
     const reranked  = rerankForPreset(allRanked, meta, ctx);
-    const { picked, hours_used } = pickWithinBudget(reranked, meta.budget_hours);
+    const { picked, hours_used } = pickWithinBudget(reranked, meta.budget_hours, meta.pickOpts);
     return summarisePreset(meta, picked, hours_used, allRanked.length);
   });
 }
