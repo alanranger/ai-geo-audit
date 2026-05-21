@@ -1025,7 +1025,8 @@ function enrichOneCandidate(c, liveMap, suppressionMap, monthIdx) {
       rank: c._rebuild && c._rebuild.args && c._rebuild.args.kwInfo && c._rebuild.args.kwInfo.rank,
       searchVolume: c._rebuild && c._rebuild.args && c._rebuild.args.kwInfo && c._rebuild.args.kwInfo.searchVolume,
       title: live && live.title,
-      meta: live && live.metaDescription
+      meta: live && live.metaDescription,
+      h1: live && live.h1
     });
     if (serp.titleExample) c.title_example = serp.titleExample;
     if (serp.metaExample) c.meta_example = serp.metaExample;
@@ -1335,7 +1336,8 @@ function buildCtrActions(c, live) {
     rank,
     searchVolume: kwInfo.searchVolume,
     title,
-    meta
+    meta,
+    h1: live && live.h1
   });
   if (serp.blocked) return [];
   if (serp.serpComplete) return [];

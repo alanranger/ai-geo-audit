@@ -90,6 +90,17 @@ ok(!hire.metaExample.match(/consultation with Alan Ranger\. Book a free consulta
 const dup = fitMetaDescription('Hello. Book a free consultation with Alan Ranger.');
 ok(!dup.text.includes('Book a free consultation with Alan Ranger. Book a free'), 'fitMeta skips duplicate CTA');
 
+const hireAdvice = buildSerpCopyAdvice({
+  pageUrl: 'https://www.alanranger.com/hire-me/professional-photographer-in-coventry',
+  rankingKw: 'professional photographer',
+  title: 'Photographer in Coventry | Alan Ranger Photography',
+  meta: 'short',
+  h1: 'Professional Photographer in Coventry'
+});
+ok(hireAdvice.metaExample && !hireAdvice.metaExample.endsWith('wit.'), 'Hire meta not chopped mid-word');
+ok(hireAdvice.h1Recommendation && hireAdvice.h1Recommendation.includes('Business'), 'Hire H1 paste provided');
+ok(hireAdvice.actions[0].detail.startsWith('Paste'), 'Hire actions use paste lines');
+
 console.log('Coventry meta:', meta.text);
 console.log(failed ? `${failed} failed` : 'All serp-copy checks passed');
 process.exit(failed ? 1 : 0);
