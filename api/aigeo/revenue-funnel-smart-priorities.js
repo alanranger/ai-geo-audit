@@ -31,6 +31,10 @@ import {
   applyKeywordGuardrails,
   safeTitleLead
 } from '../../lib/revenue-funnel-keyword-guardrails.js';
+import {
+  pickKeywordForPage,
+  buildSerpCopyAdvice
+} from '../../lib/revenue-funnel-serp-copy.js';
 
 let activeBlendedSeasonality = null;
 
@@ -180,6 +184,8 @@ function isBlogUrl(url) {
 // query the page is competing on, not just "rewrite the title".
 function topKeywordForPage(cleanedUrl, keywords) {
   if (!cleanedUrl || !keywords) return null;
+  const curated = pickKeywordForPage(cleanedUrl, keywords);
+  if (curated) return curated;
   let best = null;
   let bestVol = -1;
   for (const k of keywords) {
@@ -1002,6 +1008,22 @@ function enrichOneCandidate(c, liveMap, suppressionMap, monthIdx) {
     actions = applySuppressionToActions(actions, verdict);
   }
   c.recommended_actions = actions;
+  if (c.lever_id === 'ctr' || (Array.isArray(c.merged_levers) && c.merged_levers.includes('ctr'))) {
+    const url = Array.isArray(c.pages_affected) ? c.pages_affected[0] : '';
+    const kw = (c._rebuild && c._rebuild.args && c._rebuild.args.kwInfo && c._rebuild.args.kwInfo.keyword)
+      || c.primary_query || null;
+    const serp = buildSerpCopyAdvice({
+      pageUrl: url,
+      rankingKw: kw,
+      rank: c._rebuild && c._rebuild.args && c._rebuild.args.kwInfo && c._rebuild.args.kwInfo.rank,
+      searchVolume: c._rebuild && c._rebuild.args && c._rebuild.args.kwInfo && c._rebuild.args.kwInfo.searchVolume,
+      title: live && live.title,
+      meta: live && live.metaDescription
+    });
+    if (serp.titleExample) c.title_example = serp.titleExample;
+    if (serp.note) c.serp_advice_note = serp.note;
+    if (serp.lead) c.safe_title_lead = serp.lead;
+  }
   // Seasonality scaling: applied LAST so suppression decisions are
   // made on raw lift (we don't want December gap-month to mask a
   // genuine on-page issue).
@@ -1269,50 +1291,6 @@ function applySeasonalityToCandidate(c, monthIdx) {
 // the actions the page actually needs, prioritised + confidence-tagged.
 // Each builder returns at most ~4 items so the card stays scannable.
 
-function ctrTitleAction(c, kw, rank, title) {
-  if (!title) return null;
-  const lower = title.toLowerCase();
-  const pageUrl = Array.isArray(c.pages_affected) ? c.pages_affected[0] : '';
-  const safe = safeTitleLead(pageUrl, kw);
-  const lead = safe.lead || kw;
-  if (lead && !lower.includes(String(lead).toLowerCase())) {
-    const guardNote = safe.note ? ` ${safe.note}` : '';
-    return {
-      step: 1, effort_hours: 0.5, confidence: 'high', tag: 'title',
-      headline: `Lead the page title with "${lead}"`,
-      detail: `Current title is "${title}" (${title.length}ch). You rank #${rank} for "${kw}" but the title should echo the query without competing with another money page.${guardNote} Test a 55–60ch title opening with "${lead}".`
-    };
-  }
-  if (title.length < 35) {
-    return {
-      step: 1, effort_hours: 0.5, confidence: 'medium', tag: 'title',
-      headline: `Lengthen the title to ~55–60ch (currently ${title.length}ch)`,
-      detail: `Title "${title}" leaves SERP real-estate empty. Competing results use the full 60ch — add a benefit modifier (e.g. "free 14-day trial", "near you", "for beginners") to win the click.`
-    };
-  }
-  return null;
-}
-
-function ctrMetaAction(c, meta) {
-  if (typeof meta !== 'string' || meta.length === 0) return null;
-  const len = meta.length;
-  if (len > 160) {
-    return {
-      effort_hours: 0.25, confidence: 'high', tag: 'meta',
-      headline: `Trim the meta description from ${len}ch to ~155ch`,
-      detail: `Google truncates around 155–160ch on desktop. Your last ${len - 155}ch is being cut mid-sentence which kills click-through. Rewrite tighter and keep the head term in the first 80ch.`
-    };
-  }
-  if (len < 110) {
-    return {
-      effort_hours: 0.25, confidence: 'medium', tag: 'meta',
-      headline: `Expand the meta description from ${len}ch to ~150ch`,
-      detail: `Short metas leave SERP real-estate empty. Add a USP, a CTA, and the head term. Target 140–155ch.`
-    };
-  }
-  return null;
-}
-
 function buildCtrActions(c, live) {
   const args   = (c._rebuild && c._rebuild.args) || {};
   const kwInfo = args.kwInfo || {};
@@ -1321,9 +1299,23 @@ function buildCtrActions(c, live) {
   const title  = live && live.title;
   const meta   = live && live.metaDescription;
   const schema = (live && live.schemaTypes) || [];
-  const actions = [];
-  const t = ctrTitleAction(c, kw, rank, title); if (t) actions.push(t);
-  const m = ctrMetaAction(c, meta);             if (m) actions.push(m);
+  const pageUrl = Array.isArray(c.pages_affected) ? c.pages_affected[0] : '';
+  const serp = buildSerpCopyAdvice({
+    pageUrl,
+    rankingKw: kw,
+    rank,
+    searchVolume: kwInfo.searchVolume,
+    title,
+    meta
+  });
+  if (serp.blocked) return [];
+  const actions = serp.actions.map((a) => ({
+    effort_hours: a.tag === 'meta' ? 0.25 : 0.5,
+    confidence: a.confidence,
+    tag: a.tag,
+    headline: a.headline,
+    detail: a.detail
+  }));
   if (!schema.includes('FAQPage') && kw) {
     actions.push({
       effort_hours: 1.5, confidence: 'medium', tag: 'faq',
@@ -1623,7 +1615,9 @@ export default async function handler(req, res) {
           guardrail_notes: c.guardrail_notes ?? null,
           guardrail_severity: c.guardrail_severity ?? null,
           guardrail_blocked_top3: !!c.guardrail_blocked_top3,
-          merged_levers: c.merged_levers ?? null
+          merged_levers: c.merged_levers ?? null,
+          title_example: c.title_example ?? null,
+          serp_advice_note: c.serp_advice_note ?? null
         }))
       });
     }

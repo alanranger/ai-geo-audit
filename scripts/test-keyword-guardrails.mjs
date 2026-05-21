@@ -37,7 +37,7 @@ const safeAcademy = safeTitleLead(ACADEMY, 'photography lessons');
 ok(safeAcademy.lead === 'photography lessons online', 'Academy safe lead adds online');
 
 const safeCov = safeTitleLead(COVENTRY, 'photography lessons');
-ok(/Coventry/i.test(safeCov.lead), 'Coventry safe lead adds geo');
+ok(/Courses in Coventry/i.test(safeCov.lead), 'Coventry safe lead uses courses from URL not lessons from rank kw');
 
 ok(ownerUrlForKeyword('photography lessons online', keywords) === ACADEMY, 'Online query owner is Academy');
 
