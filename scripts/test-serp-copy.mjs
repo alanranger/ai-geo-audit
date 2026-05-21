@@ -75,6 +75,21 @@ const ws = buildSerpCopyAdvice({
 ok(ws.metaExample && !ws.metaExample.includes('Book today. Book today'), 'Workshops meta has no spam padding');
 ok(ws.lead && /workshop/i.test(ws.lead), 'Workshops lead uses workshops not Coventry');
 
+const HIRE = 'https://www.alanranger.com/hire-a-professional-photographer-in-coventry';
+const hire = buildSerpCopyAdvice({
+  pageUrl: HIRE,
+  rankingKw: 'photography courses',
+  rank: 20,
+  title: 'Photography in Coventry | Alan Ranger Photography',
+  meta: 'short'
+});
+ok(hire.lead && /hire|photographer/i.test(hire.lead), 'Hire page lead is hire not courses');
+ok(hire.metaExample && !hire.metaExample.includes('photography courses - photography courses'), 'Hire meta not doubled courses');
+ok(!hire.metaExample.match(/consultation with Alan Ranger\. Book a free consultation/), 'Hire meta does not duplicate CTA');
+
+const dup = fitMetaDescription('Hello. Book a free consultation with Alan Ranger.');
+ok(!dup.text.includes('Book a free consultation with Alan Ranger. Book a free'), 'fitMeta skips duplicate CTA');
+
 console.log('Coventry meta:', meta.text);
 console.log(failed ? `${failed} failed` : 'All serp-copy checks passed');
 process.exit(failed ? 1 : 0);

@@ -33,7 +33,8 @@ import {
 } from '../../lib/revenue-funnel-keyword-guardrails.js';
 import {
   pickKeywordForPage,
-  buildSerpCopyAdvice
+  buildSerpCopyAdvice,
+  keywordMatchesUrlIntent
 } from '../../lib/revenue-funnel-serp-copy.js';
 
 let activeBlendedSeasonality = null;
@@ -190,6 +191,7 @@ function topKeywordForPage(cleanedUrl, keywords) {
   let bestVol = -1;
   for (const k of keywords) {
     if (cleanUrl(k.best_url || '') !== cleanedUrl) continue;
+    if (!keywordMatchesUrlIntent(k.keyword, cleanedUrl)) continue;
     const v = Number(k.search_volume) || 0;
     if (v > bestVol) { best = k; bestVol = v; }
   }

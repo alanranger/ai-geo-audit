@@ -6,6 +6,7 @@ import {
 
 const ACADEMY = 'https://www.alanranger.com/free-online-photography-course';
 const COVENTRY = 'https://www.alanranger.com/photography-courses-coventry';
+const HIRE = 'https://www.alanranger.com/hire-a-professional-photographer-in-coventry';
 
 function cand(sig, lever, url, kw, profit) {
   return {
@@ -60,6 +61,12 @@ const bad = applyKeywordGuardrails(
   { allKeywords: keywords }
 )[0];
 ok(bad.guardrail_blocked_top3, 'Online query on Coventry URL blocked');
+
+const hireBad = applyKeywordGuardrails(
+  [cand('ctr|hire-bad', 'ctr', HIRE, 'photography courses', 40)],
+  { allKeywords: [{ keyword: 'photography courses', best_url: HIRE, search_volume: 6600 }] }
+)[0];
+ok(hireBad.guardrail_blocked_top3, 'Courses query on hire URL blocked from Top 3');
 
 console.log(failed ? `\n${failed} failed` : '\nAll guardrail checks passed');
 process.exit(failed ? 1 : 0);
