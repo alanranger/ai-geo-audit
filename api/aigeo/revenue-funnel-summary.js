@@ -11,6 +11,7 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
+import { readLatestGa4Metrics } from './ga4-data.js';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
@@ -308,7 +309,7 @@ function computeKpis(pageRows, auditLatest, auditPrior, revenueSnap) {
   };
 }
 
-function computeFunnel(kpis, revenueSnap) {
+function computeFunnel(kpis, revenueSnap, ga4Snap) {
   // Six-stage funnel. Industry benchmark targets are conservative defaults;
   // tweak in dashboard if needed.
   const clicks = kpis.total_clicks_28d;
@@ -316,11 +317,12 @@ function computeFunnel(kpis, revenueSnap) {
   const moneyClicks = kpis.total_money_clicks_28d;
   const txns = revenueSnap ? Number(revenueSnap.transactions) || 0 : 0;
   const revenue = revenueSnap ? Number(revenueSnap.revenue_amount) || 0 : 0;
+  const enquiry = ga4Snap != null ? Number(ga4Snap.enquiry_events_28d) : null;
   return [
     { stage: 'Impressions', value: impr, target_pct_next: 1.5 },
     { stage: 'Clicks', value: clicks, target_pct_next: 25 },
     { stage: 'Money-page clicks', value: moneyClicks, target_pct_next: 8 },
-    { stage: 'Add-to-cart / enquiry', value: null, target_pct_next: 35 },
+    { stage: 'Add-to-cart / enquiry', value: enquiry, target_pct_next: 35 },
     { stage: 'Transactions', value: txns || null, target_pct_next: null },
     { stage: 'Revenue', value: revenue || null, target_pct_next: null }
   ];
@@ -1143,19 +1145,20 @@ export default async function handler(req, res) {
   const propertyUrl = String(req.query?.propertyUrl || DEFAULT_PROPERTY).trim();
   try {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
-    const [audits, pageMetrics, revenueSnap, aiMap, priorities, revenueHistory] = await Promise.all([
+    const [audits, pageMetrics, revenueSnap, aiMap, priorities, revenueHistory, ga4Snap] = await Promise.all([
       fetchLatestAudit(supabase, propertyUrl),
       fetchPageMetrics(supabase, propertyUrl),
       fetchLatestRevenue(supabase, propertyUrl),
       fetchAiOverviewMap(supabase, propertyUrl),
       fetchPrioritiesWithCycle(supabase, propertyUrl),
-      fetchRevenueHistory(supabase, propertyUrl)
+      fetchRevenueHistory(supabase, propertyUrl),
+      readLatestGa4Metrics(supabase, propertyUrl)
     ]);
     const pageRows = pageMetrics.rows;
     const auditLatest = audits[0] || null;
     const auditPrior = audits[1] || null;
     const kpis = computeKpis(pageRows, auditLatest, auditPrior, revenueSnap);
-    const funnel = computeFunnel(kpis, revenueSnap);
+    const funnel = computeFunnel(kpis, revenueSnap, ga4Snap);
     const leakPages = pickLeakPages(pageRows);
     const earningPages = pickEarningPages(pageRows);
     const revenueHistoryDecorated = decorateHistoryWithTargets(revenueHistory);
@@ -1168,6 +1171,19 @@ export default async function handler(req, res) {
       property_url: propertyUrl,
       generated_at: new Date().toISOString(),
       page_metrics_date_end: pageMetrics.dateEnd,
+      ga4_metrics_date_end: ga4Snap?.date_end || null,
+      ga4_metrics_captured_at: ga4Snap?.captured_at || null,
+      ga4_metrics: ga4Snap ? {
+        date_start: ga4Snap.date_start,
+        date_end: ga4Snap.date_end,
+        sessions_28d: Number(ga4Snap.sessions_28d) || 0,
+        page_views_28d: Number(ga4Snap.page_views_28d) || 0,
+        enquiry_events_28d: Number(ga4Snap.enquiry_events_28d) || 0,
+        top_events: Object.entries(ga4Snap.event_counts || {})
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 8)
+          .map(([eventName, count]) => ({ eventName, count: Number(count) || 0 }))
+      } : null,
       kpis,
       kpi_targets: kpiTargets,
       funnel,

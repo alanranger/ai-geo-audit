@@ -20,6 +20,25 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || proce
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 const SOURCES = ['squarespace_api', 'stripe_supplemental', 'booking_sheet', 'manual'];
 
+async function fetchGa4Status(supabase, propertyUrl) {
+  const { data, error } = await supabase
+    .from('ga4_site_metrics_28d')
+    .select('captured_at, date_start, date_end, enquiry_events_28d')
+    .eq('property_url', propertyUrl)
+    .order('date_end', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  const latest = data?.[0] || null;
+  return {
+    source: 'ga4_api',
+    last_synced_at: latest ? latest.captured_at : null,
+    last_period_start: latest ? latest.date_start : null,
+    last_period_end: latest ? latest.date_end : null,
+    enquiry_events_28d: latest ? Number(latest.enquiry_events_28d) : null,
+    row_count: latest ? 1 : 0
+  };
+}
+
 function noop() {}
 
 async function fetchMaxCreatedAt(supabase, propertyUrl, source) {
@@ -73,6 +92,7 @@ export default async function handler(req, res) {
       // eslint-disable-next-line no-await-in-loop
       out[src] = await buildStatusForSource(supabase, propertyUrl, src);
     }
+    out.ga4_api = await fetchGa4Status(supabase, propertyUrl);
     res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=60');
     return res.status(200).json({
       property_url: propertyUrl,

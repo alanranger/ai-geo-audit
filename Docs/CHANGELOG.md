@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-21] - GA4 Data API → Revenue Funnel
+
+- **`GET` / `POST` `/api/aigeo/ga4-metrics`** — pulls GA4 Data API (28d, GSC-aligned window), caches in **`ga4_site_metrics_28d`**.
+- **`revenue-funnel-summary`** — funnel stage **Add-to-cart / enquiry** uses **`enquiry_events_28d`** (`form_start`, `view_item`, `generate_lead`, `begin_checkout`, `add_to_cart`, `checklist_download`).
+- **UI:** **Sync GA4** button + GA4 line on revenue sync banner; **Sync everything** includes GA4 step 4 of 5.
+- **Env:** `GA4_PROPERTY_ID` (default `289575590`); uses existing `GOOGLE_*` OAuth (needs `analytics.readonly` + `webmasters.readonly`).
+- **Migration:** `migrations/20260521_ga4_site_metrics_28d.sql`.
+
 ## [2026-05-21] - Revenue Funnel trust loop + Auto-Optimise layout + preset diversity
 
 - **UI:** Auto-Optimise uses one 4-column grid (Do Nothing | Easy | Balanced | Hard) with summary tile above each detail card; green/red uplift vs Do Nothing; optional sticky summary row.
