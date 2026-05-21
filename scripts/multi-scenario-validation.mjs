@@ -1,25 +1,5 @@
 // Multi-scenario validation pass (2026-05-20 phase H+).
-//
-// Calls the live picker + auto-optimise + seasonality endpoints
-// against five distinct scenarios:
-//
-//   1. Baseline                   (no weight bias)
-//   2. Auto: Easy                 (preset)
-//   3. Auto: Balanced             (preset)
-//   4. Auto: Hard                 (preset)
-//   5. Custom: workshops-peak     (boost workshops_nonres + workshops_residential)
-//   6. Custom: services-opportunity (boost services + hire to chase 1-2-1 gap-filler)
-//
-// For each scenario:
-//   - Captures top 3 candidates per active scenario via /smart-priorities
-//   - Captures top 5 per preset via /auto-optimise
-//   - Confirms differentiation: at least 2 of 3 top URLs differ from baseline
-//   - Confirms suppression: every candidate URL appearing in an active
-//     optimisation_task_cycles row carries a suppression block
-//   - Confirms seasonality: every candidate.seasonality_factor !== 1.0 for
-//     a tier whose current-month factor != 1.0
-//
-// Writes a markdown report under Docs/ at the end.
+// Baseline + Auto presets + two custom weight permutations.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -45,8 +25,11 @@ async function getSeasonality() {
   return r.json || {};
 }
 
-async function getTopCandidates() {
-  const r = await http('GET', '/api/aigeo/revenue-funnel-smart-priorities?propertyUrl=' + encodeURIComponent(PROP));
+async function getTopCandidates(validationScenario) {
+  const qs = validationScenario
+    ? '&validationScenario=' + encodeURIComponent(validationScenario)
+    : '';
+  const r = await http('GET', '/api/aigeo/revenue-funnel-smart-priorities?propertyUrl=' + encodeURIComponent(PROP) + qs);
   return (r.json && r.json.candidates) || [];
 }
 
@@ -81,21 +64,41 @@ function diffUrls(baselineUrls, scenarioUrls) {
   return scenarioUrls.filter(u => !set.has(u)).length;
 }
 
+function presetPairDiff(a, b) {
+  const sa = new Set(a);
+  return b.filter(u => !sa.has(u)).length;
+}
+
 async function run() {
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   console.log('Running multi-scenario validation at', ts);
   const seasonality = await getSeasonality();
   console.log('Current month:', seasonality.month_name, '·', (seasonality.monitoring || {}).urls_in_monitoring, 'URLs in monitoring');
-  for (const b of (seasonality.tier_bands || [])) {
-    console.log('  · ' + b.tier_id + ':', b.label, '(x' + b.factor.toFixed(2) + ')');
-  }
+  if (seasonality.seasonality_calibration) console.log(' ', seasonality.seasonality_calibration);
 
-  const baseline = await getTopCandidates();
+  const baseline = await getTopCandidates('');
   const baselineUrls = topUrls(baseline, 3);
   console.log('\nBASELINE top 3:');
   baseline.slice(0, 3).forEach(c => console.log(' ', summariseCandidate(c)));
-  console.log('  · ' + countSuppressed(baseline) + ' of top 8 carry a suppression flag');
-  console.log('  · ' + countSeasonScaled(baseline) + ' of top 8 are seasonality-scaled');
+
+  const customScenarios = [
+    { key: 'workshops_peak', label: 'Custom: workshops-peak' },
+    { key: 'services_opportunity', label: 'Custom: services-opportunity' }
+  ];
+  const customSummary = [];
+  for (const sc of customScenarios) {
+    const cands = await getTopCandidates(sc.key);
+    const urls = topUrls(cands, 3);
+    customSummary.push({
+      preset: sc.key,
+      name: sc.label,
+      urls,
+      diff_from_baseline: diffUrls(baselineUrls, urls),
+      suppressed: countSuppressed(cands.slice(0, 8)),
+      season_scaled: countSeasonScaled(cands.slice(0, 8))
+    });
+    console.log('\n' + sc.label + ' top 3:', urls.join(' | '), '| diff:', diffUrls(baselineUrls, urls));
+  }
 
   const presets = await getAutoOptimise();
   const presetSummary = presets.map(p => {
@@ -108,13 +111,20 @@ async function run() {
       suppressed: countSuppressed(p.top_candidates || []),
       season_scaled: countSeasonScaled(p.top_candidates || []),
       monthly_gp: (p.totals || {}).monthly_gp_lift_gbp,
-      annual_gp:  (p.totals || {}).annualised_gp_lift_gbp
+      annual_gp: (p.totals || {}).annualised_gp_lift_gbp
     };
   });
   console.log('\nAUTO-OPTIMISE PRESETS:');
   for (const s of presetSummary) {
-    console.log(' ', s.preset, '|', s.urls.join(' | '), '| diff-from-baseline:', s.diff_from_baseline, '| supp:', s.suppressed, '| season:', s.season_scaled, '| £' + s.monthly_gp + '/mo, £' + s.annual_gp + '/yr');
+    console.log(' ', s.preset, '|', s.urls.join(' | '), '| diff:', s.diff_from_baseline);
   }
+
+  const easy = presetSummary.find(s => s.preset === 'easy');
+  const balanced = presetSummary.find(s => s.preset === 'balanced');
+  const hard = presetSummary.find(s => s.preset === 'hard');
+  const presetCrossDiff = (easy && balanced)
+    ? presetPairDiff(easy.urls, balanced.urls) + presetPairDiff(balanced.urls, (hard || {}).urls || [])
+    : 0;
 
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
   const lines = [];
@@ -127,6 +137,8 @@ async function run() {
   lines.push('');
   lines.push('Current month: **' + seasonality.month_name + '**');
   lines.push('URLs in monitoring: **' + ((seasonality.monitoring || {}).urls_in_monitoring || 0) + '**');
+  if (seasonality.seasonality_calibration) lines.push('');
+  if (seasonality.seasonality_calibration) lines.push('_' + seasonality.seasonality_calibration + '_');
   lines.push('');
   lines.push('| Tier | Band | Factor |');
   lines.push('|---|---|---|');
@@ -141,6 +153,14 @@ async function run() {
   lines.push('Suppression flags in top 8: **' + countSuppressed(baseline) + '**');
   lines.push('Seasonality-scaled in top 8: **' + countSeasonScaled(baseline) + '**');
   lines.push('');
+  lines.push('## Custom weight permutations');
+  lines.push('');
+  lines.push('| Scenario | Top 3 URLs | Diff from baseline | Suppressed | Season-scaled |');
+  lines.push('|---|---|---|---|---|');
+  for (const s of customSummary) {
+    lines.push('| ' + s.preset + ' | ' + s.urls.join('<br>') + ' | ' + s.diff_from_baseline + ' | ' + s.suppressed + ' | ' + s.season_scaled + ' |');
+  }
+  lines.push('');
   lines.push('## Auto-Optimise presets');
   lines.push('');
   lines.push('| Preset | Top 3 URLs | Diff from baseline | Suppressed | Season-scaled | Mo GP | Yr GP |');
@@ -152,11 +172,15 @@ async function run() {
   lines.push('## Verdict');
   lines.push('');
   const allDifferentiate = presetSummary.every(s => s.diff_from_baseline >= 1);
+  const customDifferentiate = customSummary.every(s => s.diff_from_baseline >= 1);
+  const presetsDivergeEachOther = presetCrossDiff >= 2;
   const someSuppression = countSuppressed(baseline) > 0;
   const someSeason = countSeasonScaled(baseline) > 0;
-  lines.push('- Differentiation: ' + (allDifferentiate ? 'PASS (each preset diverges from baseline in at least 1 URL)' : 'FAIL'));
-  lines.push('- Suppression layer firing: ' + (someSuppression ? 'PASS' : 'FAIL (no suppression flags found)'));
-  lines.push('- Seasonality layer firing: ' + (someSeason ? 'PASS' : 'FAIL (no season scaling found)'));
+  lines.push('- Auto preset vs baseline: ' + (allDifferentiate ? 'PASS' : 'FAIL'));
+  lines.push('- Custom vs baseline: ' + (customDifferentiate ? 'PASS' : 'FAIL'));
+  lines.push('- Easy/Balanced/Hard cross-divergence: ' + (presetsDivergeEachOther ? 'PASS' : 'FAIL'));
+  lines.push('- Suppression layer firing: ' + (someSuppression ? 'PASS' : 'FAIL'));
+  lines.push('- Seasonality layer firing: ' + (someSeason ? 'PASS' : 'FAIL'));
   const fname = 'MULTI_SCENARIO_VALIDATION_' + ts + '.md';
   fs.writeFileSync(path.join(OUT_DIR, fname), lines.join('\n'), 'utf8');
   console.log('\nReport written to Docs/' + fname);

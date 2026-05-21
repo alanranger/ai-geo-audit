@@ -28,6 +28,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { __INTERNAL as SP } from './revenue-funnel-smart-priorities.js';
+import { loadBlendedSeasonality } from '../../lib/revenue-funnel-seasonality-blend.js';
+import { academyTierHealth } from '../../lib/revenue-funnel-academy-economics.js';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
@@ -137,24 +139,69 @@ function sanitiseCandidate(c) {
 // Greedy effort-budget pick: walk the re-sorted list, take candidates
 // in order, stop when cumulative effort_hours would exceed budget.
 function pickWithinBudget(ranked, budgetHours) {
-  const picked = [];
-  let used = 0;
-  for (const c of ranked) {
-    const eh = Number(c.effort_hours) || 0;
-    if (eh + used > budgetHours) continue;
-    picked.push(c);
-    used += eh;
-  }
-  return { picked, hours_used: Math.round(used * 10) / 10 };
+  return pickWithinBudgetDiverse(ranked, budgetHours);
 }
 
 // Re-sort the picker's output by the preset's strategic objective.
 // We DON'T trust the picker's `weighted_score` directly because the
 // presets express strategy via filter+sort, not just weights.
-function rerankForPreset(allRanked, preset) {
-  const eligible = allRanked.filter(preset.filter);
-  eligible.sort((a, b) => preset.score(b) - preset.score(a));
+function presetScore(c) {
+  return Number(c.estimated_lift_gbp_profit) || Number(c.lift_per_hour_gbp) || 0;
+}
+
+function rerankForPreset(allRanked, preset, ctx) {
+  const monthIdx = ctx?.monthIdx ?? 0;
+  let eligible = allRanked.filter(preset.filter);
+  if (preset.id === 'easy') {
+    eligible = eligible.filter(c => c.lever_id !== 'surfacing');
+    eligible.forEach(c => {
+      if (c.tier_id === 'hire' || c.tier_id === 'services') c._preset_score = preset.score(c) * 1.45;
+    });
+  } else if (preset.id === 'balanced' && ctx?.gapTierId) {
+    eligible.forEach(c => {
+      if (c.tier_id === ctx.gapTierId) c._preset_score = preset.score(c) * 1.35;
+    });
+  } else if (preset.id === 'hard') {
+    const peakMo = [3, 4, 8, 9, 10];
+    if (peakMo.includes(monthIdx)) {
+      eligible.forEach(c => {
+        if (c.tier_id === 'workshops_nonres' || c.tier_id === 'workshops_residential') {
+          c._preset_score = preset.score(c) * 1.55;
+        }
+      });
+    }
+    eligible = eligible.filter(c => c.lever_id !== 'surfacing' || String(c.tier_id || '').startsWith('workshops'));
+  }
+  eligible.sort((a, b) => {
+    const sa = Number(a._preset_score) || preset.score(a);
+    const sb = Number(b._preset_score) || preset.score(b);
+    return sb - sa;
+  });
   return eligible;
+}
+
+function primaryUrl(c) {
+  const u = Array.isArray(c.pages_affected) ? c.pages_affected[0] : '';
+  return String(u || '').replace(/^https?:\/\/[^/]+/i, '').replace(/\/$/, '') || '/';
+}
+
+function pickWithinBudgetDiverse(ranked, budgetHours) {
+  const picked = [];
+  const usedUrls = new Set();
+  let used = 0;
+  for (const c of ranked) {
+    const eh = Number(c.effort_hours) || 0;
+    if (eh + used > budgetHours) continue;
+    const url = primaryUrl(c);
+    if (usedUrls.has(url) && picked.length >= 1) {
+      const alt = ranked.find(x => !usedUrls.has(primaryUrl(x)) && (Number(x.effort_hours) || 0) + used <= budgetHours);
+      if (alt && presetScore(alt) >= presetScore(c) * 0.55) continue;
+    }
+    picked.push(c);
+    usedUrls.add(url);
+    used += eh;
+  }
+  return { picked, hours_used: Math.round(used * 10) / 10 };
 }
 
 // Aggregate the picked candidates: monthly + annualised revenue + GP.
@@ -265,17 +312,33 @@ function sanitisePresetCandidates(presetResults) {
 // calling the summary endpoint internally. We don't recompute it here
 // because the summary builder is non-trivial (tier history -> profit
 // pyramid -> targets) and the canonical truth lives in that file.
-async function fetchDoNothingBaseline(propertyUrl, req) {
+async function fetchSummary(propertyUrl, req) {
   const base = inferBaseUrl(req);
   const url  = `${base}/api/aigeo/revenue-funnel-summary?propertyUrl=${encodeURIComponent(propertyUrl)}`;
   try {
     const r = await fetch(url);
     if (!r.ok) return null;
-    const j = await r.json();
-    return extractBaseline(j);
+    return await r.json();
   } catch {
     return null;
   }
+}
+
+async function fetchDoNothingBaseline(propertyUrl, req) {
+  const j = await fetchSummary(propertyUrl, req);
+  return extractBaseline(j);
+}
+
+function gapTierFromSummary(summary) {
+  const hist = summary?.tier_history || [];
+  let worstId = null;
+  let worstVar = 0;
+  for (const t of hist) {
+    const v = t.current_month && t.current_month.variance_pct;
+    if (v == null || !Number.isFinite(v)) continue;
+    if (v < worstVar) { worstVar = v; worstId = t.tier_id; }
+  }
+  return worstId;
 }
 
 function extractBaseline(summary) {
@@ -330,14 +393,14 @@ function pctDelta(lift, baseline) {
 }
 
 // Resolve all preset summaries against the same snapshot in one pass.
-function runAllPresets(snapshot, suppressionMap) {
+function runAllPresets(snapshot, suppressionMap, ctx) {
   return PRESETS.map(meta => {
     const weights = {
       tier:  mapFromObj(meta.tier_weights),
       lever: mapFromObj(meta.lever_weights)
     };
-    const allRanked = SP.buildAllPriorities(snapshot, weights, suppressionMap);
-    const reranked  = rerankForPreset(allRanked, meta);
+    const allRanked = SP.buildAllPriorities(snapshot, weights, suppressionMap, ctx.pickerOpts);
+    const reranked  = rerankForPreset(allRanked, meta, ctx);
     const { picked, hours_used } = pickWithinBudget(reranked, meta.budget_hours);
     return summarisePreset(meta, picked, hours_used, allRanked.length);
   });
@@ -374,14 +437,23 @@ export default async function handler(req, res) {
 
   try {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
-    const [snapshot, baseline] = await Promise.all([
+    const [snapshot, summary, blended, academyHealth] = await Promise.all([
       SP.buildSnapshot(supabase, propertyUrl),
-      fetchDoNothingBaseline(propertyUrl, req)
+      fetchSummary(propertyUrl, req),
+      loadBlendedSeasonality(supabase, propertyUrl),
+      academyTierHealth(supabase, propertyUrl)
     ]);
+    if (SP.setBlendedSeasonality) SP.setBlendedSeasonality(blended);
+    const baseline = extractBaseline(summary);
     const optimCycles = await SP.fetchActiveOptimisationCycles(supabase);
     const suppressionMap = SP.buildSuppressionMap(optimCycles);
     const monthIdx = SP.currentMonthIndex();
-    const presetResults = runAllPresets(snapshot, suppressionMap);
+    const gapTierId = gapTierFromSummary(summary);
+    const presetResults = runAllPresets(snapshot, suppressionMap, {
+      monthIdx,
+      gapTierId,
+      pickerOpts: { academyHealth }
+    });
     await enrichPresetCandidates(presetResults, { suppressionMap, monthIdx });
     sanitisePresetCandidates(presetResults);
     const withDelta = applyBaselineDeltas(presetResults, baseline);

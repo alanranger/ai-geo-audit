@@ -7,6 +7,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { __INTERNAL as SP } from './revenue-funnel-smart-priorities.js';
+import { loadBlendedSeasonality } from '../../lib/revenue-funnel-seasonality-blend.js';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
@@ -60,7 +61,11 @@ export default async function handler(req, res) {
   try {
     const propertyUrl = String(req.query?.propertyUrl || DEFAULT_PROPERTY).trim();
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
-    const cycles = await SP.fetchActiveOptimisationCycles(supabase);
+    const [cycles, blended] = await Promise.all([
+      SP.fetchActiveOptimisationCycles(supabase),
+      loadBlendedSeasonality(supabase, propertyUrl)
+    ]);
+    if (SP.setBlendedSeasonality) SP.setBlendedSeasonality(blended);
     const suppressionMap = SP.buildSuppressionMap(cycles);
     const monthIdx = SP.currentMonthIndex();
     return send(res, 200, {
@@ -69,7 +74,8 @@ export default async function handler(req, res) {
       month_index: monthIdx,
       month_name: SP.MONTH_NAMES[monthIdx],
       tier_bands: buildTierBands(monthIdx),
-      monitoring: summariseMonitoring(suppressionMap)
+      monitoring: summariseMonitoring(suppressionMap),
+      seasonality_calibration: blended.calibration_note
     });
   } catch (e) {
     return send(res, 500, { error: 'server_error', detail: String(e && e.message || e) });

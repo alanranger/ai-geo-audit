@@ -19,6 +19,10 @@ export const config = { runtime: 'nodejs' };
 import { createClient } from '@supabase/supabase-js';
 import { COMMERCIAL_TIERS, classifyCommercialTier } from './commercial-tier.js';
 import { validateUrlsLive } from './lib/live-page-validator.js';
+import { loadBlendedSeasonality, factorFromBlend } from '../../lib/revenue-funnel-seasonality-blend.js';
+import { academyTierHealth } from '../../lib/revenue-funnel-academy-economics.js';
+
+let activeBlendedSeasonality = null;
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 const MIN_IMPRESSIONS_FOR_CTR_TASK = 500;
@@ -765,7 +769,48 @@ function applySuppressionPenaltyToCandidate(c, suppressionMap) {
   return c;
 }
 
-function buildAllPriorities(snapshot, weights, suppressionMap) {
+function validationWeightsFor(key) {
+  const flat = { academy: 1, courses: 1, workshops_nonres: 1, workshops_residential: 1, services: 1, hire: 1 };
+  const tier = new Map(Object.entries(flat));
+  const lever = new Map(Object.entries({ ctr: 1, schema: 1, aio: 1, rank: 1, surfacing: 1, conversion: 1 }));
+  if (key === 'workshops_peak') {
+    tier.set('workshops_nonres', 2.5);
+    tier.set('workshops_residential', 2.5);
+    tier.set('courses', 0.6);
+    return { scenario_id: null, scenario_name: 'Validation: workshops peak', tier, lever };
+  }
+  if (key === 'services_opportunity') {
+    tier.set('services', 2.4);
+    tier.set('hire', 2.4);
+    tier.set('courses', 0.7);
+    return { scenario_id: null, scenario_name: 'Validation: services opportunity', tier, lever };
+  }
+  return null;
+}
+
+function academyReviewCandidate(health, propertyUrl) {
+  if (!health || !health.suppress_academy_picker) return null;
+  const m0 = (health.months && health.months[0]) || {};
+  const m1 = (health.months && health.months[1]) || {};
+  return {
+    tier_id: 'academy',
+    tier_label: 'Academy',
+    lever_id: 'conversion',
+    signature: 'academy-tier-review',
+    title: 'REVIEW: keep Academy live?',
+    description: `Academy net GP was negative for the last two closed months (e.g. ${m0.period_start || '?'}: £${m0.net_gp_gbp || 0} after £${health.monthly_fixed_cost_gbp}/mo costs). Trailing signups ~${m0.signups_est || 0}/mo vs minimum ${health.min_paid_signups_per_month}. Decide whether to freeze marketing, cut costs, or retire the tier.`,
+    pages_affected: ['https://www.alanranger.com/free-online-photography-course'],
+    primary_kpi: 'paid_signups',
+    estimated_lift_gbp_revenue: 0,
+    estimated_lift_gbp_profit: 0,
+    weighted_score: 99999,
+    property_url: propertyUrl,
+    status: 'not_started',
+    academy_economics: health
+  };
+}
+
+function buildAllPriorities(snapshot, weights, suppressionMap, pickerOpts) {
   // First, collect every tier's candidates without sort_order. We then
   // sort ALL candidates by scenario-WEIGHTED GP lift so the top of the
   // priority queue reflects the active scenario's tier + lever
@@ -774,16 +819,24 @@ function buildAllPriorities(snapshot, weights, suppressionMap) {
   // weights = { tier: Map<tier_id, weight>, lever: Map<lever_id, weight>,
   //             scenario_id, scenario_name } - or null for flat weighting.
   const { tierWeightOf, leverWeightOf } = makeWeightLookups(weights);
+  const academyHealth = pickerOpts && pickerOpts.academyHealth;
+  const academyPenalty = academyHealth && academyHealth.suppress_academy_picker ? 0.08 : 1;
   const collected = [];
+  const review = academyReviewCandidate(academyHealth, snapshot.propertyUrl);
+  if (review) collected.push(review);
   for (const tier of COMMERCIAL_TIERS) {
     const hub = tierHub(tier.id);
     if (!hub) continue;
-    const tierWeight = tierWeightOf(tier.id);
+    let tierWeight = tierWeightOf(tier.id);
+    if (tier.id === 'academy') tierWeight *= academyPenalty;
     if (tierWeight <= WEIGHT_ZERO_THRESHOLD) continue;
     const cands = buildPrioritiesForTier(tier.id, tierSnapshotSlice(snapshot, tier.id, hub));
     for (const c of cands) {
       const enriched = enrichCandidate(c, tier, tierWeight, leverWeightOf, snapshot.propertyUrl);
       if (enriched) {
+        if (tier.id === 'academy' && academyPenalty < 1) {
+          enriched.academy_economics = { badge: academyHealth.badge, under_minimum: academyHealth.under_minimum_signups };
+        }
         applySuppressionPenaltyToCandidate(enriched, suppressionMap);
         collected.push(enriched);
       }
@@ -826,6 +879,7 @@ export const __INTERNAL = {
   seasonalityLabel:                 (band)       => seasonalityLabel(band),
   get MONTH_NAMES()                              { return MONTH_NAMES; },
   get SEASONALITY_BY_TIER()                      { return SEASONALITY_BY_TIER; },
+  setBlendedSeasonality:            (b) => { activeBlendedSeasonality = b; },
   EFFORT_BY_LEVER:                  EFFORT_BY_LEVER,
   BASELINE_LIFT_GBP_PROFIT_BY_LEVER: BASELINE_LIFT_GBP_PROFIT_BY_LEVER
 };
@@ -1144,9 +1198,12 @@ function currentMonthIndex(now) {
 }
 
 function seasonalityFor(tierId, monthIdx) {
+  const i = Math.max(0, Math.min(11, Number(monthIdx) || 0));
+  if (activeBlendedSeasonality && activeBlendedSeasonality.byTier) {
+    return factorFromBlend(activeBlendedSeasonality.byTier, tierId, i);
+  }
   const arr = SEASONALITY_BY_TIER[tierId];
   if (!Array.isArray(arr)) return 1.0;
-  const i = Math.max(0, Math.min(11, Number(monthIdx) || 0));
   return arr[i];
 }
 
@@ -1458,14 +1515,19 @@ export default async function handler(req, res) {
 
   try {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
-    const [snapshot, weights, optimCycles] = await Promise.all([
+    const validationKey = String(req.query?.validationScenario || body.validationScenario || '').trim();
+    const [snapshot, weightsRaw, optimCycles, blended, academyHealth] = await Promise.all([
       buildSnapshot(supabase, propertyUrl),
       fetchActiveScenarioWeights(supabase, propertyUrl),
-      fetchActiveOptimisationCycles(supabase)
+      fetchActiveOptimisationCycles(supabase),
+      loadBlendedSeasonality(supabase, propertyUrl),
+      academyTierHealth(supabase, propertyUrl)
     ]);
+    activeBlendedSeasonality = blended;
+    const weights = validationWeightsFor(validationKey) || weightsRaw;
     const suppressionMap = buildSuppressionMap(optimCycles);
     const monthIdx = currentMonthIndex();
-    const candidates = buildAllPriorities(snapshot, weights, suppressionMap);
+    const candidates = buildAllPriorities(snapshot, weights, suppressionMap, { academyHealth });
     // Live-validate the top N candidates so their descriptions cite
     // the current live page state, not a possibly-stale audit row.
     // The same pass now also: (a) builds per-page recommended_actions[]
@@ -1490,6 +1552,8 @@ export default async function handler(req, res) {
         generated_at: new Date().toISOString(),
         candidate_count: candidates.length,
         active_scenario: scenarioContext,
+        seasonality_calibration: blended.calibration_note,
+        academy_economics: academyHealth,
         candidates: candidates.map(c => ({
           tier_id: c.tier_id, tier_label: c.tier_label, signature: c.signature,
           title: c.title, description: c.description, pages_affected: c.pages_affected,
@@ -1516,7 +1580,8 @@ export default async function handler(req, res) {
           lift_per_hour_gbp: c.lift_per_hour_gbp ?? null,
           live_data_source: c.live_data_source ?? 'audit',
           live_fetched_at: c.live_fetched_at ?? null,
-          live_fetch_error: c.live_fetch_error ?? null
+          live_fetch_error: c.live_fetch_error ?? null,
+          academy_economics: c.academy_economics ?? null
         }))
       });
     }

@@ -2,6 +2,15 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-21] - Revenue Funnel trust loop + Auto-Optimise layout + preset diversity
+
+- **UI:** Auto-Optimise uses one 4-column grid (Do Nothing | Easy | Balanced | Hard) with summary tile above each detail card; green/red uplift vs Do Nothing; optional sticky summary row.
+- **Trust loop:** `GET /api/aigeo/revenue-funnel-trust-loop` — recent `page_html` edits (14d), per-cycle GSC deltas on suppressed cards, auto GSC refresh when HTML is newer than last optimisation event.
+- **Academy economics:** `revenue_funnel_tier_costs` (Academy £100/mo, min 10 signups); picker suppresses Academy when net GP negative 2 months; REVIEW card when triggered.
+- **Seasonality:** blended 70% observed booking history + 30% stated calendar (`lib/revenue-funnel-seasonality-blend.js`); calibration note on seasonality banner.
+- **Auto-Optimise:** preset-specific rerank (Easy drops surfacing, boosts hire/services; Balanced boosts worst-variance tier; Hard boosts peak workshops) + URL-diverse pick within budget.
+- **Validation:** `scripts/multi-scenario-validation.mjs` adds `workshops_peak` and `services_opportunity` custom scenarios.
+
 ## [2026-05-20 Phase H+] - Optimisation-tracking suppression + per-tier seasonality + banner
 
 Addresses Alan's most direct critique of the picker: it kept
