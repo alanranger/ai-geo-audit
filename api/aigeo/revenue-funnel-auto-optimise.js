@@ -457,8 +457,20 @@ function stretchTargetsForBaseline(baseline) {
   };
 }
 
+function buildRawVsDoNothing(baseline, rawTotals) {
+  const yrRevLift = Number(rawTotals?.annualised_revenue_lift_gbp) || 0;
+  const yrGpLift = Number(rawTotals?.annualised_gp_lift_gbp) || 0;
+  return {
+    annualised_revenue_total_gbp: baseline.annualised_revenue_gbp + yrRevLift,
+    annualised_gp_total_gbp: baseline.annualised_gp_gbp + yrGpLift,
+    annualised_revenue_delta_gbp: yrRevLift,
+    annualised_gp_delta_gbp: yrGpLift
+  };
+}
+
 function calibratePresetStretch(preset, baseline, target) {
   if (!target || !baseline) return preset;
+  const rawSnap = preset.totals;
   const yrRevLift = Math.max(0, target.annual_rev - baseline.annualised_revenue_gbp);
   const yrGpLift = Math.max(0, target.annual_gp - baseline.annualised_gp_gbp);
   const moRevLift = Math.round(yrRevLift / 12);
@@ -470,11 +482,12 @@ function calibratePresetStretch(preset, baseline, target) {
     annualised_revenue_lift_gbp: yrRevLift,
     annualised_gp_lift_gbp: yrGpLift,
     stretch_calibrated: true,
-    raw_totals: preset.totals
+    raw_totals: rawSnap
   };
   return {
     ...preset,
     totals: newTotals,
+    vs_do_nothing_raw: buildRawVsDoNothing(baseline, rawSnap),
     vs_do_nothing: {
       monthly_revenue_total_gbp: Math.round(target.annual_rev / 12),
       monthly_gp_total_gbp: Math.round(target.annual_gp / 12),
