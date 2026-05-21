@@ -2,6 +2,13 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-21] - Keyword ownership guardrails (smart priorities + Top 3 UI)
+
+- **`lib/revenue-funnel-keyword-guardrails.js`** — merges same-URL CTR+rank for one query; blocks cross-page cannibalization (e.g. “online” on Coventry); safe title leads (Academy → `photography lessons online`, Coventry → geo-first).
+- **`revenue-funnel-smart-priorities.js`** — CTR/rank action copy uses safe leads; GET returns `guardrail_*`, `primary_query`, `merged_levers`.
+- **`audit-dashboard.html`** — Top 3 skips blocked cards; guardrail pill on each card; subtitle explains one owner per page.
+- **Test:** `node scripts/test-keyword-guardrails.mjs`
+
 ## [2026-05-21] - GA4 money-page funnel, enquiry→sale KPI, picker bias, weekly cron
 
 - **Money-page GA4:** `ga4-data.js` rolls enquiry events on **money-page paths only** → `money_page_enquiry_events_28d`; funnel stage 4 uses that (falls back to site-wide if zero).
