@@ -1,6 +1,7 @@
 import {
   buildHubMeta,
   buildHubTitle,
+  buildMetaSeed,
   buildSerpCopyAdvice,
   fitMetaDescription,
   hubMetaMeetsIntent,
@@ -57,6 +58,22 @@ ok(em === 'Coventry - test', 'normalizeSerpText fixes em dash');
 
 const fitted = fitMetaDescription('x'.repeat(200));
 ok(fitted.valid && fitted.length <= META_MAX, 'fitMetaDescription clamps long text');
+
+const fittedShort = fitMetaDescription(buildMetaSeed(
+  'https://www.alanranger.com/photography-workshops-near-me', 'Photography Workshops', 'photography workshops'
+));
+ok(!fittedShort.text.match(/Book today\. Book today/), 'fitMetaDescription does not repeat Book today');
+ok(fittedShort.valid, 'Workshops seed fits 150-160 band');
+
+const ws = buildSerpCopyAdvice({
+  pageUrl: 'https://www.alanranger.com/photography-workshops-near-me',
+  rankingKw: 'photography workshops',
+  rank: 12,
+  title: 'Old title',
+  meta: 'Too short'
+});
+ok(ws.metaExample && !ws.metaExample.includes('Book today. Book today'), 'Workshops meta has no spam padding');
+ok(ws.lead && /workshop/i.test(ws.lead), 'Workshops lead uses workshops not Coventry');
 
 console.log('Coventry meta:', meta.text);
 console.log(failed ? `${failed} failed` : 'All serp-copy checks passed');
