@@ -27,6 +27,10 @@ import {
   buildConversionGapCandidate,
   conversionHealthFromMetrics
 } from '../../lib/revenue-funnel-conversion-bias.js';
+import {
+  applyKeywordGuardrails,
+  safeTitleLead
+} from '../../lib/revenue-funnel-keyword-guardrails.js';
 
 let activeBlendedSeasonality = null;
 
@@ -868,18 +872,7 @@ function buildAllPriorities(snapshot, weights, suppressionMap, pickerOpts) {
       }
     }
   }
-  collected.sort((a, b) => {
-    const aScore = Number(a.weighted_score) || 0;
-    const bScore = Number(b.weighted_score) || 0;
-    if (aScore !== bScore) return bScore - aScore;
-    // Secondary tiebreaker: raw numeric profit lift (so genuinely-bigger
-    // numeric actions beat baseline-lift qualitative ones when scores tie).
-    const aProf = Number(a.estimated_lift_gbp_profit) || 0;
-    const bProf = Number(b.estimated_lift_gbp_profit) || 0;
-    if (aProf !== bProf) return bProf - aProf;
-    return 0;
-  });
-  return collected.map((c, i) => ({ ...c, sort_order: (i + 1) * 10 }));
+  return applyKeywordGuardrails(collected, snapshot);
 }
 
 // Named export bundle used by other endpoints (e.g. the auto-optimise
@@ -894,7 +887,8 @@ function buildAllPriorities(snapshot, weights, suppressionMap, pickerOpts) {
 // module has finished evaluating.
 export const __INTERNAL = {
   buildSnapshot:                    (s, u)       => buildSnapshot(s, u),
-  buildAllPriorities:               (s, w, sm)  => buildAllPriorities(s, w, sm),
+  buildAllPriorities:               (s, w, sm, po) => buildAllPriorities(s, w, sm, po),
+  applyKeywordGuardrails,
   liveEnrichTopCandidates:          (c, ctx)     => liveEnrichTopCandidates(c, ctx),
   fetchActiveScenarioWeights:       (s, u)       => fetchActiveScenarioWeights(s, u),
   fetchActiveOptimisationCycles:    (s)          => fetchActiveOptimisationCycles(s),
@@ -1278,11 +1272,15 @@ function applySeasonalityToCandidate(c, monthIdx) {
 function ctrTitleAction(c, kw, rank, title) {
   if (!title) return null;
   const lower = title.toLowerCase();
-  if (kw && !lower.includes(String(kw).toLowerCase())) {
+  const pageUrl = Array.isArray(c.pages_affected) ? c.pages_affected[0] : '';
+  const safe = safeTitleLead(pageUrl, kw);
+  const lead = safe.lead || kw;
+  if (lead && !lower.includes(String(lead).toLowerCase())) {
+    const guardNote = safe.note ? ` ${safe.note}` : '';
     return {
       step: 1, effort_hours: 0.5, confidence: 'high', tag: 'title',
-      headline: `Lead the page title with "${kw}"`,
-      detail: `Current title is "${title}" (${title.length}ch). You actually rank #${rank} for "${kw}" but it isn't in the title — SERP CTR drops when the displayed title doesn't echo the query the user typed. Test a 55–60ch title that opens with "${kw}".`
+      headline: `Lead the page title with "${lead}"`,
+      detail: `Current title is "${title}" (${title.length}ch). You rank #${rank} for "${kw}" but the title should echo the query without competing with another money page.${guardNote} Test a 55–60ch title opening with "${lead}".`
     };
   }
   if (title.length < 35) {
@@ -1343,14 +1341,17 @@ function buildCtrActions(c, live) {
   return actions.map((a, i) => ({ step: i + 1, ...a }));
 }
 
-function rankCheapestAction(keyword, hasKwInTitle, hasKwInH1) {
+function rankCheapestAction(keyword, hasKwInTitle, hasKwInH1, pageUrl) {
   if (hasKwInTitle && hasKwInH1) return null;
+  const safe = safeTitleLead(pageUrl, keyword);
+  const head = safe.lead || keyword;
   const titleNote = hasKwInTitle ? 'already contains' : 'is MISSING';
   const h1Note    = hasKwInH1    ? 'already contains' : 'is MISSING';
+  const guardNote = safe.note ? ` ${safe.note}` : '';
   return {
     effort_hours: 0.5, confidence: 'high', tag: 'on-page',
-    headline: `Put "${keyword}" in BOTH the page title AND the H1`,
-    detail: `Current title ${titleNote} the head term. Current H1 ${h1Note} the head term. For top-3 ranking Google needs the head term in both — this is the cheapest move before any content work.`
+    headline: `Put "${head}" in BOTH the page title AND the H1`,
+    detail: `Current title ${titleNote} the head term. Current H1 ${h1Note} the head term. For top-3 ranking Google needs the head term in both on this URL only — not on other tier pages.${guardNote}`
   };
 }
 
@@ -1364,7 +1365,8 @@ function buildRankActions(c, live) {
   const hasKwInTitle = !!(title && keyword && title.toLowerCase().includes(String(keyword).toLowerCase()));
   const hasKwInH1    = !!(h1    && keyword && h1.toLowerCase().includes(String(keyword).toLowerCase()));
   const actions = [];
-  const cheap = rankCheapestAction(keyword, hasKwInTitle, hasKwInH1);
+  const pageUrl = Array.isArray(c.pages_affected) ? c.pages_affected[0] : '';
+  const cheap = rankCheapestAction(keyword, hasKwInTitle, hasKwInH1, pageUrl);
   if (cheap) actions.push(cheap);
   if (hasKwInTitle && hasKwInH1) {
     actions.push({
@@ -1613,7 +1615,15 @@ export default async function handler(req, res) {
           live_data_source: c.live_data_source ?? 'audit',
           live_fetched_at: c.live_fetched_at ?? null,
           live_fetch_error: c.live_fetch_error ?? null,
-          academy_economics: c.academy_economics ?? null
+          academy_economics: c.academy_economics ?? null,
+          primary_query: c.primary_query ?? null,
+          page_intent: c.page_intent ?? null,
+          keyword_owner_url: c.keyword_owner_url ?? null,
+          safe_title_lead: c.safe_title_lead ?? null,
+          guardrail_notes: c.guardrail_notes ?? null,
+          guardrail_severity: c.guardrail_severity ?? null,
+          guardrail_blocked_top3: !!c.guardrail_blocked_top3,
+          merged_levers: c.merged_levers ?? null
         }))
       });
     }
