@@ -23,7 +23,7 @@ const SOURCES = ['squarespace_api', 'stripe_supplemental', 'booking_sheet', 'man
 async function fetchGa4Status(supabase, propertyUrl) {
   const { data, error } = await supabase
     .from('ga4_site_metrics_28d')
-    .select('captured_at, date_start, date_end, enquiry_events_28d')
+    .select('captured_at, date_start, date_end, enquiry_events_28d, money_page_enquiry_events_28d')
     .eq('property_url', propertyUrl)
     .order('date_end', { ascending: false })
     .limit(1);
@@ -35,6 +35,7 @@ async function fetchGa4Status(supabase, propertyUrl) {
     last_period_start: latest ? latest.date_start : null,
     last_period_end: latest ? latest.date_end : null,
     enquiry_events_28d: latest ? Number(latest.enquiry_events_28d) : null,
+    money_page_enquiry_events_28d: latest ? Number(latest.money_page_enquiry_events_28d) : null,
     row_count: latest ? 1 : 0
   };
 }

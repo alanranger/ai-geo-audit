@@ -21,6 +21,12 @@ import { COMMERCIAL_TIERS, classifyCommercialTier } from './commercial-tier.js';
 import { validateUrlsLive } from './lib/live-page-validator.js';
 import { loadBlendedSeasonality, factorFromBlend } from '../../lib/revenue-funnel-seasonality-blend.js';
 import { academyTierHealth } from '../../lib/revenue-funnel-academy-economics.js';
+import { readLatestGa4Metrics } from './ga4-data.js';
+import {
+  applyFunnelConversionBias,
+  buildConversionGapCandidate,
+  conversionHealthFromMetrics
+} from '../../lib/revenue-funnel-conversion-bias.js';
 
 let activeBlendedSeasonality = null;
 
@@ -630,7 +636,8 @@ function buildPrioritiesForTier(tierId, tierData) {
 const BASELINE_LIFT_GBP_PROFIT_BY_LEVER = {
   rank: 120,
   schema: 60,
-  surfacing: 50
+  surfacing: 50,
+  conversion: 180
 };
 // Phase C: time-and-effort heuristics keyed by lever_id. effort_hours
 // is "person-time to do the action once" (Alan's hands on keyboard).
@@ -643,7 +650,8 @@ const EFFORT_BY_LEVER = {
   rank:      { effort_hours: 4.0, time_to_realise_days: 60, label: 'Content depth pass: head term into title + H1, 250-400w body extension, 6-8 FAQ items, hub backlinks.' },
   aio:       { effort_hours: 2.0, time_to_realise_days: 30, label: '60-90 word direct-answer block + FAQPage JSON-LD with 5 Q/A pairs.' },
   schema:    { effort_hours: 1.0, time_to_realise_days: 14, label: 'Drop the missing JSON-LD block into the hub page <head>.' },
-  surfacing: { effort_hours: 2.0, time_to_realise_days: 21, label: 'Add to hub product grid + 250-400w product page + one blog backlink.' }
+  surfacing: { effort_hours: 2.0, time_to_realise_days: 21, label: 'Add to hub product grid + 250-400w product page + one blog backlink.' },
+  conversion: { effort_hours: 2.0, time_to_realise_days: 21, label: 'Tighten enquiry → sale on money pages: form UX, offer clarity, checkout path.' }
 };
 const WEIGHT_ZERO_THRESHOLD = 0.05; // <= treat as "park this tier/lever"
 
@@ -810,6 +818,22 @@ function academyReviewCandidate(health, propertyUrl) {
   };
 }
 
+async function fetchRollingRevenueSnap(supabase, propertyUrl) {
+  const { data, error } = await supabase
+    .from('revenue_snapshots')
+    .select('period_start, period_end, transactions, revenue_amount')
+    .eq('property_url', propertyUrl)
+    .order('period_end', { ascending: false })
+    .limit(12);
+  if (error) throw error;
+  const rows = data || [];
+  if (!rows.length) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const closed = rows.filter((r) => r.period_end <= today);
+  const pick = (closed.length ? closed : rows)[0];
+  return pick;
+}
+
 function buildAllPriorities(snapshot, weights, suppressionMap, pickerOpts) {
   // First, collect every tier's candidates without sort_order. We then
   // sort ALL candidates by scenario-WEIGHTED GP lift so the top of the
@@ -824,6 +848,8 @@ function buildAllPriorities(snapshot, weights, suppressionMap, pickerOpts) {
   const collected = [];
   const review = academyReviewCandidate(academyHealth, snapshot.propertyUrl);
   if (review) collected.push(review);
+  const gap = buildConversionGapCandidate(pickerOpts && pickerOpts.conversionHealth, snapshot.propertyUrl);
+  if (gap) collected.push(gap);
   for (const tier of COMMERCIAL_TIERS) {
     const hub = tierHub(tier.id);
     if (!hub) continue;
@@ -1516,18 +1542,22 @@ export default async function handler(req, res) {
   try {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
     const validationKey = String(req.query?.validationScenario || body.validationScenario || '').trim();
-    const [snapshot, weightsRaw, optimCycles, blended, academyHealth] = await Promise.all([
+    const [snapshot, weightsRaw, optimCycles, blended, academyHealth, ga4Snap, revenueSnap] = await Promise.all([
       buildSnapshot(supabase, propertyUrl),
       fetchActiveScenarioWeights(supabase, propertyUrl),
       fetchActiveOptimisationCycles(supabase),
       loadBlendedSeasonality(supabase, propertyUrl),
-      academyTierHealth(supabase, propertyUrl)
+      academyTierHealth(supabase, propertyUrl),
+      readLatestGa4Metrics(supabase, propertyUrl),
+      fetchRollingRevenueSnap(supabase, propertyUrl)
     ]);
     activeBlendedSeasonality = blended;
-    const weights = validationWeightsFor(validationKey) || weightsRaw;
+    const conversionHealth = conversionHealthFromMetrics(ga4Snap, revenueSnap);
+    let weights = validationWeightsFor(validationKey) || weightsRaw;
+    weights = applyFunnelConversionBias(weights, conversionHealth);
     const suppressionMap = buildSuppressionMap(optimCycles);
     const monthIdx = currentMonthIndex();
-    const candidates = buildAllPriorities(snapshot, weights, suppressionMap, { academyHealth });
+    const candidates = buildAllPriorities(snapshot, weights, suppressionMap, { academyHealth, conversionHealth });
     // Live-validate the top N candidates so their descriptions cite
     // the current live page state, not a possibly-stale audit row.
     // The same pass now also: (a) builds per-page recommended_actions[]
@@ -1554,6 +1584,8 @@ export default async function handler(req, res) {
         active_scenario: scenarioContext,
         seasonality_calibration: blended.calibration_note,
         academy_economics: academyHealth,
+        funnel_conversion: conversionHealth,
+        funnel_conversion_bias: !!(weights && weights.funnel_conversion_bias),
         candidates: candidates.map(c => ({
           tier_id: c.tier_id, tier_label: c.tier_label, signature: c.signature,
           title: c.title, description: c.description, pages_affected: c.pages_affected,

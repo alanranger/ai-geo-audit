@@ -2,6 +2,7 @@
  * GA4 Data API fetch + Supabase cache for Revenue Funnel.
  */
 import { getGSCAccessToken, getGscDateRange } from './utils.js';
+import { isMoneyPagePath } from '../../lib/revenue-funnel-money-pages.js';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 const DEFAULT_GA4_PROPERTY_ID = '289575590';
@@ -56,6 +57,20 @@ function parseEventRows(report) {
   return counts;
 }
 
+function parsePageEventRows(report) {
+  let site = 0;
+  let money = 0;
+  for (const row of report?.rows || []) {
+    const pagePath = row.dimensionValues?.[0]?.value;
+    const eventName = row.dimensionValues?.[1]?.value;
+    if (!GA4_ENQUIRY_EVENT_NAMES.has(eventName)) continue;
+    const n = Number(row.metricValues?.[0]?.value) || 0;
+    site += n;
+    if (isMoneyPagePath(pagePath)) money += n;
+  }
+  return { site, money };
+}
+
 function parseTotals(report, metricNames) {
   const row = report?.rows?.[0];
   const out = {};
@@ -77,7 +92,13 @@ export async function fetchGa4FromGoogle() {
   const { startDate, endDate } = getGscDateRange({ daysBack: 28, endOffsetDays: 2 });
   const accessToken = await getGSCAccessToken();
   const range = { startDate, endDate };
-  const [eventsReport, totalsReport] = await Promise.all([
+  const enquiryFilter = {
+    filter: {
+      fieldName: 'eventName',
+      inListFilter: { values: [...GA4_ENQUIRY_EVENT_NAMES] }
+    }
+  };
+  const [eventsReport, pageEventsReport, totalsReport] = await Promise.all([
     runGa4Report(accessToken, {
       dateRanges: [range],
       dimensions: [{ name: 'eventName' }],
@@ -87,10 +108,18 @@ export async function fetchGa4FromGoogle() {
     }),
     runGa4Report(accessToken, {
       dateRanges: [range],
+      dimensions: [{ name: 'pagePath' }, { name: 'eventName' }],
+      metrics: [{ name: 'eventCount' }],
+      dimensionFilter: enquiryFilter,
+      limit: 10000
+    }),
+    runGa4Report(accessToken, {
+      dateRanges: [range],
       metrics: [{ name: 'sessions' }, { name: 'screenPageViews' }]
     })
   ]);
   const event_counts = parseEventRows(eventsReport);
+  const pageSplit = parsePageEventRows(pageEventsReport);
   const totals = parseTotals(totalsReport, ['sessions', 'screenPageViews']);
   return {
     ga4_property_id: ga4PropertyId(),
@@ -99,6 +128,7 @@ export async function fetchGa4FromGoogle() {
     sessions_28d: totals.sessions,
     page_views_28d: totals.screenPageViews,
     enquiry_events_28d: sumEnquiryEvents(event_counts),
+    money_page_enquiry_events_28d: pageSplit.money,
     event_counts,
     captured_at: new Date().toISOString()
   };
@@ -107,7 +137,7 @@ export async function fetchGa4FromGoogle() {
 export async function readLatestGa4Metrics(supabase, propertyUrl) {
   const { data, error } = await supabase
     .from('ga4_site_metrics_28d')
-    .select('property_url, ga4_property_id, date_start, date_end, sessions_28d, page_views_28d, enquiry_events_28d, event_counts, captured_at')
+    .select('property_url, ga4_property_id, date_start, date_end, sessions_28d, page_views_28d, enquiry_events_28d, money_page_enquiry_events_28d, event_counts, captured_at')
     .eq('property_url', propertyUrl)
     .order('date_end', { ascending: false })
     .limit(1);
@@ -129,6 +159,7 @@ export async function upsertGa4Snapshot(supabase, propertyUrl, snap) {
     sessions_28d: snap.sessions_28d,
     page_views_28d: snap.page_views_28d,
     enquiry_events_28d: snap.enquiry_events_28d,
+    money_page_enquiry_events_28d: snap.money_page_enquiry_events_28d,
     event_counts: snap.event_counts,
     captured_at: snap.captured_at
   };

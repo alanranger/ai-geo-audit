@@ -136,6 +136,7 @@ const KPI_BASELINES = {
   ctr_28d_pct: { target: 1.5, warn: 1 },              // last 28d CTR
   money_page_click_share_pct: { target: 3, warn: 2 },
   click_to_sale_pct: { target: 0.5, warn: 0.25 },
+  enquiry_to_sale_pct: { target: 2, warn: 1 },        // GA4 money-page enquiries → transactions
   revenue_per_1k_impressions: { target: 1, warn: 0.5 }
 };
 
@@ -276,7 +277,7 @@ async function fetchPageMetrics(supabase, propertyUrl) {
   return { rows: data || [], dateEnd: latestEnd };
 }
 
-function computeKpis(pageRows, auditLatest, auditPrior, revenueSnap) {
+function computeKpis(pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap) {
   const totals = pageRows.reduce((acc, r) => {
     const clicks = Number(r.clicks_28d) || 0;
     const impr = Number(r.impressions_28d) || 0;
@@ -293,17 +294,23 @@ function computeKpis(pageRows, auditLatest, auditPrior, revenueSnap) {
   const txns = revenueSnap ? Number(revenueSnap.transactions) || 0 : 0;
   const revPer1k = totals.impressions > 0 ? (revenue / totals.impressions) * 1000 : null;
   const clickToSale = pct(txns, totals.clicks);
+  const moneyEnquiry = ga4Snap != null ? Number(ga4Snap.money_page_enquiry_events_28d) : null;
+  const enquiryToSale = moneyEnquiry > 0 ? pct(txns, moneyEnquiry) : null;
 
   return {
     ctr_28d_pct: ctr,
     ctr_prior_pct: ctrPrior,
     money_page_click_share_pct: moneyShare,
     click_to_sale_pct: clickToSale,
+    enquiry_to_sale_pct: enquiryToSale,
     revenue_per_1k_impressions: revPer1k,
     revenue_currency: revenueSnap ? revenueSnap.currency : 'GBP',
     total_clicks_28d: totals.clicks,
     total_impressions_28d: totals.impressions,
     total_money_clicks_28d: totals.moneyClicks,
+    money_page_enquiry_events_28d: moneyEnquiry,
+    site_enquiry_events_28d: ga4Snap != null ? Number(ga4Snap.enquiry_events_28d) : null,
+    transactions_28d: txns,
     audit_date_latest: auditLatest ? auditLatest.audit_date : null,
     audit_date_prior: auditPrior ? auditPrior.audit_date : null
   };
@@ -317,12 +324,15 @@ function computeFunnel(kpis, revenueSnap, ga4Snap) {
   const moneyClicks = kpis.total_money_clicks_28d;
   const txns = revenueSnap ? Number(revenueSnap.transactions) || 0 : 0;
   const revenue = revenueSnap ? Number(revenueSnap.revenue_amount) || 0 : 0;
-  const enquiry = ga4Snap != null ? Number(ga4Snap.enquiry_events_28d) : null;
+  const moneyEnquiry = ga4Snap != null ? Number(ga4Snap.money_page_enquiry_events_28d) : null;
+  const enquiry = moneyEnquiry != null && moneyEnquiry > 0
+    ? moneyEnquiry
+    : (ga4Snap != null ? Number(ga4Snap.enquiry_events_28d) : null);
   return [
     { stage: 'Impressions', value: impr, target_pct_next: 1.5 },
     { stage: 'Clicks', value: clicks, target_pct_next: 25 },
     { stage: 'Money-page clicks', value: moneyClicks, target_pct_next: 8 },
-    { stage: 'Add-to-cart / enquiry', value: enquiry, target_pct_next: 35 },
+    { stage: 'Add-to-cart / enquiry', value: enquiry, target_pct_next: 35, source: moneyEnquiry > 0 ? 'ga4_money_pages' : 'ga4_site' },
     { stage: 'Transactions', value: txns || null, target_pct_next: null },
     { stage: 'Revenue', value: revenue || null, target_pct_next: null }
   ];
@@ -1052,6 +1062,7 @@ function computeKpiTargets(kpis, revenueSnap) {
     ctr_28d_pct: { value: kpis.ctr_28d_pct, target: KPI_BASELINES.ctr_28d_pct.target, rag: ragFor(kpis.ctr_28d_pct, KPI_BASELINES.ctr_28d_pct) },
     money_page_click_share_pct: { value: kpis.money_page_click_share_pct, target: KPI_BASELINES.money_page_click_share_pct.target, rag: ragFor(kpis.money_page_click_share_pct, KPI_BASELINES.money_page_click_share_pct) },
     click_to_sale_pct: { value: kpis.click_to_sale_pct, target: KPI_BASELINES.click_to_sale_pct.target, rag: ragFor(kpis.click_to_sale_pct, KPI_BASELINES.click_to_sale_pct) },
+    enquiry_to_sale_pct: { value: kpis.enquiry_to_sale_pct, target: KPI_BASELINES.enquiry_to_sale_pct.target, rag: ragFor(kpis.enquiry_to_sale_pct, KPI_BASELINES.enquiry_to_sale_pct) },
     revenue_per_1k_impressions: { value: kpis.revenue_per_1k_impressions, target: KPI_BASELINES.revenue_per_1k_impressions.target, rag: ragFor(kpis.revenue_per_1k_impressions, KPI_BASELINES.revenue_per_1k_impressions) }
   };
 }
@@ -1157,7 +1168,7 @@ export default async function handler(req, res) {
     const pageRows = pageMetrics.rows;
     const auditLatest = audits[0] || null;
     const auditPrior = audits[1] || null;
-    const kpis = computeKpis(pageRows, auditLatest, auditPrior, revenueSnap);
+    const kpis = computeKpis(pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap);
     const funnel = computeFunnel(kpis, revenueSnap, ga4Snap);
     const leakPages = pickLeakPages(pageRows);
     const earningPages = pickEarningPages(pageRows);
@@ -1179,6 +1190,7 @@ export default async function handler(req, res) {
         sessions_28d: Number(ga4Snap.sessions_28d) || 0,
         page_views_28d: Number(ga4Snap.page_views_28d) || 0,
         enquiry_events_28d: Number(ga4Snap.enquiry_events_28d) || 0,
+        money_page_enquiry_events_28d: Number(ga4Snap.money_page_enquiry_events_28d) || 0,
         top_events: Object.entries(ga4Snap.event_counts || {})
           .sort((a, b) => b[1] - a[1])
           .slice(0, 8)

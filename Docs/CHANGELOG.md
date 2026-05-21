@@ -2,12 +2,19 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
-## [2026-05-21] - GA4 Data API → Revenue Funnel
+## [2026-05-21] - GA4 money-page funnel, enquiry→sale KPI, picker bias, weekly cron
+
+- **Money-page GA4:** `ga4-data.js` rolls enquiry events on **money-page paths only** → `money_page_enquiry_events_28d`; funnel stage 4 uses that (falls back to site-wide if zero).
+- **KPI:** **`enquiry_to_sale_pct`** = transactions ÷ money-page enquiries; tile on Revenue Funnel (target 2%, warn 1%).
+- **Scenario picker:** when enquiry→sale &lt; 1%, boosts **conversion** lever (×2), trims **CTR** (×0.65), injects **“Raise enquiry → sale on money pages”** candidate.
+- **Cron:** `GET /api/cron/ga4-metrics-sync` Mondays 07:20 UTC (`vercel.json`).
+- **Migration:** `money_page_enquiry_events_28d` on `ga4_site_metrics_28d`.
+
+## [2026-05-21] - GA4 Data API → Revenue Funnel (initial)
 
 - **`GET` / `POST` `/api/aigeo/ga4-metrics`** — pulls GA4 Data API (28d, GSC-aligned window), caches in **`ga4_site_metrics_28d`**.
-- **`revenue-funnel-summary`** — funnel stage **Add-to-cart / enquiry** uses **`enquiry_events_28d`** (`form_start`, `view_item`, `generate_lead`, `begin_checkout`, `add_to_cart`, `checklist_download`).
 - **UI:** **Sync GA4** button + GA4 line on revenue sync banner; **Sync everything** includes GA4 step 4 of 5.
-- **Env:** `GA4_PROPERTY_ID` (default `289575590`); uses existing `GOOGLE_*` OAuth (needs `analytics.readonly` + `webmasters.readonly`).
+- **Env:** `GA4_PROPERTY_ID` (default `289575590`); uses existing `GOOGLE_*` OAuth.
 - **Migration:** `migrations/20260521_ga4_site_metrics_28d.sql`.
 
 ## [2026-05-21] - Revenue Funnel trust loop + Auto-Optimise layout + preset diversity
