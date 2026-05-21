@@ -240,7 +240,10 @@ function diagnosePositionIssue(avgPosition, ctrPct) {
   }
   return null;
 }
-function diagnoseLowCtr({ ctrPct, avgPosition, title, meta, topKw }) {
+function diagnoseLowCtr({ ctrPct, avgPosition, title, meta, topKw, serpComplete }) {
+  if (serpComplete) {
+    return 'SERP title and meta are on target for this hub — monitor CTR in GSC; next gains are likely rank or rich results, not another title/meta rewrite.';
+  }
   const issues = [];
   const tIssue = diagnoseTitleIssue(title, topKw);
   if (tIssue) issues.push(tIssue);
@@ -269,11 +272,12 @@ function diagnoseLowCtr({ ctrPct, avgPosition, title, meta, topKw }) {
 // post-pass calls the SAME builder with live data after fanning out
 // validateUrlsLive(), so the audit→live swap is one line, not a
 // re-implementation.
-function buildCtrDescription(args, pageState, sourceTag) {
+function buildCtrDescription(args, pageState, sourceTag, opts) {
   const { cleanedUrl, top, posTxt, kwInfo } = args;
   const title = pageState && pageState.title;
   const meta = pageState && pageState.metaDescription;
   const schemaTypes = (pageState && pageState.schemaTypes) || [];
+  const serpComplete = !!(opts && opts.serpComplete);
   const kwLine = kwInfo
     ? `Top ranking keyword: "${kwInfo.keyword}" at rank #${kwInfo.rank ?? '?'} (${Number(kwInfo.searchVolume || 0).toLocaleString()}/mo).`
     : 'No tracked keyword found for this page yet.';
@@ -287,7 +291,8 @@ function buildCtrDescription(args, pageState, sourceTag) {
     ctrPct: top.ctrPct,
     avgPosition: (args.pos != null ? args.pos : null),
     title, meta,
-    topKw: kwInfo ? { keyword: kwInfo.keyword } : null
+    topKw: kwInfo ? { keyword: kwInfo.keyword } : null,
+    serpComplete
   });
   const base = `${cleanedUrl} — ${top.impr.toLocaleString()} impressions/28d, ${top.ctrPct.toFixed(2)}% CTR, ${posTxt}. ${kwLine} ${titleLine} ${metaLine} ${schemaLine} Diagnosis: ${diag} Target: ${top.targetPct.toFixed(2)}% CTR.`;
   return sourceTag ? `${base} ${sourceTag}` : base;
@@ -1037,6 +1042,13 @@ function enrichOneCandidate(c, liveMap, suppressionMap, monthIdx) {
         headline: 'SERP copy already matches',
         detail: 'Live title and meta match the recommended hub copy. This URL drops out of Top 3 until GSC shows a new lever (CTR move, rank, or AIO).'
       }];
+      if (c._rebuild && c._rebuild.type === 'ctr') {
+        const tag = c.live_fetched_at ? `[live · fetched ${shortIso(c.live_fetched_at)}]` : null;
+        const ps = live && live.ok
+          ? { title: live.title, metaDescription: live.metaDescription, schemaTypes: live.schemaTypes }
+          : { title: null, metaDescription: null, schemaTypes: [] };
+        c.description = buildCtrDescription(c._rebuild.args, ps, tag, { serpComplete: true });
+      }
     }
   }
   // Seasonality scaling: applied LAST so suppression decisions are
