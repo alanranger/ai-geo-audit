@@ -1,36 +1,48 @@
-import { buildSerpCopyAdvice, proposeTitleExample, pickKeywordForPage } from '../lib/revenue-funnel-serp-copy.js';
+import {
+  buildHubMeta,
+  buildHubTitle,
+  buildSerpCopyAdvice,
+  fitMetaDescription,
+  normalizeSerpText,
+  serpLength,
+  META_MIN,
+  META_MAX
+} from '../lib/revenue-funnel-serp-copy.js';
 
 const COVENTRY = 'https://www.alanranger.com/photography-courses-coventry';
-const keywords = [
-  { keyword: 'photography lessons', best_url: COVENTRY, search_volume: 390, best_rank_group: 18 },
-  { keyword: 'photography courses', best_url: COVENTRY, search_volume: 6600, best_rank_group: 12 }
-];
-
-const title = 'Photography Courses Coventry or Online - Learn from a Pro';
-const meta = 'Master photography with courses in Coventry or online. From complete beginners to RPS accreditation. Flexible Options - Book a free consu…';
-
-const picked = pickKeywordForPage(COVENTRY, keywords);
-const advice = buildSerpCopyAdvice({
-  pageUrl: COVENTRY,
-  rankingKw: picked.keyword,
-  rank: picked.best_rank_group,
-  searchVolume: picked.search_volume,
-  title,
-  meta: meta.slice(0, 151)
-});
 
 let failed = 0;
-function ok(c, m) { if (!c) { console.error('FAIL:', m); failed++; } else console.log('OK:', m); }
+function ok(c, m) {
+  if (!c) { console.error('FAIL:', m); failed++; }
+  else console.log('OK:', m);
+}
 
-ok(picked.keyword === 'photography courses', 'Curated pick prefers tier keyword over lessons');
-ok(advice.lead && advice.lead.includes('Courses'), 'Lead uses courses noun');
-ok(!/Lessons in Coventry/i.test(advice.lead || ''), 'Lead does not swap to lessons');
-ok(advice.titleExample && advice.titleExample.length <= 58, 'Title example within ~58ch');
-ok(
-  advice.reasons.some((r) => /online/i.test(r)) || advice.actions.length > 0,
-  'Flags "or Online" in title or suggests meta/title tweak'
-);
+const meta = buildHubMeta(COVENTRY);
+ok(meta.valid && meta.length >= META_MIN && meta.length <= META_MAX, `Coventry hub meta ${meta.length} in ${META_MIN}-${META_MAX}`);
+ok(!meta.text.includes('\u2014'), 'Meta has no em dash');
+ok(meta.text.includes(' - '), 'Meta uses ASCII hyphen');
 
-console.log('Example title:', advice.titleExample);
+const title = buildHubTitle(COVENTRY);
+ok(title.valid && title.length <= 58, `Coventry title ${title.length}ch`);
+
+const advice = buildSerpCopyAdvice({
+  pageUrl: COVENTRY,
+  rankingKw: 'photography lessons',
+  rank: 18,
+  searchVolume: 390,
+  title: 'Photography Courses Coventry or Online - Learn from a Pro',
+  meta: 'Master photography with courses in Coventry or online. From complete beginners to RPS accreditation. Flexible Options - Book a free consultation today.'
+});
+ok(advice.isHub, 'Coventry detected as hub');
+ok(advice.metaExample && advice.metaExampleLength >= META_MIN && advice.metaExampleLength <= META_MAX, 'Hub advice includes verified meta');
+ok(advice.h1Recommendation && advice.h1Recommendation.includes('Coventry'), 'Hub keeps H1');
+
+const em = normalizeSerpText('Coventry — test');
+ok(em === 'Coventry - test', 'normalizeSerpText fixes em dash');
+
+const fitted = fitMetaDescription('x'.repeat(200));
+ok(fitted.valid && fitted.length <= META_MAX, 'fitMetaDescription clamps long text');
+
+console.log('Coventry meta:', meta.text);
 console.log(failed ? `${failed} failed` : 'All serp-copy checks passed');
 process.exit(failed ? 1 : 0);

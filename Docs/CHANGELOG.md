@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-21] - SERP copy length fix + hub-aware title/meta (150-160)
+
+- **`lib/revenue-funnel-serp-copy.js`:** ASCII hyphen only (no em dash); `fitMetaDescription()` enforces **150-160ch**; hub pages (`/photography-courses-coventry`, academy) ship **exact** title + meta + **keep H1** guidance.
+- **Top 3 cards:** show `meta_example` with character count; hub pill says use copy exactly.
+- **Test:** `node scripts/test-serp-copy.mjs`
+
 ## [2026-05-21] - Keyword ownership guardrails (smart priorities + Top 3 UI)
 
 - **`lib/revenue-funnel-keyword-guardrails.js`** — merges same-URL CTR+rank for one query; blocks cross-page cannibalization (e.g. “online” on Coventry); safe title leads (Academy → `photography lessons online`, Coventry → geo-first).

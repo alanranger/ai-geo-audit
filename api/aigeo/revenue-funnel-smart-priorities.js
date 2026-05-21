@@ -1021,8 +1021,12 @@ function enrichOneCandidate(c, liveMap, suppressionMap, monthIdx) {
       meta: live && live.metaDescription
     });
     if (serp.titleExample) c.title_example = serp.titleExample;
+    if (serp.metaExample) c.meta_example = serp.metaExample;
+    if (serp.metaExampleLength != null) c.meta_example_length = serp.metaExampleLength;
+    if (serp.h1Recommendation) c.h1_recommendation = serp.h1Recommendation;
     if (serp.note) c.serp_advice_note = serp.note;
     if (serp.lead) c.safe_title_lead = serp.lead;
+    if (serp.isHub) c.serp_is_hub = true;
   }
   // Seasonality scaling: applied LAST so suppression decisions are
   // made on raw lift (we don't want December gap-month to mask a
@@ -1617,7 +1621,11 @@ export default async function handler(req, res) {
           guardrail_blocked_top3: !!c.guardrail_blocked_top3,
           merged_levers: c.merged_levers ?? null,
           title_example: c.title_example ?? null,
-          serp_advice_note: c.serp_advice_note ?? null
+          meta_example: c.meta_example ?? null,
+          meta_example_length: c.meta_example_length ?? null,
+          h1_recommendation: c.h1_recommendation ?? null,
+          serp_advice_note: c.serp_advice_note ?? null,
+          serp_is_hub: !!c.serp_is_hub
         }))
       });
     }
