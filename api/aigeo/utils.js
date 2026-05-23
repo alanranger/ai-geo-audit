@@ -169,8 +169,7 @@ export async function getGSCAccessToken() {
  * @returns {Promise<string>} Access token
  */
 export async function getBusinessProfileAccessToken() {
-  // Business Profile API uses the same OAuth credentials as GSC
-  // The refresh token we got includes both webmasters and business.manage scopes
+  // Same refresh token as GSC/GA4 — must include business.manage (see oauth-helper.html).
   return getGSCAccessToken();
 }
 

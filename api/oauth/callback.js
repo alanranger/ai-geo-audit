@@ -182,7 +182,7 @@ export default async function handler(req, res) {
       <body>
         <h1>✓ OAuth Authorization Successful!</h1>
         <div class="success">
-          <p><strong>Your new refresh token (with Business Profile scope):</strong></p>
+          <p><strong>Your new refresh token (GSC + Business Profile + GA4):</strong></p>
           <div class="code" id="refreshToken">${tokenData.refresh_token}</div>
           <button onclick="copyToken()">Copy Token</button>
           <span id="copied" style="display: none; color: #28a745; margin-left: 10px;">✓ Copied!</span>
@@ -198,7 +198,7 @@ export default async function handler(req, res) {
             <li>Test the Business Profile API access again</li>
           </ol>
           <p style="margin-top: 15px; color: #666; font-size: 14px;">
-            <strong>Note:</strong> This token includes both GSC and Business Profile scopes, so it will work for both APIs.
+            <strong>Note:</strong> This token must include webmasters, business.manage, and analytics.readonly — one sign-in for GSC, GBP (Local Entity / Service Area), and GA4.
           </p>
         </div>
         
