@@ -1,6 +1,6 @@
 # Global Run — tiered refresh architecture
 
-**Last updated:** 2026-04-17
+**Last updated:** 2026-05-20
 **Status:** Live. Supersedes the "Run All Audits & Updates" documentation in `Docs/ALL-AUDIT-SCAN-PROCESSES.md`.
 
 ---
@@ -39,9 +39,9 @@ A ✓ means the step runs in that tier. A blank means it is intentionally **not*
 
 ### Step counts
 
-- **Quick**: 5 steps (~30–60 s, no DataForSEO spend)
-- **Standard**: 8 steps (~3–5 min, small DataForSEO spend on Ranking & AI + KE top-up)
-- **Full**: 11 steps (15+ min, significant DataForSEO credit burn + GSC URL Inspection quota)
+- **Quick**: 8 steps (~30–90 s, no DataForSEO spend; includes RF summary + trust loop)
+- **Standard**: 13 steps (~4–6 min, small DataForSEO spend + Auto-Optimise + seasonality)
+- **Full**: 17 steps (15+ min, 13-month revenue + GA4 + DFS/GSC deep refresh)
 
 ### Cost expectations
 
