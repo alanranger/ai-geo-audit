@@ -104,6 +104,8 @@ Dependent steps show **Skipped** (e.g. Money Pages if GSC audit failed).
 
 After any tier finishes, open the run modal summary for **Done / Failed / Skipped** per step.
 
+**Unattended runs:** Quick / Standard / Full set `window._dashboardGlobalRunActive` so the run does **not** stop for post-audit or post–Ranking & AI `confirm()` dialogs, the schema completion modal, or the admin-key prompt (update-tasks still runs at the end if configured). The **one** confirm before **Full** (cost warning) still appears at the start.
+
 ---
 
 ## Doc map for agents
