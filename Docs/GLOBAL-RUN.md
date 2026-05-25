@@ -26,6 +26,13 @@ The dashboard now exposes **three tiers** so each run matches its purpose, cost,
 | `sync_csv` | Sync CSV (portfolio + keyword seed) | ✓ | ✓ | ✓ | — |
 | `audit_scan` | GSC & Backlink Audit (reads cached backlinks) | ✓ | ✓ | ✓ | — |
 | `ranking_ai` | Ranking & AI scan (84 keywords, DFS SERP + AI engines) |  | ✓ | ✓ | — |
+| `revenue_sync` | Revenue sync (Squarespace + Stripe; 28d quick/standard, 13mo full) | ✓ | ✓ | ✓ | — |
+| `ga4_sync` | GA4 enquiry metrics (28d) |  |  | ✓ | — |
+| `rf_summary` | Revenue Funnel summary refresh | ✓ | ✓ | ✓ | — |
+| `rf_trust_loop` | Revenue Funnel trust loop | ✓ | ✓ | ✓ | `audit_scan` |
+| `rf_seasonality` | Revenue Funnel seasonality bands |  | ✓ | ✓ | — |
+| `scenario_auto_optimise` | Scenario Planning Auto-Optimise |  | ✓ | ✓ | `audit_scan` |
+| `scenario_cockpit` | Scenario Planning cockpit refresh | ✓ | ✓ | ✓ | — |
 | `money_pages` | Reload Money Pages view from Supabase | ✓ | ✓ | ✓ | `audit_scan` |
 | `trad_seo_rescore` | Traditional SEO rescore (uses cached extractability) |  | ✓ |  | `audit_scan` |
 | `trad_seo_full` | Traditional SEO + full extractability refresh (per-URL HTML refetch) |  |  | ✓ | `audit_scan` |
