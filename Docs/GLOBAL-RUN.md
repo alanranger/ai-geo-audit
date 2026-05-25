@@ -58,6 +58,14 @@ A ✓ means the step runs in that tier. A blank means it is intentionally **not*
 
 ---
 
+## Plain-English guide
+
+See **[`RUNS-CHEATSHEET.md`](./RUNS-CHEATSHEET.md)** for a non-technical summary (what to click, what stays manual, Revenue Funnel vs Dashboard).
+
+The live UI also renders the step list from `globalRunStepCatalog()` under **Dashboard → “What each tier runs”** and **Configuration → Audit Coverage Map → Dashboard global runs**.
+
+---
+
 ## UI
 
 Dashboard header now shows three buttons:

@@ -442,6 +442,9 @@ After you've read this file:
 
 Other docs worth knowing about (read on demand, not upfront):
 
+- `Docs/RUNS-CHEATSHEET.md` - plain English: Dashboard Quick / Standard / Full, what each excludes, RF vs Dashboard, cron vs buttons
+- `Docs/GLOBAL-RUN.md` - tier matrix + `globalRunStepCatalog()` code map
+- `Docs/ALL-AUDIT-SCAN-PROCESSES.md` - what each underlying audit API does (superseded for "one button runs all")
 - `Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md` - Keywords Everywhere
   cache + Traditional SEO column feature
 - `Docs/TRADITIONAL_SEO_BACKLINKS_DFS.md` - DataForSEO backlinks

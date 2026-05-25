@@ -12,6 +12,8 @@ Supabase setup, repo layout, key DB tables, the 8 open tasks in priority order,
 hard rules, communication rules, and verification commands.
 
 Then on demand:
+- `Docs/RUNS-CHEATSHEET.md` — **which Dashboard button does what** (Quick / Standard / Full), manual-only actions, last-run vs status bar.
+- `Docs/GLOBAL-RUN.md` — tier matrix tied to `globalRunStepCatalog()` in code.
 - `Docs/HANDOVER_REVENUE_FUNNEL_2026-05-20.md` — file-by-file pitfalls for the
   most recent Revenue Funnel / Scenario Planning work.
 - `Docs/CHANGELOG.md` — chronological history (read the top entry first).

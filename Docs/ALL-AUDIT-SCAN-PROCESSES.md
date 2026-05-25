@@ -1,7 +1,7 @@
 # All Audit/Scan/Update/Refresh Processes
 
 > **🚨 SUPERSEDED for the Dashboard global run.**
-> The single "Run All Audits & Updates" button described below has been replaced by three tiered buttons (Quick / Standard / Full refresh). The authoritative reference for the global-run step catalog, tier matrix, dependency rules, and failure-isolation policy is now **[`Docs/GLOBAL-RUN.md`](./GLOBAL-RUN.md)** (2026-04-17).
+> The single "Run All Audits & Updates" button described below has been replaced by three tiered buttons (Quick / Standard / Full refresh). Read **[`Docs/RUNS-CHEATSHEET.md`](./RUNS-CHEATSHEET.md)** (plain English) and **[`Docs/GLOBAL-RUN.md`](./GLOBAL-RUN.md)** (tier matrix + code). The Configuration tab **Audit Coverage Map** and Dashboard **“What each tier runs”** expander are generated from the same step catalog as the buttons.
 >
 > The per-process descriptions below (GSC audit, Ranking & AI, Domain Strength, etc.) remain accurate as descriptions of the *individual* audit surfaces — they are just no longer a complete list of what the dashboard button runs. Use `GLOBAL-RUN.md` when you need to know which button runs which subset.
 
