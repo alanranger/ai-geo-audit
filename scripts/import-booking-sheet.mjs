@@ -1,5 +1,24 @@
 // scripts/import-booking-sheet.mjs
 //
+// !!! DEPRECATED 2026-05-26 !!!
+//
+// This LEGACY CLI wraps `lib/booking-sheet-parser.mjs`, which double-counts
+// revenue when combined with the SQ + Stripe API sources. See the deprecation
+// notice in `lib/booking-sheet-parser.mjs` and the spec at
+// Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md.
+//
+// REPLACED BY: `scripts/backfill-booking-sheet-monthly.mjs` (reads row-18
+// Totals from each Sales YYYY tab and writes to booking_sheet_monthly +
+// booking_sheet_monthly_category -- the new single-source-of-truth tables).
+//
+// Running this script will RE-CREATE the deleted `source='booking_sheet'`
+// rows in revenue_snapshots, which the dashboard no longer reads but which
+// would confuse anyone querying that table directly. Do NOT run.
+//
+// -----------------------------------------------------------------------
+// Original docstring (kept for reference):
+// -----------------------------------------------------------------------
+//
 // CLI wrapper around lib/booking-sheet-parser.mjs.
 //
 // Reads the live Booking Sheet from Dropbox, imports every funded-but-

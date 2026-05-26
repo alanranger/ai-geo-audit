@@ -516,8 +516,20 @@ function mergeRowsByMonth(rows) {
 }
 
 async function fetchRevenueHistory(supabase, propertyUrl) {
+  // 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX: source is now
+  // `booking_sheet_monthly_wide`, which holds exactly one authoritative
+  // row per (property, year, month) sourced from the Booking Sheet
+  // row-18 Totals. The legacy `revenue_snapshots` table was summing
+  // squarespace_api + stripe_supplemental + booking_sheet sources -- those
+  // sources overlap (a SQ order paid by Bank Transfer appears in BOTH the
+  // SQ Orders API and the Booking Sheet's Bank receipts), so the monthly
+  // history was double-counted. See Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md.
+  //
+  // The view already returns one row per month -- the isCalendarMonthRow
+  // filter and mergeRowsByMonth ceremony are now no-ops but kept in place
+  // for resilience if the view's shape ever changes.
   const { data, error } = await supabase
-    .from('revenue_snapshots')
+    .from('booking_sheet_monthly_wide')
     .select('period_start, period_end, revenue_amount, currency, source, transactions, tier_revenue, tier_transactions')
     .eq('property_url', propertyUrl)
     .order('period_end', { ascending: false })
@@ -1128,8 +1140,13 @@ function pickBestRevenueRow(rows) {
 }
 
 async function fetchLatestRevenue(supabase, propertyUrl) {
+  // 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX: see fetchRevenueHistory above.
+  // The picker (pickBestRevenueRow) will now skip future-dated rows (e.g.
+  // the in-progress current month) and pick the latest CLOSED calendar
+  // month from the Booking Sheet, which is the correct rolling-window
+  // denominator for the funnel KPI tiles.
   const { data, error } = await supabase
-    .from('revenue_snapshots')
+    .from('booking_sheet_monthly_wide')
     .select('period_start, period_end, revenue_amount, currency, source, transactions, tier_revenue, tier_transactions, notes')
     .eq('property_url', propertyUrl)
     .order('period_end', { ascending: false })

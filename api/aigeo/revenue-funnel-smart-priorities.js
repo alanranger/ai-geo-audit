@@ -1550,8 +1550,15 @@ function academyReviewCandidate(health, propertyUrl) {
 }
 
 async function fetchRollingRevenueSnap(supabase, propertyUrl) {
+  // 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX: source is now
+  // `booking_sheet_monthly_wide` (single authoritative row per month from
+  // the Booking Sheet) instead of `revenue_snapshots`, which was summing
+  // overlapping squarespace_api + stripe_supplemental + booking_sheet rows
+  // (with no transaction-level dedup) AND included fossilised rolling-window
+  // rows from the daily sync, producing an unreliable "latest" pick. See
+  // Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md.
   const { data, error } = await supabase
-    .from('revenue_snapshots')
+    .from('booking_sheet_monthly_wide')
     .select('period_start, period_end, transactions, revenue_amount')
     .eq('property_url', propertyUrl)
     .order('period_end', { ascending: false })

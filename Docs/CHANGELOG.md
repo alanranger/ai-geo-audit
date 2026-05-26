@@ -2,6 +2,99 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-26] - Revenue: Booking Sheet is the single source of truth (Phase L)
+
+Critical headline-revenue fix. The Revenue Funnel + Scenario Planning tabs were
+double-counting revenue across three overlapping sources in `revenue_snapshots`
+(`squarespace_api` + `stripe_supplemental` + `booking_sheet`). The three sources
+overlap (a Squarespace order paid by Bank Transfer appears in BOTH the SQ Orders
+API row AND the Booking Sheet's Bank receipt row) with no transaction-level
+de-dup, so the headline 17-month total was inflated to £72,251 vs the user's
+manually-reconciled truth of £66,165.50 (2025 £46,567.46 + 2026 YTD £19,598.04).
+
+**Root cause:** the dashboard summed `revenue_snapshots.tier_revenue` across all
+sources for each month. The legacy parser also dropped Stripe-funded rows from
+the Booking Sheet import on the assumption the SQ + Stripe sources would supply
+the rest -- they did, but with overlap. The Booking Sheet's `Sales YYYY` row-18
+"Totals" line is the user's manually-reconciled master figure that already
+includes every funding channel (Bank, PayPal, Cash, Stripe, vouchers, etc).
+
+**Fix shipped in this same commit window:**
+
+1. **New tables** (migration `migrations/20260526_booking_sheet_monthly.sql`):
+   - `public.booking_sheet_monthly` — per `(property_url, year, month, tier_id)`
+     authoritative revenue, sourced from the row-18 Totals.
+   - `public.booking_sheet_monthly_category` — per-month per-raw-category audit
+     trail (all 12 Booking Sheet categories preserved verbatim).
+   - `public.booking_sheet_monthly_wide` — materialised view that mirrors the
+     legacy `revenue_snapshots` row shape (`period_start`, `period_end`,
+     `revenue_amount`, `currency`, `source`, `tier_revenue`, `tier_transactions`,
+     `notes`) so reader code can switch source with one-line changes.
+   - `public.refresh_booking_sheet_monthly_wide()` — SQL function called after
+     every import.
+
+2. **New parser** `lib/booking-sheet-truth-parser.mjs` reads the row-18 Totals
+   + category × month grid from each `Sales YYYY` tab. The 12 Booking Sheet
+   categories are mapped to the 5 dashboard tiers:
+   - `1. Courses/masterclasses` → `courses`
+   - `2. Workshops Non Residential` → `workshops_nonres`
+   - `3. Workshops Residential` → `workshops_residential`
+   - `4. Pick n Mix Inc` / `5. Pick n Mix Out` → `services` (net re-attribution)
+   - `6. Mentoring` / `7. 1-2-1` → `services`
+   - `8. Gift Vouchers Inc` / `9. Gift Vouchers Out` → `services` (net)
+   - `10. Prints & Royalties` → `services`
+   - `11 Commissions` → `services`
+   - `12. Academy` → `academy`
+   Hard reconciliation: import refuses if any sheet's category-sum does not
+   match its own `J47`/`J48` "YTD Actual" cell to the penny.
+
+3. **Backfilled** `booking_sheet_monthly` from the user's `.xlsm` files via
+   `scripts/backfill-booking-sheet-monthly.mjs`. 73 tier rows + 133 category
+   rows for 2025 + 2026 YTD. Per-year totals match the user-stated truth
+   exactly: £46,567.46 (2025) and £19,598.04 (2026 YTD).
+
+4. **Repointed the four hot reader paths** to `booking_sheet_monthly_wide`
+   (one-line changes, with explanatory comments at each call site so the
+   change is auditable):
+   - `api/aigeo/revenue-funnel-summary.js` — `fetchRevenueHistory` (Revenue
+     Funnel monthly sparklines) + `fetchLatestRevenue` (funnel KPI tiles).
+   - `api/aigeo/revenue-funnel-smart-priorities.js` — `fetchRollingRevenueSnap`
+     (Scenario Planning current run-rate).
+   - `lib/revenue-funnel-seasonality-blend.js` — `loadBlendedSeasonality`
+     (observed seasonality factors per tier per month).
+   - `lib/revenue-funnel-academy-economics.js` — `academyTierHealth` (Academy
+     CAC/LTV and tier-health badge).
+   Smoke-tested via `scripts/smoke-test-booking-sheet-readers.mjs` — all three
+   patched libs return the expected per-tier monthly figures.
+
+5. **Rewrote** `api/aigeo/booking-sheet-upload.js` to use the new parser,
+   write to the new tables, refresh the wide view, and refuse to import any
+   workbook whose category sums do not reconcile to the YTD Actual cells.
+   Dashboard upload-progress log updated to surface the new per-year totals
+   + reconciliation status instead of the obsolete `by_funding` / `records_kept`
+   shape.
+
+6. **Demoted `revenue_snapshots`** to detail-only:
+   - Deleted the 17 superseded `source='booking_sheet'` rows (preserved in
+     `booking_sheet_monthly` + `..._category` so nothing was lost).
+   - Added `COMMENT ON TABLE` warning that callers MUST NOT sum sources for
+     the headline figure; the table is for transaction-level detail only.
+   - Marked `lib/booking-sheet-parser.mjs` and `scripts/import-booking-sheet.mjs`
+     as DEPRECATED with prominent banner comments — they still work but their
+     import shape is the source of the double-counting and they should never
+     be called from new code.
+   - The `squarespace_api` and `stripe_supplemental` rows remain (daily syncs
+     continue writing them) for legitimate detail-drilldown use cases. The
+     fossil-row cleanup inside those sources was NOT performed — no headline
+     reader now consumes them, so the fossils are harmless and can be tidied
+     later as a separate task.
+
+**Documentation:** `Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md` (spec + full
+per-month per-category grids for 2025 and 2026 YTD); `Docs/REVENUE-DATA-AUDIT.md`
+banner updated from SUPERSEDED to FIXED with a summary of what changed.
+
+**British English. Discovery-then-build sequence honoured throughout.**
+
 ## [2026-05-26] - Phase K-2: Academy two-step trial-funnel model + dashboard-wide ASSUMED flag + materiality floor
 
 Follow-up to the same-day Phase K data-layer reconciliation. The Coventry card is
