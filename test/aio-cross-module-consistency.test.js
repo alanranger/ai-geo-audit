@@ -19,9 +19,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { __INTERNAL } from '../api/aigeo/revenue-funnel-smart-priorities.js';
-import { pickKeywordForPage } from '../lib/revenue-funnel-serp-copy.js';
 
 const COVENTRY_URL = 'https://www.alanranger.com/photography-courses-coventry';
+// Slug-anchor for the Coventry URL. The funnel MUST pick this keyword
+// (not the higher-volume national head term) so the user can match the
+// card's anchor against the URL's slug at a glance. This is what
+// Amendment 1 of the 2026-05-26 phase K instruction means by
+// "consistency anchor".
+const COVENTRY_SLUG_ANCHOR = 'photography courses coventry';
 
 // Mirror of the real keyword_rankings rows for the Coventry URL as of
 // audit_date 2026-05-26 (see chat provenance report Q6 for the SQL).
@@ -57,23 +62,22 @@ function ctxFor(keywords, overrides = null) {
   };
 }
 
-test('aio funnel anchor agrees with the Keyword Scorecard (slug-aligned pick)', () => {
+test('aio funnel anchor is the slug-aligned keyword for the URL (NOT the highest-volume national term)', () => {
   const keywords = buildCoventryKeywordSnapshot();
   const ctx = ctxFor(keywords);
   const candidate = __INTERNAL.aioCitationPriority('courses', keywords, ctx);
   assert.ok(candidate, 'aioCitationPriority should return a candidate for the Coventry page');
+  assert.equal(candidate.aio_anchor_keyword, COVENTRY_SLUG_ANCHOR, 'anchor must be the slug-aligned keyword, not the highest-volume national term');
 
-  const scorecardAnchor = pickKeywordForPage(COVENTRY_URL, keywords);
-  assert.ok(scorecardAnchor, 'pickKeywordForPage should return the Scorecard anchor for this URL');
+  const slugRow = keywords.find(k => k.keyword === COVENTRY_SLUG_ANCHOR);
+  assert.ok(slugRow, 'fixture sanity check: slug-aligned keyword exists');
+  assert.equal(candidate.aio_anchor_rank, slugRow.best_rank_group, 'funnel anchor rank must equal the slug row rank');
+  assert.equal(candidate.aio_anchor_volume, Number(slugRow.search_volume) || 0, 'funnel anchor volume must equal the slug row volume');
 
-  assert.equal(candidate.aio_anchor_keyword, scorecardAnchor.keyword, 'funnel anchor keyword must match Scorecard anchor keyword');
-  assert.equal(candidate.aio_anchor_rank, scorecardAnchor.best_rank_group, 'funnel anchor rank must match Scorecard anchor rank');
-  assert.equal(candidate.aio_anchor_volume, Number(scorecardAnchor.search_volume) || 0, 'funnel anchor volume must match Scorecard anchor volume');
-
-  const expectedCited = (Number(scorecardAnchor.ai_alan_citations_count) || 0) > 0;
-  assert.equal(candidate.aio_anchor_citation_state.cited, expectedCited, 'funnel anchor cited flag must match Scorecard alan_citations > 0');
-  assert.equal(candidate.aio_anchor_citation_state.alan, Number(scorecardAnchor.ai_alan_citations_count) || 0, 'funnel anchor alan-citations must match Scorecard value');
-  assert.equal(candidate.aio_anchor_citation_state.total, Number(scorecardAnchor.ai_total_citations) || 0, 'funnel anchor total-citations must match Scorecard value');
+  const expectedCited = (Number(slugRow.ai_alan_citations_count) || 0) > 0;
+  assert.equal(candidate.aio_anchor_citation_state.cited, expectedCited, 'funnel anchor cited flag must reflect the slug row alan_citations');
+  assert.equal(candidate.aio_anchor_citation_state.alan, Number(slugRow.ai_alan_citations_count) || 0, 'funnel anchor alan-citations must equal the slug row value');
+  assert.equal(candidate.aio_anchor_citation_state.total, Number(slugRow.ai_total_citations) || 0, 'funnel anchor total-citations must equal the slug row value');
 });
 
 test('aio funnel surfaces ALL AIO levers on the URL (capture + grow)', () => {

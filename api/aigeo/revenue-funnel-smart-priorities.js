@@ -160,9 +160,15 @@ async function fetchPageMetrics(supabase, propertyUrl) {
 }
 
 async function fetchKeywordRankings(supabase, propertyUrl) {
+  // 2026-05-26 phase K: include ai_total_citations in the SELECT so the
+  // funnel can render "alan / total" properly in the lever list and so
+  // the runtime consistency check has the real total to compare against.
+  // Previously every lever was reporting `total: 0` because the column
+  // wasn't selected, which made every cited lever look like
+  // alan_citations_greater_than_total at the data layer.
   const { data, error } = await supabase
     .from('keyword_rankings')
-    .select('keyword, best_rank_group, search_volume, has_ai_overview, ai_alan_citations_count, best_url, segment')
+    .select('keyword, best_rank_group, search_volume, has_ai_overview, ai_alan_citations_count, ai_total_citations, best_url, segment')
     .eq('property_url', propertyUrl)
     .order('audit_date', { ascending: false })
     .limit(2000);
@@ -605,10 +611,63 @@ function scoreAioUrl(tierId, cleanedUrl, kws, ctx) {
   return { cleanedUrl, levers, anchor, top, pageScope, gpPct, aov, convRate };
 }
 
-// Slug-aligned anchor uses pickKeywordForPage (HUB_CURATED + URL→noun
-// intent + best volume on the URL). Falls back to the top lever when
-// no slug match exists so the card always has an anchor.
+// Normalise a URL slug or keyword to a token set we can compare:
+// lowercase, dashes/underscores → spaces, strip non-word, collapse
+// whitespace, split on words. Used by findAnchorLever to score
+// slug↔keyword alignment.
+function tokenSetFromText(text) {
+  if (!text) return new Set();
+  return new Set(String(text)
+    .toLowerCase()
+    .replace(/[-_/]+/g, ' ')
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter(t => t.length > 2));
+}
+
+// Pull just the trailing path segment from a URL so we anchor on
+// the page's own slug rather than its parent hub. E.g.
+// https://www.alanranger.com/photography-courses-coventry → 'photography-courses-coventry'.
+function urlSlugSegment(cleanedUrl) {
+  if (!cleanedUrl) return '';
+  try {
+    const u = new URL(cleanedUrl, 'https://x/');
+    const parts = u.pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : '';
+  } catch {
+    return '';
+  }
+}
+
+// Score each lever by how many slug tokens its keyword contains
+// (Jaccard-ish: tokensOverlap / slugTokensCount). Returns the
+// best-scoring lever ABOVE the threshold; otherwise falls back to
+// pickKeywordForPage, otherwise to the top-GP lever. This gives
+// "photography courses coventry" the anchor on /photography-courses-
+// coventry instead of the higher-volume national term — matching the
+// Keyword Scorecard's default view of the page.
 function findAnchorLever(cleanedUrl, levers, ctx) {
+  const slugTokens = tokenSetFromText(urlSlugSegment(cleanedUrl));
+  if (slugTokens.size > 0) {
+    const scored = levers.map(l => {
+      const kwTokens = tokenSetFromText(l.kw.keyword);
+      let overlap = 0;
+      for (const t of slugTokens) if (kwTokens.has(t)) overlap += 1;
+      const score = overlap / slugTokens.size;
+      return { lever: l, score, kwSize: kwTokens.size };
+    }).filter(s => s.score >= 0.6);
+    if (scored.length) {
+      scored.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        const aDelta = Math.abs(a.kwSize - slugTokens.size);
+        const bDelta = Math.abs(b.kwSize - slugTokens.size);
+        if (aDelta !== bDelta) return aDelta - bDelta;
+        return (Number(b.lever.kw.search_volume) || 0) - (Number(a.lever.kw.search_volume) || 0);
+      });
+      return scored[0].lever;
+    }
+  }
   const allKeywords = ctx.allKeywords || ctx.keywords || [];
   const slugRow = pickKeywordForPage(cleanedUrl, allKeywords);
   if (slugRow) {
