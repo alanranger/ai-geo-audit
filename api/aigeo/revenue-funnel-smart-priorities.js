@@ -43,10 +43,25 @@ import {
   pWinCitation,
   liftRange,
   shouldRerouteToLocal,
+  findKeywordRowByText,
   EVIDENCE,
   TASK_TYPE
 } from '../../lib/revenue-funnel-aio-model.js';
 import { scanLiabilities, detectFluffyOpener } from '../../lib/revenue-funnel-page-liability.js';
+
+// True average booking value per tier (matches AOV_BY_TIER in
+// revenue-funnel-summary.js). Used to split the per-click revenue
+// figure into TRUE AOV + booking conversion rate inside the AIO model's
+// assumption stack, so the user no longer sees "Tier AOV £2" for a
+// page selling £150–£495 courses (defect 2, 2026-05-26).
+const TRUE_AOV_BY_TIER = { workshops: 250, courses: 200, services: 100, hire: 200, academy: 79 };
+const BOOKING_CONV_RATE_BY_TIER = { workshops: 0.01, courses: 0.01, services: 0.01, hire: 0.01, academy: 0.01 };
+function trueAovForTier(tierId) {
+  return TRUE_AOV_BY_TIER[tierId] || 150;
+}
+function bookingConvRateForTier(tierId) {
+  return BOOKING_CONV_RATE_BY_TIER[tierId] || 0.01;
+}
 
 let activeBlendedSeasonality = null;
 
@@ -174,6 +189,33 @@ async function fetchProducts(supabase) {
     out.push(row);
   }
   return out;
+}
+
+// Per-URL assigned keyword overrides from the Traditional SEO tab.
+// 2026-05-26 defect fix: the AIO picker was rerouting to whatever
+// local variant had the most search volume, ignoring the user's
+// explicit assignment. Surface the override here so the picker can
+// honour it before any heuristic reroute fires.
+async function fetchTargetKeywordOverrides(supabase, propertyUrl) {
+  try {
+    const { data, error } = await supabase
+      .from('traditional_seo_target_keyword_overrides')
+      .select('page_url, target_keyword')
+      .eq('property_url', propertyUrl);
+    if (error) {
+      if (/does not exist/i.test(String(error.message || ''))) return new Map();
+      throw error;
+    }
+    const map = new Map();
+    for (const row of (data || [])) {
+      if (row && row.page_url && row.target_keyword) {
+        map.set(String(row.page_url).trim(), String(row.target_keyword).trim());
+      }
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
 }
 
 // ----------------------------------------------------------------------
@@ -444,18 +486,33 @@ function rankPriorityForTier(tierId, tierKeywords, ctx) {
   };
 }
 
+// 2026-05-26 defect-fix: the description is now intentionally lean.
+// The full "do this, in order" plan lives in `recommended_actions[]`
+// and renders below. The Why block should NOT duplicate or contradict
+// that plan — it states the OPPORTUNITY + the EVIDENCE, then defers
+// to the rendered task list. Prior copy ("Action: FAQPage already
+// present — append… extend the existing FAQPage with 3-5 Q/A pairs…")
+// was rendered before the plan list AND contradicted the post-fix
+// REWRITE tasks. Removed here.
+//
+// FAQ schema deprecation note (HEURISTIC): Google has announced FAQ
+// rich results are being removed from SERPs (rolling out 2026). The
+// FAQPage JSON-LD itself is no longer a meaningful ranking lever; the
+// value is in the rendered Q&A content (extractable for AIO/LLM
+// answer-stitching). How much LLMs weight FAQPage vs plain prose is
+// unproven, so we surface this in the Why block as HEURISTIC.
 function buildAioDescription(args, pageState, sourceTag) {
-  const { cleanedUrl, keyword, sv, rankInfo } = args;
+  const { cleanedUrl, keyword, sv, rankInfo, assignedKeyword } = args;
   const schemaTypes = (pageState && pageState.schemaTypes) || [];
-  const hasFaq = schemaTypes.includes('FAQPage');
-  const hasCourse = schemaTypes.includes('Course');
   const schemaLine = schemaTypes.length
-    ? `Schema present: ${schemaTypes.slice(0, 8).join(', ')}${hasFaq ? '' : ' — FAQPage missing.'}`
-    : 'Schema present: none captured — FAQPage + the actual answer block both need adding.';
-  const action = hasFaq
-    ? `Action: FAQPage already present — append a 60–90 word direct-answer block at the top of the page mirroring the AIO summary, then extend the existing FAQPage with 3–5 question/answer pairs that match the People-Also-Ask cluster for "${keyword}".`
-    : `Action: add a 60–90 word direct-answer block at the top of the page mirroring the AIO summary, then publish 5 question/answer pairs in FAQPage JSON-LD${hasCourse ? ' (you already have Course schema — extend with FAQPage in the same block)' : ''}.`;
-  const base = `AI Overview exists for "${keyword}" (${sv.toLocaleString()}/mo) — you ${rankInfo} but aren't cited. Target page: ${cleanedUrl || '(no URL)'}. ${schemaLine} ${action}`;
+    ? `Schema present: ${schemaTypes.slice(0, 8).join(', ')}.`
+    : 'Schema present: none captured.';
+  const overrideLine = assignedKeyword
+    ? `Assigned target keyword (Traditional SEO): "${assignedKeyword}".`
+    : '';
+  const opportunity = `AI Overview exists for "${keyword}" (${sv.toLocaleString()}/mo) — you ${rankInfo} but aren't cited. Target page: ${cleanedUrl || '(no URL)'}.`;
+  const faqNote = `FAQ rich results note: Google is removing FAQ rich results from SERPs in 2026 — FAQPage JSON-LD is no longer a meaningful SERP lever. The value is the rendered Q&A content (how heavily AIO/LLMs weight it is unproven — heuristic).`;
+  const base = [opportunity, overrideLine, schemaLine, faqNote].filter(Boolean).join(' ');
   return sourceTag ? `${base} ${sourceTag}` : base;
 }
 
@@ -463,44 +520,87 @@ function buildAioDescription(args, pageState, sourceTag) {
 // See lib/revenue-funnel-aio-model.js for the full assumption stack.
 // `pickAioTarget` selects the highest expected-GP keyword across the
 // tier, applying local-page rerouting and the rank-aware P(win) curve.
+//
+// 2026-05-26 phase J fix: the picker now also honours the assigned
+// keyword from `traditional_seo_target_keyword_overrides`. The Coventry
+// courses page is a textbook case — it had an assigned keyword
+// "Photography Courses Coventry" but the picker was substituting the
+// higher-volume local variant "photography courses near me", which the
+// user (correctly) flagged as ignoring his explicit assignment.
 function pickAioTarget(tierId, tierKeywords, ctx) {
   const gpPct = estimatedGpPctForTier(tierId);
-  const aov = estimatedAovPerClick(tierId);
+  const aov = trueAovForTier(tierId);
+  const convRate = bookingConvRateForTier(tierId);
   const uncited = (tierKeywords || [])
     .filter(k => !isBlogUrl(k.best_url || ''))
     .filter(k => k.has_ai_overview && !(Number(k.ai_alan_citations_count) > 0));
   if (!uncited.length) return null;
-  const scored = uncited.map(k => scoreAioCandidate(k, ctx, gpPct, aov));
+  const scored = uncited.map(k => scoreAioCandidate(k, ctx, gpPct, aov, convRate));
   scored.sort((a, b) => b.range.profit.expected - a.range.profit.expected);
-  return { gpPct, aov, top: scored[0] };
+  return { gpPct, aov, convRate, top: scored[0] };
 }
 
-function scoreAioCandidate(kw, ctx, gpPct, aov) {
+function scoreAioCandidate(kw, ctx, gpPct, aov, convRate) {
   const cleanedUrl = cleanUrl(kw.best_url || '');
   const pageScope = classifyPageScope(intentClassForUrl(cleanedUrl));
-  const queryIntent = classifyQueryIntent(kw.keyword);
-  const reroute = shouldRerouteToLocal({
-    pageScope, queryIntent, rank: kw.best_rank_group,
-    keyword: kw.keyword, keywords: ctx.allKeywords || ctx.keywords || []
-  });
-  const targetKw = reroute.reroute ? reroute.target : kw;
+  const assignedKeyword = lookupAssignedKeyword(ctx.targetKeywordOverrides, cleanedUrl);
+  const targetSelection = selectAioTargetKeyword({ kw, cleanedUrl, pageScope, ctx, assignedKeyword });
+  const targetKw = targetSelection.target;
   const targetIntent = classifyQueryIntent(targetKw.keyword);
   const pwin = pWinCitation(targetKw.best_rank_group, targetIntent, pageScope, 'neutral');
   const range = liftRange({
     volume: Number(targetKw.search_volume) || 0,
-    pWin: pwin.p, captureRate: 0.03, aov, gpPct
+    pWin: pwin.p, captureRate: 0.03, aov, conversionRate: convRate, gpPct
   });
   return {
-    originalKw: kw, kw: targetKw, cleanedUrl,
-    pageScope, queryIntent: targetIntent,
-    pwin, range, reroute
+    originalKw: kw,
+    kw: targetKw,
+    cleanedUrl,
+    pageScope,
+    queryIntent: targetIntent,
+    pwin,
+    range,
+    reroute: targetSelection.reroute,
+    assignedKeyword,
+    selectionSource: targetSelection.source
   };
 }
 
-function buildAioRerouteNote(reroute, originalKw) {
+// Resolve which keyword to model the AIO opportunity around. Priority:
+//   1. The URL's assigned keyword (traditional_seo_target_keyword_overrides)
+//      if that keyword has AIO data — never overridden by a heuristic.
+//   2. If no override OR the override has no AIO data, run the existing
+//      local-variant reroute heuristic (national head term on a local
+//      page that ranks >20).
+//   3. Otherwise the original keyword the picker fed us.
+function selectAioTargetKeyword(opts) {
+  const { kw, pageScope, ctx, assignedKeyword } = opts;
+  const allKeywords = ctx.allKeywords || ctx.keywords || [];
+  if (assignedKeyword) {
+    const row = findKeywordRowByText(assignedKeyword, allKeywords);
+    if (row && row.has_ai_overview) {
+      return { target: row, source: 'override', reroute: { reroute: false, reason: 'override_present' } };
+    }
+  }
+  const reroute = shouldRerouteToLocal({
+    pageScope,
+    queryIntent: classifyQueryIntent(kw.keyword),
+    rank: kw.best_rank_group,
+    keyword: kw.keyword,
+    keywords: allKeywords
+  });
+  if (reroute.reroute) return { target: reroute.target, source: 'reroute_local', reroute };
+  return { target: kw, source: 'original', reroute };
+}
+
+function buildAioRerouteNote(top) {
+  if (top.selectionSource === 'override') {
+    return `Using assigned keyword "${top.kw.keyword}" from the Traditional SEO target-keyword override.`;
+  }
+  const reroute = top.reroute;
   if (!reroute || !reroute.reroute) return null;
-  return `Re-routed off national head term "${originalKw.keyword}" `
-    + `(this URL ranks #${originalKw.best_rank_group} for it; P(win citation) is too low). `
+  return `Re-routed off national head term "${top.originalKw.keyword}" `
+    + `(this URL ranks #${top.originalKw.best_rank_group} for it; P(win citation) is too low). `
     + `Local variant "${reroute.target.keyword}" is the higher-probability target on a local-business page.`;
 }
 
@@ -508,14 +608,15 @@ function aioCitationPriority(tierId, tierKeywords, ctx) {
   const picked = pickAioTarget(tierId, tierKeywords, ctx);
   if (!picked) return null;
   const { top } = picked;
-  const { kw, originalKw, cleanedUrl, pageScope, queryIntent, pwin, range, reroute } = top;
+  const { kw, cleanedUrl, pageScope, queryIntent, pwin, range, assignedKeyword, selectionSource } = top;
   const auditState = pageEnrichment(cleanedUrl, ctx.schemaDetail, ctx.keywords);
   const rankInfo = kw.best_rank_group != null ? `currently rank #${kw.best_rank_group}` : 'are not ranking yet';
   const builderArgs = {
     cleanedUrl, keyword: kw.keyword, sv: Number(kw.search_volume) || 0, rankInfo,
-    pageScope, queryIntent, pWin: pwin.p, range
+    pageScope, queryIntent, pWin: pwin.p, range,
+    assignedKeyword, selectionSource
   };
-  const rerouteNote = buildAioRerouteNote(reroute, originalKw);
+  const rerouteNote = buildAioRerouteNote(top);
   return {
     signature: `aio|${kw.keyword}`,
     title: `Get cited in Google's AI Overview for "${kw.keyword}"`,
@@ -535,7 +636,10 @@ function aioCitationPriority(tierId, tierKeywords, ctx) {
     aio_page_scope: pageScope,
     aio_query_intent: queryIntent,
     aio_reroute_note: rerouteNote,
-    aio_rerouted: !!(reroute && reroute.reroute),
+    aio_rerouted: top.selectionSource === 'reroute_local',
+    aio_used_override: top.selectionSource === 'override',
+    aio_assigned_keyword: assignedKeyword || null,
+    aio_aov_flag: range.aov_flag || null,
     lever_id: 'aio',
     _rebuild: { type: 'aio', args: builderArgs }
   };
@@ -1361,7 +1465,35 @@ function applySeasonalityToCandidate(c, monthIdx) {
     c.estimated_lift_gbp_profit_unscaled = c.estimated_lift_gbp_profit;
     c.estimated_lift_gbp_profit = Math.round(c.estimated_lift_gbp_profit * f);
   }
+  // 2026-05-26 defect 3 fix: keep lift_range on the SAME basis as the
+  // headline. Without this the headline was seasonally-adjusted while
+  // the assumption-stack range was not — the user saw "+£40/mo" up top
+  // and "expected £68/mo" in the box, which look like they disagree.
+  if (c.lift_range && f !== 1) {
+    c.lift_range = scaleLiftRange(c.lift_range, f);
+  }
   return c;
+}
+
+function scaleLiftRange(range, f) {
+  const scaleBlock = (block) => block && ({
+    low:               Math.round((block.low || 0) * f),
+    expected:          Math.round((block.expected || 0) * f),
+    high:              Math.round((block.high || 0) * f),
+    expected_unscaled: block.expected_unscaled != null ? block.expected_unscaled : block.expected
+  });
+  const stack = Array.isArray(range.assumption_stack) ? range.assumption_stack.slice() : [];
+  if (!stack.find(row => row && row.label === 'Seasonality factor')) {
+    stack.push({ label: 'Seasonality factor', value: f, unit: 'mult' });
+  }
+  return {
+    ...range,
+    basis: 'seasonally_adjusted',
+    seasonality_factor: f,
+    revenue: scaleBlock(range.revenue),
+    profit: scaleBlock(range.profit),
+    assumption_stack: stack
+  };
 }
 
 // ----------------------------------------------------------------------
@@ -1539,12 +1671,18 @@ function buildFaqAction(keyword, pageScope, hasFaq, htmlSnippet) {
   // results being removed). The CONTENT is still useful for AIO/LLM
   // extraction — value is in the rendered Q&A, not the markup. So we
   // tag the schema work as HEURISTIC and frame it as content work.
+  //
+  // 2026-05-26 defect 6 fix: when task_type is REWRITE the verb MUST
+  // be replace/rewrite. Previously the "Extend FAQs with 3…" copy
+  // shipped under a REWRITE pill, which the user (rightly) called out
+  // as a mismatch — extend/add is ADD semantics, replace/rewrite is
+  // REWRITE semantics.
   if (hasFaq && genericCount >= 2) {
     return {
       effort_hours: 1.5, confidence: EVIDENCE.MEDIUM, tag: 'rewrite', task_type: TASK_TYPE.REWRITE,
-      headline: `Rewrite the existing generic FAQs around ${localSlot}`,
+      headline: `Replace the existing generic FAQs with 3–5 questions about ${localSlot}`,
       detail: `Page already has FAQs but they read as generic photography questions ("Is photography difficult to learn?" etc.) `
-        + `with no commercial or local intent. Replace 3-5 with questions a real prospect asks `
+        + `with no commercial or local intent. Rewrite (don't append to) the existing block: replace 3-5 questions with the ones a real prospect asks `
         + `(cost, beginner pathway, 1-2-1 options${isLocal ? ', online vs in-person, Coventry travel/parking' : ''}). `
         + `Quality gate: each Q must align to a query the page can actually win.`
     };
@@ -1552,9 +1690,9 @@ function buildFaqAction(keyword, pageScope, hasFaq, htmlSnippet) {
   if (hasFaq) {
     return {
       effort_hours: 1.0, confidence: EVIDENCE.MEDIUM, tag: 'rewrite', task_type: TASK_TYPE.REWRITE,
-      headline: `Extend FAQs with 3 commercial-intent questions about ${localSlot}`,
-      detail: `Add 3 question/answer pairs that match real PAA queries AND are specific to this page's offering. `
-        + `Skip generic "what is photography" questions — they don't move conversion or AIO extraction.`
+      headline: `Rewrite 3 of the existing FAQs around ${localSlot}`,
+      detail: `Existing FAQs are not pulling their weight for "${keyword}". Replace 3 of them with question/answer pairs that match real PAA queries AND are specific to this page's offering. `
+        + `Skip generic "what is photography" rewrites — they don't move conversion or AIO extraction.`
     };
   }
   return {
@@ -1577,10 +1715,28 @@ function buildCitationAction(keyword) {
   };
 }
 
+// 2026-05-26 defect 1 fix: detectors no longer silently return
+// "nothing found" on empty input — they log a warning and return an
+// `audit_status: 'incomplete'` marker. When that happens we surface a
+// scan-incomplete warning on the candidate so the UI can flag it and
+// the user knows the absence of REMEDIATE tasks means "could not
+// check", not "page is clean".
+function buildAioIncompleteWarning(reasons, url) {
+  const reasonText = reasons && reasons.length ? reasons.join(', ') : 'page body unavailable';
+  return {
+    effort_hours: 0, confidence: EVIDENCE.HIGH, tag: 'audit', task_type: TASK_TYPE.REMEDIATE,
+    headline: `Page-body scan INCOMPLETE — could not extract body text from ${url || 'this page'}`,
+    detail: `Liability detectors (fluffy opener, unsourced stats, weak citations, duplicate claims) `
+      + `had no body text to inspect (${reasonText}). Re-run after verifying the page renders the body server-side, `
+      + `or treat this card's task list as a starting point only — REMEDIATE issues may exist that we haven't surfaced.`
+  };
+}
+
 function buildAioActions(c, live) {
   const args      = (c._rebuild && c._rebuild.args) || {};
   const keyword   = args.keyword;
   const pageScope = c.aio_page_scope || args.pageScope || 'national';
+  const url       = Array.isArray(c.pages_affected) ? c.pages_affected[0] : '';
   const schema    = (live && live.schemaTypes) || [];
   const hasFaq    = schema.includes('FAQPage');
   const bodyText  = (live && live.bodyText) || '';
@@ -1588,13 +1744,24 @@ function buildAioActions(c, live) {
   const fluffy    = detectFluffyOpener(bodyText);
   const liabilities = scanLiabilities(htmlSnip, bodyText);
   const actions = [];
+  if (liabilities.audit_status === 'incomplete') {
+    actions.push(buildAioIncompleteWarning(liabilities.audit_reasons, url));
+  }
   actions.push(...buildRemediateActionsFromLiabilities(liabilities));
   actions.push(buildOpenerAction(c, keyword, pageScope, fluffy));
   actions.push(buildFaqAction(keyword, pageScope, hasFaq, htmlSnip));
   actions.push(buildCitationAction(keyword));
   c.page_liabilities = liabilities;
   c.opener_audit = fluffy;
-  return actions.map((a, i) => ({ step: i + 1, ...a }));
+  c.aio_audit_status = liabilities.audit_status;
+  c.aio_audit_reasons = liabilities.audit_reasons || [];
+  const numbered = actions.map((a, i) => ({ step: i + 1, ...a }));
+  // 2026-05-26 defect 7 fix: total effort must be computed from the
+  // task array, never hardcoded. Overrides the lever EFFORT_BY_LEVER
+  // estimate the upstream `attachEffortAndRealisation` set.
+  const totalEffort = numbered.reduce((sum, a) => sum + (Number(a.effort_hours) || 0), 0);
+  c.effort_hours = Number(totalEffort.toFixed(2));
+  return numbered;
 }
 
 function buildSchemaActions(c) {
@@ -1617,11 +1784,12 @@ function buildRecommendedActions(c, live) {
 // Data assembly
 // ----------------------------------------------------------------------
 async function buildSnapshot(supabase, propertyUrl) {
-  const [schemaDetail, pages, keywords, products] = await Promise.all([
+  const [schemaDetail, pages, keywords, products, targetKeywordOverrides] = await Promise.all([
     fetchSchemaDetail(supabase, propertyUrl),
     fetchPageMetrics(supabase, propertyUrl),
     fetchKeywordRankings(supabase, propertyUrl),
-    fetchProducts(supabase)
+    fetchProducts(supabase),
+    fetchTargetKeywordOverrides(supabase, propertyUrl)
   ]);
   const pagesByUrl = new Map();
   for (const p of pages) pagesByUrl.set(p.page_url, p);
@@ -1635,7 +1803,33 @@ async function buildSnapshot(supabase, propertyUrl) {
   // hub ranks for "online photography course" which keyword-classifies as
   // 'courses' on URL prefix. Without the global pool, the enricher misses
   // the head term entirely and we're back to generic prose.
-  return { propertyUrl, schemaDetail, pagesByUrl, pagesByTier, keywordsByTier, productsByTier, allKeywords: keywords };
+  return {
+    propertyUrl,
+    schemaDetail,
+    pagesByUrl,
+    pagesByTier,
+    keywordsByTier,
+    productsByTier,
+    allKeywords: keywords,
+    targetKeywordOverrides
+  };
+}
+
+// Look up the assigned-keyword override for a URL (normalises trailing
+// slash + bare-path forms so we don't miss matches when the GSC row
+// uses a slightly different canonical form than the override row).
+function lookupAssignedKeyword(overrides, url) {
+  if (!overrides || !url) return null;
+  const tries = new Set();
+  const raw = String(url).trim();
+  tries.add(raw);
+  tries.add(raw.replace(/\/$/, ''));
+  tries.add(raw.replace(/^https?:\/\/[^/]+/, ''));
+  tries.add(raw.replace(/^https?:\/\/[^/]+/, '').replace(/\/$/, ''));
+  for (const candidate of tries) {
+    if (overrides.has(candidate)) return overrides.get(candidate);
+  }
+  return null;
 }
 
 // ----------------------------------------------------------------------
@@ -1813,6 +2007,11 @@ export default async function handler(req, res) {
           aio_query_intent: c.aio_query_intent ?? null,
           aio_reroute_note: c.aio_reroute_note ?? null,
           aio_rerouted: !!c.aio_rerouted,
+          aio_used_override: !!c.aio_used_override,
+          aio_assigned_keyword: c.aio_assigned_keyword ?? null,
+          aio_aov_flag: c.aio_aov_flag ?? null,
+          aio_audit_status: c.aio_audit_status ?? null,
+          aio_audit_reasons: c.aio_audit_reasons ?? null,
           page_liabilities: c.page_liabilities ?? null,
           opener_audit: c.opener_audit ?? null
         }))

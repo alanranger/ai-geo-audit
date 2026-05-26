@@ -2,6 +2,87 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-26] - AIO recommendation engine: 7 post-deploy defect fixes
+
+Follow-up to the AIO model + page-liability rework from earlier today. Seven defects
+flagged on `/photography-courses-coventry` are addressed; UI layout is frozen.
+
+- **Assigned keyword honoured (highest-priority defect):**
+  - `api/aigeo/revenue-funnel-smart-priorities.js` now fetches
+    `traditional_seo_target_keyword_overrides` in `buildSnapshot` and threads it
+    through `pickAioTarget` → `scoreAioCandidate` → new `selectAioTargetKeyword`.
+  - When a URL has an explicit assigned keyword AND that keyword has AIO data, the
+    picker uses it and SKIPS the local-variant reroute. Coventry now models
+    "Photography Courses Coventry", not "photography courses near me".
+  - Card surfaces the assigned keyword in the edit-this-page bar
+    (`rfActionPageUrlBar` shows `Assigned KW: <strong>...</strong>`).
+
+- **DEFECT 1 — page-body detectors now fail loud:**
+  - `lib/revenue-funnel-page-liability.js`:
+    - `detectFluffyOpener`, `detectUnsourcedStats`, `detectWeakOutboundCitations`
+      now `console.warn` on empty input AND return an `audit_status: 'incomplete'`
+      sentinel instead of silently returning a neutral pass.
+    - `scanLiabilities` aggregates `audit_status` + `audit_reasons[]`.
+    - `RHETORICAL_OPENERS` widened from 40 → 80 chars (catches "Ready to capture
+      the world through your lens?", 45 chars).
+    - `isFluffy` no longer fully vetoed by ONE concrete-fact token; rhetorical
+      question + 3+ aspirational words wins regardless.
+    - `NUMERIC_CLAIM_RE` fixed (trailing `\b` after `%` was breaking the common
+      "30% of UK adults" pattern); duplicate-claim dedup-key shortened to 30
+      chars (absorbs minor lead-in differences).
+    - `stripHtml` aligned with `extractBodyText` (now also strips `<head>`,
+      `<nav>`, `<header>`, `<footer>`) so the opener detector doesn't hunt past
+      the title/nav text.
+  - `buildAioActions` injects a `Page-body scan INCOMPLETE` REMEDIATE warning when
+    `audit_status === 'incomplete'`; UI renders an amber `rf-aio-audit-incomplete`
+    banner in the assumption-stack block.
+  - **New test:** `test/aio-page-liability-fixture.test.js` (6 cases). A Coventry-
+    style HTML fixture MUST yield >=2 REMEDIATE-worthy issues and a fluffy opener
+    — build fails otherwise. Empty input MUST mark `audit_status: 'incomplete'`.
+
+- **DEFECT 2 — AOV no longer misleadingly labelled "Tier AOV £2":**
+  - `lib/revenue-funnel-aio-model.js` `liftRange` now takes `aov` + `conversionRate`
+    separately and computes `revenue per click` as a labelled DERIVED row in the
+    assumption stack. Stack also flags any `revenue per click` outside £0.5–£10
+    via `aov_flag: { unverified: true, reason: ... }`.
+  - Smart-priorities passes `TRUE_AOV_BY_TIER` (Workshops £250, Courses £200,
+    Services £100, Hire £200, Academy £79) + a 1% booking conv rate so the stack
+    reads "AOV £200 × Conversion 1% = Revenue per click £2" instead of the bald
+    "Tier AOV £2".
+  - UI: `rfAioAssumptionStackHtml` renders flagged rows in red with a `!`
+    indicator and an "AOV unverified — revenue figure provisional" banner.
+
+- **DEFECT 3 — headline/range/£-per-hour on one labelled basis:**
+  - `applySeasonalityToCandidate` now also scales `lift_range` via new
+    `scaleLiftRange()` and labels the range `seasonally adjusted`. Headline and
+    range no longer disagree.
+  - UI badge `seasonally adjusted` shown next to the GP range when applicable.
+
+- **DEFECT 4 — LIVE banner copy rewritten:**
+  - `rfLiftBasisLine(c)` AIO branch: "Modelled probabilistically: monthly GP =
+    volume × P(win) × click capture × AOV × conversion rate × GP%, shown as a
+    low/expected/high range. P(win) decomposed by rank, intent fit, answer
+    readiness. Headline/range/£-per-hour all on the same seasonally-adjusted
+    basis." No more "Citation is binary".
+
+- **DEFECT 5 — "Why" block regenerated:**
+  - `buildAioDescription` now emits only: opportunity sentence + assigned-keyword
+    line + schema-present line + FAQ rich-results deprecation HEURISTIC note.
+    No more stale "append... extend the existing FAQPage" copy that contradicted
+    the new task list.
+
+- **DEFECT 6 — FAQ verb aligned to `task_type`:**
+  - `buildFaqAction` REWRITE branches now say "Replace ..." / "Rewrite 3 of ..."
+    instead of "Extend FAQs with 3 ..." / "Add 3 ...". REWRITE pill + replace/
+    rewrite copy match.
+
+- **DEFECT 7 — total effort computed from task array:**
+  - `buildAioActions` overrides `c.effort_hours` with the sum of action efforts
+    (1 + 1 + 0.5 = 2.5h on the Coventry example, not the hardcoded 2h).
+
+- **Verification:**
+  - `npm test` → 42/42 pass (36 pre-existing + 6 new liability-fixture tests).
+
 ## [2026-05-21] - SERP copy length fix + hub-aware title/meta (150-160)
 
 - **`lib/revenue-funnel-serp-copy.js`:** ASCII hyphen only (no em dash); `fitMetaDescription()` enforces **150-160ch**; hub pages (`/photography-courses-coventry`, academy) ship **exact** title + meta + **keep H1** guidance.
