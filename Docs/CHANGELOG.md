@@ -2,6 +2,107 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-26] - Revenue Truth tab — Gate 2 (sections 1-9)
+
+Built the **Revenue Truth** dashboard tab — measured revenue history from the
+Booking Sheet, the single source of truth. Sections 1-9 per the brief; the
+Gap & Signals section is deliberately deferred to a later turn (one verifiable
+change per turn).
+
+**Headline rule (from Phase L1, reaffirmed):** primary dashboard headline =
+`revenue_amount` = the full 12-category sum = the Booking Sheet YTD Actual cell
+(£46,572.46 for 2025, £19,598.04 for 2026 YTD). It is NOT `operational_revenue`.
+`operational_revenue` (D2C+B2B) is shown as a secondary breakdown line.
+`adjustment_net` is its own explicit labelled line so the user always sees
+`headline = operational + adjustment`.
+
+**New data layer (Gate 1 + Gate 2 combined):**
+- `booking_sheet_category_gp` — per-(category, year) GP rate (verbatim from each
+  Sales YYYY tab's GP Amount grid; year-specific, never harmonised). Added in
+  Gate 1.
+- `booking_sheet_transactions` — per-booking detail rows from the Sales YYYY
+  transactional block (cols A-G below the summary grids: Date | Client |
+  Category | Funding | Amount | Event | Source). One row per booking line item.
+  Idempotent on `(property_url, year, source_workbook, source_row)`. Reconciles
+  to the penny against the category grid at year level
+  (2025: 471 txns = £46,572.46; 2026 YTD: 150 txns = £19,598.04). Added in
+  Gate 2.
+- `client_type` derived from booking_source: `Existing` if source is literally
+  `"Existing"`, else `New`. `channel` carries the booking source for new
+  clients only (NULL for Existing).
+
+**New API:** `GET /api/aigeo/revenue-truth-summary`. One call returns
+`config` (tier bands, fee rules, current month), `monthly` (17 rows of
+headline / operational / adjustment / d2c / b2b / band / isPartial),
+`yearTotals`, `headlineStrip` (latest closed month, YTD, trailing-3 avg),
+`categoryBreakdown` (12 cats × month with revenue, units, avg price, GP rate,
+GP £), `channelMix`, `newVsExisting`, `fundingFees` (with estimated payment
+fees), `gpRates`.
+
+**Dashboard tab (`audit-dashboard.html`):**
+- New `data-panel="revenue-truth"` nav button in the Planning & Optimisation
+  section, immediately above Revenue Funnel.
+- Sections 1-9 rendered:
+  1. **Tier band chart** — 17-month bar chart of `revenue_amount` with three
+     horizontal dashed lines at Survival £3k / Comfortable £5k / Thrive £8k
+     (config constants, edit in one place). Bars coloured by band reached;
+     current partial month (May 2026) shown in slate-grey to distinguish from
+     a "real" below-survival result.
+  2. **Headline strip** — latest closed month, YTD with pro-rata target,
+     trailing-3-closed-month average band, tier bands reference card.
+  3. **Market split** — 17-month table: D2C / B2B / Operational / Adjustment /
+     Headline. Adjustment shown in red when negative. Operational =
+     `D2C + B2B` labelled as such.
+  4 + 5. **Category breakdown** — 12 verbatim categories × 17 months pivot,
+     with units / avg price / GP shown on hover. `*_Out` voucher lines shown
+     as negative re-attribution (not hidden). Market pill (D2C/B2B/ADJ) on
+     each row.
+  6. **Channel mix** — booking source per month, computed FROM transaction
+     rows (never from cached grid-summary cells). Existing-client revenue
+     shown as its own row.
+  7. **New vs Existing** — revenue + units per month per client_type.
+  8. **Funding & fees** — banking source per month with estimated payment fees
+     (Stripe 1.8%, PayPal 2.9% + £0.30 verbatim from the workbook's
+     "Payment Fees" note). Bank transfers + voucher redemptions = no fee.
+  9. **Revenue / GP toggle** — checkbox above the category table flips between
+     revenue £ and GP £ (GP rate verbatim from the year's own grid).
+
+**Code conformance:** every helper function in the new parser code, backfill
+extension, API endpoint, and UI render code is kept under cyclomatic-15.
+Charting uses the dashboard's existing Chart.js 4.4.0; tier band lines drawn
+by a small inline `afterDatasetsDraw` plugin (no `chartjs-plugin-annotation`
+dependency added).
+
+**Reconciliation evidence (Gate 1 + Gate 2):**
+- 2025 year total: £46,572.46 (category grid) = £46,572.46 (txn sum) — zero
+  delta.
+- 2026 YTD total: £19,598.04 (category grid) = £19,598.04 (txn sum) — zero
+  delta.
+- `booking_sheet_monthly_wide` matview refreshed post-import.
+- Smoke test `scripts/smoke-test-revenue-truth-summary.mjs` returns
+  reconciled monthly + yearTotals matching the spreadsheet to the penny.
+
+**Not yet built (deferred to a separate turn, per user instruction):**
+- Gap & Signals section (gap quantification + GSC/GA4 correlation context).
+- Removal of the back-compat `tier_revenue` synthesis from
+  `revenue-funnel-summary.js` (waiting on Revenue Funnel UI rebuild turn).
+- Repointing the existing Revenue Funnel sparklines + Scenario Planning
+  cockpit at the new `revenue_amount` headline (Revenue Funnel + Scenario
+  Planning tabs deliberately untouched this turn).
+
+**Files changed:**
+- `migrations/phase_l2_create_booking_sheet_transactions_20260526.sql` (new)
+- `lib/booking-sheet-truth-parser.mjs` — `transactionRows` emitter +
+  `findTxnHeaderRow` / `buildOneTxnRow` / `buildTransactionRows` /
+  `readTxnDate` / `excelSerialToIsoDate` / `deriveClientFields` helpers
+- `scripts/backfill-booking-sheet-monthly.mjs` — txn upsert into
+  `booking_sheet_transactions` + `printTransactionReconciliation` soft check
+- `api/aigeo/revenue-truth-summary.js` (new)
+- `audit-dashboard.html` — Revenue Truth nav button, panel, scoped CSS, render
+  JS, inline tier-band-lines Chart.js plugin, `setActivePanel` hook
+- `scripts/smoke-test-revenue-truth-summary.mjs` (new) — local end-to-end
+  reconciliation smoke test
+
 ## [2026-05-26] - Revenue: three tier systems, not one — Phase L1 correction
 
 Phase L (immediately below) shipped the right reconciliation total (£66,165.50)

@@ -1,6 +1,6 @@
 # Revenue Truth — Booking Sheet is the Single Source
 
-**Status:** ✅ IMPLEMENTED in Phase L (2026-05-26) with correction in Phase L1 (same day). Schema, parser, importer and four reader paths are live; data reconciles to the penny against YTD Actual for both 2025 and 2026 YTD.
+**Status:** ✅ IMPLEMENTED in Phase L (2026-05-26) with correction in Phase L1 (same day) and **Revenue Truth dashboard tab built in Gate 2 (Phase L2, same day)** — see `Docs/CHANGELOG.md` top entry for the tab build details. Schema, parser, importer, four reader paths, year-specific GP table, per-booking transaction table and the new `/api/aigeo/revenue-truth-summary` endpoint are all live. Data reconciles to the penny against YTD Actual for both 2025 (£46,572.46 after the C444 fix) and 2026 YTD (£19,598.04).
 **Date:** 2026-05-26.
 **Supersedes:** `Docs/REVENUE-DATA-AUDIT.md` "Trustworthy monthly revenue series" section. That table summed Squarespace API + Stripe API + `booking_sheet`-source rows and produced **£72,251.50** as the 17-month total. **That figure is wrong — it double-counts.** This document replaces it.
 
@@ -24,7 +24,7 @@ Phase L initially rolled the 12 verbatim Booking Sheet categories into 5 invente
 **Headline rules (locked by Alan 2026-05-26 — REVISED, see history note below):**
 
 - **Primary headline** = `revenue_amount` = **full 12-category sum** = **the spreadsheet YTD Actual cell** (J47 for 2025, J48 for 2026). The dashboard headline MUST equal the figure the user reads on the Booking Sheet — anything else destroys trust on every glance.
-  - 2025 headline = **£46,567.46**
+  - 2025 headline = **£46,572.46** (the C444 fix in the corrected workbook moved 2025 from £46,567.46 to £46,572.46 — Gate 1 re-import 2026-05-26).
   - 2026 YTD headline = **£19,598.04**
 - **Tier-band comparison** (survival £3k / comfortable £5k / thrive £8k bands) is also against `revenue_amount`, so "which tier am I in" matches what the spreadsheet says.
 - **Secondary breakdown line** = `operational_revenue` = D2C + B2B, labelled **"service revenue (excl. voucher timing)"**. Shown beneath the headline.
