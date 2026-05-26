@@ -1,5 +1,21 @@
 # Revenue Funnel — Squarespace API integration
 
+> **⚠️ READ THIS FIRST (2026-05-26 — Phase L + L1).** The headline Revenue
+> Funnel reads no longer come from `revenue_snapshots`. The Booking Sheet
+> (`Sales YYYY` row 18 "Totals" line) is the single source of truth — see
+> `Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md`. The Squarespace sync described
+> below STILL RUNS as a daily cron and continues to write to
+> `revenue_snapshots` for **transaction-level detail only** (order IDs,
+> product names, customer email, AOV, refunds — useful for drilldowns and
+> conversion analysis). It is no longer summed into the headline. The
+> "Revenue per 1k impressions" KPI and the Click→Sale conversion tiles now
+> source their revenue figure from `public.booking_sheet_monthly_wide`
+> (operational_revenue = D2C + B2B) and the click/impression detail from
+> the existing GSC + SQ rows. The cron is kept so the SQ side stays warm
+> for the future "Where did the bookings come from?" drilldown.
+>
+> ---
+
 The Revenue Funnel tab (rendered in `audit-dashboard.html`) populates its
 "Revenue per 1k impressions" KPI, the bottom of the funnel (Clicks → Sales)
 and the "Sales / Click → Sale conversion" tiles from the

@@ -1,5 +1,42 @@
 # Revenue tracking — how the 3 sources stay in sync
 
+> **⚠️ SUPERSEDED on 2026-05-26 by Phase L + L1 — see `Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md`.**
+>
+> The "three independent feeds summed to one per-month total" model described
+> below is **wrong** and produced a double-counted 17-month total of £72,251.50
+> vs the user-reconciled truth of £66,165.50. The three sources overlap: every
+> Squarespace order paid by Bank Transfer arrives in BOTH the SQ Orders API
+> AND the Booking Sheet's Bank receipts, and no transaction-level join exists
+> to de-dup them. The "Stripe skips SQ Commerce", "Booking Sheet ignores
+> Funding=Stripe" and "ignores Funding=PicknMix" filters described below were
+> attempts to shrink the overlap, but they all undercounted in different
+> directions (the legacy Booking Sheet import captured only **43%** of true
+> revenue — the other 57% was supposed to come back via SQ + Stripe sums, which
+> introduced the double-counting).
+>
+> **The replacement model (Phase L + L1, 2026-05-26):**
+>
+> - The user's local Booking Sheet (`Sales YYYY` tab, row 18 "Totals" line) is
+>   the **single source of truth** for total revenue. It already de-duplicates
+>   correctly because the user enters bookings once per transaction by hand.
+> - The Booking Sheet's 12 verbatim categories are the **revenue truth layer**,
+>   stored in `public.booking_sheet_monthly_category`. The mapping to 3 derived
+>   markets (D2C / B2B / ADJUSTMENT) is stored as data in
+>   `public.booking_sheet_category_market`. Reads go through
+>   `public.booking_sheet_monthly_wide`.
+> - Operational headline = **D2C + B2B**. ADJUSTMENT (voucher Inc/Out timing)
+>   shown as its own labelled line. Full 12-cat sum = reconciliation basis.
+> - `revenue_snapshots` is now **detail-only** for transaction-level SQ + Stripe
+>   data (order IDs, charge IDs, product names) — NEVER summed for headline
+>   revenue. The `squarespace_api` + `stripe_supplemental` cron jobs described
+>   below continue to run for that detail-only role; the (legacy) `booking_sheet`
+>   importer rows were deleted in Phase L.
+>
+> **What's below is left for historical reference only — do not implement
+> against this model. See the new doc.**
+>
+> ---
+
 The Revenue Funnel page combines revenue from **three independent feeds** into
 a single per-month total. They never overlap because each one is restricted
 to streams the others cannot see.

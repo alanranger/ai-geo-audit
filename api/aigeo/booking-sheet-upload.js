@@ -4,23 +4,32 @@
 // JSON body, reads the row-18 Totals + per-category grid from each
 // "Sales YYYY" tab (the SINGLE SOURCE OF TRUTH for total revenue), and
 // upserts into:
-//   - public.booking_sheet_monthly           (per-month per-tier truth)
-//   - public.booking_sheet_monthly_category  (12-category audit trail)
+//   - public.booking_sheet_monthly_category  (verbatim 12-category truth)
 //   - then refreshes booking_sheet_monthly_wide materialised view
 //
-// 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX: this endpoint previously called
-// the LEGACY `parseBookingSheet` parser, which walked transactional rows
-// and filtered to Bank+PayPal+Cash funding (excluding Stripe), then wrote
-// to `revenue_snapshots` with source='booking_sheet'. The dashboard then
-// SUMMED that source with `squarespace_api` + `stripe_supplemental`
+// 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX (Phase L): this endpoint previously
+// called the LEGACY `parseBookingSheet` parser, which walked transactional
+// rows and filtered to Bank+PayPal+Cash funding (excluding Stripe), then
+// wrote to `revenue_snapshots` with source='booking_sheet'. The dashboard
+// then SUMMED that source with `squarespace_api` + `stripe_supplemental`
 // sources, producing double-counted headline figures because the three
 // sources overlap (no transaction-level de-dup exists between SQ orders,
 // Stripe charges and Booking Sheet receipts).
 //
-// The new behaviour reads the Booking Sheet's row-18 "Totals" line, which
-// is the user's manually-reconciled master total -- it already includes
-// every funding channel. The dashboard now reads from the new tables and
-// no longer needs the SQ/Stripe sources to be summed for the headline.
+// 2026-05-26 PHASE L1 CORRECTION: the initial Phase L fix also wrote a
+// monthlyPerTier rowset to public.booking_sheet_monthly, mapping the 12
+// verbatim categories into 5 invented "tiers". That table is now dropped
+// -- the canonical layer is the 12 verbatim categories; the
+// category -> market (D2C / B2B / ADJUSTMENT) mapping is data in
+// booking_sheet_category_market joined by the wide view.
+//
+// IMPORT GATE: the parser's verification requires the per-sheet derived
+// year sum of ALL 12 CATEGORIES to equal that sheet's "YTD Actual" cell to
+// the penny. The gate proves the import is complete. The operational
+// headline (D2C + B2B) is a presentation layer ON TOP of verified-complete
+// data -- it must NEVER become what the gate checks, or an incomplete
+// import could pass.
+//
 // See Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md.
 //
 // We use JSON+base64 (not multipart/form-data) because:
@@ -42,7 +51,6 @@
 //     tabs_read:   ["Sales 2025", "Sales 2026"],
 //     verification: [ { sheet, year, derivedYearSum, ytdActualValue,
 //                       ytdActualCell, reconciles } ],
-//     tier_rows_written:     73,
 //     category_rows_written: 133,
 //     totals_by_year:        { "2025": 46567.46, "2026": 19598.04 },
 //     warnings:              []
@@ -74,9 +82,9 @@ function validateBody(body) {
   return null;
 }
 
-function totalsByYear(perTierRows) {
+function totalsByYear(perCategoryRows) {
   const out = {};
-  for (const r of perTierRows) {
+  for (const r of perCategoryRows) {
     out[r.year] = Number(((out[r.year] || 0) + Number(r.revenue_amount || 0)).toFixed(2));
   }
   return out;
@@ -89,10 +97,8 @@ function chunk(arr, n) {
 }
 
 async function clearExistingForProperty(supabase, propertyUrl) {
-  const del1 = await supabase.from('booking_sheet_monthly').delete().eq('property_url', propertyUrl);
-  if (del1.error) throw new Error(`clear booking_sheet_monthly failed: ${del1.error.message}`);
-  const del2 = await supabase.from('booking_sheet_monthly_category').delete().eq('property_url', propertyUrl);
-  if (del2.error) throw new Error(`clear booking_sheet_monthly_category failed: ${del2.error.message}`);
+  const del = await supabase.from('booking_sheet_monthly_category').delete().eq('property_url', propertyUrl);
+  if (del.error) throw new Error(`clear booking_sheet_monthly_category failed: ${del.error.message}`);
 }
 
 async function upsertChunks(supabase, table, rows) {
@@ -165,7 +171,6 @@ export default async function handler(req, res) {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
     await clearExistingForProperty(supabase, property);
-    await upsertChunks(supabase, 'booking_sheet_monthly', parsed.monthlyPerTier);
     await upsertChunks(supabase, 'booking_sheet_monthly_category', parsed.monthlyPerCategory);
     await refreshWideView(supabase);
 
@@ -174,9 +179,8 @@ export default async function handler(req, res) {
       filename: filename || null,
       tabs_read: parsed.verification.map(v => v.sheet),
       verification: parsed.verification,
-      tier_rows_written: parsed.monthlyPerTier.length,
       category_rows_written: parsed.monthlyPerCategory.length,
-      totals_by_year: totalsByYear(parsed.monthlyPerTier),
+      totals_by_year: totalsByYear(parsed.monthlyPerCategory),
       warnings: parsed.warnings
     });
   } catch (e) {

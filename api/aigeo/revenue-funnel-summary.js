@@ -515,8 +515,60 @@ function mergeRowsByMonth(rows) {
   return merged;
 }
 
+// Back-compat: synthesize the legacy `tier_revenue` jsonb shape the UI
+// still consumes (per-tier sparklines, KPI tiles via tierRevenueFromRow).
+//
+// 2026-05-26 Phase L1: only the 4 categories that 1-to-1 map to a real
+// tier ID are populated. The Phase L "services" rollup is GONE (it merged
+// 8 unrelated D2C, B2B, ADJUSTMENT lines into one bucket). The legacy
+// `hire` key never had a Booking Sheet category and is also null. Until
+// the UI rebuild turn deletes the per-tier sparklines and replaces them
+// with the 3-line D2C / B2B / ADJUSTMENT chart, the `services` and `hire`
+// sparklines will render as empty -- which is the truthful state.
+const LEGACY_TIER_TO_CATEGORY = {
+  courses:               '1. Courses/masterclasses',
+  workshops_nonres:      '2. Workshops Non Residential',
+  workshops_residential: '3. Workshops Residential',
+  academy:               '12. Academy'
+};
+
+function synthesiseLegacyTierRevenue(row) {
+  const cats = row.category_revenue || {};
+  const out = {};
+  for (const [tier, label] of Object.entries(LEGACY_TIER_TO_CATEGORY)) {
+    const v = Number(cats[label]);
+    out[tier] = Number.isFinite(v) ? v : null;
+  }
+  out.services = null;
+  out.hire = null;
+  return out;
+}
+
+function shapeWideViewRow(row) {
+  // Surface ALL new Phase L1 columns to the caller so the dashboard can
+  // start consuming them (revenue_amount = the spreadsheet headline figure,
+  // operational_revenue as the "service revenue excl. voucher timing"
+  // breakdown line, adjustment_net as the voucher timing line, market
+  // breakdown, verbatim categories) while the legacy tier_revenue field
+  // continues to drive existing UI until the rebuild turn.
+  return {
+    period_start: row.period_start,
+    period_end: row.period_end,
+    revenue_amount: Number(row.revenue_amount) || 0,
+    currency: row.currency,
+    source: row.source,
+    transactions: row.transactions,
+    tier_revenue: synthesiseLegacyTierRevenue(row),
+    tier_transactions: row.tier_transactions,
+    operational_revenue: Number(row.operational_revenue) || 0,
+    adjustment_net: Number(row.adjustment_net) || 0,
+    market_revenue: row.market_revenue || null,
+    category_revenue: row.category_revenue || null
+  };
+}
+
 async function fetchRevenueHistory(supabase, propertyUrl) {
-  // 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX: source is now
+  // 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX (Phase L): source is now
   // `booking_sheet_monthly_wide`, which holds exactly one authoritative
   // row per (property, year, month) sourced from the Booking Sheet
   // row-18 Totals. The legacy `revenue_snapshots` table was summing
@@ -525,17 +577,26 @@ async function fetchRevenueHistory(supabase, propertyUrl) {
   // SQ Orders API and the Booking Sheet's Bank receipts), so the monthly
   // history was double-counted. See Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md.
   //
+  // 2026-05-26 Phase L1 correction: SELECT the new view columns
+  // (category_revenue, market_revenue, operational_revenue, adjustment_net)
+  // instead of Phase L's invented `tier_revenue` jsonb. `shapeWideViewRow`
+  // synthesises a back-compat `tier_revenue` for the 4 real 1-to-1
+  // category mappings so the existing UI keeps rendering until the UI
+  // rebuild turn replaces the per-tier sparklines with the 3-line
+  // operational chart.
+  //
   // The view already returns one row per month -- the isCalendarMonthRow
   // filter and mergeRowsByMonth ceremony are now no-ops but kept in place
   // for resilience if the view's shape ever changes.
   const { data, error } = await supabase
     .from('booking_sheet_monthly_wide')
-    .select('period_start, period_end, revenue_amount, currency, source, transactions, tier_revenue, tier_transactions')
+    .select('period_start, period_end, revenue_amount, currency, source, transactions, tier_transactions, operational_revenue, adjustment_net, market_revenue, category_revenue')
     .eq('property_url', propertyUrl)
     .order('period_end', { ascending: false })
     .limit(120);
   if (error) throw error;
-  const monthly = (data || []).filter(isCalendarMonthRow);
+  const shaped = (data || []).map(shapeWideViewRow);
+  const monthly = shaped.filter(isCalendarMonthRow);
   const merged = mergeRowsByMonth(monthly);
   const sorted = merged.toSorted((a, b) => a.period_end.localeCompare(b.period_end));
   return sorted.slice(-12);
@@ -571,8 +632,12 @@ function decorateHistoryWithTargets(history) {
 //   { tier_id, tier_label, monthly_target, monthly_total_28d, points: [
 //       { month, revenue, target, variance_pct, is_partial }
 //     ] }
-// The `revenue` value is read from `revenue_snapshots.tier_revenue[tier_id]`
-// when present, falling back to null (UI shows "no data" for that point).
+// The `revenue` value comes from the back-compat `tier_revenue` jsonb
+// synthesised by `synthesiseLegacyTierRevenue` from `booking_sheet_monthly_wide`
+// (4 valid 1-to-1 mappings: courses, workshops_nonres, workshops_residential,
+// academy; services + hire = null). Falls back to null where the synthesis is
+// null (UI shows "no data" for that point). Will be removed when the UI is
+// rebuilt to consume `category_revenue` and `market_revenue` directly.
 function emptyTierSeries() {
   return MONEY_PAGE_TIERS.map(t => ({
     tier_id: t.id,
@@ -1140,23 +1205,29 @@ function pickBestRevenueRow(rows) {
 }
 
 async function fetchLatestRevenue(supabase, propertyUrl) {
-  // 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX: see fetchRevenueHistory above.
-  // The picker (pickBestRevenueRow) will now skip future-dated rows (e.g.
-  // the in-progress current month) and pick the latest CLOSED calendar
-  // month from the Booking Sheet, which is the correct rolling-window
-  // denominator for the funnel KPI tiles.
+  // 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX (Phase L): see fetchRevenueHistory.
+  // The picker (pickBestRevenueRow) will skip future-dated rows (e.g. the
+  // in-progress current month) and pick the latest CLOSED calendar month
+  // from the Booking Sheet, which is the correct rolling-window denominator
+  // for the funnel KPI tiles.
+  //
+  // 2026-05-26 Phase L1 correction: SELECT the new view columns and shape
+  // them via `shapeWideViewRow` (which synthesises a back-compat
+  // tier_revenue jsonb for the 4 real 1-to-1 category mappings) so the
+  // KPI tiles and tierRevenueFromRow lookups keep working until the UI
+  // rebuild turn.
   const { data, error } = await supabase
     .from('booking_sheet_monthly_wide')
-    .select('period_start, period_end, revenue_amount, currency, source, transactions, tier_revenue, tier_transactions, notes')
+    .select('period_start, period_end, revenue_amount, currency, source, transactions, tier_transactions, operational_revenue, adjustment_net, market_revenue, category_revenue, notes')
     .eq('property_url', propertyUrl)
     .order('period_end', { ascending: false })
     .limit(36);
   if (error) throw error;
-  const allRows = data || [];
-  const base = pickBestRevenueRow(allRows);
+  const allShaped = (data || []).map(r => ({ ...shapeWideViewRow(r), notes: r.notes }));
+  const base = pickBestRevenueRow(allShaped);
   if (!base) return null;
   // Merge any other rows that cover the EXACT same window (different source).
-  const siblings = allRows.filter(r =>
+  const siblings = allShaped.filter(r =>
     r !== base && r.period_start === base.period_start && r.period_end === base.period_end
   );
   return mergeRevenueRows(base, siblings);

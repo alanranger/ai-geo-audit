@@ -1,10 +1,39 @@
-# Revenue Truth — Booking Sheet is the Single Source (Discovery Only)
+# Revenue Truth — Booking Sheet is the Single Source
 
-**Status:** Discovery only. No data has been corrected, no fossil-row cleanup has been run, no tab has been built, no schema has been changed.
+**Status:** ✅ IMPLEMENTED in Phase L (2026-05-26) with correction in Phase L1 (same day). Schema, parser, importer and four reader paths are live; data reconciles to the penny against YTD Actual for both 2025 and 2026 YTD.
 **Date:** 2026-05-26.
 **Supersedes:** `Docs/REVENUE-DATA-AUDIT.md` "Trustworthy monthly revenue series" section. That table summed Squarespace API + Stripe API + `booking_sheet`-source rows and produced **£72,251.50** as the 17-month total. **That figure is wrong — it double-counts.** This document replaces it.
 
 **British English used throughout. All money in GBP.**
+
+---
+
+## Phase L1 correction — three tier systems, not one
+
+Phase L initially rolled the 12 verbatim Booking Sheet categories into 5 invented "tiers" (`courses`, `workshops_nonres`, `workshops_residential`, `services`, `academy`). The `services` bucket merged eight unrelated categories (D2C, B2B and ADJUSTMENT lines) into one figure that corresponded to nothing real. Phase L1 deletes the invented rollup and replaces it with the right model — three separate tier systems:
+
+1. **Accounting categories (12)** — what was bought. Verbatim Booking Sheet categories. Revenue truth layer. Stored in `public.booking_sheet_monthly_category`. Never merged.
+2. **Business market (3)** — who the customer is. Derived attribute per category:
+   - **D2C** — `1. Courses/masterclasses`, `2. Workshops Non Residential`, `3. Workshops Residential`, `6. Mentoring`, `7. 1-2-1`, `12. Academy`
+   - **B2B** — `10. Prints & Royalties`, `11 Commissions`
+   - **ADJUSTMENT** — `4. Pick n Mix Inc`, `5. Pick n Mix Out`, `8. Gift Vouchers Inc`, `9. Gift Vouchers Out`. **Not revenue** — deferred-spend accounting plumbing (advance purchase booked `Inc`, then credited `Out` against the D2C category it is eventually spent on). Nets toward zero. Shown on the dashboard as its own labelled line, never silently in or out of the headline.
+
+   The mapping is stored as DATA in `public.booking_sheet_category_market` (12 rows), joined by the wide view. Editing the table changes the dashboard without a code release.
+3. **Page tiers (A–F: Landing, Product, Event, Blog, Academy, Unmapped)** — where on the website the journey happens. SEO/money-pages classification. **Stays out of the revenue data layer entirely.** The two systems meet only via the `market` attribute on money pages (a separate follow-up, not done yet).
+
+**Headline rules (locked by Alan 2026-05-26 — REVISED, see history note below):**
+
+- **Primary headline** = `revenue_amount` = **full 12-category sum** = **the spreadsheet YTD Actual cell** (J47 for 2025, J48 for 2026). The dashboard headline MUST equal the figure the user reads on the Booking Sheet — anything else destroys trust on every glance.
+  - 2025 headline = **£46,567.46**
+  - 2026 YTD headline = **£19,598.04**
+- **Tier-band comparison** (survival £3k / comfortable £5k / thrive £8k bands) is also against `revenue_amount`, so "which tier am I in" matches what the spreadsheet says.
+- **Secondary breakdown line** = `operational_revenue` = D2C + B2B, labelled **"service revenue (excl. voucher timing)"**. Shown beneath the headline.
+- **ADJUSTMENT** = `adjustment_net`, shown as its own visible labelled line (e.g. "voucher / deferred-spend timing: −£1,228.75") so the user can see headline = operational + adjustment at a glance.
+- **Import gate** verifies `SUM(12 categories) === YTD Actual` to the penny. The gate proves the import is complete. The headline is `revenue_amount` (which IS the gate's basis), so the on-screen number and the import-gate number are the same number.
+
+> **Headline-decision history (kept honest):** an earlier draft of this section locked in `operational_revenue` (D2C + B2B) as the primary headline with `revenue_amount` as the secondary "incl. timing adjustment" figure. That was reversed on 2026-05-26 before any UI work shipped: the user's live workflow reads the Booking Sheet `Sales YYYY` row 18 (= `revenue_amount`) constantly, and a dashboard headline that differs from the spreadsheet by £1,229 in either direction destroys trust the moment they cross-check it. The data layer doesn't change — both fields are already on the matview — only which field the UI reads for the headline + tier-band comparison.
+
+**Sparklines** on the Revenue Funnel tab will be three lines on one chart (D2C, B2B, ADJUSTMENT) on a shared `revenue_amount`-basis y-axis, in the UI rebuild turn that follows Phase L1. The sparkline breakdown is per-market; the bar / headline total each month is `revenue_amount` (so the three lines sum to the bar, with ADJUSTMENT visible as its own line).
 
 ---
 
@@ -184,6 +213,15 @@ The `booking_sheet` source rows currently in Supabase represent only **43%** of 
 
 ## 9. Revised plan for the Revenue & Conversion Tab — specify, do NOT build yet
 
+> **⚠️ This section is historical (discovery-stage spec from before any build).** The actual schema shipped is different and is described in the "Phase L1 correction" section at the top of this document. Key differences:
+>
+> - The proposed `booking_sheet_monthly` table here was built in Phase L then **dropped in Phase L1** (the 5-tier rollup it implied was an invented dimension that conflated D2C, B2B and ADJUSTMENT lines into one "services" bucket). The verbatim 12-category truth lives in `public.booking_sheet_monthly_category` instead.
+> - The category → market mapping (D2C / B2B / ADJUSTMENT) is stored as data in a separate table `public.booking_sheet_category_market` (not derived in code).
+> - Dashboard reads go through the materialised view `public.booking_sheet_monthly_wide` which exposes `category_revenue` jsonb (12 verbatim categories), `market_revenue` jsonb (D2C / B2B / ADJUSTMENT), `operational_revenue` (D2C + B2B — the "service revenue excl. voucher timing" secondary breakdown line), `adjustment_net` (voucher timing line), **`revenue_amount` (full 12-cat sum = YTD Actual = the dashboard headline + tier-band comparison basis — must equal the spreadsheet figure on every screen)**.
+> - `revenue_snapshots` was demoted to detail-only (the §9.2 plan), the importer was rewritten with a hard reconciliation gate (the §9.3 plan, plus the L1 correction that the gate checks the **full 12-cat sum**, not the operational subset).
+>
+> The §9 text below is kept for the historical record. Read the Phase L1 section at the top of this doc for what's actually in production.
+
 The previous plan (in `Docs/DATA-INVENTORY-CONVERSION-TAB.md`) assumed `revenue_snapshots` SUM-across-sources could be the headline. It cannot. Replace with:
 
 ### 9.1 Data layer
@@ -250,9 +288,11 @@ Monthly bar chart, YTD vs target, GP overlay — all of them must `SELECT FROM b
 
 ## 11. What needs the user's confirmation before any build
 
-1. **Confirm** the new authoritative table `booking_sheet_monthly` (schema in §9.1) is the model you want to adopt.
-2. **Confirm** that `revenue_snapshots` should be demoted to detail-only (renamed `revenue_snapshots_detail`, or flagged via `is_headline_total = false`).
-3. **Confirm** the order in §9.5 — build new authoritative table first, migrate dashboard reads second, fossil cleanup last (and only if still wanted).
-4. **Confirm** the category names in §4/§5 are the canonical set you want surfaced on the dashboard (verbatim, including the leading numbers), or supply the preferred display labels.
+> **✅ All four items below were confirmed (with corrections) on 2026-05-26 and built in Phase L + L1 the same day. Kept for historical record.**
+
+1. **Confirm** the new authoritative table `booking_sheet_monthly` (schema in §9.1) is the model you want to adopt. — _Confirmed; corrected in Phase L1: the authoritative table is `booking_sheet_monthly_category` keyed on the 12 verbatim categories (not pre-rolled into 5 tiers). Dashboard reads use the matview `booking_sheet_monthly_wide`._
+2. **Confirm** that `revenue_snapshots` should be demoted to detail-only (renamed `revenue_snapshots_detail`, or flagged via `is_headline_total = false`). — _Confirmed (Phase L): demoted via `COMMENT ON TABLE` warning + deletion of the 17 superseded `source='booking_sheet'` rows. Not renamed (would have broken too many existing reads). No headline reader now consumes it._
+3. **Confirm** the order in §9.5 — build new authoritative table first, migrate dashboard reads second, fossil cleanup last (and only if still wanted). — _Confirmed; first two done. Fossil cleanup not yet run, harmless to defer._
+4. **Confirm** the category names in §4/§5 are the canonical set you want surfaced on the dashboard (verbatim, including the leading numbers), or supply the preferred display labels. — _Confirmed verbatim. The 12 labels in `booking_sheet_category_market.category_label` are the canonical display set._
 
 Once confirmed, the build can begin. Until then, nothing in the database changes.

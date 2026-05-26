@@ -9,16 +9,23 @@
 > - **2026 YTD (Jan–May): £19,598.04**
 > - **17-month total: £66,165.50**
 >
-> **What was fixed (2026-05-26):**
-> 1. New tables `public.booking_sheet_monthly` (per year/month/tier) + `public.booking_sheet_monthly_category` (12-category audit trail) + materialised view `public.booking_sheet_monthly_wide` (drop-in replacement for `revenue_snapshots` reads). Migration: `migrations/20260526_booking_sheet_monthly.sql`.
+> **What was fixed (2026-05-26):** Two passes on the same day.
+>
+> **Phase L (committed `6faa5f1`):**
+> 1. New tables `public.booking_sheet_monthly` (per year/month/tier — _later dropped by L1_) + `public.booking_sheet_monthly_category` (12-category audit trail) + materialised view `public.booking_sheet_monthly_wide`. Migration: `migrations/20260526_booking_sheet_monthly.sql`.
 > 2. New parser `lib/booking-sheet-truth-parser.mjs` reads the row-18 "Totals" line from each `Sales YYYY` tab instead of walking transactional rows with a funding filter. New backfill script `scripts/backfill-booking-sheet-monthly.mjs`.
-> 3. Repointed the four hot reader paths to `booking_sheet_monthly_wide`:
->    - `api/aigeo/revenue-funnel-summary.js` (Revenue Funnel tab — `fetchRevenueHistory` + `fetchLatestRevenue`)
->    - `api/aigeo/revenue-funnel-smart-priorities.js` (Scenario Planning tab — `fetchRollingRevenueSnap`)
->    - `lib/revenue-funnel-seasonality-blend.js` (observed seasonality factors)
->    - `lib/revenue-funnel-academy-economics.js` (Academy CAC/LTV math)
-> 4. Upload endpoint `api/aigeo/booking-sheet-upload.js` rewritten to use the new parser, write to the new tables, and refuse to import any sheet whose category sum does not match its own "YTD Actual" cell to the penny.
-> 5. Demoted `revenue_snapshots` to detail-only: deleted the 17 superseded `source='booking_sheet'` rows, added a `COMMENT ON TABLE` warning, and deprecated the legacy `lib/booking-sheet-parser.mjs` + `scripts/import-booking-sheet.mjs`. The `squarespace_api` + `stripe_supplemental` rows remain (daily syncs continue) as transaction-level detail — no headline reader sums them.
+> 3. Repointed the four hot reader paths to `booking_sheet_monthly_wide`: `api/aigeo/revenue-funnel-summary.js` (`fetchRevenueHistory` + `fetchLatestRevenue`), `api/aigeo/revenue-funnel-smart-priorities.js` (`fetchRollingRevenueSnap`), `lib/revenue-funnel-seasonality-blend.js`, `lib/revenue-funnel-academy-economics.js`.
+> 4. Upload endpoint `api/aigeo/booking-sheet-upload.js` rewritten — hard gate refuses to import any sheet whose 12-category sum does not match its "YTD Actual" cell (J47/J48) to the penny.
+> 5. Demoted `revenue_snapshots` to detail-only: deleted the 17 superseded `source='booking_sheet'` rows, added a `COMMENT ON TABLE` warning, deprecated `lib/booking-sheet-parser.mjs` + `scripts/import-booking-sheet.mjs`. The `squarespace_api` + `stripe_supplemental` rows remain as transaction-level detail — no headline reader sums them.
+>
+> **Phase L1 correction (uncommitted at time of writing — fixes Phase L's tier model):**
+> 1. **Killed the invented 5-tier rollup.** Phase L had merged the 12 verbatim categories into 5 fake "tiers" (`courses`, `workshops_nonres`, `workshops_residential`, `services`, `academy`) where `services` lumped 8 unrelated D2C, B2B and ADJUSTMENT categories into one bucket corresponding to nothing real. **The `booking_sheet_monthly` table is dropped** — the 12-category truth in `booking_sheet_monthly_category` is now the only stored revenue.
+> 2. **Added `public.booking_sheet_category_market` mapping table** — 12 rows mapping each verbatim category to one of three derived markets: **D2C** (6 categories), **B2B** (2 categories), **ADJUSTMENT** (4 voucher Inc/Out categories). Editing the table changes the dashboard without a code release.
+> 3. **Rebuilt `booking_sheet_monthly_wide` matview** on the new shape — exposes `category_revenue` jsonb (12 keys verbatim), `market_revenue` jsonb (D2C/B2B/ADJUSTMENT), `operational_revenue` (D2C+B2B, the "service revenue excl. voucher timing" secondary breakdown line), `adjustment_net` (voucher timing line, shown as its own labelled figure), **`revenue_amount` (full 12-cat sum = YTD Actual = the dashboard headline AND tier-band comparison basis — the on-screen number must equal the spreadsheet number).**
+> 4. **Updated all 5 reader paths** to consume the new shape; back-compat `tier_revenue` jsonb is synthesised in `revenue-funnel-summary.js` (4 valid 1-to-1 mappings; `services` + `hire` = null) so the dashboard UI keeps rendering until the UI rebuild turn that follows.
+> 5. **Removed `tier_id` column** from `booking_sheet_monthly_category` — the parser only emits the 12 verbatim categories now; tier mapping has no place in the data layer.
+>
+> See `Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md` for the corrected three-tier-systems model (12 accounting categories, 3 markets, A-F page tiers — never conflated).
 >
 > The §1–§3 findings below about fossil rows / rolling-window contamination inside `revenue_snapshots` remain technically correct. The fossil-row cleanup was NOT run as part of this fix because no headline reader now consumes those sources — it can be done later as a tidy-up of the detail-only data without affecting any headline number.
 

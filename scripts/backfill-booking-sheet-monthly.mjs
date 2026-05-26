@@ -2,16 +2,26 @@
 //
 // Reads the user's Booking Sheet workbooks from Dropbox, parses the row-18
 // Totals + per-category grids via lib/booking-sheet-truth-parser.mjs, and
-// upserts into the new authoritative tables:
+// upserts into the canonical truth table:
 //
-//   - public.booking_sheet_monthly           (per year/month/tier)
-//   - public.booking_sheet_monthly_category  (per year/month/raw_category)
+//   public.booking_sheet_monthly_category  (verbatim 12 categories per
+//                                           year/month)
 //
-// Then refreshes the booking_sheet_monthly_wide materialised view.
+// Then refreshes the booking_sheet_monthly_wide materialised view, which
+// joins the category table to booking_sheet_category_market to expose
+// per-month operational_revenue (D2C+B2B), adjustment_net, and revenue_amount
+// (full 12-cat sum = YTD Actual basis).
 //
-// Hard requirement before any DB write: the per-sheet derived YEAR sum MUST
-// equal that sheet's "YTD Actual" cell (J47 for 2025, J48 for 2026). If any
-// sheet fails this check, the script aborts and writes nothing.
+// 2026-05-26 Phase L1 correction: removed the upsert to booking_sheet_monthly
+// (the invented 5-tier rollup table, now dropped). The verbatim 12-category
+// data is the canonical truth; market mapping is data in
+// booking_sheet_category_market joined by the view, not hard-coded here.
+//
+// Hard requirement before any DB write: the per-sheet derived YEAR sum of
+// ALL 12 categories MUST equal that sheet's "YTD Actual" cell (J47 for 2025,
+// J48 for 2026). If any sheet fails this check, the script aborts and writes
+// nothing. The gate proves completeness; the operational headline (D2C+B2B)
+// is a presentation layer on top of verified-complete data.
 //
 // Usage:
 //   node scripts/backfill-booking-sheet-monthly.mjs --dry-run
@@ -65,14 +75,10 @@ function loadAndParse(filePath) {
 // In practice the historical tabs are identical to the originals, but
 // last-write-wins makes the override behaviour explicit.
 function combineParses(parses) {
-  const tierMap = new Map();      // key = `${year}|${month}|${tier_id}`
   const catMap = new Map();       // key = `${year}|${month}|${category_order}`
   const verification = [];
   const warnings = [];
   for (const p of parses) {
-    for (const r of p.monthlyPerTier) {
-      tierMap.set(`${r.year}|${r.month}|${r.tier_id}`, r);
-    }
     for (const r of p.monthlyPerCategory) {
       catMap.set(`${r.year}|${r.month}|${r.category_order}`, r);
     }
@@ -80,7 +86,6 @@ function combineParses(parses) {
     warnings.push(...p.warnings);
   }
   return {
-    monthlyPerTier: [...tierMap.values()],
     monthlyPerCategory: [...catMap.values()],
     verification,
     warnings
@@ -104,20 +109,21 @@ function printVerification(verification) {
   }
 }
 
-function printTopline(perTier) {
-  const byTier = new Map();
+function printTopline(perCategory) {
+  const byCategory = new Map();
   let total = 0;
-  for (const r of perTier) {
-    byTier.set(r.tier_id, (byTier.get(r.tier_id) || 0) + r.revenue_amount);
+  for (const r of perCategory) {
+    const key = r.category_label;
+    byCategory.set(key, (byCategory.get(key) || 0) + r.revenue_amount);
     total += r.revenue_amount;
   }
-  console.log('--- per-tier totals (all years combined) ---');
-  for (const [tier, sum] of byTier) console.log(`  ${tier.padEnd(24)} £${sum.toFixed(2)}`);
-  console.log(`  ${'TOTAL'.padEnd(24)} £${total.toFixed(2)}`);
+  const sorted = [...byCategory.entries()].sort((a, b) => a[0].localeCompare(b[0], 'en', { numeric: true }));
+  console.log('--- per-category totals (all years combined; full 12-cat sum = YTD Actual basis) ---');
+  for (const [label, sum] of sorted) console.log(`  ${label.padEnd(34)} £${sum.toFixed(2)}`);
+  console.log(`  ${'TOTAL (12-cat sum)'.padEnd(34)} £${total.toFixed(2)}`);
 }
 
 async function clearExistingRowsForProperty(supabase) {
-  await supabase.from('booking_sheet_monthly').delete().eq('property_url', PROPERTY_URL);
   await supabase.from('booking_sheet_monthly_category').delete().eq('property_url', PROPERTY_URL);
 }
 
@@ -155,7 +161,7 @@ async function main() {
   }
   printVerification(combined.verification);
   assertAllReconcile(combined.verification);
-  printTopline(combined.monthlyPerTier);
+  printTopline(combined.monthlyPerCategory);
 
   if (args.dryRun) {
     console.log('dry-run: no DB writes performed.');
@@ -169,10 +175,9 @@ async function main() {
 
   console.log('--- writing to Supabase ---');
   await clearExistingRowsForProperty(supabase);
-  await upsertChunks(supabase, 'booking_sheet_monthly', combined.monthlyPerTier);
   await upsertChunks(supabase, 'booking_sheet_monthly_category', combined.monthlyPerCategory);
   await refreshWideView(supabase);
-  console.log(`wrote ${combined.monthlyPerTier.length} tier rows, ${combined.monthlyPerCategory.length} category rows. wide view refreshed.`);
+  console.log(`wrote ${combined.monthlyPerCategory.length} category rows. wide view refreshed.`);
 }
 
 main().catch(err => {

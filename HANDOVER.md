@@ -1,7 +1,7 @@
 # AI GEO Audit - Comprehensive Handover Document
 
-**Last Updated**: 2026-05-20  
-**Current Commit**: *not auto-synced — run `git log -1 --oneline`*  
+**Last Updated**: 2026-05-26 (Phase L1 — revenue data-layer correction shipped, UI rebuild deferred)
+**Current Commit**: *not auto-synced — run `git log -1 --oneline`* (last committed: `6faa5f1` Phase L; Phase L1 changes uncommitted at time of writing)
 **Purpose**: Single source of truth for all projects, phases, tasks, fixes, and key information for any new chat thread.
 
 **🚀 NEW CHAT AGENTS — start here:**
@@ -9,16 +9,47 @@
 Read **`Docs/AGENT_ONBOARDING.md`** in full **before touching any code**. It's the
 single soup-to-nuts brief: business mission, commercial tiers + GP%, Vercel +
 Supabase setup, repo layout, key DB tables, the 8 open tasks in priority order,
-hard rules, communication rules, and verification commands.
+hard rules, communication rules, and verification commands. **§0 of that doc
+covers the Phase L + L1 revenue rebuild** — read it before touching anything
+that reads or writes revenue.
 
 Then on demand:
+- `Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md` — **single source of truth for revenue data** (12 verbatim Booking Sheet categories + 3 derived markets; Booking Sheet `Sales YYYY` row 18 is the truth, `revenue_snapshots` is detail-only).
 - `Docs/RUNS-CHEATSHEET.md` — **which Dashboard button does what** (Quick / Standard / Full), manual-only actions, last-run vs status bar.
 - `Docs/GLOBAL-RUN.md` — tier matrix tied to `globalRunStepCatalog()` in code.
-- `Docs/HANDOVER_REVENUE_FUNNEL_2026-05-20.md` — file-by-file pitfalls for the
-  most recent Revenue Funnel / Scenario Planning work.
+- `Docs/HANDOVER_REVENUE_FUNNEL_2026-05-20.md` — file-by-file pitfalls for the Phase H+ Revenue Funnel / Scenario Planning work (suppression + seasonality). _Note: revenue data layer has since been rebuilt by Phase L + L1 — see the doc above before assuming anything about revenue reads._
 - `Docs/CHANGELOG.md` — chronological history (read the top entry first).
 - `Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md` — Keywords Everywhere feature.
 - `AGENTS.md` — workspace-level conventions.
+
+---
+
+## Recent: Revenue data layer rebuild — Phase L + L1 (2026-05-26)
+
+**Why this matters**: the Revenue Funnel and Scenario Planning tabs used to sum
+three overlapping sources (`squarespace_api` + `stripe_supplemental` +
+`booking_sheet`) in `revenue_snapshots` and produced a double-counted 17-month
+total (£72,251.50 vs the real £66,165.50). Phase L killed that model and made
+the user's local Booking Sheet (`.xlsm`) the single source of truth. Phase L1
+corrected Phase L's tier rollup (which had merged 8 unrelated categories into
+a fake "services" bucket).
+
+**Live state:**
+
+- ✅ **Schema:** `public.booking_sheet_monthly_category` (12-cat truth, 204 rows), `public.booking_sheet_category_market` (12→3 D2C/B2B/ADJUSTMENT mapping as data), `public.booking_sheet_monthly_wide` matview (dashboard read shape with `operational_revenue`, `adjustment_net`, `revenue_amount`, `category_revenue` jsonb, `market_revenue` jsonb).
+- ✅ **Parser + importer:** `lib/booking-sheet-truth-parser.mjs` + `scripts/backfill-booking-sheet-monthly.mjs` + rewritten `api/aigeo/booking-sheet-upload.js`. Hard import gate refuses to write unless `SUM(12 categories) === YTD Actual cell` to the penny.
+- ✅ **Five reader paths repointed:** `api/aigeo/revenue-funnel-summary.js`, `api/aigeo/revenue-funnel-smart-priorities.js`, `lib/revenue-funnel-seasonality-blend.js`, `lib/revenue-funnel-academy-economics.js`, plus the importer.
+- ✅ **Reconciliation:** 2025 = £46,567.46 ✓, 2026 YTD = £19,598.04 ✓, 17-month total = £66,165.50 ✓.
+- ✅ **Docs:** `Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md` rewritten; `Docs/CHANGELOG.md` Phase L + L1 entries; `Docs/AGENT_ONBOARDING.md` §0 + §4b updated; `AGENTS.md` (workspace rule) read-first list + gotchas updated.
+- ⏸️ **Pending UI rebuild (next turn):** delete the 6 per-tier sparklines from `audit-dashboard.html`; add a 3-line monthly chart (D2C / B2B / ADJUSTMENT) where the three lines sum to `revenue_amount`; point the headline AND the survival/comfortable/thrive tier-band comparison at `revenue_amount` (= the spreadsheet YTD Actual figure) NOT at `operational_revenue`; show `operational_revenue` as a secondary breakdown line ("service revenue excl. voucher timing") beneath the headline; show `adjustment_net` as its own explicit labelled line; remove the back-compat `tier_revenue` synthesis from `revenue-funnel-summary.js`. Until then `services` and `hire` sparklines render empty — the honest interim state.
+
+**Hard rules** (from Phase L+L1, do not violate):
+
+1. The Booking Sheet `Sales YYYY` row-18 "Totals" is the single source of truth for total revenue. Nothing else.
+2. Never sum `revenue_snapshots.source IN (squarespace_api, stripe_supplemental, booking_sheet)` — those overlap. SQ + Stripe rows are transaction-level detail only.
+3. The three tier systems (12 accounting categories, 3 markets, A-F page tiers) must never be conflated. Page tiers stay out of the revenue data layer entirely.
+4. ADJUSTMENT (voucher Inc/Out, Pick n Mix Inc/Out) is not revenue — it's a deferred-spend accounting line. Always shown as its own labelled figure, never silently in or out of the headline.
+5. **Dashboard headline = `revenue_amount` = the spreadsheet YTD Actual cell (J47/J48), every screen.** Tier-band comparison (£3k/£5k/£8k) also against `revenue_amount`. The number on screen must always equal the number on the user's Booking Sheet. `operational_revenue` (D2C + B2B) and `adjustment_net` are secondary breakdown lines beneath the headline, not the headline itself. (An earlier draft made operational the headline; reversed on 2026-05-26 before any UI shipped — trust beats theoretical purity.)
 
 ---
 

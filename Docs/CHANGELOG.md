@@ -2,6 +2,135 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-26] - Revenue: three tier systems, not one — Phase L1 correction
+
+Phase L (immediately below) shipped the right reconciliation total (£66,165.50)
+but the wrong tier model. It rolled the 12 verbatim Booking Sheet categories into
+5 invented "tiers" (`courses`, `workshops_nonres`, `workshops_residential`,
+`services`, `academy`), where the `services` bucket merged 8 unrelated D2C, B2B
+and ADJUSTMENT categories into one figure that corresponded to nothing real.
+
+**The right model — three separate tier systems:**
+
+1. **Accounting categories (12)** — what was bought. The Booking Sheet's verbatim
+   categories. This is the revenue truth layer. Verbatim, all 12, never merged.
+2. **Business market (3)** — who the customer is. A derived attribute on each
+   category: `D2C` (workshops/courses/mentoring/1-2-1/academy), `B2B` (prints,
+   commissions), `ADJUSTMENT` (voucher/deferred-spend timing pairs, not revenue).
+3. **Page tiers (A–F)** — where on the website the journey happens. SEO-side
+   only, never in the revenue data layer.
+
+**Schema changes (this fix):**
+
+- DROP `public.booking_sheet_monthly` (the invented 5-tier rollup table).
+- DROP the legacy `tier_id` column from `public.booking_sheet_monthly_category`
+  (no longer meaningful; the canonical mapping is data, not a code constant).
+- ADD `public.booking_sheet_category_market` — 12-row mapping table:
+  `(category_order, category_label, market, is_revenue, notes)`. Single source
+  of truth for the 12 → 3 mapping; editing the table changes the dashboard
+  without a code release.
+- REBUILD `public.booking_sheet_monthly_wide` materialised view on the new
+  shape:
+  - `category_revenue` jsonb — 12 verbatim keys per month.
+  - `market_revenue` jsonb — `{D2C, B2B, ADJUSTMENT}` per month, joined from
+    `booking_sheet_category_market`.
+  - `operational_revenue` numeric — `D2C + B2B`, shown on the dashboard as a
+    secondary breakdown line ("service revenue excl. voucher timing") beneath
+    the headline. **Not the headline itself** (see headline rule below).
+  - `adjustment_net` numeric — the voucher / deferred-spend timing line, shown
+    on the dashboard as its own labelled line so the user can see headline =
+    operational + adjustment at a glance.
+  - `revenue_amount` numeric — full 12-category sum, = YTD Actual cell (J47 for
+    2025 = £46,567.46; J48 for 2026 = £19,598.04). This is BOTH the
+    **import gate reconciliation basis** (proves the import is complete) AND
+    **the dashboard headline figure AND the tier-band comparison basis**
+    (survival £3k / comfortable £5k / thrive £8k). Rationale: the user reads
+    the Booking Sheet daily and the dashboard headline must equal the figure
+    they read there — a dashboard that disagrees with the spreadsheet by
+    £1,229 destroys trust on every glance. (An earlier locked decision made
+    `operational_revenue` the headline; reversed on 2026-05-26 before any UI
+    shipped — see `Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md` for full context.)
+
+**Code changes:**
+
+- `lib/booking-sheet-truth-parser.mjs` — strip the `CATEGORY_TO_TIER` mapping
+  and `buildTierRows`; only emit `monthlyPerCategory`. The legacy `tier_id`
+  field on each row is gone.
+- `scripts/backfill-booking-sheet-monthly.mjs` and
+  `api/aigeo/booking-sheet-upload.js` — no more writes to the dropped
+  `booking_sheet_monthly` table; the import gate still verifies the full
+  12-category sum vs YTD Actual.
+- `lib/revenue-funnel-academy-economics.js` — read
+  `category_revenue->>'12. Academy'` instead of Phase L's `tier_revenue.academy`.
+- `api/aigeo/revenue-funnel-smart-priorities.js fetchRollingRevenueSnap` —
+  SELECT now includes `operational_revenue` and `adjustment_net` alongside
+  the existing `revenue_amount` (full 12-cat sum). The shape of the returned
+  row is unchanged — `revenue_amount` semantics remain "full 12-category sum
+  = YTD Actual basis", and the new fields are exposed alongside for the UI
+  rebuild turn to consume. Keeps this turn data-layer-only.
+- `lib/revenue-funnel-seasonality-blend.js` — read `category_revenue` and
+  `market_revenue`. Emit `byTier` (back-compat, 4 real 1-to-1 mappings only;
+  `services` and `hire` are gone from STATED, so callers passing them get the
+  neutral factor 1.0 — what they were effectively getting before). Also emit
+  `byMarket` (new dimension: D2C, B2B) for the per-market chart the UI rebuild
+  turn will consume.
+- `api/aigeo/revenue-funnel-summary.js fetchRevenueHistory` +
+  `fetchLatestRevenue` — SELECT the new view columns and synthesize a
+  back-compat `tier_revenue` jsonb in JS (4 real 1-to-1 mappings populated;
+  `services` and `hire` set to null so the existing per-tier sparklines render
+  empty for them, which is the truthful state) until the UI rebuild turn
+  replaces the per-tier sparklines with a 3-line D2C / B2B / ADJUSTMENT chart.
+
+**Verification (all checks pass against the live DB and re-imported data):**
+
+- 2025 full year: operational £47,796.21 + adjustment −£1,228.75 = £46,567.46
+  (YTD Actual ✓)
+- 2026 YTD (Jan-May): operational £19,857.04 + adjustment −£259.00 = £19,598.04
+  (YTD Actual ✓)
+- Per-row invariant `operational_revenue + adjustment_net = revenue_amount` is
+  0.00 across every month.
+- The −£1,228.75 ADJUSTMENT for 2025 is a genuine timing effect: 2025 brought
+  in £2,390 of new vouchers (£1,450 PnM + £940 GV) and paid out £3,618.75
+  against older vouchers (£2,030.75 PnM + £1,588 GV). The September 2025 +£1,350
+  spike is a single large PnM bundle sold that month with no Out yet (expected:
+  future months will draw down on it). One minor £1 rounding in Aug 2025 GV
+  flagged but harmless.
+
+**Deferred (separate turn):** the dashboard UI still renders the legacy 6
+per-tier sparklines (2 of which now show empty because their merged data is
+gone). A follow-up turn will delete those sparklines, add a 3-line chart
+(D2C, B2B, ADJUSTMENT on a shared `revenue_amount`-basis y-axis), point the
+headline AND the survival/comfortable/thrive tier-band comparison at
+`revenue_amount` (= YTD Actual = the spreadsheet figure, **not**
+`operational_revenue`), show `operational_revenue` as a secondary breakdown
+line ("service revenue excl. voucher timing") beneath the headline, and show
+`adjustment_net` as its own labelled line so `headline = operational +
+adjustment` is visible. After the UI rebuild, the back-compat `tier_revenue`
+synthesis in `api/aigeo/revenue-funnel-summary.js` can also be removed.
+
+**Migrations on disk (replay order matches DB version timestamps):**
+
+- `migrations/20260526195610_booking_sheet_monthly_category_order_relax.sql`
+  — relax `category_order` CHECK from `(1..20)` to `(0..20)` (Phase L follow-up).
+- `migrations/20260526195951_booking_sheet_monthly_wide_drop_in_shape.sql`
+  — Phase L matview shape; superseded by Phase L1 the same day but retained
+  on disk for replay completeness.
+- `migrations/20260526204321_phase_l1_drop_invented_5_tier_rollup.sql`
+  — drop function + matview + table for the 5-tier rollup.
+- `migrations/20260526204347_phase_l1_create_category_market_mapping.sql`
+  — create `booking_sheet_category_market` (12 rows).
+- `migrations/20260526204404_phase_l1_rebuild_wide_view_on_12cat_3market_model.sql`
+  — rebuild `booking_sheet_monthly_wide` on the corrected model.
+- `migrations/20260526204559_phase_l1_drop_legacy_tier_id_from_category_table.sql`
+  — drop unused `tier_id` column.
+
+**Pre-existing follow-ups not touched in this fix:**
+
+- Tag each MONEY PAGE with a market (D2C / B2B) on the SEO/money-pages side so
+  the user can see "which pages target D2C vs B2B". The two systems connect
+  only via the `market` attribute, never by equating a page tier with a revenue
+  category.
+
 ## [2026-05-26] - Revenue: Booking Sheet is the single source of truth (Phase L)
 
 Critical headline-revenue fix. The Revenue Funnel + Scenario Planning tabs were

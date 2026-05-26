@@ -1,5 +1,7 @@
 # Data Inventory — Conversion & Revenue-Truth Tab (Discovery Only)
 
+> **⚠️ The revenue section of this inventory is SUPERSEDED on 2026-05-26 — see `Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md`.** The revenue figures quoted from `revenue_snapshots` here (notably the 2025-01 = £117k and 2025-04 = £177k Squarespace API figures) were confirmed by the user as NOT real — they were the symptom that triggered the `Docs/REVENUE-DATA-AUDIT.md` forensic audit, which in turn led to Phase L (Booking Sheet as single source of truth) and Phase L1 (three tier systems, not one). The headline revenue figure to quote is now `revenue_amount` from `public.booking_sheet_monthly_wide` (= the full 12-category sum = the Booking Sheet `Sales YYYY` row-18 / YTD Actual figure: **2025 = £46,567.46, 2026 YTD = £19,598.04, 17-month total = £66,165.50**). `operational_revenue` (D2C + B2B) is a secondary breakdown line beneath the headline, not the headline itself. The non-revenue parts of this inventory (GSC traffic, keyword data, Academy engagement, page catalogue) remain valid.
+
 **Status:** Discovery report. No design, schema or code is proposed.
 **Date:** 2026-05-26.
 **Author:** Cursor coding agent, on behalf of Alan Ranger.

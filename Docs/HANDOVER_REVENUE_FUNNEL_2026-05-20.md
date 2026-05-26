@@ -1,7 +1,28 @@
 # Revenue Funnel + Scenario Planning - Session handover
 
-**Last touched**: 2026-05-20 ~23:15 UTC+1
-**Last commit on `main`**: `44671a0` ("Picker: apply suppression penalty inside the scoring pass")
+> **⚠️ Read first (added 2026-05-26):** The revenue **data layer** was rebuilt
+> by Phase L + L1 on 2026-05-26 after this handover was written. The picker
+> and Auto-Optimise pass described here still work — but **stop reading
+> `revenue_snapshots` for headline revenue** (it was a double-counted sum of
+> three overlapping sources). All headline revenue now reads
+> `public.booking_sheet_monthly_wide` (operational_revenue = D2C + B2B;
+> adjustment_net = voucher timing line; revenue_amount = full 12-cat sum =
+> YTD Actual reconciliation basis). The 6-tier scenario-picker concepts
+> (`courses`, `workshops_nonres`, `workshops_residential`, `services`,
+> `hire`, `academy`) survive as picker focus areas, but `services` and
+> `hire` no longer correspond to any real Booking Sheet category — they're
+> opportunity-zone scenario concepts only. The `tier_revenue` jsonb returned
+> by `revenue-funnel-summary.js` is now synthesised for back-compat (4 real
+> mappings, `services` + `hire` = null) until the UI rebuild turn deletes the
+> 6 per-tier sparklines and replaces them with a 3-line D2C/B2B/ADJUSTMENT
+> chart. **Read `Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md` and
+> `Docs/AGENT_ONBOARDING.md` §0 + §4b before touching anything that reads or
+> writes revenue.**
+>
+> ---
+
+**Last touched**: 2026-05-20 ~23:15 UTC+1 (revenue data layer rebuilt 2026-05-26 — see banner above)
+**Last commit on `main`**: `44671a0` ("Picker: apply suppression penalty inside the scoring pass") at session end; subsequent: `6faa5f1` (Phase L); Phase L1 uncommitted at time of writing
 **Branch / repo**: `ai-geo-audit` / `main` (Vercel auto-deploys from `main`)
 **Owner waiting on this**: Alan - he closed the thread for handover, so the NEXT agent should read this file first before touching anything in Revenue Funnel or Scenario Planning.
 

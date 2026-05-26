@@ -1550,16 +1550,29 @@ function academyReviewCandidate(health, propertyUrl) {
 }
 
 async function fetchRollingRevenueSnap(supabase, propertyUrl) {
-  // 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX: source is now
+  // 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX (Phase L): source is now
   // `booking_sheet_monthly_wide` (single authoritative row per month from
   // the Booking Sheet) instead of `revenue_snapshots`, which was summing
   // overlapping squarespace_api + stripe_supplemental + booking_sheet rows
   // (with no transaction-level dedup) AND included fossilised rolling-window
   // rows from the daily sync, producing an unreliable "latest" pick. See
   // Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md.
+  //
+  // 2026-05-26 Phase L1 correction (REVISED same day): surface BOTH
+  // operational_revenue (D2C + B2B, the "service revenue excl. voucher
+  // timing" secondary breakdown line) AND adjustment_net (voucher /
+  // deferred-spend timing line, shown as its own labelled figure).
+  // revenue_amount is the full 12-category sum (= YTD Actual cell J47/J48)
+  // and is the DASHBOARD HEADLINE FIGURE AND TIER-BAND COMPARISON BASIS
+  // -- the on-screen number must equal what the user reads on the Booking
+  // Sheet, every screen. An earlier locked draft made operational_revenue
+  // the headline; reversed before any UI shipped (trust beats theoretical
+  // purity -- the user reads the spreadsheet daily). The UI rebuild turn
+  // should point the headline at revenue_amount and use operational_revenue
+  // as a secondary breakdown line. See Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md.
   const { data, error } = await supabase
     .from('booking_sheet_monthly_wide')
-    .select('period_start, period_end, transactions, revenue_amount')
+    .select('period_start, period_end, transactions, operational_revenue, adjustment_net, revenue_amount')
     .eq('property_url', propertyUrl)
     .order('period_end', { ascending: false })
     .limit(12);
