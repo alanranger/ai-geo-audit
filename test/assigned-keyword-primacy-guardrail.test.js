@@ -137,16 +137,22 @@ test('candidate with no assigned_keyword \u2192 no change', () => {
   assert.equal(c.primary_query, 'photography lessons online');
 });
 
-test('assigned keyword not in keyword_rankings \u2192 soft note, no suppress, no re-anchor', () => {
+test('assigned keyword not in keyword_rankings \u2192 card re-pinned, primary_query becomes assigned KW, note explains the sibling proxy', () => {
   const snap = buildSnapshot();
   const c = rankCandidate(URL_ACADEMY, 'photography lessons online', 'untracked head term', null);
   applyAssignedKeywordPrimacyGuardrail([c], snap);
+  // Not suppressed (assigned KW rank unknown, not top 5).
   assert.notEqual(c.guardrail_severity, 'hard');
   assert.notEqual(c.guardrail_blocked_top3, true);
-  assert.equal(c.primary_query, 'photography lessons online');
+  // Pill kw === plan kw rule: primary_query MUST become the assigned KW even
+  // when no keyword_rankings row exists for it on this URL. The user's
+  // 2026-05-26 instruction makes this a tool-wide invariant.
+  assert.equal(c.primary_query, 'untracked head term');
   const note = (c.guardrail_notes || []).join(' | ');
-  assert.match(note, /not currently tracked/);
+  assert.match(note, /re-pinned to assigned keyword/i);
+  assert.match(note, /photography lessons online/);
   assert.match(note, /untracked head term/);
+  assert.match(note, /sibling proxy/i);
 });
 
 test('AIO-only candidate is untouched by the non-AIO guardrail', () => {

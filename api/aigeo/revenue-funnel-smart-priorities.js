@@ -1329,7 +1329,11 @@ function buildPrioritiesForTier(tierId, tierData) {
   // picker can produce a research-validated description without re-fetching.
   const ctx = {
     schemaDetail: tierData.schemaDetail,
-    keywords: tierData.allKeywords || tierData.keywords
+    keywords: tierData.allKeywords || tierData.keywords,
+    // Forwarded so the AIO picker's applyAssignedKeyword() can resolve
+    // the CSV-07 + Supabase override map for each URL. Without this the
+    // override silently misses on every AIO card.
+    targetKeywordOverrides: tierData.targetKeywordOverrides || null
   };
   const candidates = [
     schemaGapPriority(tierId, tierData.schemaDetail),
@@ -1457,7 +1461,16 @@ function tierSnapshotSlice(snapshot, tierId, hub) {
     pagesByUrl: snapshot.pagesByUrl,
     keywords: snapshot.keywordsByTier.get(tierId) || [],
     allKeywords: snapshot.allKeywords || [],
-    products: snapshot.productsByTier.get(tierId) || []
+    products: snapshot.productsByTier.get(tierId) || [],
+    // 2026-05-26 phase K-3 fix: the AIO picker's applyAssignedKeyword()
+    // path reads ctx.targetKeywordOverrides to honour CSV 07 + Supabase
+    // assigned keywords. The tier-level snapshot wasn't forwarding the
+    // map, so the AIO override silently fell back to slug-anchor on
+    // every URL (e.g. /free-online-photography-course used the slug
+    // anchor "free online photography course" instead of the assigned
+    // "Online Photography Course"). Forwarding fixes the AIO half of
+    // the assigned-keyword obedience contract.
+    targetKeywordOverrides: snapshot.targetKeywordOverrides || null
   };
 }
 
@@ -2555,13 +2568,32 @@ function applyAssignedKeywordPrimacyGuardrail(candidates, snapshot) {
     const url = Array.isArray(c.pages_affected) ? c.pages_affected[0] : null;
     const assignedRow = findKeywordRowForUrl(keywords, url, c.assigned_keyword);
     if (assignedRow) { reanchorCardToAssignedKw(c, assignedRow); continue; }
-    appendGuardrailNote(
-      c,
-      `Card targets "${c.primary_query}" but the page's assigned keyword is "${c.assigned_keyword}" ` +
-      `(not currently tracked in keyword_rankings for this URL). The picker fell back to the highest-volume ` +
-      `sibling; add the assigned keyword to GSC tracking to use it as the canonical target.`
-    );
+    realignCardKeywordOnly(c);
   }
+}
+
+// Pill keyword === plan target keyword on every card. Even when the
+// assigned keyword isn't tracked in keyword_rankings for this URL,
+// we still pin the card's plan target to the assigned keyword so the
+// dashboard doesn't show contradictory keywords on one card. The GP
+// figure stays as the picker's original sibling-derived number (we
+// have no volume / rank data for the assigned keyword to recompute),
+// but the card carries a visible note explaining that.
+function realignCardKeywordOnly(c) {
+  const prior = c.primary_query;
+  const url = Array.isArray(c.pages_affected) ? c.pages_affected[0] : '';
+  const levers = Array.isArray(c.merged_levers) ? c.merged_levers : (c.lever_id ? [c.lever_id] : []);
+  c.primary_query = c.assigned_keyword;
+  c.title = levers.includes('rank')
+    ? `Lift "${c.assigned_keyword}" on ${labelOf(url)}`
+    : `Lift CTR on ${labelOf(url)} for "${c.assigned_keyword}"`;
+  appendGuardrailNote(
+    c,
+    `Card re-pinned to assigned keyword "${c.assigned_keyword}". Picker originally targeted ` +
+    `"${prior}". The assigned keyword has no keyword_rankings row for this URL yet \u2014 the GP figure ` +
+    `below is derived from "${prior}" as a sibling proxy. Add the assigned keyword to GSC tracking ` +
+    `to get a measured rank / volume for this URL.`
+  );
 }
 
 // Enrich every candidate with the assigned-keyword + its current
