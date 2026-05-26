@@ -29,13 +29,24 @@ import {
 } from '../../lib/revenue-funnel-conversion-bias.js';
 import {
   applyKeywordGuardrails,
-  safeTitleLead
+  safeTitleLead,
+  intentClassForUrl
 } from '../../lib/revenue-funnel-keyword-guardrails.js';
 import {
   pickKeywordForPage,
   buildSerpCopyAdvice,
   keywordMatchesUrlIntent
 } from '../../lib/revenue-funnel-serp-copy.js';
+import {
+  classifyQueryIntent,
+  classifyPageScope,
+  pWinCitation,
+  liftRange,
+  shouldRerouteToLocal,
+  EVIDENCE,
+  TASK_TYPE
+} from '../../lib/revenue-funnel-aio-model.js';
+import { scanLiabilities, detectFluffyOpener } from '../../lib/revenue-funnel-page-liability.js';
 
 let activeBlendedSeasonality = null;
 
@@ -448,41 +459,83 @@ function buildAioDescription(args, pageState, sourceTag) {
   return sourceTag ? `${base} ${sourceTag}` : base;
 }
 
-function aioCitationPriority(tierId, tierKeywords, ctx) {
-  // Re-rank uncited AIO keywords by GP-weighted potential rather than
-  // raw search volume. A 1k/mo academy keyword (99% GP) outranks a
-  // 5k/mo residential workshops keyword (35% GP) because the profit
-  // captured per click is dramatically higher even at lower volume.
+// 2026-05-26: AIO scoring rewritten to use probabilistic P(win) model.
+// See lib/revenue-funnel-aio-model.js for the full assumption stack.
+// `pickAioTarget` selects the highest expected-GP keyword across the
+// tier, applying local-page rerouting and the rank-aware P(win) curve.
+function pickAioTarget(tierId, tierKeywords, ctx) {
   const gpPct = estimatedGpPctForTier(tierId);
   const aov = estimatedAovPerClick(tierId);
-  const uncited = tierKeywords
+  const uncited = (tierKeywords || [])
     .filter(k => !isBlogUrl(k.best_url || ''))
-    .filter(k => k.has_ai_overview && !(Number(k.ai_alan_citations_count) > 0))
-    .map(k => ({ kw: k, vol: Number(k.search_volume) || 0 }))
-    // Assume an AIO citation captures ~3% of the AIO query volume as
-    // an aggressive-but-realistic monthly click lift, then convert to
-    // monthly profit via the tier's GP%.
-    .map(x => ({ ...x, gpLift: Math.round(x.vol * 0.03 * aov * (gpPct / 100)) }))
-    .sort((a, b) => b.gpLift - a.gpLift);
+    .filter(k => k.has_ai_overview && !(Number(k.ai_alan_citations_count) > 0));
   if (!uncited.length) return null;
-  const top = uncited[0];
-  const cleanedUrl = cleanUrl(top.kw.best_url || '');
-  const revLift = Math.round(top.vol * 0.03 * aov);
-  const auditState = pageEnrichment(cleanedUrl, ctx.schemaDetail, ctx.keywords);
-  const rankInfo = top.kw.best_rank_group != null ? `currently rank #${top.kw.best_rank_group}` : 'are not ranking yet';
-  const builderArgs = { cleanedUrl, keyword: top.kw.keyword, sv: top.vol, rankInfo };
+  const scored = uncited.map(k => scoreAioCandidate(k, ctx, gpPct, aov));
+  scored.sort((a, b) => b.range.profit.expected - a.range.profit.expected);
+  return { gpPct, aov, top: scored[0] };
+}
+
+function scoreAioCandidate(kw, ctx, gpPct, aov) {
+  const cleanedUrl = cleanUrl(kw.best_url || '');
+  const pageScope = classifyPageScope(intentClassForUrl(cleanedUrl));
+  const queryIntent = classifyQueryIntent(kw.keyword);
+  const reroute = shouldRerouteToLocal({
+    pageScope, queryIntent, rank: kw.best_rank_group,
+    keyword: kw.keyword, keywords: ctx.allKeywords || ctx.keywords || []
+  });
+  const targetKw = reroute.reroute ? reroute.target : kw;
+  const targetIntent = classifyQueryIntent(targetKw.keyword);
+  const pwin = pWinCitation(targetKw.best_rank_group, targetIntent, pageScope, 'neutral');
+  const range = liftRange({
+    volume: Number(targetKw.search_volume) || 0,
+    pWin: pwin.p, captureRate: 0.03, aov, gpPct
+  });
   return {
-    signature: `aio|${top.kw.keyword}`,
-    title: `Get cited in Google's AI Overview for "${top.kw.keyword}"`,
+    originalKw: kw, kw: targetKw, cleanedUrl,
+    pageScope, queryIntent: targetIntent,
+    pwin, range, reroute
+  };
+}
+
+function buildAioRerouteNote(reroute, originalKw) {
+  if (!reroute || !reroute.reroute) return null;
+  return `Re-routed off national head term "${originalKw.keyword}" `
+    + `(this URL ranks #${originalKw.best_rank_group} for it; P(win citation) is too low). `
+    + `Local variant "${reroute.target.keyword}" is the higher-probability target on a local-business page.`;
+}
+
+function aioCitationPriority(tierId, tierKeywords, ctx) {
+  const picked = pickAioTarget(tierId, tierKeywords, ctx);
+  if (!picked) return null;
+  const { top } = picked;
+  const { kw, originalKw, cleanedUrl, pageScope, queryIntent, pwin, range, reroute } = top;
+  const auditState = pageEnrichment(cleanedUrl, ctx.schemaDetail, ctx.keywords);
+  const rankInfo = kw.best_rank_group != null ? `currently rank #${kw.best_rank_group}` : 'are not ranking yet';
+  const builderArgs = {
+    cleanedUrl, keyword: kw.keyword, sv: Number(kw.search_volume) || 0, rankInfo,
+    pageScope, queryIntent, pWin: pwin.p, range
+  };
+  const rerouteNote = buildAioRerouteNote(reroute, originalKw);
+  return {
+    signature: `aio|${kw.keyword}`,
+    title: `Get cited in Google's AI Overview for "${kw.keyword}"`,
     description: buildAioDescription(builderArgs, { schemaTypes: auditState.schemaTypes }, '[data: last audit]'),
     pages_affected: cleanedUrl ? [cleanedUrl] : [],
     primary_kpi: 'aio_citations',
-    kpi_baseline_value: 0,
-    kpi_target_value: 1,
-    kpi_target_direction: 'up',
-    estimated_lift: `${top.vol.toLocaleString()}/mo AIO query \u00b7 ~£${revLift.toLocaleString()}/mo revenue \u2192 ~£${top.gpLift.toLocaleString()}/mo profit at ${gpPct}% GP`,
-    estimated_lift_gbp_revenue: revLift,
-    estimated_lift_gbp_profit: top.gpLift,
+    kpi_baseline_value: 0, kpi_target_value: 1, kpi_target_direction: 'up',
+    estimated_lift: `${(Number(kw.search_volume) || 0).toLocaleString()}/mo AIO query`
+      + ` \u00b7 P(win) ${(pwin.p * 100).toFixed(0)}%`
+      + ` \u00b7 expected ~£${range.profit.expected.toLocaleString()}/mo GP`
+      + ` (range £${range.profit.low.toLocaleString()}\u2013£${range.profit.high.toLocaleString()})`,
+    estimated_lift_gbp_revenue: range.revenue.expected,
+    estimated_lift_gbp_profit: range.profit.expected,
+    lift_range: range,
+    aio_assumption_stack: range.assumption_stack,
+    aio_pwin_stack: pwin.stack,
+    aio_page_scope: pageScope,
+    aio_query_intent: queryIntent,
+    aio_reroute_note: rerouteNote,
+    aio_rerouted: !!(reroute && reroute.reroute),
     lever_id: 'aio',
     _rebuild: { type: 'aio', args: builderArgs }
   };
@@ -1414,35 +1467,133 @@ function buildRankActions(c, live) {
   return actions.map((a, i) => ({ step: i + 1, ...a }));
 }
 
-function buildAioActions(c, live) {
-  const args    = (c._rebuild && c._rebuild.args) || {};
-  const keyword = args.keyword;
-  const schema  = (live && live.schemaTypes) || [];
-  const hasFaq  = schema.includes('FAQPage');
-  const actions = [];
-  actions.push({
-    effort_hours: 1, confidence: 'high', tag: 'content',
-    headline: `Add a 60–90 word direct-answer block immediately under the H1`,
-    detail: `Write one paragraph that directly answers "${keyword}" in 60–90 words. Place it right under the H1 — Google's AIO crawler prefers the first answer it can extract from the page.`
-  });
-  if (!hasFaq) {
-    actions.push({
-      effort_hours: 1, confidence: 'high', tag: 'schema',
-      headline: 'Publish 5 Q/A pairs in FAQPage JSON-LD',
-      detail: `Page has no FAQPage schema. Pull the People-Also-Ask cluster for "${keyword}", answer each PAA question in 50–80 words, wrap in FAQPage JSON-LD. Wins the FAQ rich result AND seeds the AIO crawler.`
-    });
-  } else {
-    actions.push({
-      effort_hours: 0.5, confidence: 'medium', tag: 'schema',
-      headline: 'Extend the existing FAQPage with 3 PAA-aligned questions',
-      detail: `You already have FAQPage schema — add 3 more Q/A pairs whose questions match the live People-Also-Ask box for "${keyword}" verbatim.`
+// 2026-05-26 phase J: AIO action builder rebuilt to emit the three
+// task types (REMEDIATE / REWRITE / ADD) instead of always appending
+// new content, and to tag every action with an evidence-confidence
+// level (HIGH / MEDIUM / HEURISTIC) so the UI never presents a thin
+// belief as fact. Each helper returns at most a small handful of
+// actions and is well inside the 15-complexity limit.
+function buildRemediateActionsFromLiabilities(liabilities) {
+  const out = [];
+  const stats = (liabilities.unsourced_stats || []).slice(0, 3);
+  if (stats.length) {
+    const snippet = stats[0].snippet.slice(0, 120);
+    const dupNote = stats.some(s => s.count >= 2) ? ' (one of these is repeated 2+ times on the page).' : '.';
+    out.push({
+      effort_hours: 0.5, confidence: EVIDENCE.HIGH, tag: 'remediate', task_type: TASK_TYPE.REMEDIATE,
+      headline: `Remove or cite ${stats.length} unsourced statistical claim${stats.length === 1 ? '' : 's'}`,
+      detail: `Unsourced numeric claim detected on this page${dupNote} `
+        + `Example: "${snippet}". `
+        + `Either delete the claim or add a (Source: ONS / .gov / .ac.uk) citation inline. `
+        + `LLMs increasingly discount answers that cite uncited stats.`
     });
   }
-  actions.push({
-    effort_hours: 0.5, confidence: 'low', tag: 'trust',
-    headline: 'Cite 1 authoritative source in the answer block',
-    detail: `AIO favours pages that cite recognised sources. In the direct-answer block, link out once to Royal Photographic Society / B&H Explora / DPReview / similar.`
-  });
+  const weak = (liabilities.weak_citations || []).slice(0, 2);
+  if (weak.length) {
+    const dom = weak.map(w => w.domain).join(', ');
+    out.push({
+      effort_hours: 0.25, confidence: EVIDENCE.HIGH, tag: 'remediate', task_type: TASK_TYPE.REMEDIATE,
+      headline: `Replace ${weak.length} low-authority outbound citation${weak.length === 1 ? '' : 's'}`,
+      detail: `Outbound link${weak.length === 1 ? '' : 's'} to ${dom} treated as a citation. `
+        + `Swap for a recognised source: Royal Photographic Society, .gov.uk, ONS, BBC, Nature, or a peer university. `
+        + `Weak citation domains hurt trust on both human and LLM reads.`
+    });
+  }
+  return out;
+}
+
+function buildOpenerAction(c, keyword, pageScope, fluffy) {
+  const isLocal = pageScope === 'local';
+  const localBits = isLocal ? ' (levels, format, price-from, location, who it suits)' : '';
+  if (fluffy.isFluffy) {
+    return {
+      effort_hours: 1.0, confidence: EVIDENCE.HIGH, tag: 'rewrite', task_type: TASK_TYPE.REWRITE,
+      headline: `Rewrite the opening section into a factual 60–90 word answer to "${keyword}"`,
+      detail: `Current opener reads as rhetorical/marketing copy (signals: ${fluffy.signals.join(', ')}). `
+        + `Replace with one paragraph that directly answers "${keyword}" in 60–90 words${localBits}. `
+        + `Place it under the H1. Serves AI Overview extraction AND human conversion in one block.`
+    };
+  }
+  return {
+    effort_hours: 1.0, confidence: EVIDENCE.HIGH, tag: 'add', task_type: TASK_TYPE.ADD,
+    headline: `Add a 60–90 word direct-answer block immediately under the H1`,
+    detail: `Write one paragraph that directly answers "${keyword}" in 60–90 words${localBits}. `
+      + `Place it right under the H1 — Google's AIO crawler prefers the first extractable answer.`
+  };
+}
+
+function genericFaqWordCount(htmlSnippet) {
+  if (!htmlSnippet) return 0;
+  const GENERIC = /(is photography (difficult|hard) to learn|how (do|to) i (start|begin)|what is photography|what camera should i (buy|get))/gi;
+  const matches = String(htmlSnippet).match(GENERIC);
+  return matches ? matches.length : 0;
+}
+
+function buildFaqAction(keyword, pageScope, hasFaq, htmlSnippet) {
+  const isLocal = pageScope === 'local';
+  const localSlot = isLocal
+    ? `the local commercial intent ("${keyword}" - cost, beginner pathway, 1-2-1 vs group, in-person vs online)`
+    : `the page's actual commercial intent for "${keyword}"`;
+  const genericCount = genericFaqWordCount(htmlSnippet);
+  // FAQPage schema is no longer a meaningful SERP ranking lever (rich
+  // results being removed). The CONTENT is still useful for AIO/LLM
+  // extraction — value is in the rendered Q&A, not the markup. So we
+  // tag the schema work as HEURISTIC and frame it as content work.
+  if (hasFaq && genericCount >= 2) {
+    return {
+      effort_hours: 1.5, confidence: EVIDENCE.MEDIUM, tag: 'rewrite', task_type: TASK_TYPE.REWRITE,
+      headline: `Rewrite the existing generic FAQs around ${localSlot}`,
+      detail: `Page already has FAQs but they read as generic photography questions ("Is photography difficult to learn?" etc.) `
+        + `with no commercial or local intent. Replace 3-5 with questions a real prospect asks `
+        + `(cost, beginner pathway, 1-2-1 options${isLocal ? ', online vs in-person, Coventry travel/parking' : ''}). `
+        + `Quality gate: each Q must align to a query the page can actually win.`
+    };
+  }
+  if (hasFaq) {
+    return {
+      effort_hours: 1.0, confidence: EVIDENCE.MEDIUM, tag: 'rewrite', task_type: TASK_TYPE.REWRITE,
+      headline: `Extend FAQs with 3 commercial-intent questions about ${localSlot}`,
+      detail: `Add 3 question/answer pairs that match real PAA queries AND are specific to this page's offering. `
+        + `Skip generic "what is photography" questions — they don't move conversion or AIO extraction.`
+    };
+  }
+  return {
+    effort_hours: 1.5, confidence: EVIDENCE.MEDIUM, tag: 'add', task_type: TASK_TYPE.ADD,
+    headline: `Add 5 commercial-intent FAQs about ${localSlot}`,
+    detail: `No FAQ block on the page. Write 5 question/answer pairs sourced from the live People-Also-Ask box for "${keyword}", `
+      + `each specific to this page's offering. The value is in the rendered Q&A content (extractable for AIO/LLMs); `
+      + `FAQPage JSON-LD markup is no longer a meaningful SERP ranking lever.`
+  };
+}
+
+function buildCitationAction(keyword) {
+  return {
+    effort_hours: 0.5, confidence: EVIDENCE.HEURISTIC, tag: 'trust', task_type: TASK_TYPE.ADD,
+    headline: `Cite 1 authoritative source in the answer block (may help)`,
+    detail: `It is believed (heuristic, not proven) that AIO favours pages citing recognised sources. `
+      + `In the direct-answer block for "${keyword}", link out once to Royal Photographic Society, `
+      + `a .gov.uk / .ac.uk source, or another recognised authority. `
+      + `Skip low-authority blogs/aggregators — they hurt trust on both human and LLM reads.`
+  };
+}
+
+function buildAioActions(c, live) {
+  const args      = (c._rebuild && c._rebuild.args) || {};
+  const keyword   = args.keyword;
+  const pageScope = c.aio_page_scope || args.pageScope || 'national';
+  const schema    = (live && live.schemaTypes) || [];
+  const hasFaq    = schema.includes('FAQPage');
+  const bodyText  = (live && live.bodyText) || '';
+  const htmlSnip  = (live && live.bodyHtmlSnippet) || '';
+  const fluffy    = detectFluffyOpener(bodyText);
+  const liabilities = scanLiabilities(htmlSnip, bodyText);
+  const actions = [];
+  actions.push(...buildRemediateActionsFromLiabilities(liabilities));
+  actions.push(buildOpenerAction(c, keyword, pageScope, fluffy));
+  actions.push(buildFaqAction(keyword, pageScope, hasFaq, htmlSnip));
+  actions.push(buildCitationAction(keyword));
+  c.page_liabilities = liabilities;
+  c.opener_audit = fluffy;
   return actions.map((a, i) => ({ step: i + 1, ...a }));
 }
 
@@ -1654,7 +1805,16 @@ export default async function handler(req, res) {
           h1_recommendation: c.h1_recommendation ?? null,
           serp_advice_note: c.serp_advice_note ?? null,
           serp_is_hub: !!c.serp_is_hub,
-          serp_complete: !!c.serp_complete
+          serp_complete: !!c.serp_complete,
+          lift_range: c.lift_range ?? null,
+          aio_assumption_stack: c.aio_assumption_stack ?? null,
+          aio_pwin_stack: c.aio_pwin_stack ?? null,
+          aio_page_scope: c.aio_page_scope ?? null,
+          aio_query_intent: c.aio_query_intent ?? null,
+          aio_reroute_note: c.aio_reroute_note ?? null,
+          aio_rerouted: !!c.aio_rerouted,
+          page_liabilities: c.page_liabilities ?? null,
+          opener_audit: c.opener_audit ?? null
         }))
       });
     }

@@ -94,6 +94,39 @@ function extractH1(html) {
   return decodeEntities(stripped) || null;
 }
 
+// First ~250 words of visible body text. Powers downstream liability
+// scanners (fluffy-opener detection, unsourced-stats) without forcing
+// them to re-fetch the page. We strip <script>, <style>, <head>, and
+// all tags, then collapse whitespace and take a word-bounded slice.
+function extractBodyText(html, wordLimit = 250) {
+  if (!html) return null;
+  const headStripped = String(html).replace(/<head[\s\S]*?<\/head>/i, ' ');
+  const cleaned = headStripped
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
+    .replace(/<header[\s\S]*?<\/header>/gi, ' ')
+    .replace(/<footer[\s\S]*?<\/footer>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ');
+  const decoded = decodeEntities(cleaned).replace(/\s+/g, ' ').trim();
+  if (!decoded) return null;
+  const words = decoded.split(/\s+/);
+  return words.slice(0, wordLimit).join(' ');
+}
+
+// Capped HTML sample around the first <main>/<article>/<body> open tag,
+// up to 60KB. Used by liability scanners that need raw HTML (link
+// detection, schema-around-claim windows). 60KB covers the visible
+// body on every alanranger.com landing page tested.
+function extractBodyHtmlSnippet(html, capBytes = 60000) {
+  if (!html) return null;
+  const str = String(html);
+  const startMatch = /<(main|article|body)\b/i.exec(str);
+  const startIdx = startMatch ? startMatch.index : 0;
+  return str.slice(startIdx, startIdx + capBytes);
+}
+
 // Find every <script type="application/ld+json"> block, parse each one,
 // and return the flat union of @type values found anywhere inside
 // (top-level or @graph children). Deduped, sorted for stable display.
@@ -224,6 +257,8 @@ export async function validateUrlLive(url) {
     metaDescription: extractMetaDescription(fetched.html),
     h1: extractH1(fetched.html),
     schemaTypes: extractJsonLdTypes(fetched.html),
+    bodyText: extractBodyText(fetched.html),
+    bodyHtmlSnippet: extractBodyHtmlSnippet(fetched.html),
     ok: true,
     error: null
   };
@@ -254,6 +289,8 @@ function makeEmpty(url, source, error) {
     metaDescription: null,
     h1: null,
     schemaTypes: [],
+    bodyText: null,
+    bodyHtmlSnippet: null,
     ok: false,
     error: error || null
   };
