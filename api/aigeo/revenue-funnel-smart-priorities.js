@@ -42,8 +42,6 @@ import {
   classifyPageScope,
   pWinCitation,
   liftRange,
-  shouldRerouteToLocal,
-  findKeywordRowByText,
   EVIDENCE,
   TASK_TYPE
 } from '../../lib/revenue-funnel-aio-model.js';
@@ -501,186 +499,308 @@ function rankPriorityForTier(tierId, tierKeywords, ctx) {
 // value is in the rendered Q&A content (extractable for AIO/LLM
 // answer-stitching). How much LLMs weight FAQPage vs plain prose is
 // unproven, so we surface this in the Why block as HEURISTIC.
+// 2026-05-26 phase K rewrite (data-layer reconciliation).
+// Narrative reads ONLY from the anchor keyword row — no cross-row
+// fact mixing. Prior code stitched rank/volume/citation facts from
+// the original kw + rerouted kw + headline kw, producing the
+// contradictory card the user flagged ("ranks #2 but isn't cited"
+// while applying the rank 1-5 P(win) multiplier AND referencing
+// rank #23 in the reroute box — three different rank values on one
+// card). Now: one row, one set of facts.
 function buildAioDescription(args, pageState, sourceTag) {
-  const { cleanedUrl, keyword, sv, rankInfo, assignedKeyword } = args;
-  const schemaTypes = (pageState && pageState.schemaTypes) || [];
+  const { cleanedUrl, anchorKeyword, anchorRank, anchorVolume, anchorCitationState, assignedKeyword } = args;
+  const schemaTypes = pageState?.schemaTypes || [];
   const schemaLine = schemaTypes.length
     ? `Schema present: ${schemaTypes.slice(0, 8).join(', ')}.`
     : 'Schema present: none captured.';
+  const rankLine = anchorRank != null ? `currently ranks #${anchorRank}` : 'is not yet ranking';
+  const cit = anchorCitationState || { cited: false, alan: 0, total: 0 };
+  const citedLine = cit.cited
+    ? `is already cited ${cit.alan}/${cit.total} in the AI Overview`
+    : `is not yet cited in the AI Overview (0/${cit.total || 0} citations from any domain)`;
+  const opportunity = `Page anchor keyword "${anchorKeyword}" (${Number(anchorVolume).toLocaleString()}/mo) ${rankLine} and ${citedLine} on ${cleanedUrl || '(no URL)'}.`;
   const overrideLine = assignedKeyword
-    ? `Assigned target keyword (Traditional SEO): "${assignedKeyword}".`
+    ? `Assigned target keyword (Traditional SEO override): "${assignedKeyword}".`
     : '';
-  const opportunity = `AI Overview exists for "${keyword}" (${sv.toLocaleString()}/mo) — you ${rankInfo} but aren't cited. Target page: ${cleanedUrl || '(no URL)'}.`;
-  const faqNote = `FAQ rich results note: Google is removing FAQ rich results from SERPs in 2026 — FAQPage JSON-LD is no longer a meaningful SERP lever. The value is the rendered Q&A content (how heavily AIO/LLMs weight it is unproven — heuristic).`;
+  const faqNote = `FAQ rich results note: Google is removing FAQ rich results from SERPs in 2026 — FAQPage JSON-LD is no longer a meaningful SERP lever (rendered Q&A content is what AIO/LLMs read — heuristic).`;
   const base = [opportunity, overrideLine, schemaLine, faqNote].filter(Boolean).join(' ');
   return sourceTag ? `${base} ${sourceTag}` : base;
 }
 
-// 2026-05-26: AIO scoring rewritten to use probabilistic P(win) model.
-// See lib/revenue-funnel-aio-model.js for the full assumption stack.
-// `pickAioTarget` selects the highest expected-GP keyword across the
-// tier, applying local-page rerouting and the rank-aware P(win) curve.
-//
-// 2026-05-26 phase J fix: the picker now also honours the assigned
-// keyword from `traditional_seo_target_keyword_overrides`. The Coventry
-// courses page is a textbook case — it had an assigned keyword
-// "Photography Courses Coventry" but the picker was substituting the
-// higher-volume local variant "photography courses near me", which the
-// user (correctly) flagged as ignoring his explicit assignment.
-function pickAioTarget(tierId, tierKeywords, ctx) {
+// 2026-05-26 phase K rewrite (data-layer reconciliation).
+// The picker no longer filters cited keywords out. It groups all
+// AIO-eligible keywords by URL, scores every one of them as a lever,
+// tags each lever capture_slot (uncited) vs grow_share (already
+// cited), and surfaces the full lever list on the card. The headline
+// GP figure comes from the highest-expected-GP lever. The narrative
+// is anchored on the URL's slug-aligned keyword (consistency anchor
+// shared with the Keyword Scorecard), with any assigned-keyword
+// override taking precedence if the assigned keyword exists in
+// keyword_rankings for this URL.
+
+// Group AIO-eligible keywords by their cleaned best_url. Drops blog
+// posts and non-AIO keywords; preserves URL casing as the cleaned form.
+function groupKeywordsByUrlForAio(tierKeywords) {
+  const byUrl = new Map();
+  for (const k of (tierKeywords || [])) {
+    if (!k || !k.best_url || !k.has_ai_overview) continue;
+    if (isBlogUrl(k.best_url)) continue;
+    const cleaned = cleanUrl(k.best_url);
+    if (!cleaned) continue;
+    if (!byUrl.has(cleaned)) byUrl.set(cleaned, []);
+    byUrl.get(cleaned).push(k);
+  }
+  return byUrl;
+}
+
+// Capture-rate calibration. For uncited keywords the lever models
+// the full slot capture (default 0.03). For already-cited keywords
+// the lever models INCREMENTAL share growth (one more citation out
+// of the headroom), so capture rate scales by 1 / headroom and is
+// floored at 0.005 so a saturated query (alan == total) still shows
+// a small positive number rather than a hard zero (helps the user
+// see the saturated state without it disappearing from the list).
+function aioLeverCaptureRate(cited, alanCit, totalCit) {
+  if (!cited) return 0.03;
+  const headroom = Math.max(1, totalCit - alanCit);
+  return Math.max(0.005, 0.03 / headroom);
+}
+
+// Score one keyword as a lever for a URL. Returns the lever object
+// the UI renders in the lever list AND the picker uses for the
+// headline GP figure when this lever is the top one.
+function aioLeverFromKeyword(kw, pageScope, gpPct, aov, convRate) {
+  const queryIntent = classifyQueryIntent(kw.keyword);
+  const alanCit = Number(kw.ai_alan_citations_count) || 0;
+  const totalCit = Number(kw.ai_total_citations) || 0;
+  const cited = alanCit > 0;
+  const pwin = pWinCitation(kw.best_rank_group, queryIntent, pageScope, 'neutral');
+  const captureRate = aioLeverCaptureRate(cited, alanCit, totalCit);
+  const range = liftRange({
+    volume: Number(kw.search_volume) || 0,
+    pWin: pwin.p, captureRate, aov, conversionRate: convRate, gpPct
+  });
+  return {
+    kw, queryIntent, pwin, range,
+    lever_type: cited ? 'grow_share' : 'capture_slot',
+    citation_state: { cited, alan: alanCit, total: totalCit }
+  };
+}
+
+// Score all levers on one URL and pick its anchor (slug-aligned kw)
+// + top lever (highest expected GP). Anchor and top may be the
+// same row — and frequently are when the URL's slug matches the
+// biggest opportunity (e.g. /photography-workshops vs "photography
+// workshops near me"). They diverge on the Coventry courses page,
+// which is the exact contradiction the user reported.
+function scoreAioUrl(tierId, cleanedUrl, kws, ctx) {
   const gpPct = estimatedGpPctForTier(tierId);
   const aov = trueAovForTier(tierId);
   const convRate = bookingConvRateForTier(tierId);
-  const uncited = (tierKeywords || [])
-    .filter(k => !isBlogUrl(k.best_url || ''))
-    .filter(k => k.has_ai_overview && !(Number(k.ai_alan_citations_count) > 0));
-  if (!uncited.length) return null;
-  const scored = uncited.map(k => scoreAioCandidate(k, ctx, gpPct, aov, convRate));
-  scored.sort((a, b) => b.range.profit.expected - a.range.profit.expected);
-  return { gpPct, aov, convRate, top: scored[0] };
-}
-
-function scoreAioCandidate(kw, ctx, gpPct, aov, convRate) {
-  const cleanedUrl = cleanUrl(kw.best_url || '');
   const pageScope = classifyPageScope(intentClassForUrl(cleanedUrl));
-  const assignedKeyword = lookupAssignedKeyword(ctx.targetKeywordOverrides, cleanedUrl);
-  const targetSelection = selectAioTargetKeyword({ kw, cleanedUrl, pageScope, ctx, assignedKeyword });
-  const targetKw = targetSelection.target;
-  const targetIntent = classifyQueryIntent(targetKw.keyword);
-  const pwin = pWinCitation(targetKw.best_rank_group, targetIntent, pageScope, 'neutral');
-  const range = liftRange({
-    volume: Number(targetKw.search_volume) || 0,
-    pWin: pwin.p, captureRate: 0.03, aov, conversionRate: convRate, gpPct
-  });
-  return {
-    originalKw: kw,
-    kw: targetKw,
-    cleanedUrl,
-    pageScope,
-    queryIntent: targetIntent,
-    pwin,
-    range,
-    reroute: targetSelection.reroute,
-    assignedKeyword,
-    selectionSource: targetSelection.source,
-    overrideStatus: targetSelection.override_status
-  };
+  const levers = kws.map(k => aioLeverFromKeyword(k, pageScope, gpPct, aov, convRate));
+  levers.sort((a, b) => b.range.profit.expected - a.range.profit.expected);
+  const anchor = findAnchorLever(cleanedUrl, levers, ctx);
+  const top = levers[0];
+  return { cleanedUrl, levers, anchor, top, pageScope, gpPct, aov, convRate };
 }
 
-// Resolve which keyword to model the AIO opportunity around. Priority:
-//   1. The URL's assigned keyword (traditional_seo_target_keyword_overrides)
-//      if that keyword has AIO data — never overridden by a heuristic.
-//   2. If no override OR the override has no AIO data, run the existing
-//      local-variant reroute heuristic (national head term on a local
-//      page that ranks >20).
-//   3. Otherwise the original keyword the picker fed us.
-//
-// 2026-05-26 defect A fix: when an assigned keyword EXISTS but has no
-// AIO data in keyword_rankings, we MUST NOT silently fall back. The
-// fallback target is still used (the user still gets actionable
-// recommendations), but `override_status` carries the reason so the
-// UI can surface a visible "Assigned KW 'X' has no AIO data — using
-// fallback Y" note.
-function selectAioTargetKeyword(opts) {
-  const { kw, pageScope, ctx, assignedKeyword } = opts;
+// Slug-aligned anchor uses pickKeywordForPage (HUB_CURATED + URL→noun
+// intent + best volume on the URL). Falls back to the top lever when
+// no slug match exists so the card always has an anchor.
+function findAnchorLever(cleanedUrl, levers, ctx) {
   const allKeywords = ctx.allKeywords || ctx.keywords || [];
-  let overrideStatus = null;
-  if (assignedKeyword) {
-    const row = findKeywordRowByText(assignedKeyword, allKeywords);
-    if (row && row.has_ai_overview) {
-      return {
-        target: row,
-        source: 'override',
-        reroute: { reroute: false, reason: 'override_present' },
-        override_status: { applied: true }
-      };
-    }
-    overrideStatus = row
-      ? { applied: false, reason: 'override_keyword_no_aio_data' }
-      : { applied: false, reason: 'override_keyword_not_in_data' };
+  const slugRow = pickKeywordForPage(cleanedUrl, allKeywords);
+  if (slugRow) {
+    const needle = String(slugRow.keyword).toLowerCase().trim();
+    const found = levers.find(l => String(l.kw.keyword).toLowerCase().trim() === needle);
+    if (found) return found;
   }
-  const reroute = shouldRerouteToLocal({
-    pageScope,
-    queryIntent: classifyQueryIntent(kw.keyword),
-    rank: kw.best_rank_group,
-    keyword: kw.keyword,
-    keywords: allKeywords
-  });
-  if (reroute.reroute) return { target: reroute.target, source: 'reroute_local', reroute, override_status: overrideStatus };
-  return { target: kw, source: 'original', reroute, override_status: overrideStatus };
+  return levers[0];
 }
 
-function buildAioRerouteNote(top) {
-  if (top.selectionSource === 'override') {
-    return `Using assigned keyword "${top.kw.keyword}" from the Traditional SEO target-keyword override.`;
+// Apply a user-assigned keyword override to the anchor. Returns the
+// resolved anchor + status. If the assigned keyword exists in
+// keyword_rankings for THIS URL it becomes the anchor; otherwise the
+// slug-aligned anchor stands and the override status carries the
+// "not in keyword_rankings for this URL" reason so the UI can show
+// a visible note instead of silently discarding the assignment.
+function applyAssignedKeyword(cleanedUrl, levers, anchor, ctx) {
+  const assignedKeyword = lookupAssignedKeyword(ctx.targetKeywordOverrides, cleanedUrl);
+  if (!assignedKeyword) {
+    return { anchor, assignedKeyword: null, overrideStatus: null };
   }
-  const reroute = top.reroute;
-  if (!reroute || !reroute.reroute) return null;
-  return `Re-routed off national head term "${top.originalKw.keyword}" `
-    + `(this URL ranks #${top.originalKw.best_rank_group} for it; P(win citation) is too low). `
-    + `Local variant "${reroute.target.keyword}" is the higher-probability target on a local-business page.`;
-}
-
-// 2026-05-26 defect A: when the URL has an assigned KW but it can't
-// be used (no AIO data / not in keyword_rankings), surface a visible
-// note so the user knows the override is being honoured-as-best-can-be,
-// NOT silently discarded.
-function buildAioOverrideStatusNote(top) {
-  const st = top && top.overrideStatus;
-  if (!st || st.applied) return null;
-  const fallback = top.kw && top.kw.keyword;
-  if (st.reason === 'override_keyword_no_aio_data') {
-    return `Assigned keyword "${top.assignedKeyword}" has no AI Overview data in the latest keyword sync — using fallback "${fallback}" for the model. Re-sync that keyword to use the assignment.`;
+  const needle = String(assignedKeyword).toLowerCase().trim();
+  const overrideLever = levers.find(l => String(l.kw.keyword).toLowerCase().trim() === needle);
+  if (overrideLever) {
+    return { anchor: overrideLever, assignedKeyword, overrideStatus: { applied: true } };
   }
-  if (st.reason === 'override_keyword_not_in_data') {
-    return `Assigned keyword "${top.assignedKeyword}" is not in the keyword_rankings dataset — using fallback "${fallback}". Add the keyword to the next sync to honour the override.`;
-  }
-  return null;
-}
-
-function aioCitationPriority(tierId, tierKeywords, ctx) {
-  const picked = pickAioTarget(tierId, tierKeywords, ctx);
-  if (!picked) return null;
-  const { top } = picked;
-  const { kw, cleanedUrl, pageScope, queryIntent, pwin, range, assignedKeyword, selectionSource } = top;
-  const auditState = pageEnrichment(cleanedUrl, ctx.schemaDetail, ctx.keywords);
-  const rankInfo = kw.best_rank_group != null ? `currently rank #${kw.best_rank_group}` : 'are not ranking yet';
-  const builderArgs = {
-    cleanedUrl, keyword: kw.keyword, sv: Number(kw.search_volume) || 0, rankInfo,
-    pageScope, queryIntent, pWin: pwin.p, range,
-    assignedKeyword, selectionSource
-  };
-  const rerouteNote = buildAioRerouteNote(top);
-  const overrideStatusNote = buildAioOverrideStatusNote(top);
   return {
-    signature: `aio|${kw.keyword}`,
-    title: `Get cited in Google's AI Overview for "${kw.keyword}"`,
+    anchor,
+    assignedKeyword,
+    overrideStatus: { applied: false, reason: 'override_keyword_not_in_keyword_rankings_for_url' }
+  };
+}
+
+// Pick the URL within this tier that has the highest top-lever GP.
+// One card per tier (unchanged contract); the card now carries the
+// full lever list for the picked URL.
+function pickAioTarget(tierId, tierKeywords, ctx) {
+  const byUrl = groupKeywordsByUrlForAio(tierKeywords);
+  if (!byUrl.size) return null;
+  const urlScores = [];
+  for (const [url, kws] of byUrl) {
+    const score = scoreAioUrl(tierId, url, kws, ctx);
+    if (score.top && score.top.range.profit.expected >= 0) urlScores.push(score);
+  }
+  if (!urlScores.length) return null;
+  urlScores.sort((a, b) => b.top.range.profit.expected - a.top.range.profit.expected);
+  return urlScores[0];
+}
+
+// Serialise a lever for the API response so the UI can render the
+// lever list under the assumption stack. Keep this tight — only the
+// fields the UI actually displays.
+function serializeAioLever(lever) {
+  return {
+    keyword: lever.kw.keyword,
+    rank: lever.kw.best_rank_group ?? null,
+    volume: Number(lever.kw.search_volume) || 0,
+    p_win: lever.pwin.p,
+    expected_gp_mo: lever.range.profit.expected,
+    expected_rev_mo: lever.range.revenue.expected,
+    lever_type: lever.lever_type,
+    citation_state: lever.citation_state,
+    query_intent: lever.queryIntent
+  };
+}
+
+// Headline strap-line for the card. Mentions the top lever (because
+// the headline GP figure is the top lever's GP, not the anchor's)
+// AND the total lever count split capture/grow so the user sees the
+// shape of the opportunity at a glance.
+function buildAioEstimatedLiftLine(urlScore) {
+  const { top, levers } = urlScore;
+  const captureCount = levers.filter(l => l.lever_type === 'capture_slot').length;
+  const growCount = levers.filter(l => l.lever_type === 'grow_share').length;
+  const total = captureCount + growCount;
+  const leverType = top.lever_type === 'grow_share' ? 'grow citation share' : 'capture AIO slot';
+  return `${top.kw.keyword} (${leverType})`
+    + ` \u00b7 ${(Number(top.kw.search_volume) || 0).toLocaleString()}/mo`
+    + ` \u00b7 P(win) ${(top.pwin.p * 100).toFixed(0)}%`
+    + ` \u00b7 expected ~£${top.range.profit.expected.toLocaleString()}/mo GP`
+    + ` (range £${top.range.profit.low.toLocaleString()}\u2013£${top.range.profit.high.toLocaleString()})`
+    + ` \u00b7 ${total} lever${total === 1 ? '' : 's'} on this URL (${captureCount} capture / ${growCount} grow) stacked beneath`;
+}
+
+// Override-status note rendered when an assigned keyword exists but
+// doesn't appear in keyword_rankings for this URL. Never silently
+// discards the assignment.
+function buildAioOverrideNote(assignedKeyword, overrideStatus, anchorKeyword) {
+  if (!assignedKeyword || !overrideStatus || overrideStatus.applied) return null;
+  return `Assigned keyword "${assignedKeyword}" is not in keyword_rankings for this URL — using slug-anchored "${anchorKeyword}" instead. Add the keyword to the next sync to honour the override.`;
+}
+
+// Step 6 (fail-visible) runtime check. Looks at the picked URL's
+// lever set + the anchor row's internal consistency. Catches bad
+// data (alan > total citations, has_ai_overview false on a lever
+// that was selected as AIO-eligible, lever URL drift from the
+// cleaned URL the picker grouped on) BEFORE the headline GP figure
+// is shown. The unit test in test/aio-cross-module-consistency
+// catches code drift; this catches data drift.
+function assertAioAnchorConsistent(urlScore, anchorLever) {
+  const reasons = [];
+  if (!anchorLever || !anchorLever.kw) {
+    return { inconsistent: true, reasons: ['anchor_lever_missing'] };
+  }
+  const cs = anchorLever.citation_state;
+  if (cs.alan > cs.total) reasons.push('alan_citations_greater_than_total');
+  if (cs.cited && cs.alan === 0) reasons.push('cited_flag_set_without_alan_citation');
+  if (!cs.cited && cs.alan > 0) reasons.push('uncited_flag_set_with_alan_citation');
+  if (anchorLever.kw.has_ai_overview === false) reasons.push('anchor_kw_has_no_aio');
+  for (const lever of urlScore.levers) {
+    const leverUrl = cleanUrl(lever.kw.best_url || '');
+    if (leverUrl && leverUrl !== urlScore.cleanedUrl) {
+      reasons.push(`lever_url_mismatch:${lever.kw.keyword}`);
+      break;
+    }
+  }
+  return { inconsistent: reasons.length > 0, reasons };
+}
+
+// Assemble the final candidate object from the scored URL + override
+// resolution + consistency check. Kept narrow so complexity stays
+// within rule budget; the heavy lifting lives in the small helpers
+// above.
+function buildAioCandidate(opts) {
+  const { urlScore, anchorLever, top, builderArgs, auditState, pageScope, withOverride, consistency } = opts;
+  const { cleanedUrl, levers } = urlScore;
+  const overrideNote = buildAioOverrideNote(withOverride.assignedKeyword, withOverride.overrideStatus, anchorLever.kw.keyword);
+  return {
+    signature: `aio|${cleanedUrl}`,
+    title: `Get cited in Google's AI Overview for "${anchorLever.kw.keyword}"`,
     description: buildAioDescription(builderArgs, { schemaTypes: auditState.schemaTypes }, '[data: last audit]'),
     pages_affected: cleanedUrl ? [cleanedUrl] : [],
     primary_kpi: 'aio_citations',
-    kpi_baseline_value: 0, kpi_target_value: 1, kpi_target_direction: 'up',
-    estimated_lift: `${(Number(kw.search_volume) || 0).toLocaleString()}/mo AIO query`
-      + ` \u00b7 P(win) ${(pwin.p * 100).toFixed(0)}%`
-      + ` \u00b7 expected ~£${range.profit.expected.toLocaleString()}/mo GP`
-      + ` (range £${range.profit.low.toLocaleString()}\u2013£${range.profit.high.toLocaleString()})`,
-    estimated_lift_gbp_revenue: range.revenue.expected,
-    estimated_lift_gbp_profit: range.profit.expected,
-    lift_range: range,
-    aio_assumption_stack: range.assumption_stack,
-    aio_pwin_stack: pwin.stack,
+    kpi_baseline_value: anchorLever.citation_state.alan,
+    kpi_target_value: anchorLever.citation_state.alan + 1,
+    kpi_target_direction: 'up',
+    estimated_lift: buildAioEstimatedLiftLine(urlScore),
+    estimated_lift_gbp_revenue: top.range.revenue.expected,
+    estimated_lift_gbp_profit: top.range.profit.expected,
+    lift_range: top.range,
+    aio_assumption_stack: top.range.assumption_stack,
+    aio_pwin_stack: top.pwin.stack,
     aio_page_scope: pageScope,
-    aio_query_intent: queryIntent,
-    aio_reroute_note: rerouteNote,
-    aio_rerouted: top.selectionSource === 'reroute_local',
-    aio_used_override: top.selectionSource === 'override',
-    aio_assigned_keyword: assignedKeyword || null,
-    aio_override_status: top.overrideStatus || null,
-    aio_override_status_note: overrideStatusNote,
-    aio_aov_flag: range.aov_flag || null,
-    aio_conv_flag: range.conv_flag || null,
+    aio_query_intent: top.queryIntent,
+    aio_levers: levers.map(serializeAioLever),
+    aio_anchor_keyword: anchorLever.kw.keyword,
+    aio_anchor_rank: anchorLever.kw.best_rank_group ?? null,
+    aio_anchor_volume: Number(anchorLever.kw.search_volume) || 0,
+    aio_anchor_citation_state: anchorLever.citation_state,
+    aio_top_lever_keyword: top.kw.keyword,
+    aio_top_lever_type: top.lever_type,
+    aio_reroute_note: null,
+    aio_rerouted: false,
+    aio_used_override: !!(withOverride.overrideStatus && withOverride.overrideStatus.applied),
+    aio_assigned_keyword: withOverride.assignedKeyword || null,
+    aio_override_status: withOverride.overrideStatus || null,
+    aio_override_status_note: overrideNote,
+    aio_aov_flag: top.range.aov_flag || null,
+    aio_conv_flag: top.range.conv_flag || null,
+    aio_data_inconsistent: consistency.inconsistent,
+    aio_data_inconsistent_reasons: consistency.reasons,
     lever_id: 'aio',
     _rebuild: { type: 'aio', args: builderArgs }
   };
+}
+
+function aioCitationPriority(tierId, tierKeywords, ctx) {
+  const urlScore = pickAioTarget(tierId, tierKeywords, ctx);
+  if (!urlScore) return null;
+  const { cleanedUrl, levers, top, pageScope } = urlScore;
+  const withOverride = applyAssignedKeyword(cleanedUrl, levers, urlScore.anchor, ctx);
+  const anchorLever = withOverride.anchor;
+  const consistency = assertAioAnchorConsistent(urlScore, anchorLever);
+  const auditState = pageEnrichment(cleanedUrl, ctx.schemaDetail, ctx.keywords);
+  const builderArgs = {
+    cleanedUrl,
+    anchorKeyword: anchorLever.kw.keyword,
+    anchorRank: anchorLever.kw.best_rank_group,
+    anchorVolume: Number(anchorLever.kw.search_volume) || 0,
+    anchorCitationState: anchorLever.citation_state,
+    assignedKeyword: withOverride.assignedKeyword,
+    // Aliases consumed by buildAioActions (live-detector pipeline)
+    // and the REBUILDERS re-render pass. `keyword` is the anchor
+    // (what the action plan targets); `pageScope` is the page intent
+    // bucket the detectors use to tune their thresholds.
+    keyword: anchorLever.kw.keyword,
+    pageScope
+  };
+  return buildAioCandidate({
+    tierId, urlScore, anchorLever, top, builderArgs, auditState, pageScope,
+    withOverride, consistency
+  });
 }
 
 function orphanProductPriority(tierId, products, tierMetricsByUrl) {
@@ -1105,6 +1225,14 @@ export const __INTERNAL = {
   seasonalityFor:                   (tier, m)    => seasonalityFor(tier, m),
   seasonalityBandFor:               (tier, m)    => seasonalityBandFor(tier, m),
   seasonalityLabel:                 (band)       => seasonalityLabel(band),
+  // 2026-05-26 phase K: cross-module consistency test entry points.
+  // Exposed so test/aio-cross-module-consistency.test.js can feed a
+  // synthetic keyword_rankings snapshot in and assert the funnel's
+  // anchor/lever fields agree with the Keyword Scorecard's view.
+  aioCitationPriority:              (tierId, kws, ctx) => aioCitationPriority(tierId, kws, ctx),
+  pickAioTarget:                    (tierId, kws, ctx) => pickAioTarget(tierId, kws, ctx),
+  scoreAioUrl:                      (tierId, url, kws, ctx) => scoreAioUrl(tierId, url, kws, ctx),
+  groupKeywordsByUrlForAio:         (kws)        => groupKeywordsByUrlForAio(kws),
   get MONTH_NAMES()                              { return MONTH_NAMES; },
   get SEASONALITY_BY_TIER()                      { return SEASONALITY_BY_TIER; },
   setBlendedSeasonality:            (b) => { activeBlendedSeasonality = b; },
@@ -2058,6 +2186,15 @@ export default async function handler(req, res) {
           aio_conv_flag: c.aio_conv_flag ?? null,
           aio_audit_status: c.aio_audit_status ?? null,
           aio_audit_reasons: c.aio_audit_reasons ?? null,
+          aio_levers: c.aio_levers ?? null,
+          aio_anchor_keyword: c.aio_anchor_keyword ?? null,
+          aio_anchor_rank: c.aio_anchor_rank ?? null,
+          aio_anchor_volume: c.aio_anchor_volume ?? null,
+          aio_anchor_citation_state: c.aio_anchor_citation_state ?? null,
+          aio_top_lever_keyword: c.aio_top_lever_keyword ?? null,
+          aio_top_lever_type: c.aio_top_lever_type ?? null,
+          aio_data_inconsistent: !!c.aio_data_inconsistent,
+          aio_data_inconsistent_reasons: c.aio_data_inconsistent_reasons ?? null,
           page_liabilities: c.page_liabilities ?? null,
           opener_audit: c.opener_audit ?? null
         }))

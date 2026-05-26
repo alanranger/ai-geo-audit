@@ -2,6 +2,118 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-26] - Phase K: AIO data-layer reconciliation (Coventry card defect)
+
+The 8de72d5/b034d2d/598d44c rounds tried to patch the symptoms (effort total,
+override status note, conv-rate flag, detector failures). The user (correctly)
+pushed back: the real defect is data-layer incoherence inside one card — the
+funnel was composing narrative facts across multiple keyword rows from the
+same `keyword_rankings` table, producing internally contradictory statements
+("ranks #2 but isn't cited" while also referencing rank #23 and applying a
+rank 1–5 multiplier — three different rank values on one card). This entry
+fixes the root cause.
+
+**Provenance map (verified, rows pasted in chat 2026-05-26 16:05Z):**
+
+| value | source | row |
+|---|---|---|
+| previous funnel target "photography courses near me" 2,400/mo rank #2 cited 1/34 | `keyword_rankings` | exists, audit_date 2026-05-26 |
+| previous funnel reroute "rank #23" | `keyword_rankings` | row for `keyword='photography courses'` vol 6,600 — different keyword |
+| Keyword Scorecard "photography courses coventry" 70/mo rank #2 cited 2/10 | `keyword_rankings` | exists, audit_date 2026-05-26 |
+| AOV £200, conv 1%, GP% 90% | code constants in `revenue-funnel-smart-priorities.js` + `revenue-funnel-aio-model.js` | not table-driven |
+| GSC clicks 21/28d, impressions 4,155, CTR 0.5%, pos 26.5 | `gsc_page_metrics_28d` | date_end 2026-05-24 |
+
+The previous "Photography Courses Coventry doesn't exist in keyword_rankings"
+diagnosis in the **2026-05-26 DEFECT A** entry below was **incorrect**. The
+keyword exists with vol 70, rank #2, 2/10 alanranger.com citations. The earlier
+query used `order by search_volume desc nulls last limit 25` so 25 high-volume
+"near me" rows filled the limit before the single vol-70 "coventry" row could
+appear. The keyword was always there. The pre-Phase-K picker simply filtered it
+out via `!(ai_alan_citations_count > 0)` — cited keywords were silently dropped
+from candidacy, including the URL's own slug-aligned keyword.
+
+**Code changes (no UI layout change):**
+
+- **`api/aigeo/revenue-funnel-smart-priorities.js`** picker rewrite:
+  - `pickAioTarget` now groups AIO-eligible keywords by `cleanUrl(best_url)`
+    via `groupKeywordsByUrlForAio`, scores every keyword on the URL as a lever
+    (`aioLeverFromKeyword` + `aioLeverCaptureRate`), and picks the URL whose
+    top lever has the highest expected GP. Cited keywords are NO LONGER
+    filtered out — they become `grow_share` levers modelling incremental
+    citation-share uplift (1/headroom × capture rate, floored at 0.005).
+  - `findAnchorLever` selects the slug-aligned anchor via `pickKeywordForPage`
+    so the funnel and Keyword Scorecard always pick the same row for a URL.
+  - `applyAssignedKeyword` honours a Traditional-SEO override when the
+    assigned keyword exists in `keyword_rankings` for THIS URL; otherwise it
+    records `override_keyword_not_in_keyword_rankings_for_url` so the UI can
+    surface a visible "not used" note rather than silently discarding the
+    assignment.
+  - `buildAioDescription` rewritten to read kw/rank/volume/citation facts
+    ONLY from the anchor row. No cross-row mixing.
+  - `assertAioAnchorConsistent` runs a runtime sanity check on the anchor
+    (`alan ≤ total`, `has_ai_overview`, lever URLs all match the cleaned URL)
+    and sets `aio_data_inconsistent: true` + reasons array if it trips.
+  - Removed: `selectAioTargetKeyword`, `scoreAioCandidate`, `buildAioRerouteNote`,
+    `buildAioOverrideStatusNote`. Reroute logic gone — every lever is now
+    surfaced, so the user (not a heuristic) chooses the lever to act on.
+  - Imports `shouldRerouteToLocal` and `findKeywordRowByText` removed (unused).
+- **`audit-dashboard.html`** card render:
+  - New `rfAioLeverListHtml` renders the full lever list under the assumption
+    stack: KW · Rank · Vol · P(win) · Cited · Lever type · +£GP/mo.
+    Anchor row highlighted green; top lever (drives headline GP) highlighted
+    blue.
+  - New `rfAioDataInconsistentHtml` renders a "DATA SOURCES INCONSISTENT"
+    banner at the top of the assumption block when the runtime check trips.
+  - `rfActionAssignedKwBlock` now handles the new
+    `override_keyword_not_in_keyword_rankings_for_url` reason with a clear
+    fallback tooltip.
+- **`test/aio-cross-module-consistency.test.js`** (new, 8 tests):
+  - Asserts funnel anchor agrees with `pickKeywordForPage` (the Scorecard view)
+    on keyword/rank/volume/citation_state for the Coventry URL using a
+    synthetic snapshot mirroring the real `keyword_rankings` rows.
+  - Asserts ALL AIO-eligible keywords appear as levers (capture + grow).
+  - Asserts headline GP comes from the top lever, not the anchor when they
+    diverge.
+  - Asserts the description quotes the anchor keyword and never claims
+    "aren't cited" when the anchor IS cited.
+  - Asserts the override is applied when the assigned keyword exists in
+    `keyword_rankings` for the URL.
+  - Asserts the visible note fires when the assigned keyword is absent.
+  - Asserts `aio_data_inconsistent` trips on impossible citation_state.
+  - Asserts `null` return when no AIO-eligible keywords exist.
+
+Test suite: **54 pass / 0 fail** (was 46 before; +8 cross-module tests).
+
+**Tracked tasks (filed for follow-up, not part of this fix):**
+
+1. **`property_url` casing normalisation.** `keyword_rankings` holds three
+   `property_url` formats: `https://www.alanranger.com` (canonical, 7,077
+   rows), `https://www.alanranger.com/` (trailing slash, 33 stale rows),
+   `alanranger.com` (no scheme, 84 stale rows). All current writes go to
+   canonical but nothing enforces that. (a) one-off normalisation of the
+   2 stale partitions into the canonical row set; (b) DB-level CHECK or
+   normalise-on-write trigger so non-canonical writes are blocked. Owner:
+   next AIO maintainer touching `keyword_rankings`. Ticket placeholder:
+   PHASE-K-FOLLOWUP-1.
+
+2. **Tier-mapping defect.** `TRUE_AOV_BY_TIER['courses'] = £200` was
+   validated by the user (2026-05-26) as the in-person Coventry group
+   course price ONLY. Workshops, 1-2-1, and online courses currently fold
+   into the same `courses` tier and inherit £200 AOV — that's wrong for
+   workshops (~£250+) and 1-2-1 (~£395+). Conversion rate (1% assumed)
+   may also differ materially. Action: split into `courses_in_person`,
+   `courses_121`, `courses_online` with separate AOV + conv rate per
+   sub-tier, and re-classify all current `courses`-tier URLs. Owner:
+   tier maintainer. Ticket placeholder: PHASE-K-FOLLOWUP-2.
+
+3. **Booking conversion rate verification.** User confirmed 1-2 paid
+   bookings/28d across all paid courses+workshops pages (~165 GSC clicks
+   /28d), so the 1% assumption is roughly right but unverified per-tier.
+   Conversion rate continues to render `ASSUMED` amber banner across
+   every AIO card tool-wide; the flag must remain until per-tier measured
+   rates are wired in (Amendment 2 of phase K user instruction). Ticket
+   placeholder: PHASE-K-FOLLOWUP-3.
+
 ## [2026-05-26] - AIO recommendation engine: 4 defects that failed to land live (8de72d5 follow-up)
 
 The 8de72d5 changelog claimed 8 fixes; the live `/photography-courses-coventry` card
@@ -57,6 +169,12 @@ deployed API + the actual Coventry HTML (not a synthetic fixture).
     it wasn't. Additionally, the keyword "Photography Courses Coventry" is NOT in
     `keyword_rankings` at all — even if an override existed, the AIO data lookup
     would have returned nothing.
+  - **CORRECTION (2026-05-26 Phase K):** the second half of the above diagnosis was
+    wrong. `photography courses coventry` IS in `keyword_rankings` (vol 70, rank 2,
+    cited 2/10). The earlier SQL used `ORDER BY search_volume DESC NULLS LAST LIMIT
+    25` which let 25 high-volume `near me` rows fill the result set before the
+    single vol-70 `coventry` row appeared. The keyword was always there; the query
+    was bad. See the **Phase K** entry above for the actual root-cause fix.
   - `selectAioTargetKeyword` now records `override_status` on the candidate
     (`applied: true` / `applied: false, reason: override_keyword_no_aio_data` /
     `applied: false, reason: override_keyword_not_in_data`) instead of silently

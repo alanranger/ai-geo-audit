@@ -330,6 +330,35 @@ Alan flagged all of these at session end. Work them in this order.
 8. **[LOW] Extend validation script**
    Add 2 custom weight permutations to `multi-scenario-validation.mjs`.
 
+### Phase K follow-up tasks (2026-05-26, NOT blocking current work)
+
+These came out of the AIO data-layer reconciliation. See **Docs/CHANGELOG.md
+[2026-05-26] Phase K** for the full context.
+
+9. **[MEDIUM/data] PHASE-K-FOLLOWUP-1: `property_url` casing normalisation**
+   `keyword_rankings` holds three `property_url` formats:
+   `https://www.alanranger.com` (canonical, 7,077 rows),
+   `https://www.alanranger.com/` (33 stale rows),
+   `alanranger.com` (84 stale rows). All current writes go to canonical
+   but nothing enforces that.
+   (a) one-off normalisation of the 2 stale partitions; (b) DB-level CHECK
+   constraint or normalise-on-write trigger blocking non-canonical inserts.
+
+10. **[MEDIUM/business] PHASE-K-FOLLOWUP-2: Tier-mapping defect**
+    `TRUE_AOV_BY_TIER['courses'] = £200` was confirmed by Alan to be the
+    in-person Coventry group-course price ONLY. Workshops (~£250+) and
+    1-2-1 (~£395+) currently fold into the same `courses` tier and inherit
+    £200 AOV — wrong. Action: split into `courses_in_person`,
+    `courses_121`, `courses_online` with separate AOV + conv rate per
+    sub-tier; re-classify current `courses`-tier URLs accordingly.
+
+11. **[MEDIUM/trust] PHASE-K-FOLLOWUP-3: Booking conversion rate per tier**
+    Conversion rate (1% assumed) was validated by Alan as roughly right
+    across all paid courses+workshops (1-2 bookings/28d on ~165 paid
+    clicks/28d) but it is unverified PER-TIER. Per-tier measured rates
+    needed before the funnel headline GP figures can drop their
+    `ASSUMED` flag.
+
 ---
 
 ## 6. Hard rules (no exceptions)
