@@ -128,3 +128,20 @@ test('academy stack uses the corrected 4.3% paid rate and £73 blended AOV (not 
   assert.equal(Number(paid.value), 0.043, 'paid rate must be the corrected all-time 9/208 = 4.3% \u2014 not the rejected 6.0% guess');
   assert.equal(Number(aov.value), 73, 'effective AOV must be the £73 blend \u2014 not the hardcoded £79');
 });
+
+// Regression: the materiality floor (Defect 3) initially used a flat
+// \u00a32/mo threshold. The academy tier's per-click GP is \u00a30.084 (vs
+// courses' \u00a30.018 \u00d7 100 booking volume \u2192 \u00a31.80/click capture); a
+// single \u00a32 floor zeroes out every academy lever (max around \u00a31/mo
+// even on a 1000-vol rank-1 keyword) and the picker drops the URL
+// entirely \u2014 no academy card ever appears. The fix is a per-tier
+// threshold (academy: \u00a30.25) AND a raw-total picker gate so URLs with
+// only immaterial levers still produce a card. Without this test, a
+// future change to the global threshold would silently kill the
+// academy AIO card again.
+test('academy URL always produces an AIO card even when no single lever clears the global \u00a32/mo floor', () => {
+  const keywords = buildAcademyKeywordSnapshot();
+  const candidate = __INTERNAL.aioCitationPriority('academy', keywords, ctxFor(keywords));
+  assert.ok(candidate, 'academy card must NOT be dropped by the materiality floor when its per-click economics put every lever below \u00a32/mo');
+  assert.ok(Array.isArray(candidate.aio_levers) && candidate.aio_levers.length > 0, 'academy card must list at least one lever even if none are material at the global \u00a32 floor');
+});

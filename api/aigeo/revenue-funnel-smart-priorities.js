@@ -110,6 +110,29 @@ function trialFunnelForTier(tierId) {
 // dashboard combined headline. They still render in the lever table
 // (in a collapsed "long tail" group) so the user can see them, but
 // don't inflate headline totals.
+//
+// PER-TIER, not a global constant: the academy tier's per-click GP is
+// \u00a30.084 (two-step trial funnel: 0.027 \u00d7 0.043 \u00d7 \u00a373 \u00d7 0.99),
+// vs courses at \u00a32.00 \u00d7 1% \u00d7 90% = \u00a30.018/click. Academy's biggest
+// lever maxes out near \u00a31/mo even on a perfect 1000-volume rank-1
+// page \u2014 a single global \u00a32 floor would zero out the entire academy
+// tier and prevent any academy AIO card from ever appearing. The
+// per-tier floor below scales the threshold with each tier's
+// per-click economics so "negligible long tail" means the same
+// fraction-of-headline on every card, not the same absolute \u00a3.
+const MATERIAL_GP_THRESHOLD_BY_TIER = {
+  workshops: 2,
+  courses:   2,
+  services:  1,
+  hire:      2,
+  academy:   0.25
+};
+function materialGpThresholdForTier(tierId) {
+  return MATERIAL_GP_THRESHOLD_BY_TIER[tierId] != null ? MATERIAL_GP_THRESHOLD_BY_TIER[tierId] : 2;
+}
+// Kept as a hard floor (used in fixtures and the UI strap-line copy).
+// Most tiers will pick this up via the table above; academy overrides
+// it for the reason described in the per-tier block above.
 const MATERIAL_GP_THRESHOLD_GBP_MO = 2;
 
 let activeBlendedSeasonality = null;
@@ -641,7 +664,7 @@ function aioLeverCaptureRate(cited, alanCit, totalCit) {
 //   the lever's expected GP/mo clears MATERIAL_GP_THRESHOLD_GBP_MO.
 //   The picker uses this when summing aio_total_expected_gp_mo so
 //   the long tail of \u00a30\u2013\u00a31/mo levers doesn't inflate the headline.
-function aioLeverFromKeyword(kw, pageScope, gpPct, aov, convRate, trialFunnel) {
+function aioLeverFromKeyword(kw, pageScope, gpPct, aov, convRate, trialFunnel, materialThreshold) {
   const queryIntent = classifyQueryIntent(kw.keyword);
   const alanCit = Number(kw.ai_alan_citations_count) || 0;
   const totalCit = Number(kw.ai_total_citations) || 0;
@@ -657,11 +680,12 @@ function aioLeverFromKeyword(kw, pageScope, gpPct, aov, convRate, trialFunnel) {
   const intentKey = `${pageScope}_${queryIntent}`;
   // eslint-disable-next-line no-console
   console.log(`[aio-intent] kw=${JSON.stringify(kw.keyword)} pageScope=${pageScope} queryIntent=${queryIntent} intentFit=${intentKey} pwin=${pwin.p.toFixed(3)} (${pwin.stack.map(s => s.label + '=' + s.value).join(', ')})`);
+  const threshold = (materialThreshold != null) ? Number(materialThreshold) : MATERIAL_GP_THRESHOLD_GBP_MO;
   return {
     kw, queryIntent, pwin, range,
     lever_type: cited ? 'grow_share' : 'capture_slot',
     citation_state: { cited, alan: alanCit, total: totalCit },
-    material: Number(range.profit.expected) >= MATERIAL_GP_THRESHOLD_GBP_MO
+    material: Number(range.profit.expected) >= threshold
   };
 }
 
@@ -682,25 +706,34 @@ function scoreAioUrl(tierId, cleanedUrl, kws, ctx) {
   const aov = trueAovForTier(tierId);
   const convRate = bookingConvRateForTier(tierId);
   const trialFunnel = trialFunnelForTier(tierId);
+  const materialThreshold = materialGpThresholdForTier(tierId);
   const pageScope = classifyPageScope(intentClassForUrl(cleanedUrl));
-  const levers = kws.map(k => aioLeverFromKeyword(k, pageScope, gpPct, aov, convRate, trialFunnel));
+  const levers = kws.map(k => aioLeverFromKeyword(k, pageScope, gpPct, aov, convRate, trialFunnel, materialThreshold));
   levers.sort((a, b) => b.range.profit.expected - a.range.profit.expected);
   const anchor = findAnchorLever(cleanedUrl, levers, ctx);
   const top = levers[0];
   // Defect 3 (materiality floor): the URL total used for ranking and
-  // for the card headline sums only MATERIAL levers (>= £2/mo GP).
-  // Immaterial levers are tracked separately so the UI can still
-  // surface them in a collapsed "long tail" group without inflating
-  // headlines that are sums of mostly £0/mo rows.
+  // for the card headline sums only MATERIAL levers (>= the per-tier
+  // threshold). Immaterial levers are tracked separately so the UI
+  // can still surface them in a collapsed "long tail" group without
+  // inflating headlines that are sums of mostly £0/mo rows.
   const materialLevers = levers.filter(l => l.material);
   const immaterialLevers = levers.filter(l => !l.material);
   const totalExpectedGpMo = materialLevers.reduce((sum, l) => sum + (Number(l.range.profit.expected) || 0), 0);
   const totalImmaterialGpMo = immaterialLevers.reduce((sum, l) => sum + (Number(l.range.profit.expected) || 0), 0);
+  // Raw total across ALL levers — used by pickAioTarget to gate URL
+  // selection so a tier whose levers are all individually below the
+  // materiality floor (e.g. academy, where every lever maxes near
+  // \u00a31/mo because per-click GP is \u00a30.084) still gets a card. The
+  // headline figure still uses totalExpectedGpMo (material only) so
+  // it doesn't inflate.
+  const totalRawExpectedGpMo = totalExpectedGpMo + totalImmaterialGpMo;
   return {
     cleanedUrl, levers, anchor, top, pageScope, gpPct, aov, convRate,
-    totalExpectedGpMo, totalImmaterialGpMo,
+    totalExpectedGpMo, totalImmaterialGpMo, totalRawExpectedGpMo,
     materialLeverCount: materialLevers.length,
     immaterialLeverCount: immaterialLevers.length,
+    materialThreshold,
     usedTrialFunnel: !!trialFunnel
   };
 }
@@ -810,10 +843,26 @@ function pickAioTarget(tierId, tierKeywords, ctx) {
   const urlScores = [];
   for (const [url, kws] of byUrl) {
     const score = scoreAioUrl(tierId, url, kws, ctx);
-    if (score.totalExpectedGpMo > 0) urlScores.push(score);
+    // Gate on RAW total (all levers) so a tier with per-click economics
+    // that put every lever individually below the materiality threshold
+    // (academy two-step funnel: \u00a30.084/click means even a perfect
+    // 1000-vol rank-1 lever maxes near \u00a31/mo) still produces a card.
+    // The card's headline GP still comes from MATERIAL levers only via
+    // totalExpectedGpMo, so the dashboard combined headline isn't
+    // inflated by long-tail \u00a30 rows.
+    if (score.totalRawExpectedGpMo > 0) urlScores.push(score);
   }
   if (!urlScores.length) return null;
-  urlScores.sort((a, b) => b.totalExpectedGpMo - a.totalExpectedGpMo);
+  // Rank by material total when there ARE material levers (preferred
+  // signal); fall back to raw total so URLs with only immaterial
+  // levers can still be picked when no material URL exists for the
+  // tier. This keeps the academy card visible even though all its
+  // levers are individually small.
+  urlScores.sort((a, b) => {
+    const aSort = (a.totalExpectedGpMo > 0) ? a.totalExpectedGpMo : a.totalRawExpectedGpMo;
+    const bSort = (b.totalExpectedGpMo > 0) ? b.totalExpectedGpMo : b.totalRawExpectedGpMo;
+    return bSort - aSort;
+  });
   return urlScores[0];
 }
 
