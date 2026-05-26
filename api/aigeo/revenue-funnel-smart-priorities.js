@@ -42,6 +42,7 @@ import {
   classifyPageScope,
   pWinCitation,
   liftRange,
+  liftRangeForOnPageMove,
   EVIDENCE,
   TASK_TYPE
 } from '../../lib/revenue-funnel-aio-model.js';
@@ -550,9 +551,21 @@ function ctrPriorityForTier(tierId, tierMetrics, ctx) {
   const top = scored[0];
   const cleanedUrl = cleanUrl(top.row.page_url);
   const upliftMonthly = top.uplift * (30 / 28);
-  const revLift = Math.round(upliftMonthly * estimatedAovPerClick(tierId));
-  const gpLift = Math.round(upliftMonthly * estimatedGpPerClick(tierId));
-  const gpPct = estimatedGpPctForTier(tierId);
+  const econ = perClickEconomics(tierId);
+  const lift = liftRangeForOnPageMove({
+    incrementalClicks: upliftMonthly,
+    aov: econ.aov,
+    conversionRate: econ.conv,
+    gpPct: econ.gpPct,
+    trialFunnel: econ.trialFunnel,
+    conversionRateMeasured: false,
+    cardKind: 'ctr_lift',
+    volumeLabel: 'Incremental clicks from CTR lift',
+    volumeSub: `extra clicks/mo from lifting CTR from ${top.ctrPct.toFixed(2)}% to ${top.targetPct.toFixed(2)}%`
+  });
+  const revLift = lift.revenue.expected;
+  const gpLift = lift.profit.expected;
+  const gpPct = econ.gpPct;
   // Audit-derived enrichment is the seed value used when the live
   // post-pass either isn't run (e.g. low-priority candidates) or fails
   // to fetch the URL. The Top N candidates get this overwritten with
@@ -577,6 +590,10 @@ function ctrPriorityForTier(tierId, tierMetrics, ctx) {
     estimated_lift_gbp_revenue: revLift,
     estimated_lift_gbp_profit: gpLift,
     lever_id: 'ctr',
+    revenue_assumption_stack: lift.assumption_stack,
+    revenue_lift_model: lift.model,
+    revenue_aov_flag: lift.aov_flag,
+    revenue_conv_flag: lift.conv_flag,
     _rebuild: { type: 'ctr', args: builderArgs }
   };
 }
@@ -641,10 +658,21 @@ function rankPriorityForTier(tierId, tierKeywords, ctx) {
   const targetCtr  = ctrForRank(targetRank);
   const sv         = Number(top.search_volume) || 0;
   const upliftMonthlyClicks = Math.max(0, sv * (targetCtr - currentCtr));
-  const aov   = estimatedAovPerClick(tierId);
-  const gpPct = estimatedGpPctForTier(tierId);
-  const revLift = Math.round(upliftMonthlyClicks * aov);
-  const gpLift  = Math.round(revLift * (gpPct / 100));
+  const econ = perClickEconomics(tierId);
+  const lift = liftRangeForOnPageMove({
+    incrementalClicks: upliftMonthlyClicks,
+    aov: econ.aov,
+    conversionRate: econ.conv,
+    gpPct: econ.gpPct,
+    trialFunnel: econ.trialFunnel,
+    conversionRateMeasured: false,
+    cardKind: 'rank_lift',
+    volumeLabel: 'Incremental clicks from rank lift',
+    volumeSub: `extra clicks/mo from ranking #${top.best_rank_group} \u2192 top ${targetRank} on ${sv.toLocaleString()}/mo keyword`
+  });
+  const gpPct = econ.gpPct;
+  const revLift = lift.revenue.expected;
+  const gpLift  = lift.profit.expected;
   const builderArgs = { cleanedUrl, keyword: top.keyword, rank: top.best_rank_group, sv: top.search_volume };
   return {
     signature: `rank|${top.keyword}|${cleanedUrl}`,
@@ -659,6 +687,10 @@ function rankPriorityForTier(tierId, tierKeywords, ctx) {
     estimated_lift_gbp_revenue: revLift,
     estimated_lift_gbp_profit: gpLift,
     lever_id: 'rank',
+    revenue_assumption_stack: lift.assumption_stack,
+    revenue_lift_model: lift.model,
+    revenue_aov_flag: lift.aov_flag,
+    revenue_conv_flag: lift.conv_flag,
     _rebuild: { type: 'rank', args: builderArgs }
   };
 }
@@ -1243,9 +1275,27 @@ function cleanUrl(rawUrl) {
   }
 }
 
-const AOV_PER_CLICK = { workshops: 2.5, courses: 2, services: 1, hire: 2, academy: 0.8 };
+// 2026-05-26 phase K-3 (one revenue model tool-wide). The old
+// AOV_PER_CLICK constant baked TRUE_AOV \u00d7 1% booking-conversion into
+// a single round number per tier. It was \u201croughly right\u201d for
+// courses (\u00a32 = \u00a3200 \u00d7 1%) but wrong by ~10x for academy
+// (\u00a30.8 vs the real two-step funnel \u00a30.084), and the conversion
+// step was invisible \u2014 so a card showing \u00a339/mo had no auditable
+// derivation. perClickEconomics() now exposes every input (TRUE_AOV,
+// booking conv rate, GP%, plus academy\u2019s two-step trial funnel) so
+// the CTR / rank cards run the SAME stack as the AIO cards.
+function perClickEconomics(tierId) {
+  const aov = trueAovForTier(tierId);
+  const conv = bookingConvRateForTier(tierId);
+  const gpPct = estimatedGpPctForTier(tierId);
+  const trialFunnel = trialFunnelForTier(tierId);
+  const revPerClick = trialFunnel
+    ? trialFunnel.signupRate * trialFunnel.paidRate * trialFunnel.effectiveAov
+    : aov * conv;
+  return { aov, conv, gpPct, trialFunnel, revPerClick, gpPerClick: revPerClick * (gpPct / 100) };
+}
 function estimatedAovPerClick(tierId) {
-  return AOV_PER_CLICK[tierId] || 1.5;
+  return perClickEconomics(tierId).revPerClick;
 }
 
 // GP% per tier — mirrors the constants in revenue-funnel-summary.js.
@@ -1268,7 +1318,7 @@ function estimatedGpPctForTier(tierId) {
   return GP_PCT_PER_TIER[tierId] != null ? GP_PCT_PER_TIER[tierId] : 60;
 }
 function estimatedGpPerClick(tierId) {
-  return estimatedAovPerClick(tierId) * (estimatedGpPctForTier(tierId) / 100);
+  return perClickEconomics(tierId).gpPerClick;
 }
 
 // ----------------------------------------------------------------------
@@ -2407,26 +2457,56 @@ function suppressAsAssignedKwOwned(c, rank) {
 // whatever sibling the picker grabbed by highest search_volume. The
 // _rebuild block is updated too so live-enrichment downstream uses
 // the assigned keyword in the description body.
+function recomputeRankLiftForAssignedKw(c, assignedRow, tierId) {
+  const rank = assignedRow.best_rank_group != null ? Number(assignedRow.best_rank_group) : null;
+  const sv = Number(assignedRow.search_volume) || 0;
+  if (rank == null || rank < 1 || sv <= 0) return null;
+  const targetRank = Math.max(3, Math.floor(rank / 2));
+  const currentCtr = ctrForRank(rank);
+  const targetCtr = ctrForRank(targetRank);
+  const upliftMonthlyClicks = Math.max(0, sv * (targetCtr - currentCtr));
+  const econ = perClickEconomics(tierId);
+  const lift = liftRangeForOnPageMove({
+    incrementalClicks: upliftMonthlyClicks,
+    aov: econ.aov,
+    conversionRate: econ.conv,
+    gpPct: econ.gpPct,
+    trialFunnel: econ.trialFunnel,
+    conversionRateMeasured: false,
+    cardKind: 'rank_lift',
+    volumeLabel: 'Incremental clicks from rank lift',
+    volumeSub: `extra clicks/mo from #${rank} \u2192 top ${targetRank} on ${sv.toLocaleString()}/mo keyword "${assignedRow.keyword}"`
+  });
+  c.estimated_lift_gbp_revenue = lift.revenue.expected;
+  c.estimated_lift_gbp_profit = lift.profit.expected;
+  c.estimated_lift = `Rank ${rank} \u2192 top ${targetRank} on a ${sv.toLocaleString()}/mo keyword \u2192 ~\u00a3${lift.revenue.expected.toLocaleString()}/mo revenue \u2192 ~\u00a3${lift.profit.expected.toLocaleString()}/mo profit at ${econ.gpPct}% GP`;
+  c.revenue_assumption_stack = lift.assumption_stack;
+  c.revenue_lift_model = lift.model;
+  c.revenue_aov_flag = lift.aov_flag;
+  c.revenue_conv_flag = lift.conv_flag;
+  return { rank, sv };
+}
+
 function reanchorCardToAssignedKw(c, assignedRow) {
   const prior = c.primary_query;
   const url = Array.isArray(c.pages_affected) ? c.pages_affected[0] : '';
-  const rank = assignedRow.best_rank_group != null ? Number(assignedRow.best_rank_group) : null;
-  const sv = Number(assignedRow.search_volume) || 0;
+  const tierId = c.tier_id || classifyCommercialTier(url);
+  const recomputed = recomputeRankLiftForAssignedKw(c, assignedRow, tierId);
+  const rank = recomputed ? recomputed.rank : (assignedRow.best_rank_group != null ? Number(assignedRow.best_rank_group) : null);
+  const sv = recomputed ? recomputed.sv : (Number(assignedRow.search_volume) || 0);
   c.primary_query = assignedRow.keyword;
   const levers = Array.isArray(c.merged_levers) ? c.merged_levers : (c.lever_id ? [c.lever_id] : []);
-  if (levers.includes('rank')) {
-    c.title = rank != null
-      ? `Lift "${assignedRow.keyword}" from rank ${rank} on ${labelOf(url)}`
-      : `Lift "${assignedRow.keyword}" on ${labelOf(url)}`;
-  } else {
-    c.title = `Lift CTR on ${labelOf(url)} for "${assignedRow.keyword}"`;
-  }
+  c.title = levers.includes('rank')
+    ? (rank != null
+        ? `Lift "${assignedRow.keyword}" from rank ${rank} on ${labelOf(url)}`
+        : `Lift "${assignedRow.keyword}" on ${labelOf(url)}`)
+    : `Lift CTR on ${labelOf(url)} for "${assignedRow.keyword}"`;
   appendGuardrailNote(
     c,
     `Re-anchored from "${prior}" to assigned keyword "${assignedRow.keyword}"` +
     `${rank != null ? ` (rank #${rank})` : ''}. The page's assigned keyword is the canonical target \u2014 ` +
     `sibling keywords are secondary. Picker had originally proposed lifting "${prior}" by search volume; ` +
-    `assigned keyword now wins.`
+    `assigned keyword now wins. Revenue lift recomputed from the assigned keyword's own volume + rank.`
   );
   if (c._rebuild && c._rebuild.type === 'rank') {
     c._rebuild.args = { ...c._rebuild.args, keyword: assignedRow.keyword, rank, sv };
@@ -2730,6 +2810,10 @@ export default async function handler(req, res) {
           // user knows the override exists but isn't yet ranking.
           assigned_keyword: c.assigned_keyword ?? null,
           assigned_keyword_rank: c.assigned_keyword_rank ?? null,
+          revenue_assumption_stack: c.revenue_assumption_stack ?? null,
+          revenue_lift_model: c.revenue_lift_model ?? null,
+          revenue_aov_flag: c.revenue_aov_flag ?? null,
+          revenue_conv_flag: c.revenue_conv_flag ?? null,
           page_liabilities: c.page_liabilities ?? null,
           opener_audit: c.opener_audit ?? null
         }))

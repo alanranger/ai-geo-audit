@@ -180,3 +180,102 @@ test('aio funnel never crashes when the URL has zero AIO-eligible keywords', () 
   const candidate = __INTERNAL.aioCitationPriority('courses', [], ctxFor([]));
   assert.equal(candidate, null, 'aioCitationPriority returns null when there are no eligible keywords');
 });
+
+// ----------------------------------------------------------------------
+// Tool-wide consistency (2026-05-26 phase K-3): pill keyword === plan
+// target keyword on every card type, every URL. The previous round of
+// fixes wired the assigned-keyword obedience into AIO cards only;
+// CTR/rank cards kept choosing their own sibling and contradicting
+// the URL pill. The non-AIO primacy guardrail
+// (applyAssignedKeywordPrimacyGuardrail) now enforces:
+//   - if assigned KW ranks top 5  -> SUPPRESS the card (no rewrite)
+//   - if assigned KW tracked >5   -> RE-ANCHOR card to assigned KW
+//   - if assigned KW not tracked  -> soft note (pill kw still pinned)
+// Below we assert all three paths on synthetic rank / CTR / merged
+// candidates so a future picker change can't silently regress.
+// ----------------------------------------------------------------------
+
+const ACADEMY_URL = 'https://www.alanranger.com/free-online-photography-course';
+const BEGINNERS_URL = 'https://www.alanranger.com/beginners-photography-classes';
+
+function consistencySnapshot() {
+  return {
+    allKeywords: [
+      { keyword: 'online photography course',     search_volume: 320,  best_rank_group: 2,  best_url: ACADEMY_URL },
+      { keyword: 'photography lessons online',    search_volume: 1000, best_rank_group: 8,  best_url: ACADEMY_URL },
+      { keyword: 'beginners photography classes', search_volume: 90,   best_rank_group: 13, best_url: BEGINNERS_URL },
+      { keyword: 'beginners photography courses', search_volume: 110,  best_rank_group: 14, best_url: BEGINNERS_URL }
+    ]
+  };
+}
+
+function makeRankCandidate(url, primaryQuery, assignedKw, assignedRank) {
+  return {
+    tier_id: assignedKw && /online|academy/i.test(assignedKw) ? 'academy' : 'courses',
+    pages_affected: [url],
+    primary_query: primaryQuery,
+    lever_id: 'rank',
+    merged_levers: null,
+    estimated_lift_gbp_revenue: 91,
+    estimated_lift_gbp_profit: 90,
+    assigned_keyword: assignedKw,
+    assigned_keyword_rank: assignedRank,
+    _rebuild: { type: 'rank', args: { keyword: primaryQuery, rank: 14, sv: 110, cleanedUrl: url } }
+  };
+}
+
+function applyAndCollect(candidates, snap) {
+  __INTERNAL.applyAssignedKeywordPrimacyGuardrail(candidates, snap);
+  return candidates;
+}
+
+test('cross-card: top-5 assigned KW \u2192 sibling-target card is suppressed (pill kw NEVER differs from a Top-3 plan kw)', () => {
+  const snap = consistencySnapshot();
+  const c = makeRankCandidate(ACADEMY_URL, 'photography lessons online', 'Online Photography Course', 2);
+  applyAndCollect([c], snap);
+  assert.equal(c.guardrail_blocked_top3, true);
+  assert.equal(c.estimated_lift_gbp_profit, 0);
+});
+
+test('cross-card: tracked >5 assigned KW \u2192 card re-anchored, pill kw matches plan kw, lift recomputed from assigned KW row', () => {
+  const snap = consistencySnapshot();
+  const c = makeRankCandidate(BEGINNERS_URL, 'beginners photography courses', 'beginners photography classes', 13);
+  applyAndCollect([c], snap);
+  assert.notEqual(c.guardrail_blocked_top3, true);
+  assert.equal(c.primary_query.toLowerCase(), c.assigned_keyword.toLowerCase());
+  // Lift must now be derived from the assigned KW's volume (sv=90) +
+  // rank (#13), not the sibling's sv=110, rank=#14. Asserting it is
+  // present + numeric is enough; the precise number is pinned by the
+  // on-page-lift unit tests.
+  assert.equal(typeof c.estimated_lift_gbp_profit, 'number');
+  assert.ok(Array.isArray(c.revenue_assumption_stack), 're-anchored card must carry a unified assumption stack');
+  const labels = c.revenue_assumption_stack.map(r => r.label);
+  assert.ok(labels.includes('Booking conversion rate'), 'stack must surface the booking-conversion row');
+});
+
+test('cross-card: every non-suppressed Top-3-eligible candidate has primary_query === assigned_keyword OR no assigned_keyword', () => {
+  const snap = consistencySnapshot();
+  const cards = [
+    makeRankCandidate(ACADEMY_URL,   'photography lessons online',   'Online Photography Course', 2),
+    makeRankCandidate(BEGINNERS_URL, 'beginners photography courses','beginners photography classes', 13)
+  ];
+  applyAndCollect(cards, snap);
+  for (const c of cards) {
+    if (c.guardrail_blocked_top3) continue;
+    if (!c.assigned_keyword) continue;
+    assert.equal(
+      String(c.primary_query || '').trim().toLowerCase(),
+      String(c.assigned_keyword).trim().toLowerCase(),
+      `card for ${c.pages_affected[0]} shows pill "${c.assigned_keyword}" but plan targets "${c.primary_query}"`
+    );
+  }
+});
+
+test('cross-card: re-anchored card carries a visible booking-conversion-rate row with assumed=true', () => {
+  const snap = consistencySnapshot();
+  const c = makeRankCandidate(BEGINNERS_URL, 'beginners photography courses', 'beginners photography classes', 13);
+  applyAndCollect([c], snap);
+  const conv = c.revenue_assumption_stack.find(r => r.label === 'Booking conversion rate');
+  assert.ok(conv, 'booking-conversion row must exist on re-anchored card');
+  assert.equal(conv.assumed, true, 'until measured rate lands, every card must keep the ASSUMED flag');
+});
