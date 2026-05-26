@@ -21,6 +21,13 @@ import assert from 'node:assert/strict';
 import { __INTERNAL } from '../api/aigeo/revenue-funnel-smart-priorities.js';
 
 const COVENTRY_URL = 'https://www.alanranger.com/photography-courses-coventry';
+// 2026-05-26: override map is now keyed by bare slug (path only,
+// lowercased, no trailing slash) on the API side via urlSlugKey()
+// in fetchTargetKeywordOverrides. Test fixtures use the same key
+// form so the picker honours overrides regardless of www / no-www /
+// trailing-slash / tracking-suffix differences between the override
+// row and the candidate URL.
+const COVENTRY_SLUG = '/photography-courses-coventry';
 // Slug-anchor for the Coventry URL. The funnel MUST pick this keyword
 // (not the higher-volume national head term) so the user can match the
 // card's anchor against the URL's slug at a glance. This is what
@@ -127,7 +134,7 @@ test('aio funnel narrative description references ONLY the anchor row (no cross-
 
 test('aio funnel honours an assigned-keyword override when row exists in keyword_rankings for this URL', () => {
   const keywords = buildCoventryKeywordSnapshot();
-  const overrides = new Map([[COVENTRY_URL, 'photography courses coventry']]);
+  const overrides = new Map([[COVENTRY_SLUG, 'photography courses coventry']]);
   const candidate = __INTERNAL.aioCitationPriority('courses', keywords, ctxFor(keywords, overrides));
   assert.equal(candidate.aio_used_override, true, 'override must be applied when keyword exists in keyword_rankings for the URL');
   assert.equal(candidate.aio_anchor_keyword.toLowerCase(), 'photography courses coventry');
@@ -136,7 +143,7 @@ test('aio funnel honours an assigned-keyword override when row exists in keyword
 
 test('aio funnel surfaces a visible note when assigned keyword is NOT in keyword_rankings for the URL', () => {
   const keywords = buildCoventryKeywordSnapshot();
-  const overrides = new Map([[COVENTRY_URL, 'photography courses warwick']]); // not in snapshot
+  const overrides = new Map([[COVENTRY_SLUG, 'photography courses warwick']]); // not in snapshot
   const candidate = __INTERNAL.aioCitationPriority('courses', keywords, ctxFor(keywords, overrides));
   assert.equal(candidate.aio_used_override, false, 'override must NOT be applied when keyword is missing for the URL');
   assert.ok(candidate.aio_override_status, 'override_status must be present');
@@ -162,7 +169,7 @@ test('aio funnel flags data inconsistency at runtime (Step 6 fail-visible)', () 
   // Force the anchor onto the broken row via override so the runtime
   // consistency check trips on it (the assertion runs against the
   // anchor lever, not every lever on the URL).
-  const overrides = new Map([[COVENTRY_URL, 'broken row']]);
+  const overrides = new Map([[COVENTRY_SLUG, 'broken row']]);
   const candidate = __INTERNAL.aioCitationPriority('courses', keywords, ctxFor(keywords, overrides));
   assert.equal(candidate.aio_data_inconsistent, true, 'runtime check must trip on impossible citation_state');
   assert.ok(Array.isArray(candidate.aio_data_inconsistent_reasons), 'reasons must be an array');

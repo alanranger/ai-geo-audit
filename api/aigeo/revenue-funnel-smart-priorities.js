@@ -274,6 +274,28 @@ async function fetchProducts(supabase) {
 // local variant had the most search volume, ignoring the user's
 // explicit assignment. Surface the override here so the picker can
 // honour it before any heuristic reroute fires.
+// Normalise any URL form to a bare-slug key for override lookup. The
+// overrides table mixes `https://alanranger.com/...` (no www) with
+// candidate URLs like `https://www.alanranger.com/...` (with www);
+// rather than chase the canonical-host moving target, key the lookup
+// Map by path-only after stripping scheme/host/trailing-slash/case so
+// www / no-www / trailing-slash / tracking-suffix variants all match.
+// (Per user 2026-05-26: "ignore https://www.alanranger.com and use
+// slug after that".)
+function urlSlugKey(rawUrl) {
+  if (!rawUrl) return '';
+  const cleaned = cleanUrl(rawUrl);
+  if (!cleaned) return '';
+  try {
+    const u = new URL(cleaned, 'https://www.alanranger.com');
+    let path = (u.pathname || '/').toLowerCase();
+    if (path.length > 1) path = path.replace(/\/+$/, '');
+    return path;
+  } catch {
+    return String(cleaned).toLowerCase().replace(/^https?:\/\/[^/]+/, '').replace(/[?#].*$/, '').replace(/\/+$/, '');
+  }
+}
+
 async function fetchTargetKeywordOverrides(supabase, propertyUrl) {
   try {
     const { data, error } = await supabase
@@ -287,7 +309,8 @@ async function fetchTargetKeywordOverrides(supabase, propertyUrl) {
     const map = new Map();
     for (const row of (data || [])) {
       if (row && row.page_url && row.target_keyword) {
-        map.set(String(row.page_url).trim(), String(row.target_keyword).trim());
+        const key = urlSlugKey(row.page_url);
+        if (key) map.set(key, String(row.target_keyword).trim());
       }
     }
     return map;
@@ -2228,33 +2251,27 @@ async function buildSnapshot(supabase, propertyUrl) {
 // uses a slightly different canonical form than the override row).
 function lookupAssignedKeyword(overrides, url) {
   if (!overrides || !url) return null;
-  const tries = new Set();
-  const raw = String(url).trim();
-  tries.add(raw);
-  tries.add(raw.replace(/\/$/, ''));
-  tries.add(raw.replace(/^https?:\/\/[^/]+/, ''));
-  tries.add(raw.replace(/^https?:\/\/[^/]+/, '').replace(/\/$/, ''));
-  for (const candidate of tries) {
-    if (overrides.has(candidate)) return overrides.get(candidate);
-  }
+  const key = urlSlugKey(url);
+  if (key && overrides.has(key)) return overrides.get(key);
   return null;
 }
 
 // Find the current organic rank for an assigned keyword on a URL by
 // scanning the keyword_rankings snapshot. Case-insensitive on both
 // keyword and best_url (the canonical-form mismatch handled by
-// cleanUrl strips tracking params). Returns null if the keyword
-// exists in the overrides table but has no current keyword_rankings
-// row for the URL (so the UI can say "set, not yet ranked" rather
-// than silently dropping it).
+// urlSlugKey strips scheme/host/tracking/trailing-slash on both
+// sides). Returns null if the keyword exists in the overrides table
+// but has no current keyword_rankings row for the URL (so the UI can
+// say "rank n/a" rather than silently dropping it).
 function lookupAssignedKeywordRank(keywords, url, assignedKeyword) {
   if (!Array.isArray(keywords) || !url || !assignedKeyword) return null;
-  const targetUrl = cleanUrl(url).toLowerCase();
+  const targetSlug = urlSlugKey(url);
+  if (!targetSlug) return null;
   const targetKw = String(assignedKeyword).trim().toLowerCase();
   for (const k of keywords) {
     if (!k || !k.keyword || !k.best_url) continue;
     if (String(k.keyword).trim().toLowerCase() !== targetKw) continue;
-    if (cleanUrl(k.best_url).toLowerCase() !== targetUrl) continue;
+    if (urlSlugKey(k.best_url) !== targetSlug) continue;
     const rank = (k.best_rank_group == null) ? null : Number(k.best_rank_group);
     return Number.isFinite(rank) ? rank : null;
   }
