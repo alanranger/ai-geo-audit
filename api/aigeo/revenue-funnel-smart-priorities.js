@@ -599,6 +599,12 @@ function aioLeverFromKeyword(kw, pageScope, gpPct, aov, convRate) {
 // biggest opportunity (e.g. /photography-workshops vs "photography
 // workshops near me"). They diverge on the Coventry courses page,
 // which is the exact contradiction the user reported.
+//
+// `total_expected_gp_mo` is the sum across every lever on the URL.
+// pickAioTarget uses this (not just the top lever) to rank URLs
+// within a tier so a URL with 17 small grow-share levers (cited but
+// incremental) beats a URL with one mid-size capture-slot lever
+// when the total opportunity is larger.
 function scoreAioUrl(tierId, cleanedUrl, kws, ctx) {
   const gpPct = estimatedGpPctForTier(tierId);
   const aov = trueAovForTier(tierId);
@@ -608,7 +614,8 @@ function scoreAioUrl(tierId, cleanedUrl, kws, ctx) {
   levers.sort((a, b) => b.range.profit.expected - a.range.profit.expected);
   const anchor = findAnchorLever(cleanedUrl, levers, ctx);
   const top = levers[0];
-  return { cleanedUrl, levers, anchor, top, pageScope, gpPct, aov, convRate };
+  const totalExpectedGpMo = levers.reduce((sum, l) => sum + (Number(l.range.profit.expected) || 0), 0);
+  return { cleanedUrl, levers, anchor, top, pageScope, gpPct, aov, convRate, totalExpectedGpMo };
 }
 
 // Normalise a URL slug or keyword to a token set we can compare:
@@ -701,19 +708,25 @@ function applyAssignedKeyword(cleanedUrl, levers, anchor, ctx) {
   };
 }
 
-// Pick the URL within this tier that has the highest top-lever GP.
-// One card per tier (unchanged contract); the card now carries the
-// full lever list for the picked URL.
+// Pick the URL within this tier whose TOTAL AIO opportunity (sum of
+// expected GP across all levers on the URL) is highest. Ranking by
+// total — not just the top single lever — means a URL with many
+// small grow-share levers (a page already cited for several queries
+// but with headroom on each) can win over a URL with one big
+// capture-slot lever, IF the user's combined opportunity is larger.
+// This matches the user's mental model from Amendment 1: "the card
+// represents this URL's full opportunity" — top single lever drives
+// the headline number, but the URL selection accounts for the stack.
 function pickAioTarget(tierId, tierKeywords, ctx) {
   const byUrl = groupKeywordsByUrlForAio(tierKeywords);
   if (!byUrl.size) return null;
   const urlScores = [];
   for (const [url, kws] of byUrl) {
     const score = scoreAioUrl(tierId, url, kws, ctx);
-    if (score.top && score.top.range.profit.expected >= 0) urlScores.push(score);
+    if (score.totalExpectedGpMo > 0) urlScores.push(score);
   }
   if (!urlScores.length) return null;
-  urlScores.sort((a, b) => b.top.range.profit.expected - a.top.range.profit.expected);
+  urlScores.sort((a, b) => b.totalExpectedGpMo - a.totalExpectedGpMo);
   return urlScores[0];
 }
 
@@ -737,9 +750,12 @@ function serializeAioLever(lever) {
 // Headline strap-line for the card. Mentions the top lever (because
 // the headline GP figure is the top lever's GP, not the anchor's)
 // AND the total lever count split capture/grow so the user sees the
-// shape of the opportunity at a glance.
+// shape of the opportunity at a glance. Also surfaces the SUM of
+// expected GP across every lever on the URL — the "if you address
+// every lever on this page" number — so the cited grow-share long
+// tail isn't invisible behind a small top-lever headline.
 function buildAioEstimatedLiftLine(urlScore) {
-  const { top, levers } = urlScore;
+  const { top, levers, totalExpectedGpMo } = urlScore;
   const captureCount = levers.filter(l => l.lever_type === 'capture_slot').length;
   const growCount = levers.filter(l => l.lever_type === 'grow_share').length;
   const total = captureCount + growCount;
@@ -749,7 +765,8 @@ function buildAioEstimatedLiftLine(urlScore) {
     + ` \u00b7 P(win) ${(top.pwin.p * 100).toFixed(0)}%`
     + ` \u00b7 expected ~£${top.range.profit.expected.toLocaleString()}/mo GP`
     + ` (range £${top.range.profit.low.toLocaleString()}\u2013£${top.range.profit.high.toLocaleString()})`
-    + ` \u00b7 ${total} lever${total === 1 ? '' : 's'} on this URL (${captureCount} capture / ${growCount} grow) stacked beneath`;
+    + ` \u00b7 ${total} lever${total === 1 ? '' : 's'} on this URL (${captureCount} capture / ${growCount} grow) stacked beneath`
+    + ` \u00b7 \u03a3 all levers: ~£${Math.round(totalExpectedGpMo).toLocaleString()}/mo GP if all addressed`;
 }
 
 // Override-status note rendered when an assigned keyword exists but
@@ -819,6 +836,7 @@ function buildAioCandidate(opts) {
     aio_anchor_citation_state: anchorLever.citation_state,
     aio_top_lever_keyword: top.kw.keyword,
     aio_top_lever_type: top.lever_type,
+    aio_total_expected_gp_mo: Math.round(urlScore.totalExpectedGpMo || 0),
     aio_reroute_note: null,
     aio_rerouted: false,
     aio_used_override: !!(withOverride.overrideStatus && withOverride.overrideStatus.applied),
@@ -2252,6 +2270,7 @@ export default async function handler(req, res) {
           aio_anchor_citation_state: c.aio_anchor_citation_state ?? null,
           aio_top_lever_keyword: c.aio_top_lever_keyword ?? null,
           aio_top_lever_type: c.aio_top_lever_type ?? null,
+          aio_total_expected_gp_mo: c.aio_total_expected_gp_mo ?? null,
           aio_data_inconsistent: !!c.aio_data_inconsistent,
           aio_data_inconsistent_reasons: c.aio_data_inconsistent_reasons ?? null,
           page_liabilities: c.page_liabilities ?? null,
