@@ -2240,6 +2240,51 @@ function lookupAssignedKeyword(overrides, url) {
   return null;
 }
 
+// Find the current organic rank for an assigned keyword on a URL by
+// scanning the keyword_rankings snapshot. Case-insensitive on both
+// keyword and best_url (the canonical-form mismatch handled by
+// cleanUrl strips tracking params). Returns null if the keyword
+// exists in the overrides table but has no current keyword_rankings
+// row for the URL (so the UI can say "set, not yet ranked" rather
+// than silently dropping it).
+function lookupAssignedKeywordRank(keywords, url, assignedKeyword) {
+  if (!Array.isArray(keywords) || !url || !assignedKeyword) return null;
+  const targetUrl = cleanUrl(url).toLowerCase();
+  const targetKw = String(assignedKeyword).trim().toLowerCase();
+  for (const k of keywords) {
+    if (!k || !k.keyword || !k.best_url) continue;
+    if (String(k.keyword).trim().toLowerCase() !== targetKw) continue;
+    if (cleanUrl(k.best_url).toLowerCase() !== targetUrl) continue;
+    const rank = (k.best_rank_group == null) ? null : Number(k.best_rank_group);
+    return Number.isFinite(rank) ? rank : null;
+  }
+  return null;
+}
+
+// Enrich every candidate with the assigned-keyword + its current
+// rank for the candidate's primary URL. The Coventry AIO card was
+// already showing this via aio_assigned_keyword (because it flowed
+// through the picker's applyAssignedKeyword path), but rank, CTR
+// and merged candidates had no plumbing for it \u2014 so cards 1 and 2
+// in the Top 3 grid showed nothing next to the URL while card 3
+// (AIO) showed the green pill. Per user (2026-05-26): every card
+// must surface the assigned keyword for its URL, plus the current
+// rank for that keyword, so the user doesn't have to cross-reference
+// the Traditional SEO table to find what the page is targeting.
+function enrichCandidatesWithAssignedKeyword(candidates, overrides, keywords) {
+  if (!Array.isArray(candidates) || !candidates.length) return;
+  for (const c of candidates) {
+    const primary = Array.isArray(c.pages_affected) ? c.pages_affected[0] : null;
+    if (!primary) continue;
+    if (c.assigned_keyword == null) {
+      c.assigned_keyword = lookupAssignedKeyword(overrides, primary) || null;
+    }
+    if (c.assigned_keyword) {
+      c.assigned_keyword_rank = lookupAssignedKeywordRank(keywords, primary, c.assigned_keyword);
+    }
+  }
+}
+
 // ----------------------------------------------------------------------
 // Persistence
 // ----------------------------------------------------------------------
@@ -2345,6 +2390,12 @@ export default async function handler(req, res) {
     // current month's per-tier seasonality factor.
     await liveEnrichTopCandidates(candidates, { suppressionMap, monthIdx });
 
+    // Every card (not just AIO) gets the assigned-keyword + its current
+    // rank stamped on so the URL pill in the card header is consistent
+    // across lever types. Done AFTER live-enrich so we don't have to
+    // re-resolve overrides per candidate inside the enricher.
+    enrichCandidatesWithAssignedKeyword(candidates, snapshot.targetKeywordOverrides, snapshot.allKeywords);
+
     // Convert the weights Maps into plain objects so the response is
     // JSON-serialisable. null when no active scenario exists - caller
     // can detect that case and not render "Boosted by scenario X" UI.
@@ -2440,6 +2491,15 @@ export default async function handler(req, res) {
           aio_lift_model: c.aio_lift_model ?? null,
           aio_data_inconsistent: !!c.aio_data_inconsistent,
           aio_data_inconsistent_reasons: c.aio_data_inconsistent_reasons ?? null,
+          // Every card surfaces the assigned keyword + current rank
+          // (see enrichCandidatesWithAssignedKeyword above) so the URL
+          // pill is consistent across AIO / rank / CTR / merged cards.
+          // assigned_keyword_rank is null when the keyword is set in
+          // the overrides table but has no current keyword_rankings
+          // row for the URL \u2014 the UI labels that "rank: n/a" so the
+          // user knows the override exists but isn't yet ranking.
+          assigned_keyword: c.assigned_keyword ?? null,
+          assigned_keyword_rank: c.assigned_keyword_rank ?? null,
           page_liabilities: c.page_liabilities ?? null,
           opener_audit: c.opener_audit ?? null
         }))
