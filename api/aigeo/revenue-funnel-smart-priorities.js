@@ -1569,6 +1569,9 @@ export const __INTERNAL = {
   pickAioTarget:                    (tierId, kws, ctx) => pickAioTarget(tierId, kws, ctx),
   scoreAioUrl:                      (tierId, url, kws, ctx) => scoreAioUrl(tierId, url, kws, ctx),
   groupKeywordsByUrlForAio:         (kws)        => groupKeywordsByUrlForAio(kws),
+  // 2026-05-26 assigned-keyword primacy guardrail (non-AIO levers).
+  applyAssignedKeywordPrimacyGuardrail: (cands, snap) => applyAssignedKeywordPrimacyGuardrail(cands, snap),
+  findKeywordRowForUrl:             (kws, url, kw) => findKeywordRowForUrl(kws, url, kw),
   get MONTH_NAMES()                              { return MONTH_NAMES; },
   get SEASONALITY_BY_TIER()                      { return SEASONALITY_BY_TIER; },
   setBlendedSeasonality:            (b) => { activeBlendedSeasonality = b; },
@@ -2354,6 +2357,133 @@ function lookupAssignedKeywordRank(keywords, url, assignedKeyword) {
   return null;
 }
 
+// Find the keyword_rankings row for (url, keyword) using slug-key URL
+// matching and case-insensitive keyword comparison. Returns the raw
+// row so callers can read best_rank_group + search_volume to re-anchor
+// a smart-priority card onto the assigned keyword instead of whatever
+// the picker originally chose.
+function findKeywordRowForUrl(keywords, url, keyword) {
+  if (!Array.isArray(keywords) || !url || !keyword) return null;
+  const targetSlug = urlSlugKey(url);
+  const targetKw = String(keyword).trim().toLowerCase();
+  if (!targetSlug || !targetKw) return null;
+  for (const k of keywords) {
+    if (!k || !k.keyword || !k.best_url) continue;
+    if (String(k.keyword).trim().toLowerCase() !== targetKw) continue;
+    if (urlSlugKey(k.best_url) !== targetSlug) continue;
+    return k;
+  }
+  return null;
+}
+
+function appendGuardrailNote(c, note) {
+  const list = Array.isArray(c.guardrail_notes) ? c.guardrail_notes.slice() : [];
+  list.push(note);
+  c.guardrail_notes = list;
+}
+
+// Hard-suppress a card whose target page already owns its assigned
+// keyword in the top 5. Rewriting title / H1 / meta for a sibling
+// keyword would jeopardise the existing top rank \u2014 the user flagged
+// this 2026-05-26 ("you are telling me to change seo title and
+// description from course to lessons, surely thats not right if i
+// rank #2 for the keyword assigned to that page").
+function suppressAsAssignedKwOwned(c, rank) {
+  c.guardrail_severity = 'hard';
+  c.guardrail_blocked_top3 = true;
+  appendGuardrailNote(
+    c,
+    `SUPPRESSED \u2014 page already ranks #${rank} for its assigned keyword "${c.assigned_keyword}". ` +
+    `Rewriting title / H1 / meta to target "${c.primary_query}" instead would jeopardise the existing top rank. ` +
+    `Page owns its target; no on-page rewrite recommended.`
+  );
+  c.estimated_lift = `No action \u2014 already #${rank} for assigned keyword.`;
+  c.estimated_lift_gbp_revenue = 0;
+  c.estimated_lift_gbp_profit = 0;
+}
+
+// Re-anchor a rank-lift / CTR card onto the URL's assigned keyword so
+// the on-page work targets the canonical keyword for the URL, not
+// whatever sibling the picker grabbed by highest search_volume. The
+// _rebuild block is updated too so live-enrichment downstream uses
+// the assigned keyword in the description body.
+function reanchorCardToAssignedKw(c, assignedRow) {
+  const prior = c.primary_query;
+  const url = Array.isArray(c.pages_affected) ? c.pages_affected[0] : '';
+  const rank = assignedRow.best_rank_group != null ? Number(assignedRow.best_rank_group) : null;
+  const sv = Number(assignedRow.search_volume) || 0;
+  c.primary_query = assignedRow.keyword;
+  const levers = Array.isArray(c.merged_levers) ? c.merged_levers : (c.lever_id ? [c.lever_id] : []);
+  if (levers.includes('rank')) {
+    c.title = rank != null
+      ? `Lift "${assignedRow.keyword}" from rank ${rank} on ${labelOf(url)}`
+      : `Lift "${assignedRow.keyword}" on ${labelOf(url)}`;
+  } else {
+    c.title = `Lift CTR on ${labelOf(url)} for "${assignedRow.keyword}"`;
+  }
+  appendGuardrailNote(
+    c,
+    `Re-anchored from "${prior}" to assigned keyword "${assignedRow.keyword}"` +
+    `${rank != null ? ` (rank #${rank})` : ''}. The page's assigned keyword is the canonical target \u2014 ` +
+    `sibling keywords are secondary. Picker had originally proposed lifting "${prior}" by search volume; ` +
+    `assigned keyword now wins.`
+  );
+  if (c._rebuild && c._rebuild.type === 'rank') {
+    c._rebuild.args = { ...c._rebuild.args, keyword: assignedRow.keyword, rank, sv };
+  } else if (c._rebuild && c._rebuild.type === 'ctr') {
+    const kwInfo = { keyword: assignedRow.keyword, rank, searchVolume: sv };
+    c._rebuild.args = { ...c._rebuild.args, kwInfo };
+  }
+  if (c._rebuild_secondary && c._rebuild_secondary.type === 'ctr') {
+    const kwInfo = { keyword: assignedRow.keyword, rank, searchVolume: sv };
+    c._rebuild_secondary.args = { ...c._rebuild_secondary.args, kwInfo };
+  }
+}
+
+// Assigned-keyword primacy guardrail (2026-05-26, user defect):
+// non-AIO smart-priority cards (rank / CTR / merged ctr+rank) were
+// being generated against whichever sibling keyword the picker
+// scored highest by search volume, NOT the URL's assigned keyword.
+// User: "for online photography course that i rank 2 for you are
+// telling me to change seo title and description from course to
+// lessons, surely thats not right ... beginners photography classes
+// you say Lift 'beginners photography courses' from rank 14 ... when
+// that isnt the keyword either".
+//
+// Rules:
+//   1. If the candidate's keyword equals the assigned keyword \u2192 leave.
+//   2. If assigned keyword already ranks top 5 \u2192 SUPPRESS the card
+//      (the page is winning; do not risk a rewrite).
+//   3. If assigned keyword is tracked (has a keyword_rankings row for
+//      this URL) but ranks >5 \u2192 RE-ANCHOR the card to the assigned
+//      keyword so the lift target lines up with what the user set.
+//   4. If assigned keyword is NOT tracked \u2192 leave the card but stamp
+//      a soft note so the user knows the engine picked a sibling.
+function applyAssignedKeywordPrimacyGuardrail(candidates, snapshot) {
+  if (!Array.isArray(candidates) || !candidates.length) return;
+  const keywords = (snapshot && snapshot.allKeywords) || [];
+  for (const c of candidates) {
+    if (!c || !c.assigned_keyword) continue;
+    const levers = Array.isArray(c.merged_levers) ? c.merged_levers : (c.lever_id ? [c.lever_id] : []);
+    const onPage = levers.includes('rank') || levers.includes('ctr');
+    if (!onPage) continue;
+    const candidateKw = String(c.primary_query || '').trim().toLowerCase();
+    const assignedKw = String(c.assigned_keyword).trim().toLowerCase();
+    if (!assignedKw || candidateKw === assignedKw) continue;
+    const rank = c.assigned_keyword_rank;
+    if (rank != null && rank <= 5) { suppressAsAssignedKwOwned(c, rank); continue; }
+    const url = Array.isArray(c.pages_affected) ? c.pages_affected[0] : null;
+    const assignedRow = findKeywordRowForUrl(keywords, url, c.assigned_keyword);
+    if (assignedRow) { reanchorCardToAssignedKw(c, assignedRow); continue; }
+    appendGuardrailNote(
+      c,
+      `Card targets "${c.primary_query}" but the page's assigned keyword is "${c.assigned_keyword}" ` +
+      `(not currently tracked in keyword_rankings for this URL). The picker fell back to the highest-volume ` +
+      `sibling; add the assigned keyword to GSC tracking to use it as the canonical target.`
+    );
+  }
+}
+
 // Enrich every candidate with the assigned-keyword + its current
 // rank for the candidate's primary URL. The Coventry AIO card was
 // already showing this via aio_assigned_keyword (because it flowed
@@ -2488,6 +2618,13 @@ export default async function handler(req, res) {
     // across lever types. Done AFTER live-enrich so we don't have to
     // re-resolve overrides per candidate inside the enricher.
     enrichCandidatesWithAssignedKeyword(candidates, snapshot.targetKeywordOverrides, snapshot.allKeywords);
+
+    // Assigned-keyword primacy guardrail. Runs AFTER stamping so each
+    // candidate has assigned_keyword + assigned_keyword_rank to
+    // compare against its picker-chosen primary_query. Suppresses or
+    // re-anchors non-AIO cards whose target keyword doesn't match the
+    // URL's assigned keyword \u2014 see function header for full rules.
+    applyAssignedKeywordPrimacyGuardrail(candidates, snapshot);
 
     // Convert the weights Maps into plain objects so the response is
     // JSON-serialisable. null when no active scenario exists - caller
