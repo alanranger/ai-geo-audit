@@ -96,12 +96,27 @@ function extractH1(html) {
 
 // First ~250 words of visible body text. Powers downstream liability
 // scanners (fluffy-opener detection, unsourced-stats) without forcing
-// them to re-fetch the page. We strip <script>, <style>, <head>, and
-// all tags, then collapse whitespace and take a word-bounded slice.
+// them to re-fetch the page.
+//
+// 2026-05-26: Squarespace renders the main menu as a <nav> followed
+// by a long chain of <div> menu containers that the previous regex
+// did NOT strip. The result on /photography-courses-coventry was
+// `bodyText` reading "Cart 0 Sign In My Account Back photography courses
+// coventry Which Photography Courses..." — i.e. the entire site menu.
+// The fluffy-opener detector then judged fluffiness on nav text rather
+// than the actual page intro.
+//
+// Fix: prefer the FIRST <main>...</main> region when present (the
+// Squarespace article wrapper) and extract bodyText from that. Fall
+// back to whole-document stripping only when <main> isn't on the page.
 function extractBodyText(html, wordLimit = 250) {
   if (!html) return null;
-  const headStripped = String(html).replace(/<head[\s\S]*?<\/head>/i, ' ');
-  const cleaned = headStripped
+  const str = String(html);
+  // Try <main>...</main>; fall back to <article> or the post-<head>
+  // document. Squarespace pages always emit exactly one <main>.
+  const mainScope = extractFirstScopedRegion(str, ['main', 'article'])
+    || str.replace(/<head[\s\S]*?<\/head>/i, ' ');
+  const cleaned = mainScope
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
@@ -115,11 +130,37 @@ function extractBodyText(html, wordLimit = 250) {
   return words.slice(0, wordLimit).join(' ');
 }
 
-// Capped HTML sample around the first <main>/<article>/<body> open tag,
-// up to 60KB. Used by liability scanners that need raw HTML (link
-// detection, schema-around-claim windows). 60KB covers the visible
-// body on every alanranger.com landing page tested.
-function extractBodyHtmlSnippet(html, capBytes = 60000) {
+// Pull out the FIRST matching scoped region (e.g. <main>…</main>) using
+// a simple open-tag scan + matching close-tag search. Returns null when
+// no scope is found (caller falls back to whole-document handling).
+function extractFirstScopedRegion(html, tagNames) {
+  for (const tag of tagNames) {
+    const open = new RegExp('<' + tag + '\\b[^>]*>', 'i');
+    const close = new RegExp('</' + tag + '\\s*>', 'i');
+    const o = open.exec(html);
+    if (!o) continue;
+    const startIdx = o.index + o[0].length;
+    const tail = html.slice(startIdx);
+    const c = close.exec(tail);
+    if (!c) continue;
+    return tail.slice(0, c.index);
+  }
+  return null;
+}
+
+// Capped HTML sample around the first <main>/<article> open tag, up
+// to 200KB. Used by liability scanners that need raw HTML (link
+// detection, unsourced-stat windows).
+//
+// 2026-05-26: cap raised 60KB -> 200KB after the
+// /photography-courses-coventry case. That page's <main> opens at
+// position 123KB in the raw HTML and contains BOTH a duplicate "30%"
+// stat (at offset 12KB inside <main>) AND an allbachelordegrees.com
+// citation (at offset 136KB inside <main>). At the old 60KB cap the
+// link detector never saw the allbachelor link and emitted zero
+// REMEDIATE tasks. Squarespace HTML routinely sails past 60KB inside
+// the article scope; 200KB covers every page tested.
+function extractBodyHtmlSnippet(html, capBytes = 200000) {
   if (!html) return null;
   const str = String(html);
   const startMatch = /<(main|article|body)\b/i.exec(str);

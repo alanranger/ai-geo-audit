@@ -562,7 +562,8 @@ function scoreAioCandidate(kw, ctx, gpPct, aov, convRate) {
     range,
     reroute: targetSelection.reroute,
     assignedKeyword,
-    selectionSource: targetSelection.source
+    selectionSource: targetSelection.source,
+    overrideStatus: targetSelection.override_status
   };
 }
 
@@ -573,14 +574,30 @@ function scoreAioCandidate(kw, ctx, gpPct, aov, convRate) {
 //      local-variant reroute heuristic (national head term on a local
 //      page that ranks >20).
 //   3. Otherwise the original keyword the picker fed us.
+//
+// 2026-05-26 defect A fix: when an assigned keyword EXISTS but has no
+// AIO data in keyword_rankings, we MUST NOT silently fall back. The
+// fallback target is still used (the user still gets actionable
+// recommendations), but `override_status` carries the reason so the
+// UI can surface a visible "Assigned KW 'X' has no AIO data — using
+// fallback Y" note.
 function selectAioTargetKeyword(opts) {
   const { kw, pageScope, ctx, assignedKeyword } = opts;
   const allKeywords = ctx.allKeywords || ctx.keywords || [];
+  let overrideStatus = null;
   if (assignedKeyword) {
     const row = findKeywordRowByText(assignedKeyword, allKeywords);
     if (row && row.has_ai_overview) {
-      return { target: row, source: 'override', reroute: { reroute: false, reason: 'override_present' } };
+      return {
+        target: row,
+        source: 'override',
+        reroute: { reroute: false, reason: 'override_present' },
+        override_status: { applied: true }
+      };
     }
+    overrideStatus = row
+      ? { applied: false, reason: 'override_keyword_no_aio_data' }
+      : { applied: false, reason: 'override_keyword_not_in_data' };
   }
   const reroute = shouldRerouteToLocal({
     pageScope,
@@ -589,8 +606,8 @@ function selectAioTargetKeyword(opts) {
     keyword: kw.keyword,
     keywords: allKeywords
   });
-  if (reroute.reroute) return { target: reroute.target, source: 'reroute_local', reroute };
-  return { target: kw, source: 'original', reroute };
+  if (reroute.reroute) return { target: reroute.target, source: 'reroute_local', reroute, override_status: overrideStatus };
+  return { target: kw, source: 'original', reroute, override_status: overrideStatus };
 }
 
 function buildAioRerouteNote(top) {
@@ -602,6 +619,23 @@ function buildAioRerouteNote(top) {
   return `Re-routed off national head term "${top.originalKw.keyword}" `
     + `(this URL ranks #${top.originalKw.best_rank_group} for it; P(win citation) is too low). `
     + `Local variant "${reroute.target.keyword}" is the higher-probability target on a local-business page.`;
+}
+
+// 2026-05-26 defect A: when the URL has an assigned KW but it can't
+// be used (no AIO data / not in keyword_rankings), surface a visible
+// note so the user knows the override is being honoured-as-best-can-be,
+// NOT silently discarded.
+function buildAioOverrideStatusNote(top) {
+  const st = top && top.overrideStatus;
+  if (!st || st.applied) return null;
+  const fallback = top.kw && top.kw.keyword;
+  if (st.reason === 'override_keyword_no_aio_data') {
+    return `Assigned keyword "${top.assignedKeyword}" has no AI Overview data in the latest keyword sync — using fallback "${fallback}" for the model. Re-sync that keyword to use the assignment.`;
+  }
+  if (st.reason === 'override_keyword_not_in_data') {
+    return `Assigned keyword "${top.assignedKeyword}" is not in the keyword_rankings dataset — using fallback "${fallback}". Add the keyword to the next sync to honour the override.`;
+  }
+  return null;
 }
 
 function aioCitationPriority(tierId, tierKeywords, ctx) {
@@ -617,6 +651,7 @@ function aioCitationPriority(tierId, tierKeywords, ctx) {
     assignedKeyword, selectionSource
   };
   const rerouteNote = buildAioRerouteNote(top);
+  const overrideStatusNote = buildAioOverrideStatusNote(top);
   return {
     signature: `aio|${kw.keyword}`,
     title: `Get cited in Google's AI Overview for "${kw.keyword}"`,
@@ -639,7 +674,10 @@ function aioCitationPriority(tierId, tierKeywords, ctx) {
     aio_rerouted: top.selectionSource === 'reroute_local',
     aio_used_override: top.selectionSource === 'override',
     aio_assigned_keyword: assignedKeyword || null,
+    aio_override_status: top.overrideStatus || null,
+    aio_override_status_note: overrideStatusNote,
     aio_aov_flag: range.aov_flag || null,
+    aio_conv_flag: range.conv_flag || null,
     lever_id: 'aio',
     _rebuild: { type: 'aio', args: builderArgs }
   };
@@ -1741,6 +1779,11 @@ function buildAioActions(c, live) {
   const hasFaq    = schema.includes('FAQPage');
   const bodyText  = (live && live.bodyText) || '';
   const htmlSnip  = (live && live.bodyHtmlSnippet) || '';
+  // 2026-05-26 defect 1 observability: log the live feed sizes at
+  // detector entry so future "no liability emitted on live page"
+  // failures are diagnosable without redeploying instrumentation.
+  // eslint-disable-next-line no-console
+  console.log(`[aio-actions] ${url} bodyText.len=${bodyText.length} htmlSnip.len=${htmlSnip.length} bodyText.first120=${JSON.stringify(bodyText.slice(0, 120))}`);
   const fluffy    = detectFluffyOpener(bodyText);
   const liabilities = scanLiabilities(htmlSnip, bodyText);
   const actions = [];
@@ -2009,7 +2052,10 @@ export default async function handler(req, res) {
           aio_rerouted: !!c.aio_rerouted,
           aio_used_override: !!c.aio_used_override,
           aio_assigned_keyword: c.aio_assigned_keyword ?? null,
+          aio_override_status: c.aio_override_status ?? null,
+          aio_override_status_note: c.aio_override_status_note ?? null,
           aio_aov_flag: c.aio_aov_flag ?? null,
+          aio_conv_flag: c.aio_conv_flag ?? null,
           aio_audit_status: c.aio_audit_status ?? null,
           aio_audit_reasons: c.aio_audit_reasons ?? null,
           page_liabilities: c.page_liabilities ?? null,

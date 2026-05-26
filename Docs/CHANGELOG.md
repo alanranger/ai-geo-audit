@@ -2,6 +2,87 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-26] - AIO recommendation engine: 4 defects that failed to land live (8de72d5 follow-up)
+
+The 8de72d5 changelog claimed 8 fixes; the live `/photography-courses-coventry` card
+only landed 4 of them. This entry covers the 4 that didn't, verified against the live
+deployed API + the actual Coventry HTML (not a synthetic fixture).
+
+- **DEFECT C — Effort total 3h vs sum-of-tasks 2.5h (UI rounding bug):**
+  - The API was correctly returning `effort_hours: 2.5`. The dashboard rendered "3h"
+    because `rfActionEffortRow` called `eh.toFixed(0)` for any `eh >= 1`, rounding
+    2.5 → "3". Now uses `eh % 1 === 0 ? toFixed(0) : toFixed(1)` so 2.5 renders as
+    "2.5h". Added a tooltip on the header effort that fires when the header drifts
+    from `sum(actions.effort_hours)` — easy regression detection on future cards.
+
+- **DEFECT B — Body detectors emit nothing on live Coventry page:**
+  - Root cause (3 deploy-only bugs the synthetic fixture didn't surface):
+    1. `extractBodyText` stripped `<nav>`/`<header>`/`<footer>` but Squarespace
+       doesn't use semantic nav tags — `bodyText` was dominated by
+       "Cart 0 Sign In My Account Back photography courses coventry..." menu cruft
+       and the fluffy-opener detector judged the wrong text.
+    2. `extractBodyHtmlSnippet` capped at 60KB from `<main>`, but the
+       `allbachelordegrees.com` citation sits ~136KB inside `<main>` on the live
+       page. The link detector never reached it.
+    3. `NUMERIC_CLAIM_RE` allowed only 120 non-terminator chars between the `%` and
+       the next `.`/`?`/`!`; the actual "With 30% of UK adults now actively pursuing
+       photography as a hobby..." sentence is 142 chars and got no match.
+  - Fixes:
+    - `extractBodyText` and `stripHtml` now prefer the first `<main>`/`<article>`
+      region when present (via a shared scoped-region helper). Squarespace pages
+      have exactly one `<main>`; scoping there cuts the menu out.
+    - `extractBodyHtmlSnippet` cap raised 60KB → 200KB (covers the deepest citation
+      offset measured on alanranger.com).
+    - `NUMERIC_CLAIM_RE` distance widened to {5,250}.
+    - `RHETORICAL_OPENERS` widened 80 → 250 chars (the live page emits H1 + tagline
+      before the rhetorical `?`, putting it ~150 chars into bodyText).
+    - `isFluffy` also fires when `aspirational >= 5` (5+ marketing words in the
+      opener is overwhelming density regardless of concrete-fact tokens).
+    - `detectDuplicateClaims` dedup key changed from "first 30 chars" to "first 4
+      normalised words" — collides the two "30% of UK adults..." sentences that
+      diverge from word 5 onwards.
+  - **Observability:** `buildAioActions` now logs
+    `[aio-actions] <url> bodyText.len=<n> htmlSnip.len=<n> bodyText.first120=...`
+    at detector entry. Future "live page returns clean" bugs are debuggable from
+    Vercel logs without redeploying instrumentation.
+  - **New regression test:** `test/aio-coventry-live-fixture.test.js` loads the
+    actual 381KB HTML saved from the live page (`test/fixtures/photography-
+    courses-coventry.html`) and asserts the 4 detectors fire on it. Synthetic
+    fixtures alone are no longer trusted as live-page evidence.
+
+- **DEFECT A — Assigned keyword silently discarded:**
+  - Diagnosis against the prod DB (`igzvwbvgvmzvvzoclufx` / `traditional_seo_target_
+    keyword_overrides`): there is no override row for `/photography-courses-coventry`.
+    Only 47 blog-URL overrides exist; the user believed one was set for this URL but
+    it wasn't. Additionally, the keyword "Photography Courses Coventry" is NOT in
+    `keyword_rankings` at all — even if an override existed, the AIO data lookup
+    would have returned nothing.
+  - `selectAioTargetKeyword` now records `override_status` on the candidate
+    (`applied: true` / `applied: false, reason: override_keyword_no_aio_data` /
+    `applied: false, reason: override_keyword_not_in_data`) instead of silently
+    falling back. The fallback is still used (so the user gets actionable
+    recommendations) but the visibility is preserved.
+  - UI `rfActionAssignedKwBlock` always renders a pill for AIO cards: green
+    `Assigned KW: ...` when applied, amber `Assigned KW: X — not used (no AIO
+    data)` when present but unusable, grey `Assigned KW: (none set)` when no
+    override exists at all. New `rf-aio-override-fallback` banner in the assumption
+    stack shows the full "re-sync the assigned keyword to honour the override"
+    note when applicable.
+
+- **DEFECT D — Booking conversion rate not flagged as assumed:**
+  - `liftRange` now accepts a `conversionRateMeasured` flag (default `false`) and
+    sets `conv_flag: { assumed: true, reason: ... }` whenever a measured value
+    isn't supplied. The 0.01 default we ship is now visibly amber.
+  - Assumption stack rows carry an `assumed` boolean; the UI renders an amber
+    `assumed` chip alongside the value and a top-of-stack
+    `Booking conversion rate ASSUMED — not measured` banner.
+  - Reasoning: revenue per click scales linearly with conversion rate, so a wrong
+    assumption here cascades through every figure; the user must see this.
+
+- **Test suite:** 42 → 46 tests pass. The 4 new tests are all in the live-HTML
+  fixture file and lock in the deploy-path fixes that the synthetic fixture
+  couldn't have caught.
+
 ## [2026-05-26] - AIO recommendation engine: 7 post-deploy defect fixes
 
 Follow-up to the AIO model + page-liability rework from earlier today. Seven defects
