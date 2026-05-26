@@ -61,6 +61,57 @@ function bookingConvRateForTier(tierId) {
   return BOOKING_CONV_RATE_BY_TIER[tierId] || 0.01;
 }
 
+// 2026-05-26 phase K-2 (academy two-step model):
+// The academy tier does NOT use the single-step £79 × 1% booking model.
+// /free-online-photography-course offers a free 14-day trial; revenue
+// only lands when a trial converts to a paid annual. The funnel is:
+//
+//   AIO click \u2192 trial_signup_rate \u2192 trial_to_paid_rate \u2192 effective_AOV (\u00a379/\u00a359 blend) \u2192 99% GP
+//
+// All three rates below are derived from real Memberstack/Stripe
+// data in the academy Supabase (project dqrtcsvqsfgbqmnonkpt):
+// - signupRate: 16 trials / 588 GSC clicks over the latest 28d
+//   (over-attributes \u2014 not all trials originate from organic clicks;
+//   true organic rate likely 1.5\u20132.5%).
+// - paidRate: 9 / 208 trials all-time = 4.3%. The 14-day trial means
+//   a 28d window structurally misses conversions; all-time is the only
+//   undistorted figure.
+// - priceBlend: 70% \u00a379 / 30% \u00a359 (user-supplied; Stripe stores a
+//   single price_id, so the split is NOT in the DB yet).
+//
+// Effective AOV = \u00a379 \u00d7 0.7 + \u00a359 \u00d7 0.3 = \u00a373.
+// Per-click GP = 0.027 \u00d7 0.043 \u00d7 \u00a373 \u00d7 0.99 = \u00a30.084/click.
+//
+// All inputs ASSUMED-flagged (`*Measured: false`) until larger samples
+// or a per-source attribution model exists. Filed as PHASE-K-FOLLOWUP-3.
+const ACADEMY_PRICE_FULL_GBP = 79;
+const ACADEMY_PRICE_DISCOUNT_GBP = 59;
+const ACADEMY_TRIAL_FUNNEL = {
+  signupRate: 0.027,
+  paidRate: 0.043,
+  priceBlend: {
+    full: ACADEMY_PRICE_FULL_GBP,
+    discount: ACADEMY_PRICE_DISCOUNT_GBP,
+    fullShare: 0.7,
+    discountShare: 0.3
+  },
+  effectiveAov: (ACADEMY_PRICE_FULL_GBP * 0.7) + (ACADEMY_PRICE_DISCOUNT_GBP * 0.3),
+  signupRateMeasured: false,
+  paidRateMeasured: false,
+  priceBlendMeasured: false
+};
+function trialFunnelForTier(tierId) {
+  if (tierId === 'academy') return ACADEMY_TRIAL_FUNNEL;
+  return null;
+}
+
+// Materiality floor (Defect 3). Levers with expected GP/mo below this
+// don't count toward the per-card aio_total_expected_gp_mo or the
+// dashboard combined headline. They still render in the lever table
+// (in a collapsed "long tail" group) so the user can see them, but
+// don't inflate headline totals.
+const MATERIAL_GP_THRESHOLD_GBP_MO = 2;
+
 let activeBlendedSeasonality = null;
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
@@ -575,21 +626,42 @@ function aioLeverCaptureRate(cited, alanCit, totalCit) {
 // Score one keyword as a lever for a URL. Returns the lever object
 // the UI renders in the lever list AND the picker uses for the
 // headline GP figure when this lever is the top one.
-function aioLeverFromKeyword(kw, pageScope, gpPct, aov, convRate) {
+//
+// 2026-05-26 phase K-2:
+// - `trialFunnel` (academy tier only) switches the inner liftRange()
+//   onto the two-step trial-funnel model so the per-click value comes
+//   from signup_rate \u00d7 paid_rate \u00d7 effective_AOV instead of
+//   AOV \u00d7 single_conversion_rate.
+// - Defect 4 logging: the intent classifier's decision (query intent +
+//   page scope + chosen INTENT_MODIFIER key) is logged at lever build
+//   time so a future "academy card shows national\u00d7national \u00d71.0
+//   without explanation" complaint is debuggable from Vercel logs
+//   without redeploying instrumentation.
+// - Defect 3 materiality flag: `material: boolean` is set true when
+//   the lever's expected GP/mo clears MATERIAL_GP_THRESHOLD_GBP_MO.
+//   The picker uses this when summing aio_total_expected_gp_mo so
+//   the long tail of \u00a30\u2013\u00a31/mo levers doesn't inflate the headline.
+function aioLeverFromKeyword(kw, pageScope, gpPct, aov, convRate, trialFunnel) {
   const queryIntent = classifyQueryIntent(kw.keyword);
   const alanCit = Number(kw.ai_alan_citations_count) || 0;
   const totalCit = Number(kw.ai_total_citations) || 0;
   const cited = alanCit > 0;
   const pwin = pWinCitation(kw.best_rank_group, queryIntent, pageScope, 'neutral');
   const captureRate = aioLeverCaptureRate(cited, alanCit, totalCit);
-  const range = liftRange({
+  const liftOpts = {
     volume: Number(kw.search_volume) || 0,
     pWin: pwin.p, captureRate, aov, conversionRate: convRate, gpPct
-  });
+  };
+  if (trialFunnel) liftOpts.trialFunnel = trialFunnel;
+  const range = liftRange(liftOpts);
+  const intentKey = `${pageScope}_${queryIntent}`;
+  // eslint-disable-next-line no-console
+  console.log(`[aio-intent] kw=${JSON.stringify(kw.keyword)} pageScope=${pageScope} queryIntent=${queryIntent} intentFit=${intentKey} pwin=${pwin.p.toFixed(3)} (${pwin.stack.map(s => s.label + '=' + s.value).join(', ')})`);
   return {
     kw, queryIntent, pwin, range,
     lever_type: cited ? 'grow_share' : 'capture_slot',
-    citation_state: { cited, alan: alanCit, total: totalCit }
+    citation_state: { cited, alan: alanCit, total: totalCit },
+    material: Number(range.profit.expected) >= MATERIAL_GP_THRESHOLD_GBP_MO
   };
 }
 
@@ -609,13 +681,28 @@ function scoreAioUrl(tierId, cleanedUrl, kws, ctx) {
   const gpPct = estimatedGpPctForTier(tierId);
   const aov = trueAovForTier(tierId);
   const convRate = bookingConvRateForTier(tierId);
+  const trialFunnel = trialFunnelForTier(tierId);
   const pageScope = classifyPageScope(intentClassForUrl(cleanedUrl));
-  const levers = kws.map(k => aioLeverFromKeyword(k, pageScope, gpPct, aov, convRate));
+  const levers = kws.map(k => aioLeverFromKeyword(k, pageScope, gpPct, aov, convRate, trialFunnel));
   levers.sort((a, b) => b.range.profit.expected - a.range.profit.expected);
   const anchor = findAnchorLever(cleanedUrl, levers, ctx);
   const top = levers[0];
-  const totalExpectedGpMo = levers.reduce((sum, l) => sum + (Number(l.range.profit.expected) || 0), 0);
-  return { cleanedUrl, levers, anchor, top, pageScope, gpPct, aov, convRate, totalExpectedGpMo };
+  // Defect 3 (materiality floor): the URL total used for ranking and
+  // for the card headline sums only MATERIAL levers (>= £2/mo GP).
+  // Immaterial levers are tracked separately so the UI can still
+  // surface them in a collapsed "long tail" group without inflating
+  // headlines that are sums of mostly £0/mo rows.
+  const materialLevers = levers.filter(l => l.material);
+  const immaterialLevers = levers.filter(l => !l.material);
+  const totalExpectedGpMo = materialLevers.reduce((sum, l) => sum + (Number(l.range.profit.expected) || 0), 0);
+  const totalImmaterialGpMo = immaterialLevers.reduce((sum, l) => sum + (Number(l.range.profit.expected) || 0), 0);
+  return {
+    cleanedUrl, levers, anchor, top, pageScope, gpPct, aov, convRate,
+    totalExpectedGpMo, totalImmaterialGpMo,
+    materialLeverCount: materialLevers.length,
+    immaterialLeverCount: immaterialLevers.length,
+    usedTrialFunnel: !!trialFunnel
+  };
 }
 
 // Normalise a URL slug or keyword to a token set we can compare:
@@ -743,30 +830,33 @@ function serializeAioLever(lever) {
     expected_rev_mo: lever.range.revenue.expected,
     lever_type: lever.lever_type,
     citation_state: lever.citation_state,
-    query_intent: lever.queryIntent
+    query_intent: lever.queryIntent,
+    material: !!lever.material
   };
 }
 
-// Headline strap-line for the card. Mentions the top lever (because
-// the headline GP figure is the top lever's GP, not the anchor's)
-// AND the total lever count split capture/grow so the user sees the
-// shape of the opportunity at a glance. Also surfaces the SUM of
-// expected GP across every lever on the URL — the "if you address
-// every lever on this page" number — so the cited grow-share long
-// tail isn't invisible behind a small top-lever headline.
+// Headline strap-line for the card. Mentions the top lever (drives the
+// headline GP figure) AND the lever-count breakdown so the user sees
+// the shape of the opportunity at a glance. The \u03a3 figure is the SUM
+// over MATERIAL levers only (>= MATERIAL_GP_THRESHOLD_GBP_MO); the
+// long tail of \u00a30\u2013\u00a31/mo levers is counted but stated separately so
+// the headline isn't inflated by rows that individually round to \u00a30.
 function buildAioEstimatedLiftLine(urlScore) {
-  const { top, levers, totalExpectedGpMo } = urlScore;
+  const { top, levers, totalExpectedGpMo, immaterialLeverCount, materialLeverCount } = urlScore;
   const captureCount = levers.filter(l => l.lever_type === 'capture_slot').length;
   const growCount = levers.filter(l => l.lever_type === 'grow_share').length;
   const total = captureCount + growCount;
   const leverType = top.lever_type === 'grow_share' ? 'grow citation share' : 'capture AIO slot';
+  const tailNote = (immaterialLeverCount > 0)
+    ? ` + ${immaterialLeverCount} long-tail lever${immaterialLeverCount === 1 ? '' : 's'} (each <\u00a3${MATERIAL_GP_THRESHOLD_GBP_MO}/mo, excluded from total)`
+    : '';
   return `${top.kw.keyword} (${leverType})`
     + ` \u00b7 ${(Number(top.kw.search_volume) || 0).toLocaleString()}/mo`
     + ` \u00b7 P(win) ${(top.pwin.p * 100).toFixed(0)}%`
     + ` \u00b7 expected ~£${top.range.profit.expected.toLocaleString()}/mo GP`
     + ` (range £${top.range.profit.low.toLocaleString()}\u2013£${top.range.profit.high.toLocaleString()})`
     + ` \u00b7 ${total} lever${total === 1 ? '' : 's'} on this URL (${captureCount} capture / ${growCount} grow) stacked beneath`
-    + ` \u00b7 \u03a3 all levers: ~£${Math.round(totalExpectedGpMo).toLocaleString()}/mo GP if all addressed`;
+    + ` \u00b7 \u03a3 material (${materialLeverCount}) levers: ~£${Math.round(totalExpectedGpMo).toLocaleString()}/mo GP if all addressed${tailNote}`;
 }
 
 // Override-status note rendered when an assigned keyword exists but
@@ -804,6 +894,19 @@ function assertAioAnchorConsistent(urlScore, anchorLever) {
   return { inconsistent: reasons.length > 0, reasons };
 }
 
+// Defect 1 (Card 3 narrative\u2194headline split): when the anchor (slug-
+// aligned, drives the narrative) and the top lever (highest GP,
+// drives the headline figure) are DIFFERENT keywords the card must
+// label both explicitly. The user's instruction allows this split
+// provided the card states it; the alternative (forcing them equal)
+// would either bury the slug anchor (Amendment 1 violation) or bury
+// the largest opportunity. The explicit split preserves both.
+function buildAioSplitNote(anchorLever, top) {
+  const sameKw = String(anchorLever.kw.keyword).toLowerCase() === String(top.kw.keyword).toLowerCase();
+  if (sameKw) return null;
+  return `Anchor keyword "${anchorLever.kw.keyword}" (Scorecard consistency) and biggest lever "${top.kw.keyword}" (headline GP \u00a3${top.range.profit.expected}/mo driver) are different keywords on this URL \u2014 narrative describes the anchor; headline figure is from the biggest lever.`;
+}
+
 // Assemble the final candidate object from the scored URL + override
 // resolution + consistency check. Kept narrow so complexity stays
 // within rule budget; the heavy lifting lives in the small helpers
@@ -812,6 +915,7 @@ function buildAioCandidate(opts) {
   const { urlScore, anchorLever, top, builderArgs, auditState, pageScope, withOverride, consistency } = opts;
   const { cleanedUrl, levers } = urlScore;
   const overrideNote = buildAioOverrideNote(withOverride.assignedKeyword, withOverride.overrideStatus, anchorLever.kw.keyword);
+  const splitNote = buildAioSplitNote(anchorLever, top);
   return {
     signature: `aio|${cleanedUrl}`,
     title: `Get cited in Google's AI Overview for "${anchorLever.kw.keyword}"`,
@@ -836,7 +940,14 @@ function buildAioCandidate(opts) {
     aio_anchor_citation_state: anchorLever.citation_state,
     aio_top_lever_keyword: top.kw.keyword,
     aio_top_lever_type: top.lever_type,
+    aio_top_lever_gp_mo: Math.round(Number(top.range.profit.expected) || 0),
     aio_total_expected_gp_mo: Math.round(urlScore.totalExpectedGpMo || 0),
+    aio_immaterial_lever_count: urlScore.immaterialLeverCount || 0,
+    aio_material_lever_count: urlScore.materialLeverCount || 0,
+    aio_total_immaterial_gp_mo: Math.round(urlScore.totalImmaterialGpMo || 0),
+    aio_anchor_top_lever_split: !!splitNote,
+    aio_split_note: splitNote,
+    aio_lift_model: urlScore.usedTrialFunnel ? 'two_step_trial_funnel' : 'single_step_booking',
     aio_reroute_note: null,
     aio_rerouted: false,
     aio_used_override: !!(withOverride.overrideStatus && withOverride.overrideStatus.applied),
@@ -2270,7 +2381,14 @@ export default async function handler(req, res) {
           aio_anchor_citation_state: c.aio_anchor_citation_state ?? null,
           aio_top_lever_keyword: c.aio_top_lever_keyword ?? null,
           aio_top_lever_type: c.aio_top_lever_type ?? null,
+          aio_top_lever_gp_mo: c.aio_top_lever_gp_mo ?? null,
           aio_total_expected_gp_mo: c.aio_total_expected_gp_mo ?? null,
+          aio_immaterial_lever_count: c.aio_immaterial_lever_count ?? 0,
+          aio_material_lever_count: c.aio_material_lever_count ?? 0,
+          aio_total_immaterial_gp_mo: c.aio_total_immaterial_gp_mo ?? 0,
+          aio_anchor_top_lever_split: !!c.aio_anchor_top_lever_split,
+          aio_split_note: c.aio_split_note ?? null,
+          aio_lift_model: c.aio_lift_model ?? null,
           aio_data_inconsistent: !!c.aio_data_inconsistent,
           aio_data_inconsistent_reasons: c.aio_data_inconsistent_reasons ?? null,
           page_liabilities: c.page_liabilities ?? null,

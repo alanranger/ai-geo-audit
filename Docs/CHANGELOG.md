@@ -2,6 +2,149 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-26] - Phase K-2: Academy two-step trial-funnel model + dashboard-wide ASSUMED flag + materiality floor
+
+Follow-up to the same-day Phase K data-layer reconciliation. The Coventry card is
+confirmed fixed (anchor + lever list + DATA SOURCES INCONSISTENT banner all
+behaving). This entry addresses the five Card 3 (`/free-online-photography-course`)
+defects the user identified after the Coventry fix landed, plus the corrected
+academy economics they supplied (with one assistant arithmetic error caught and
+fixed on the next round).
+
+**Defect 2 — academy tier £79 single-step AOV was wrong. Replaced with two-step
+trial funnel from real Memberstack/Stripe figures.**
+
+The previous code used `TRUE_AOV_BY_TIER.academy = 79` and `BOOKING_CONV_RATE_BY_TIER.academy = 0.01`
+— a single-step £79 × 1% booking. That model is wrong: the academy product is a
+free 14-day trial that converts to a paid annual; the page itself earns £0 and
+revenue only appears when a trial converts. Per the user's corrected facts:
+
+- Trial signup rate: **2.7%** (16 trials / 588 GSC clicks, 28d).
+- Trial-to-paid rate: **4.3%** (9 / 208 trials all-time — explicitly NOT a blend
+  with the noisy 28d 12.5% figure; assistant's first attempt used 6.0% which the
+  user rejected as un-auditable. The 14-day trial means a 28d window structurally
+  misses conversions; all-time is the only undistorted figure).
+- Effective AOV: **£73** (70% × £79 full + 30% × £59 discounted; the price split
+  is user-supplied because Stripe stores a single `price_id` and doesn't track
+  the discount).
+- Academy GP%: **99%** (digital subscription, no real delivery cost).
+- Per-click GP: **£0.084** = 0.027 × 0.043 × 73 × 0.99. The assistant's first
+  Thinking block computed £0.117 using the rejected 6.0% paid rate — corrected.
+
+New module-level constant `ACADEMY_TRIAL_FUNNEL` in `api/aigeo/revenue-funnel-smart-priorities.js`,
+selected via `trialFunnelForTier(tierId)` and passed through `scoreAioUrl()` →
+`aioLeverFromKeyword()` → `liftRange({ trialFunnel })`. All three trial-funnel
+inputs are `*Measured: false` until larger samples or per-source attribution
+exists (PHASE-K-FOLLOWUP-3).
+
+**`lib/revenue-funnel-aio-model.js` changes:**
+- New `buildAssumptionStackRows()` branches on `opts.trialFunnel`. For the two-
+  step model, the stack reads exactly the rows the user mandated, with the
+  precise caveats they wrote out:
+  - AIO query volume **(incremental)** — clicks modelled as won from the AIO
+    citation, not the page's existing organic volume.
+  - Trial signup rate (over-attributes — not all trials originate from organic
+    clicks; true organic rate likely 1.5–2.5%).
+  - Trial-to-paid rate (free trial → paid annual, 9/208 all-time; 28d window
+    structurally misses conversions).
+  - Effective AOV (blend `70% £79 / 30% £59` — discount not tracked in Stripe,
+    split user-supplied).
+  - **NEW: AIO-click ↔ organic-click conversion join** — explicitly flagged
+    ASSUMED. This is the silent multiplier the user (correctly) demanded be made
+    visible: an observed-from-sample per-click value (derived from current
+    organic traffic) is being multiplied by hypothetical AIO uplift volume. That
+    only holds if AIO-sourced clicks convert at the same rates as organic
+    clicks. They might not. The row makes the assumption auditable.
+  - Revenue per click (derived).
+  - Tier GP% (with comment that 99% is intentional — no delivery cost).
+- New `revPerClickFromOpts()` — single source for per-click revenue arithmetic;
+  branches on `trialFunnel` (signup × paid × AOV) vs single-step (AOV × conv).
+- New `buildTrialFunnelConvFlag()` — aggregates ASSUMED status if any of the
+  three two-step inputs is unmeasured; populates `conv_flag.assumed` so the
+  dashboard combined-headline ASSUMED badge can light up.
+- `liftRange()` returns new `model: 'two_step_trial_funnel' | 'single_step_booking'`
+  so the UI can key off it.
+
+**Defect 1 — narrative keyword ≠ headline keyword (Amendment 3 regression on
+Card 3 academy page).**
+
+Coventry's anchor (slug-aligned) and top lever happened to coincide. On Card 3,
+they don't: the slug-aligned anchor is "free online photography course" (rank #5,
+880/mo) while the highest-GP lever is "online photography course" (rank #2,
+2,400/mo). The user's instruction explicitly permits the split provided the card
+states it (forcing them equal would either bury the slug anchor — Amendment 1
+violation — or bury the largest opportunity). New `buildAioSplitNote()` in
+`api/aigeo/revenue-funnel-smart-priorities.js` emits an explanation when the two
+keywords differ, plus new fields on the candidate: `aio_anchor_top_lever_split:
+boolean`, `aio_split_note: string`. UI renders the note as an amber sub-line
+under the title (`.rf-aio-split-note`).
+
+**Defect 3 — Σ-of-levers headline inflated by ~£0 capture-slot long tail.**
+
+A URL with 13 levers where 11 of them individually round to £0/mo would still
+sum to a non-trivial "combined +£N/mo" headline that misrepresented real
+opportunity. New module-level `MATERIAL_GP_THRESHOLD_GBP_MO = 2`. Each lever
+gets `material: true|false` set in `aioLeverFromKeyword()` based on expected GP
+clearing the floor. `scoreAioUrl()` returns separate `totalExpectedGpMo` (sum of
+material levers only) and `totalImmaterialGpMo` (long-tail sum); `pickAioTarget`
+ranks URLs by material GP only. The UI lever list (`rfAioLeverListHtml`) now
+splits into a material table + a `<details>`-collapsed "Long tail (N levers
+below £2/mo GP, excluded from headline)" group so the user can still see what
+was excluded.
+
+**Defect 4 — intent classifier on Card 3 (page intent "academy online" silently
+defaulted to national×national).**
+
+Added `console.log('[aio-intent] ...')` at lever build time logging the kw, page
+scope, query intent, resolved `intentFit` key (e.g. `national_national`,
+`local_local`), P(win), and the full multiplier stack. So the next "why did this
+card show ×1.00 with no explanation" question is debuggable from Vercel logs
+without redeploying instrumentation.
+
+**Defect 5 — dashboard combined headline must carry the ASSUMED flag when any
+underlying conversion rate is unverified.**
+
+A bold combined `+£138/mo` headline with no caveat reads as measured fact. The
+dashboard top-of-funnel meta line now scans the top-3 cards for `aio_conv_flag.assumed`
+(single-step tiers) or `aio_lift_model === 'two_step_trial_funnel'` (academy
+tier) and emits a yellow `ASSUMED` badge with a tooltip explaining which inputs
+are still assumed (booking conversion rate, trial-funnel rates). New CSS class
+`.rf-action-top-meta-assumed`.
+
+**New tests (5/5 pass):** `test/aio-academy-trial-funnel.test.js` pins the
+£0.084/click arithmetic at the `liftRange()` level (so future model changes
+can't silently re-break the maths), asserts the academy candidate uses the two-
+step lift model, asserts every stack row the user mandated is present in order,
+asserts every two-step input is ASSUMED-flagged until measured, and asserts the
+stack uses the corrected 4.3% paid rate and £73 blended AOV (NOT the rejected
+6.0% / hardcoded £79).
+
+**Test totals: 59/59 pass** (54 pre-Phase-K-2 + 5 new academy).
+
+**Files changed:**
+- `lib/revenue-funnel-aio-model.js` — new `buildAssumptionStackRows()`,
+  `revPerClickFromOpts()`, `buildTrialFunnelConvFlag()`, `priceBlendLabel()`;
+  `liftRange()` returns `model` field; precise stack-row captions per user.
+- `api/aigeo/revenue-funnel-smart-priorities.js` — new `ACADEMY_TRIAL_FUNNEL`
+  constant + `trialFunnelForTier()`; `MATERIAL_GP_THRESHOLD_GBP_MO`;
+  `aioLeverFromKeyword()` accepts `trialFunnel`, sets `material` flag, logs
+  intent decision; `scoreAioUrl()` splits material/immaterial totals; new
+  `buildAioSplitNote()`; candidate exports `aio_split_note`, `aio_lift_model`,
+  `aio_immaterial_lever_count`, `aio_material_lever_count`,
+  `aio_total_immaterial_gp_mo`, `aio_top_lever_gp_mo`,
+  `aio_anchor_top_lever_split`.
+- `audit-dashboard.html` — split-note CSS + render; lever list split into
+  material/long-tail (`<details>`); dashboard top-of-funnel ASSUMED badge;
+  new `.rf-aio-lever-tail-summary`, `.rf-aio-split-note`,
+  `.rf-action-top-meta-assumed` CSS rules.
+- `test/aio-academy-trial-funnel.test.js` — new (5 tests).
+
+**Tracked tasks** (PHASE-K-FOLLOWUP-3 still open): wire measured booking
+conversion rates per tier. The 1% courses rate the user gave verbally (1–2
+bookings per 28d on 21 GSC clicks ≈ 1%) is being kept as flagged ASSUMED until a
+write path lands; the academy two-step rates need a per-source attribution model
+(currently over-attributes trials to organic clicks).
+
 ## [2026-05-26] - Phase K: AIO data-layer reconciliation (Coventry card defect)
 
 The 8de72d5/b034d2d/598d44c rounds tried to patch the symptoms (effort total,
