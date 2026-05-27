@@ -94,9 +94,13 @@ async function buildPayload(supabase, propertyUrl) {
     monthly,
     yearTotals,
     headlineStrip: buildHeadlineStrip(monthly, cfg),
+    forecast: buildForecast(monthly, cfg),
     categoryBreakdown: buildCategoryBreakdown(categories, gp, marketMap, transactions),
-    channelMix: groupBy(transactions, t => t.channel || (t.client_type === 'Existing' ? 'Existing' : 'Unknown')),
-    newVsExisting: groupBy(transactions, t => t.client_type || 'Unknown'),
+    // Channel + new/existing collapsed case-insensitively (canonical = first-
+    // seen variant) so "Into The Blue" vs "Into the Blue" do not split into
+    // two rows. The user noted source-data tidying as a future workbook task.
+    channelMix: groupByValue(transactions, t => t.channel || (t.client_type === 'Existing' ? 'Existing' : 'Unknown')),
+    newVsExisting: groupByValue(transactions, t => t.client_type || 'Unknown'),
     fundingFees: buildFundingFees(transactions),
     gpRates: gp.map(r => ({ year: r.year, category_order: r.category_order, category_label: r.category_label, gp_rate: Number(r.gp_rate) }))
   };
@@ -281,15 +285,22 @@ function mergeCategoryCell(c, gpByKey, marketMap, unitsByKey) {
     units,
     avgPrice: units > 0 ? round2(revenue / units) : null,
     gpRate: gp,
-    gpAmount: gp != null ? round2(revenue * gp) : null
+    gpAmount: gp == null ? null : round2(revenue * gp)
   };
 }
 
-function groupBy(txnRows, keyFn) {
+// Case-insensitive groupBy: keys by lower(trim(value)) so casing variants
+// collapse; display label is the FIRST-SEEN trimmed variant for that lower
+// key (so the table stays stable for the user).
+function groupByValue(txnRows, valueFn) {
+  const canonical = canonicaliseMap(txnRows, valueFn);
   const map = new Map();
   for (const t of txnRows) {
-    const k = `${t.year}|${t.month}|${keyFn(t)}`;
-    const cur = map.get(k) || { year: t.year, month: t.month, label: keyFn(t), revenue: 0, units: 0 };
+    const lower = normaliseLower(valueFn(t));
+    if (!lower) continue;
+    const label = canonical.get(lower);
+    const k = `${t.year}|${t.month}|${lower}`;
+    const cur = map.get(k) || { year: t.year, month: t.month, label, revenue: 0, units: 0 };
     cur.revenue += t.amount;
     cur.units += 1;
     map.set(k, cur);
@@ -297,11 +308,32 @@ function groupBy(txnRows, keyFn) {
   return [...map.values()].map(r => ({ ...r, revenue: round2(r.revenue) }));
 }
 
+function canonicaliseMap(rows, valueFn) {
+  const out = new Map();
+  for (const r of rows) {
+    const lower = normaliseLower(valueFn(r));
+    if (!lower) continue;
+    const trimmed = String(valueFn(r)).trim();
+    if (!out.has(lower)) out.set(lower, trimmed);
+  }
+  return out;
+}
+
+function normaliseLower(v) {
+  if (v == null) return null;
+  const trimmed = String(v).trim();
+  if (!trimmed) return null;
+  return trimmed.toLowerCase();
+}
+
 function buildFundingFees(txnRows) {
+  const canonical = canonicaliseMap(txnRows, t => t.funding || 'Unknown');
   const map = new Map();
   for (const t of txnRows) {
-    const funding = t.funding || 'Unknown';
-    const k = `${t.year}|${t.month}|${funding}`;
+    const lower = normaliseLower(t.funding || 'Unknown');
+    if (!lower) continue;
+    const funding = canonical.get(lower);
+    const k = `${t.year}|${t.month}|${lower}`;
     const cur = map.get(k) || { year: t.year, month: t.month, funding, revenue: 0, units: 0, feesEstimated: 0 };
     cur.revenue += t.amount;
     cur.units += 1;
@@ -320,6 +352,66 @@ function estimateFee(funding, amount) {
   const rule = FEE_RULES[funding];
   if (!rule || amount <= 0) return 0;       // refunds / voucher redemptions: no fee
   return amount * rule.pct + rule.flat;
+}
+
+// ----------------------------------------------------------------------
+// Forecast section (the ONE projection on this otherwise-measured tab --
+// quarantined into its own block, with the formula returned verbatim so the
+// UI can show it visibly).
+//
+// Formula (locked by Alan 2026-05-27):
+//   forecast = YTD actual + (trailing-3-closed-month average × months remaining)
+//
+// Range bounds use min/max of the same trailing-3-closed-month set, so the
+// user can see how sensitive the forecast is to a single big or small month.
+//
+// Run rate uses CLOSED MONTHS ONLY -- the current partial month is never
+// blended into the rate (otherwise May-on-day-26 would always drag the
+// estimate down by a third of a month).
+// ----------------------------------------------------------------------
+
+function buildForecast(monthly, cfg) {
+  const year = cfg.now.year;
+  const closedThisYear = monthly.filter(m => m.year === year && m.isClosed);
+  const ytdActual = round2(sumHeadline(closedThisYear));
+  const trailing3 = closedThisYear.slice(-3);
+  const { avg, min, max } = trailingStats(trailing3);
+  const monthsRemaining = Math.max(0, 12 - closedThisYear.length);
+  const annualTarget = TIER_BANDS.comfortable * 12;
+  const forecastCentral = round2(ytdActual + avg * monthsRemaining);
+  const forecastLow = round2(ytdActual + min * monthsRemaining);
+  const forecastHigh = round2(ytdActual + max * monthsRemaining);
+  return {
+    year,
+    ytdActual,
+    closedMonths: closedThisYear.length,
+    closedMonthLabels: closedThisYear.map(m => m.month),
+    monthsRemaining,
+    runRateMonthly: round2(avg),
+    runRateBasis: 'trailing-3-closed-month average',
+    forecastCentral,
+    forecastLow,
+    forecastHigh,
+    annualTarget,
+    monthlyTarget: TIER_BANDS.comfortable,
+    varianceToAnnualTarget: round2(forecastCentral - annualTarget),
+    varianceToMonthlyTarget: round2(avg - TIER_BANDS.comfortable),
+    formula: 'forecast = YTD actual + (trailing-3-closed-month average × months remaining)',
+    caveat: 'Simple run-rate projection — does not model seasonality; revenue is seasonal (see the tier band chart).'
+  };
+}
+
+function sumHeadline(rows) {
+  let s = 0;
+  for (const r of rows) s += Number(r.headlineRevenue) || 0;
+  return s;
+}
+
+function trailingStats(rows) {
+  if (!rows.length) return { avg: 0, min: 0, max: 0 };
+  const vals = rows.map(r => Number(r.headlineRevenue) || 0);
+  const sum = vals.reduce((s, v) => s + v, 0);
+  return { avg: sum / vals.length, min: Math.min(...vals), max: Math.max(...vals) };
 }
 
 // ----------------------------------------------------------------------

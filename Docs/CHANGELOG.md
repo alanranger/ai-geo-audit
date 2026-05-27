@@ -2,6 +2,79 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-27] - Revenue Truth tab — Round 1 revisions
+
+Six revisions to the Gate 2 tab after first user review:
+
+1. **Channel duplicate bug fix.** The transaction data had `"Into The Blue"`
+   (capital T, 8 rows) and `"Into the Blue"` (lowercase t, 11 rows) — both the
+   same source, accidentally case-split by inconsistent capitalisation in the
+   user's workbook entries. Table 6 (channel mix) and Table 7 (new vs
+   existing) now group case-insensitively (after `trim()`), so casing variants
+   collapse to one row. The displayed label uses the first-seen trimmed
+   variant for stability. Same normalisation applied to Table 8 (funding)
+   for consistency. The user has noted source-data tidying in the .xlsm as
+   a future workbook task — not blocking.
+
+2. **Total rows added** to every measured table that lacked them: Tables 4
+   (category breakdown), 6 (channel mix), 7 (new vs existing) and 8
+   (funding & fees) now have both a per-month column total row AND a Total
+   row at the bottom. Every table is reconcilable by eye. Table 3 (market
+   split) already had totals — kept, with the visible-window total as the
+   primary footer row and a full-period reconciliation row beneath it when
+   the rolling window is active.
+
+3. **Default view = rolling 13 months.** The default display window across
+   all measured sections (chart + all monthly tables) is now a rolling 13
+   months anchored on the current month (May 2025 → May 2026 today), giving
+   a clean year-on-year read. A "Display window" toggle at the top of the
+   tab flips to **Full history (all 17 months)** when the user wants the
+   complete period. **CRITICAL:** the underlying API still returns the full
+   dataset, year totals and the Forecast block are always computed from the
+   FULL data, never from the visible window. The Market Split table footer
+   shows BOTH the visible-window total AND the full-period
+   "reconciliation basis" total when the rolling window is active, so the
+   £66,170.50 17-month total is always one click away.
+
+4. **Table 4 sort toggle.** New radio control above the category breakdown
+   table: "By market" (default — groups D2C together, then B2B, then
+   ADJUSTMENT, ordered by category within each market) or "By category
+   order" (1..12 verbatim).
+
+5. **NEW Forecast section.** The one projection on this otherwise-measured
+   tab, visually quarantined with an amber striped background, dashed amber
+   borders on each card, and a prominent `PROJECTION` pill next to the
+   section heading. Cards: YTD actual (closed months only), Run rate
+   (trailing-3-closed-month average), Months remaining, Full-year forecast
+   (with range = YTD + trailing-3 min/max × months remaining), Variance vs
+   £60k annual target, Run rate vs £5k comfortable monthly target. The
+   formula is shown verbatim on the tab — no hidden maths — and the caveat
+   "Simple run-rate projection — does not model seasonality; revenue is
+   seasonal (see the tier band chart)" is rendered beneath it. Current
+   partial month is never blended into the run rate (only closed months
+   count); the partial month sits inside `monthsRemaining` and is forecast
+   forward.
+
+6. *(User-side note, not a Cursor task)* tidy `"Into the Blue"` casing in
+   the workbook's transaction column G so the source data is clean.
+
+**Files changed:**
+- `api/aigeo/revenue-truth-summary.js` — `groupByValue` + `canonicaliseMap`
+  + `normaliseLower` helpers for case-insensitive grouping; `buildForecast`
+  + `sumHeadline` + `trailingStats` helpers for the projection block.
+- `audit-dashboard.html` — Revenue Truth panel: window-mode + sort-mode
+  state, `visibleMonthKeys` / `visibleMonthly` / `filterByVisible`
+  helpers, Forecast section with scoped CSS, sort toggle on Section 4,
+  per-month + bottom Total rows on Sections 4/6/7/8, refactored market
+  table to surface both visible-window and full-period totals.
+
+**Reconciliation verified (smoke test):**
+- 2025 year total still £46,572.46, 2026 YTD still £19,598.04 (full data).
+- API returns single "Into the Blue" row collapsing the two variants.
+- Forecast block returns YTD £18,811.04 + run rate £4,679.46 × 8 months
+  remaining = £56,247 central (range £46,000 - £67,337). Variance vs
+  £60k annual = -£3,753.
+
 ## [2026-05-26] - Revenue Truth tab — Gate 2 (sections 1-9)
 
 Built the **Revenue Truth** dashboard tab — measured revenue history from the

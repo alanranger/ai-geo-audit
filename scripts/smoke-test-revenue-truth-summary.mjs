@@ -47,6 +47,7 @@ console.log('  2026-04:', p.newVsExisting.filter(c => c.year === 2026 && c.month
 console.log(`fundingFees: ${p.fundingFees.length} rows`);
 console.log('  2026-04:', p.fundingFees.filter(c => c.year === 2026 && c.month === 4));
 console.log(`gpRates: ${p.gpRates.length} rows (year × category)`);
+console.log('forecast:', JSON.stringify(p.forecast, null, 2));
 
 // reconcile: sum of monthly headline should equal year totals
 let sum2025 = 0;
