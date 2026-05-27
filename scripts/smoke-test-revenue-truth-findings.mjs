@@ -98,8 +98,26 @@ async function main() {
   console.log('\n=== HEADLINE STRIP (non-JLR default) ===');
   console.log(JSON.stringify(findings.headline, null, 2));
 
-  console.log('\n=== HONESTY NOTE: pace_context (drives the dashboard caveat) ===');
+  console.log('\n=== HONESTY NOTE: pace_context (like-for-like Jan-Apr) ===');
   console.log(JSON.stringify(findings.headline.pace_context, null, 2));
+
+  console.log('\n=== SEASONAL FORECAST (replaces naive x12/M annualised figure) ===');
+  const sf = findings.seasonal_forecast;
+  console.log(`  method         = ${sf.method}`);
+  console.log(`  base_years     = ${JSON.stringify(sf.base_years)}`);
+  console.log(`  closed_months  = ${sf.closed_months_current_year}`);
+  console.log(`  total_mid      = £${sf.total_full_year_mid.toLocaleString('en-GB')}`);
+  console.log(`  total_low  -10% = £${sf.total_full_year_low.toLocaleString('en-GB')}`);
+  console.log(`  total_high +10% = £${sf.total_full_year_high.toLocaleString('en-GB')}`);
+  console.log(`  sanity: pass=${sf.sanity_check.pass_count} warn=${sf.sanity_check.warn_count} model_sensitive=${sf.sanity_check.model_sensitive_count}`);
+  console.log('  --- per-category forecast (sorted by mid desc) ---');
+  for (const r of sf.forecast_per_category) {
+    console.log(`    ${r.category.padEnd(34)} ytd=£${r.ytd_closed_nonjlr.toFixed(2).padStart(9)}  cw=${r.closed_weight_sum != null ? r.closed_weight_sum.toFixed(3) : '----'}  forecast_mid=£${r.forecast_full_year_mid.toFixed(2).padStart(10)}  method=${r.method}`);
+  }
+  console.log('  --- sanity rows (worst diff_pct first) ---');
+  for (const r of sf.sanity_check.rows) {
+    console.log(`    [${r.status.padEnd(16)}] ${r.category.padEnd(34)} avgJanApr=£${r.avg_jan_to_m_nonjlr.toFixed(2).padStart(9)}  model=£${r.model_forecast.toFixed(2).padStart(10)}  vs avgAnnual=£${r.avg_annual_nonjlr.toFixed(2).padStart(10)}  diff=${r.diff_pct.toFixed(2)}%`);
+  }
 
   console.log('\n=== TOP 5 DECLINING PRODUCTS 2024->2025 (non-JLR) ===');
   for (const f of findings.products.decliningTop5_2024_to_2025) {
