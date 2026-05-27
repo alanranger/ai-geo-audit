@@ -2,6 +2,164 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-27] - Money-page GSC cron — widened to all-pages nightly + scheduled in vercel.json
+
+Sister ticket to the Phase C0 backfill below. C0 patched the 16.4 months of
+historical `gsc_page_timeseries` data; this ticket fixes the nightly writer
+so the same gap does not re-open going forward.
+
+1. **ROOT CAUSE OF THE PRE-C0 GAP.** `api/cron/backfill-money-page-timeseries.js`
+   (added 2026-01-24) was the only file the codebase advertised as "the
+   nightly money-page timeseries cron", but it was **never added to
+   `vercel.json`** — verified with `git log -- vercel.json` from 2026-01-01.
+   What actually wrote `gsc_page_timeseries` Jan–Apr 2026 was
+   `api/cron/daily-gsc-backlink.js`, scheduled `*/5 * * * *` until commit
+   `e081fc6` (2026-04-22) removed it during the DFS spend-guard work.
+   `daily-gsc-backlink.js` calls `buildMoneyPageGridRows` which writes
+   `clicks: Number(existing?.clicks || 0)` for every (money_page × date)
+   cell over a rolling 28-day grid — i.e., **zero-fills any cell where
+   `audit.moneyPagesTimeseries` is missing**, then upserts. With 288
+   runs/day × ~6,524 rows/run, any one rate-limited or partial GSC response
+   overwrote previously-correct clicks with 0. That, plus a latent
+   duplicate-key bug fixed on 2026-05-19 in commit `f2b90b3`, produced the
+   94–99% click-loss the user observed for Jan–Apr 2026.
+
+2. **THIS FIX.** `api/cron/backfill-money-page-timeseries.js` rewritten in
+   place to (a) drop the ~233-page money-pages + STRATEGIC_PAGES allowlist
+   and write **all** pages GSC returns, (b) default to a **rolling 7-day**
+   window (was 28-day), (c) paginate GSC responses with `startRow` instead
+   of relying on the single-call 25k `rowLimit`, (d) send
+   `dataState: 'final'` so unstable "fresh" rows do not enter the table,
+   (e) accept optional `startDate` / `endDate` / `daysBack` query params
+   for ad-hoc backfill use, and (f) write a row to `gsc_backfill_runs`
+   (`notes='nightly all-pages cron'`) on every run so future operators
+   can audit run history without rummaging in Vercel function logs.
+   File name unchanged so existing references (Docs, vercel.json path,
+   `scripts/` mirror) keep working.
+
+3. **SCHEDULED.** `vercel.json` `"crons"` array gains
+   `{ path: "/api/cron/backfill-money-page-timeseries", schedule: "30 3 * * *" }`
+   — 03:30 UTC daily, after Google's overnight GSC processing completes
+   (chosen to land before the 07:00 UTC squarespace-revenue-sync cron).
+
+4. **CLI MIRROR UPDATED.** `scripts/backfill-money-page-timeseries.js`
+   rewritten to the same fetch/dedupe/upsert path as the cron, takes
+   `--startDate` / `--endDate` / `--daysBack` so manual backfills can use
+   the same code path as the deployed cron. Loads `.env.local` (was
+   `.env` only, which the project does not ship). Use:
+
+   ```bash
+   node scripts/backfill-money-page-timeseries.js --startDate 2026-05-19 --endDate 2026-05-25
+   ```
+
+5. **VERIFICATION (regression check approach for future changes).**
+   Re-running the cron over a window C0 has already covered must produce a
+   byte-identical row set (same UNIQUE key + idempotent upsert). Confirmed
+   2026-05-27 21:56 UTC for 2026-05-19..2026-05-25:
+   - Cron fetched 5,920 raw GSC rows in 1 API call, deduped to 2,734
+     unique records, 0 batch errors.
+   - `gsc_page_timeseries` window before cron run: 2,734 rows / 501 pages /
+     1,724 clicks / 1,067,785 impressions / hash
+     `5bef4b1c2d20153fbc01350bb9143621`.
+   - `gsc_page_timeseries` window after cron run: 2,734 / 501 / 1,724 /
+     1,067,785 / hash `5bef4b1c2d20153fbc01350bb9143621` — **byte-identical**.
+
+   Per-day capture vs `gsc_timeseries` property total (the user's F4
+   success criterion was ~5%; achieved ≤2%):
+   - 2026-05-19: 313 cron / 312 property → −0.3%
+   - 2026-05-20: 264 / 264 → 0.0%
+   - 2026-05-21: 248 / 253 → 2.0%
+   - 2026-05-22: 216 / 216 → 0.0%
+   - 2026-05-23: 189 / 191 → 1.0%
+   - 2026-05-24: 227 / 230 → 1.3%
+   - 2026-05-25: 267 cron, property-total table has no row yet (separate
+     `gsc_timeseries` ingest gap, out of scope).
+   - 2026-05-26: 0 cron (GSC has not finalised that date yet — correct
+     given `dataState: 'final'`).
+
+6. **OUT OF SCOPE / FOLLOW-UP TICKET FILED.** Decision: do not touch
+   `api/cron/daily-gsc-backlink.js` in this ticket — it is currently
+   dormant (removed from `vercel.json` 2026-04-22) so it cannot regress
+   data today, but the `buildMoneyPageGridRows` zero-fill at lines 49–78
+   is still in the source. Follow-up ticket
+   `Docs/TICKET-daily-gsc-backlink-zerofill-fix.md` raised so anyone
+   re-scheduling that cron must fix the zero-fill first.
+
+## [2026-05-27] - Revenue Truth — Phase C / C0 — GSC backfill (page-level only)
+
+GSC data layer foundation for the Phase C funnel overlay added to the Revenue
+Truth tab. **Data layer only. No views (C1), analyser changes (C2 part 1), or
+UI (C2 part 2/3) yet — each is a separate, separately-approved sub-phase.**
+
+1. **NEW TABLES.** `migrations/phase_c0_gsc_page_query_daily_20260527.sql`
+   creates `gsc_page_query_daily` (per-(property_url, date, page_url, query) —
+   PK on all four; three secondary indexes for per-page and per-query reads)
+   and `gsc_backfill_runs` (run-level audit trail with `running` / `completed`
+   / `failed` status and per-chunk rows-upserted / api-calls counters).
+
+2. **EXTENDED EXISTING TABLE.** `gsc_page_timeseries` (existing schema,
+   `UNIQUE(property_url, page_url, date)`) was backfilled from
+   2025-01-13 → 2026-05-25 — 16.4 months, the entire GSC retention window.
+   Before C0 it covered ~5 months (2025-12-27 → 2026-05-17) and was filtered
+   to a ~400-page "money pages" allowlist; after C0 it covers 952 distinct
+   pages with <5% click-attribution delta vs property totals across every
+   in-retention month except 2025-01 (which is partial, Jan 13+, because
+   retention starts mid-month).
+   - Rows: 165,942
+   - Distinct pages: 952
+   - Sum clicks: 107,668
+   - Sum impressions: 30,186,791
+
+3. **BACKFILL SCRIPT.** `scripts/gsc-c0-backfill-page-daily.mjs`. Reuses the
+   existing OAuth refresh-token flow (`GOOGLE_CLIENT_ID` / `_SECRET` /
+   `_REFRESH_TOKEN` in `.env.local` — same property identifier
+   `https://www.alanranger.com` as every other GSC ingest in this repo).
+   Weekly-chunked, idempotent (skip-if-populated by default, `--force`
+   override; upserts on `(property_url, page_url, date)` so re-runs replace
+   rows in place). Same `normalizeUrl()` slug shape as
+   `api/cron/backfill-money-page-timeseries.js` so the C0 rows interleave
+   cleanly with the existing money-pages cron writes.
+
+4. **QUERY DIMENSION DEFERRED.** The companion script
+   `scripts/gsc-c0-backfill-page-query-daily.mjs` exists and was smoke-tested
+   on one week (2026-05-18..24, 94,974 rows), but the **full backfill was
+   not run**. Reason: adding the `query` dimension to the GSC API silently
+   anonymises ~61% of clicks (long-tail queries below GSC's per-user privacy
+   threshold are dropped). Empirically measured for alanranger 2026-05-18..24
+   via `scripts/_gsc-dimension-loss-probe.mjs`: site totals 1,748 clicks vs
+   `dimensions:['date','page','query']` 676 clicks. Page-level totals for the
+   funnel diagnosis must come from the page-only cut to avoid charting a
+   phantom 60% decline. Keyword breakdowns (a possible later phase) can use
+   `gsc_page_query_daily` only with explicit "above GSC's privacy threshold"
+   labelling.
+
+5. **TABLE COMMENTS.** Set on Supabase for `gsc_page_timeseries` (AUTHORITATIVE
+   per-page source, slug format, CTR-as-percentage scale, coverage gap band),
+   `gsc_timeseries` (sanity-check basis only), `gsc_page_query_daily` (deferred
+   status + dimension-loss reason + CTR-as-fraction scale mismatch warning),
+   `gsc_page_metrics_28d` (DO NOT SUM, overlapping windows), and
+   `gsc_backfill_runs` (Phase C / C0 audit trail). These comments are the
+   schema-level source of truth for which table to query when.
+
+6. **CANONICAL DOC.** `Docs/REVENUE-TRUTH-PHASE-C-GSC-SOURCES.md` — sources
+   hierarchy, retention floor, normalisation function, scale conventions,
+   coverage gap table, deferred-keyword decision log, backfill-script
+   instructions, audit trail.
+
+7. **GATE 1 EVIDENCE.** Pasted in chat 2026-05-27 (V1.1 schemas/dates/PKs,
+   V1.2 sample rows, V1.3 canary `/private-photography-lessons`, V1.4 URL
+   format inventory, V1.5 coverage table for the 17 distinct
+   `canonical_products.service_page_url` values — brief said 19, actual is
+   17 — and V1.6 monthly rollup SQL). User approved Gate 1 before C0
+   started. C0.5 verification reissued after the `--force` rerun on the
+   21 originally-skipped overlap weeks (per-month click-gap reduced from
+   94-99% to 0.4-1.3% across 2026-01 → 2026-04).
+
+8. **OUT OF SCOPE FOR THIS CHANGE.** No Phase A / Phase B / Phase L tables
+   touched. No views built. No analyser changes. No UI changes. No Vercel
+   deploys. No git commits in this change. C1 (views) and C2 (analyser +
+   UI) are the next two sub-phases, each requiring separate user approval.
+
 ## [2026-05-27] - Revenue Truth tab — Round 1 revisions
 
 Six revisions to the Gate 2 tab after first user review:

@@ -1,22 +1,29 @@
-/**
- * Backfill: populate gsc_page_timeseries for money pages (last 28 days).
- *
- * Usage:
- *   node scripts/backfill-money-page-timeseries.js --propertyUrl "https://www.alanranger.com"
- *
- * Requires env:
- * - SUPABASE_URL
- * - SUPABASE_SERVICE_ROLE_KEY
- * - GOOGLE_CLIENT_ID
- * - GOOGLE_CLIENT_SECRET
- * - GOOGLE_REFRESH_TOKEN
- */
+// CLI mirror of api/cron/backfill-money-page-timeseries.js so the same fetch+
+// upsert path can be exercised locally (for ad-hoc backfills and for the
+// regression-check against the C0 backfill).
+//
+// 2026-05-27 rewrite -- now writes ALL pages returned by GSC for the property
+// (no money-pages allowlist). See the cron file header for the full rewrite
+// rationale and history.
+//
+// Usage:
+//   node scripts/backfill-money-page-timeseries.js
+//   node scripts/backfill-money-page-timeseries.js --startDate 2026-05-19 --endDate 2026-05-25
+//   node scripts/backfill-money-page-timeseries.js --daysBack 7
+//   node scripts/backfill-money-page-timeseries.js --propertyUrl https://www.alanranger.com
 
-import 'dotenv/config';
+import { config as dotenvConfig } from 'dotenv';
+dotenvConfig({ path: '.env.local' });
+dotenvConfig({ path: '.env' });
+
 import { createClient } from '@supabase/supabase-js';
+import { randomUUID } from 'node:crypto';
 import { getGSCAccessToken, normalizePropertyUrl, getGscDateRange } from '../api/aigeo/utils.js';
 
-const TAG = '[Backfill Money Page Timeseries]';
+const TAG = '[Cron mirror]';
+const ROW_LIMIT = 25000;
+const REQUEST_PAUSE_MS = 120;
+const UPSERT_BATCH = 1000;
 
 const need = (k) => {
   const v = process.env[k];
@@ -45,66 +52,28 @@ const normalizeUrl = (url) => {
   return normalized.replace(/^\/+/, '').replace(/\/+$/, '');
 };
 
-// Keep in sync with api/cron/backfill-money-page-timeseries.js — strategic pages
-// that must be synced even when the audit's "money pages" classifier excludes
-// them (Academy funnel entry points).
-// See Docs/ACADEMY_FUNNEL_INVESTIGATION_2026-05.md.
-const STRATEGIC_PAGES = [
-  'academy/login',
-  'academy/trial-expired',
-  'academy/upgrade',
-  'trial-expired',
-  'free-online-photography-course',
-  'free-photography-course',
-  'free-online-photography-academy',
-  'online-photography-course'
-];
-
-function parseMoneyPagesMetrics(rawValue) {
-  if (typeof rawValue === 'string') {
-    try { return JSON.parse(rawValue); } catch { return null; }
-  }
-  return rawValue;
+function resolveDateRange() {
+  const startDate = getArg('startDate');
+  const endDate = getArg('endDate');
+  if (startDate && endDate) return { startDate, endDate };
+  const parsedDays = Number.parseInt(getArg('daysBack'), 10);
+  const days = Number.isFinite(parsedDays) && parsedDays > 0 ? parsedDays : 7;
+  return getGscDateRange({ daysBack: days, endOffsetDays: 1 });
 }
 
-function buildPageSet(auditMoneyPages, strategicPages) {
-  const combinedSet = new Set();
-  for (const url of auditMoneyPages) {
-    const norm = normalizeUrl(url);
-    if (norm) combinedSet.add(norm);
-  }
-  for (const slug of strategicPages) {
-    const norm = normalizeUrl(slug);
-    if (norm) combinedSet.add(norm);
-  }
-  return combinedSet;
-}
-
-async function fetchLatestMoneyPages(supabase, siteUrl) {
-  const { data, error } = await supabase
-    .from('audit_results')
-    .select('audit_date, money_pages_metrics')
-    .eq('property_url', siteUrl)
-    .order('audit_date', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error || !data) {
-    throw new Error(`latest_audit_missing:${error?.message || 'no_audit'}`);
-  }
-  const metrics = parseMoneyPagesMetrics(data.money_pages_metrics);
-  return Array.isArray(metrics?.rows) ? metrics.rows.map((row) => row.url).filter(Boolean) : [];
-}
-
-async function fetchGscRows(siteUrl, startDate, endDate) {
-  const accessToken = await getGSCAccessToken();
-  const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
-  const response = await fetch(searchConsoleUrl, {
+async function fetchGscPage(siteUrl, startDate, endDate, startRow, accessToken) {
+  const url = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
+  const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ startDate, endDate, dimensions: ['date', 'page'], rowLimit: 25000 })
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      startDate,
+      endDate,
+      dimensions: ['date', 'page'],
+      rowLimit: ROW_LIMIT,
+      startRow,
+      dataState: 'final'
+    })
   });
   if (!response.ok) {
     const errorText = await response.text().catch(() => '');
@@ -114,14 +83,31 @@ async function fetchGscRows(siteUrl, startDate, endDate) {
   return Array.isArray(data.rows) ? data.rows : [];
 }
 
-function mapGscRowsToRecords(rows, siteUrl, pageSet) {
+async function fetchAllGscRows(siteUrl, startDate, endDate) {
+  const accessToken = await getGSCAccessToken();
+  const all = [];
+  let startRow = 0;
+  let apiCalls = 0;
+  for (;;) {
+    const batch = await fetchGscPage(siteUrl, startDate, endDate, startRow, accessToken);
+    apiCalls += 1;
+    if (batch.length === 0) break;
+    all.push(...batch);
+    if (batch.length < ROW_LIMIT) break;
+    startRow += ROW_LIMIT;
+    await new Promise((resolve) => setTimeout(resolve, REQUEST_PAUSE_MS));
+  }
+  return { rows: all, apiCalls };
+}
+
+function mapGscRowsToRecords(rows, siteUrl) {
   const result = [];
   for (const row of rows) {
     const date = row.keys?.[0] || null;
     const page = row.keys?.[1] || null;
     if (!date || !page) continue;
     const pageUrl = normalizeUrl(page);
-    if (!pageSet.has(pageUrl)) continue;
+    if (!pageUrl) continue;
     result.push({
       property_url: siteUrl,
       page_url: pageUrl,
@@ -158,17 +144,17 @@ function dedupeRecords(records) {
   return { records: Array.from(byKey.values()), collisions };
 }
 
-async function upsertInBatches(supabase, records, batchSize = 1000) {
+async function upsertInBatches(supabase, records) {
   let inserted = 0;
   let errors = 0;
-  for (let i = 0; i < records.length; i += batchSize) {
-    const batch = records.slice(i, i + batchSize);
+  for (let i = 0; i < records.length; i += UPSERT_BATCH) {
+    const batch = records.slice(i, i + UPSERT_BATCH);
     const { error } = await supabase
       .from('gsc_page_timeseries')
       .upsert(batch, { onConflict: 'property_url,page_url,date', ignoreDuplicates: false });
     if (error) {
       errors += 1;
-      console.warn(`${TAG} Batch ${i / batchSize + 1} error: ${error.message}`);
+      console.warn(`${TAG} Batch ${i / UPSERT_BATCH + 1} error: ${error.message}`);
     } else {
       inserted += batch.length;
     }
@@ -180,34 +166,42 @@ async function main() {
   const propertyUrl = getArg('propertyUrl', 'https://www.alanranger.com');
   const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
   const siteUrl = normalizePropertyUrl(propertyUrl);
-  const { startDate, endDate } = getGscDateRange({ daysBack: 28, endOffsetDays: 1 });
+  const { startDate, endDate } = resolveDateRange();
 
   console.log(`${TAG} property=${siteUrl} range=${startDate}..${endDate}`);
 
-  const auditMoneyPages = await fetchLatestMoneyPages(supabase, siteUrl);
-  const pageSet = buildPageSet(auditMoneyPages, STRATEGIC_PAGES);
+  const runId = `nightly-cli-${startDate}-${endDate}-${randomUUID().slice(0, 8)}`;
+  await supabase.from('gsc_backfill_runs').insert({
+    run_id: runId,
+    status: 'running',
+    date_range_start: startDate,
+    date_range_end: endDate,
+    notes: 'nightly all-pages cron (CLI invocation)'
+  });
 
-  if (pageSet.size === 0) {
-    console.log(`${TAG} No money pages or strategic pages configured.`);
-    return;
+  try {
+    const { rows, apiCalls } = await fetchAllGscRows(siteUrl, startDate, endDate);
+    console.log(`${TAG} fetched ${rows.length} rows in ${apiCalls} GSC call(s)`);
+    const { records, collisions } = dedupeRecords(mapGscRowsToRecords(rows, siteUrl));
+    console.log(`${TAG} deduped to ${records.length} unique records (${collisions} collisions)`);
+    const { inserted, errors } = await upsertInBatches(supabase, records);
+    await supabase.from('gsc_backfill_runs').update({
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+      rows_inserted: records.length,
+      rows_upserted: inserted,
+      api_calls: apiCalls,
+      error_message: errors > 0 ? `${errors} batch errors` : null
+    }).eq('run_id', runId);
+    console.log(`${TAG} done: saved=${inserted} errors=${errors} runId=${runId}`);
+  } catch (error) {
+    await supabase.from('gsc_backfill_runs').update({
+      status: 'failed',
+      completed_at: new Date().toISOString(),
+      error_message: error?.message || String(error)
+    }).eq('run_id', runId);
+    throw error;
   }
-  console.log(`${TAG} Pages: audit=${auditMoneyPages.length} strategic=${STRATEGIC_PAGES.length} combined=${pageSet.size}`);
-
-  const rows = await fetchGscRows(siteUrl, startDate, endDate);
-  const rawRecords = mapGscRowsToRecords(rows, siteUrl, pageSet);
-  const { records, collisions } = dedupeRecords(rawRecords);
-
-  if (collisions > 0) {
-    console.log(`${TAG} Deduped ${collisions} collision(s) before upsert`);
-  }
-  if (records.length === 0) {
-    console.log(`${TAG} No matching rows to save.`);
-    return;
-  }
-
-  console.log(`${TAG} Saving ${records.length} rows...`);
-  const { inserted, errors } = await upsertInBatches(supabase, records);
-  console.log(`${TAG} done: saved=${inserted} errors=${errors}`);
 }
 
 main().catch((e) => {

@@ -1,5 +1,55 @@
+// Nightly GSC page-timeseries cron.
+//
+// ─── 2026-05-27 fix: all-pages scope + rolling-7-day window ─────────────────
+// PRIOR STATE (broken). This file lived as `backfill-money-page-timeseries`
+// and filtered every fetched GSC row to a ~233-entry "money pages" allowlist
+// (audit_results.money_pages_metrics.rows[*].url + STRATEGIC_PAGES). At
+// alanranger volume the money-pages subset only earned ~12-29% of property
+// total clicks (per C0 SQL on 2026-05-27), so the cron could never write rows
+// matching property-level GSC numbers. Combined with three other defects --
+// (a) no pagination + 28-day window in a single call, (b) no `dataState:
+// 'final'` (mixed fresh + final data), (c) a duplicate-key bug in upsert
+// batches that was patched on 2026-05-19 (commit f2b90b3) -- it produced the
+// 94-99% click gap user observed for Jan-Apr 2026. See Docs/CHANGELOG.md
+// 2026-05-27 entry and Phase C0 verification log.
+//
+// FIXED STATE (this file).
+//  * Writes ALL pages returned by GSC (no allowlist filter) -- matches the
+//    Phase C0 page-daily backfill scope so cron and C0 are interchangeable.
+//  * Rolling 7-day window (default `daysBack=7`, `endOffsetDays=1`) instead
+//    of 28-day -- bounded API surface, fits the cron's idempotent nightly
+//    model, matches C0's weekly chunk size.
+//  * Paginates GSC responses with `startRow` so we don't silently lose rows
+//    if the 25k rowLimit is hit on a busy day.
+//  * Sends `dataState: 'final'` so we don't store unstable "fresh" rows that
+//    GSC will revise downward later.
+//  * Optional query params (`startDate`, `endDate`, `daysBack`) for ad-hoc
+//    manual backfills covering older windows without code changes.
+//  * Logs every run to `gsc_backfill_runs` with `notes='nightly all-pages
+//    cron'` so future operators can see when it ran without rummaging in
+//    Vercel function logs.
+//
+// REGRESSION CHECK / VERIFICATION APPROACH. After any change to this file,
+// re-run `scripts/gsc-c0-backfill-page-daily.mjs --from <start> --to <end>
+// --force` for the same window and confirm `gsc_page_timeseries` row counts
+// and totals are unchanged (cron + C0 share the same upsert path + on-conflict
+// key, so re-runs are idempotent and the rowset must be byte-identical).
+//
+// RELATED TICKET (out of scope here). `api/cron/daily-gsc-backlink.js` still
+// contains a `buildMoneyPageGridRows` zero-fill pattern that overwrites good
+// gsc_page_timeseries data with `clicks=0` for any (page, date) missing from
+// `audit.moneyPagesTimeseries`. That cron was removed from `vercel.json` on
+// 2026-04-22 (commit e081fc6), so it is dormant -- but the bug is still in
+// the source and will regress data again if anyone re-enables it. A separate
+// ticket has been filed to fix that helper before any re-schedule.
+
 import { getGSCAccessToken, normalizePropertyUrl, getGscDateRange } from '../aigeo/utils.js';
 import { createClient } from '@supabase/supabase-js';
+import { randomUUID } from 'node:crypto';
+
+const ROW_LIMIT = 25000;
+const REQUEST_PAUSE_MS = 120;
+const UPSERT_BATCH = 1000;
 
 const need = (k) => {
   const v = process.env[k];
@@ -20,23 +70,6 @@ const normalizeUrl = (url) => {
   return normalized.replace(/^\/+/, '').replace(/\/+$/, '');
 };
 
-// Strategic pages that MUST be synced regardless of whether the latest audit
-// classifies them as "money pages". The audit's click-volume threshold
-// filters out high-strategic-value URLs like the Academy entry points (the
-// /academy/login gate page only earns ~6 clicks/28d but is the conversion
-// chokepoint for the entire Academy funnel). See
-// Docs/ACADEMY_FUNNEL_INVESTIGATION_2026-05.md for the root-cause analysis.
-const STRATEGIC_PAGES = [
-  'academy/login',
-  'academy/trial-expired',
-  'academy/upgrade',
-  'trial-expired',
-  'free-online-photography-course',
-  'free-photography-course',
-  'free-online-photography-academy',
-  'online-photography-course'
-];
-
 function jsonResponse(res, status, body) {
   const baseMeta = body.meta || null;
   const meta = baseMeta
@@ -54,51 +87,27 @@ function checkAuth(req) {
   return { ok: false };
 }
 
-function parseMoneyPagesMetrics(rawValue) {
-  if (typeof rawValue === 'string') {
-    try { return JSON.parse(rawValue); } catch { return null; }
-  }
-  return rawValue;
+function resolveDateRange(req) {
+  const { startDate, endDate, daysBack } = req.query || {};
+  if (startDate && endDate) return { startDate, endDate };
+  const parsedDays = Number.parseInt(daysBack, 10);
+  const days = Number.isFinite(parsedDays) && parsedDays > 0 ? parsedDays : 7;
+  return getGscDateRange({ daysBack: days, endOffsetDays: 1 });
 }
 
-function buildPageSet(auditMoneyPages, strategicPages) {
-  const combinedSet = new Set();
-  for (const url of auditMoneyPages) {
-    const norm = normalizeUrl(url);
-    if (norm) combinedSet.add(norm);
-  }
-  for (const slug of strategicPages) {
-    const norm = normalizeUrl(slug);
-    if (norm) combinedSet.add(norm);
-  }
-  return combinedSet;
-}
-
-async function fetchLatestMoneyPages(supabase, siteUrl) {
-  const { data, error } = await supabase
-    .from('audit_results')
-    .select('audit_date, money_pages_metrics')
-    .eq('property_url', siteUrl)
-    .order('audit_date', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error || !data) {
-    throw new Error(`latest_audit_missing:${error?.message || 'no_audit'}`);
-  }
-  const metrics = parseMoneyPagesMetrics(data.money_pages_metrics);
-  return Array.isArray(metrics?.rows) ? metrics.rows.map((row) => row.url).filter(Boolean) : [];
-}
-
-async function fetchGscRows(siteUrl, startDate, endDate) {
-  const accessToken = await getGSCAccessToken();
-  const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
-  const response = await fetch(searchConsoleUrl, {
+async function fetchGscPage(siteUrl, startDate, endDate, startRow, accessToken) {
+  const url = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
+  const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ startDate, endDate, dimensions: ['date', 'page'], rowLimit: 25000 })
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      startDate,
+      endDate,
+      dimensions: ['date', 'page'],
+      rowLimit: ROW_LIMIT,
+      startRow,
+      dataState: 'final'
+    })
   });
   if (!response.ok) {
     const errorText = await response.text().catch(() => '');
@@ -111,14 +120,31 @@ async function fetchGscRows(siteUrl, startDate, endDate) {
   return Array.isArray(data.rows) ? data.rows : [];
 }
 
-function mapGscRowsToRecords(rows, siteUrl, pageSet) {
+async function fetchAllGscRows(siteUrl, startDate, endDate) {
+  const accessToken = await getGSCAccessToken();
+  const all = [];
+  let startRow = 0;
+  let apiCalls = 0;
+  for (;;) {
+    const batch = await fetchGscPage(siteUrl, startDate, endDate, startRow, accessToken);
+    apiCalls += 1;
+    if (batch.length === 0) break;
+    all.push(...batch);
+    if (batch.length < ROW_LIMIT) break;
+    startRow += ROW_LIMIT;
+    await new Promise((resolve) => setTimeout(resolve, REQUEST_PAUSE_MS));
+  }
+  return { rows: all, apiCalls };
+}
+
+function mapGscRowsToRecords(rows, siteUrl) {
   const result = [];
   for (const row of rows) {
     const date = row.keys?.[0] || null;
     const page = row.keys?.[1] || null;
     if (!date || !page) continue;
     const pageUrl = normalizeUrl(page);
-    if (!pageSet.has(pageUrl)) continue;
+    if (!pageUrl) continue;
     result.push({
       property_url: siteUrl,
       page_url: pageUrl,
@@ -155,11 +181,11 @@ function dedupeRecords(records) {
   return { records: Array.from(byKey.values()), collisions };
 }
 
-async function upsertInBatches(supabase, records, batchSize = 1000) {
+async function upsertInBatches(supabase, records) {
   let inserted = 0;
   let errors = 0;
-  for (let i = 0; i < records.length; i += batchSize) {
-    const batch = records.slice(i, i + batchSize);
+  for (let i = 0; i < records.length; i += UPSERT_BATCH) {
+    const batch = records.slice(i, i + UPSERT_BATCH);
     const { error } = await supabase
       .from('gsc_page_timeseries')
       .upsert(batch, { onConflict: 'property_url,page_url,date', ignoreDuplicates: false });
@@ -172,39 +198,61 @@ async function upsertInBatches(supabase, records, batchSize = 1000) {
   return { inserted, errors };
 }
 
+async function startRunLog(supabase, runId, startDate, endDate) {
+  await supabase.from('gsc_backfill_runs').insert({
+    run_id: runId,
+    status: 'running',
+    date_range_start: startDate,
+    date_range_end: endDate,
+    notes: 'nightly all-pages cron'
+  });
+}
+
+async function finishRunLog(supabase, runId, status, payload) {
+  await supabase.from('gsc_backfill_runs').update({
+    status,
+    completed_at: new Date().toISOString(),
+    ...payload
+  }).eq('run_id', runId);
+}
+
 async function runBackfill(req) {
   const propertyUrl = req.query.propertyUrl || process.env.CRON_PROPERTY_URL || 'https://www.alanranger.com';
   const siteUrl = normalizePropertyUrl(propertyUrl);
-  const { startDate, endDate } = getGscDateRange({ daysBack: 28, endOffsetDays: 1 });
-
+  const { startDate, endDate } = resolveDateRange(req);
   const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
-  const auditMoneyPages = await fetchLatestMoneyPages(supabase, siteUrl);
-  const pageSet = buildPageSet(auditMoneyPages, STRATEGIC_PAGES);
-
-  if (pageSet.size === 0) {
-    return { status: 200, body: { status: 'ok', message: 'No money pages or strategic pages configured', data: { saved: 0, pages: 0 } } };
+  const runId = `nightly-${startDate}-${endDate}-${randomUUID().slice(0, 8)}`;
+  await startRunLog(supabase, runId, startDate, endDate);
+  try {
+    const { rows, apiCalls } = await fetchAllGscRows(siteUrl, startDate, endDate);
+    const { records, collisions } = dedupeRecords(mapGscRowsToRecords(rows, siteUrl));
+    const { inserted, errors } = await upsertInBatches(supabase, records);
+    await finishRunLog(supabase, runId, 'completed', {
+      rows_inserted: records.length,
+      rows_upserted: inserted,
+      api_calls: apiCalls,
+      error_message: errors > 0 ? `${errors} batch errors` : null
+    });
+    return buildOkResponse({ siteUrl, startDate, endDate, runId, records, inserted, errors, collisions, apiCalls });
+  } catch (error) {
+    await finishRunLog(supabase, runId, 'failed', { error_message: error?.message || String(error) });
+    throw error;
   }
+}
 
-  const rows = await fetchGscRows(siteUrl, startDate, endDate);
-  const rawRecords = mapGscRowsToRecords(rows, siteUrl, pageSet);
-  const { records, collisions } = dedupeRecords(rawRecords);
-
-  if (records.length === 0) {
-    return { status: 200, body: { status: 'ok', message: 'No matching GSC rows for money pages', data: { saved: 0, pages: pageSet.size } } };
-  }
-
-  const { inserted, errors } = await upsertInBatches(supabase, records);
+function buildOkResponse({ siteUrl, startDate, endDate, runId, records, inserted, errors, collisions, apiCalls }) {
   return {
     status: 200,
     body: {
       status: 'ok',
-      message: `Saved ${inserted} page timeseries rows (${errors} batch errors, ${collisions} dedupe collisions)`,
+      message: `Saved ${inserted} all-pages timeseries rows (${errors} batch errors, ${collisions} dedupe collisions, ${apiCalls} GSC api calls)`,
       data: {
+        run_id: runId,
+        property_url: siteUrl,
         saved: inserted,
-        pages: pageSet.size,
-        audit_money_pages: auditMoneyPages.length,
-        strategic_pages: STRATEGIC_PAGES.length,
+        unique_records: records.length,
         dedupe_collisions: collisions,
+        api_calls: apiCalls,
         errors
       },
       meta: { startDate, endDate }
