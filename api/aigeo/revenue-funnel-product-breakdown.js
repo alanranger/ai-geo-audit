@@ -251,6 +251,7 @@ function buildProductBreakdown(products, txns, ctx) {
   const byProduct = groupTxnsByProduct(txns);
   return products
     .map(p => productRow(p, byProduct.get(p.product_title) || [], ctx))
+    .filter((r) => !(r.is_retired && (r.lifetime_txn_count || 0) === 0))
     .sort((a, b) => b.lifetime_revenue_active - a.lifetime_revenue_active);
 }
 

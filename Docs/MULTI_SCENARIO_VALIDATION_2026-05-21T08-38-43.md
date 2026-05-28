@@ -1,0 +1,52 @@
+# Multi-scenario validation report
+
+Generated: 2026-05-21T08:38:49.382Z
+Property: https://www.alanranger.com
+
+## Seasonality snapshot
+
+Current month: **May**
+URLs in monitoring: **19**
+
+_Seasonality: 72 months of booking data, blended 70% observed + 30% stated (6 tiers with enough history)._
+
+| Tier | Band | Factor |
+|---|---|---|
+| workshops_residential | Above-average month | x1.18 |
+| workshops_nonres | Below-average month | x0.62 |
+| courses | Below-average month | x0.60 |
+| services | Below-average month | x0.55 |
+| hire | GAP month | x0.41 |
+| academy | GAP month | x0.35 |
+
+## Baseline top 3
+
+- academy/ctr - "Lift CTR on free online photography course" - https://www.alanranger.com/free-online-photography-course [STALE] [seasonx0.35]
+- courses/ctr - "Lift CTR on photography courses coventry" - https://www.alanranger.com/photography-courses-coventry [STALE] [seasonx0.60]
+- hire/ctr - "Lift CTR on hire a professional photographer in coventry" - https://www.alanranger.com/hire-a-professional-photographer-in-coventry [STALE] [seasonx0.41]
+
+Suppression flags in top 8: **3**
+Seasonality-scaled in top 8: **8**
+
+## Custom weight permutations
+
+| Scenario | Top 3 URLs | Diff from baseline | Suppressed | Season-scaled |
+|---|---|---|---|---|
+| workshops_peak | https://www.alanranger.com/photo-workshops-uk/somerset-landscape-photography-workshops<br>https://www.alanranger.com/photo-workshops-uk/cotswolds-landscape-photography-workshop<br>https://www.alanranger.com/photography-workshops | 3 | 3 | 8 |
+| services_opportunity | https://www.alanranger.com/hire-a-professional-photographer-in-coventry<br>https://www.alanranger.com/quarterly-pick-n-mix-subscription<br>https://www.alanranger.com/photography-services-near-me/intermediates-lightroom-photography-course | 2 | 3 | 8 |
+
+## Auto-Optimise presets
+
+| Preset | Top 3 URLs | Diff from baseline | Suppressed | Season-scaled | Mo GP | Yr GP |
+|---|---|---|---|---|---|---|
+| easy | https://www.alanranger.com/free-online-photography-course<br>https://www.alanranger.com/hire-a-professional-photographer-in-coventry<br>https://www.alanranger.com/photography-courses-coventry | 0 | 5 | 5 | £533 | £3198 |
+| balanced | https://www.alanranger.com/free-online-photography-course<br>https://www.alanranger.com/photography-courses-coventry<br>https://www.alanranger.com/hire-a-professional-photographer-in-coventry | 0 | 7 | 8 | £610 | £3972 |
+| hard | https://www.alanranger.com/free-online-photography-course<br>https://www.alanranger.com/photography-courses-coventry<br>https://www.alanranger.com/hire-a-professional-photographer-in-coventry | 0 | 7 | 8 | £613 | £3999 |
+
+## Verdict
+
+- Auto preset vs baseline: FAIL
+- Custom vs baseline: PASS
+- Easy/Balanced/Hard cross-divergence: FAIL
+- Suppression layer firing: PASS
+- Seasonality layer firing: PASS
