@@ -13,6 +13,7 @@ import {
   trailing6SameCalendarMonthAvg
 } from '../lib/revenue-truth-current-month-pulse.mjs';
 import { buildExecSummary } from '../lib/revenue-truth-exec-summary.mjs';
+import { buildPulseRescueActions, PULSE_RESCUE_ACTIONS } from '../lib/revenue-truth-current-month-pulse-ui.mjs';
 
 const bands = { survival: 3000, comfortable: 5000, thrive: 8000 };
 
@@ -157,5 +158,17 @@ describe('revenue-truth current month pulse', () => {
     assert.equal(classifyBand(900, bands), 'below_survival');
     assert.equal(classifyBand(4000, bands), 'survival');
     assert.equal(classifyBand(6000, bands), 'comfortable');
+  });
+
+  it('pulse rescue chips are static high-margin priorities', () => {
+    const chips = buildPulseRescueActions();
+    assert.equal(chips.length, 4);
+    assert.equal(chips, PULSE_RESCUE_ACTIONS);
+    assert.equal(chips[0].tierScroll, 'courses_masterclasses');
+    assert.match(chips[0].text, /photography-courses-coventry/);
+    assert.match(chips[1].text, /17 Apr/);
+    assert.equal(chips[2].tierScroll, 'academy');
+    assert.equal(chips[3].tierScroll, 'one_to_one_lessons');
+    assert.ok(!chips.some((c) => /workshop/i.test(c.text)));
   });
 });
