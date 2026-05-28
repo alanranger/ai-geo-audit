@@ -30,6 +30,12 @@ export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
 import { buildCurrentMonthPulse } from '../../lib/revenue-truth-current-month-pulse.mjs';
+import {
+  attachRecurringToMonthly,
+  buildRecurringHeadlineStats,
+  buildRecurringForecast,
+  buildSeasonalityByProduct
+} from '../../lib/revenue-truth-recurring-baseline.mjs';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
@@ -79,18 +85,22 @@ function createSupabase() {
 }
 
 async function buildPayload(supabase, propertyUrl) {
-  const [wide, categories, gp, transactions, marketMap] = await Promise.all([
+  const [wide, categories, gp, transactions, marketMap, canonicalProducts] = await Promise.all([
     fetchMonthlyWide(supabase, propertyUrl),
     fetchMonthlyCategory(supabase, propertyUrl),
     fetchGp(supabase, propertyUrl),
     fetchTransactions(supabase, propertyUrl),
-    fetchMarketMap(supabase, propertyUrl)
+    fetchMarketMap(supabase, propertyUrl),
+    fetchCanonicalProducts(supabase)
   ]);
   const cfg = buildConfig();
-  const monthly = annotateMonthly(wide, cfg);
+  const seasonalityByProduct = buildSeasonalityByProduct(canonicalProducts);
+  const monthlyBase = annotateMonthly(wide, cfg);
+  const monthly = attachRecurringToMonthly(monthlyBase, transactions, seasonalityByProduct, cfg, classifyBand);
   const yearTotals = buildYearTotals(monthly);
   const forecast = buildForecast(monthly, cfg);
-  const currentMonthPulse = buildCurrentMonthPulse(transactions, cfg, monthly, forecast);
+  const recurringForecast = buildRecurringForecast(monthly, cfg);
+  const currentMonthPulse = buildCurrentMonthPulse(transactions, cfg, monthly, forecast, seasonalityByProduct);
   return {
     asOf: new Date().toISOString(),
     config: cfg,
@@ -98,7 +108,9 @@ async function buildPayload(supabase, propertyUrl) {
     yearTotals,
     currentMonthPulse,
     headlineStrip: buildHeadlineStrip(monthly, cfg),
+    recurringBaseline: buildRecurringHeadlineStats(monthly, cfg),
     forecast,
+    recurringForecast,
     categoryBreakdown: buildCategoryBreakdown(categories, gp, marketMap, transactions),
     // Channel + new/existing collapsed case-insensitively (canonical = first-
     // seen variant) so "Into The Blue" vs "Into the Blue" do not split into
@@ -147,11 +159,19 @@ async function fetchGp(supabase, propertyUrl) {
 async function fetchTransactions(supabase, propertyUrl) {
   const { data, error } = await supabase
     .from('booking_sheet_transactions')
-    .select('year, txn_date, category_order, category_label, funding, amount, booking_source, channel, client_type, is_jlr, is_redemption')
+    .select('year, txn_date, category_order, category_label, funding, amount, booking_source, channel, client_type, canonical_product, is_jlr, is_redemption')
     .eq('property_url', propertyUrl)
     .order('txn_date', { ascending: true });
   if (error) throw error;
   return (data || []).map(r => ({ ...r, month: monthOfIso(r.txn_date), amount: Number(r.amount), is_jlr: r.is_jlr === true, is_redemption: r.is_redemption === true }));
+}
+
+async function fetchCanonicalProducts(supabase) {
+  const { data, error } = await supabase
+    .from('canonical_products')
+    .select('product_title, seasonality_type');
+  if (error) throw error;
+  return data || [];
 }
 
 async function fetchMarketMap(supabase, _propertyUrl) {
@@ -234,11 +254,13 @@ function buildHeadlineStrip(monthly, cfg) {
     ? round2(trailing3.reduce((s, m) => s + m.headlineRevenue, 0) / trailing3.length)
     : 0;
   const ytdRow = ytdContext(monthly, cfg);
+  const recurring = buildRecurringHeadlineStats(monthly, cfg);
   return {
     latestClosedMonth: latest,
     trailing3MonthAverage: trailing3Avg,
     trailing3Band: classifyBand(trailing3Avg),
-    ytd: ytdRow
+    ytd: ytdRow,
+    recurring
   };
 }
 

@@ -69,7 +69,7 @@ async function fetchAllTransactions(supabase, propertyUrl) {
 async function fetchCanonicalProducts(supabase) {
   const { data, error } = await supabase
     .from('canonical_products')
-    .select('product_title, product_url, category, service_page_url, service_page_title, is_redemption, is_retired');
+    .select('product_title, product_url, category, service_page_url, service_page_title, is_redemption, is_retired, seasonality_type');
   if (error) throw error;
   return data || [];
 }

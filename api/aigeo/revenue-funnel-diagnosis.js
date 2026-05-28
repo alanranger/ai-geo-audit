@@ -1536,7 +1536,8 @@ function gscMetricsForSlug(slug, gscBySlug) {
     slug: key,
     impressions: cell?.impressions || 0,
     clicks: cell?.clicks || 0,
-    best_avg_position: cell?.best_avg_position ?? null
+    best_avg_position: cell?.best_avg_position ?? null,
+    monthly_series: cell?.monthly_series || []
   };
 }
 

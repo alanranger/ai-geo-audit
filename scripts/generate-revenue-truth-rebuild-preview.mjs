@@ -146,7 +146,7 @@ const html = `<!DOCTYPE html>
 
 <div id="rt-exec-summary" class="rt-exec-summary"><div class="rt-exec-head"><h3>Exec Summary — Revenue Truth</h3><span class="rt-basis-badge">Non-JLR / Net · ${WINDOW_MONTHS}mo</span></div>${execHtml}</div>
 
-<div class="rt-section rt-headline-forecast" id="rt-headline-forecast"><div style="display:flex;gap:0.6rem;align-items:baseline;flex-wrap:wrap;"><h3 style="display:inline;">2. Headline &amp; full-year forecast</h3><span class="rt-basis-badge">Headline (12-category gross)</span><span class="rt-forecast-pill">PROJECTION</span></div><div id="rt-headline-forecast-signals">${headlineForecastSignals(summary.headlineStrip, summary.config, summary.forecast, summary.currentMonthPulse)}</div><div id="rt-headline-forecast-body">${renderHeadlineForecastPanelHtml(summary.headlineStrip, summary.config, summary.forecast, summary.currentMonthPulse)}</div></div>
+<div class="rt-section rt-headline-forecast" id="rt-headline-forecast"><div style="display:flex;gap:0.6rem;align-items:baseline;flex-wrap:wrap;"><h3 style="display:inline;">2. Headline &amp; full-year forecast</h3><span class="rt-basis-badge">Headline (12-category gross)</span><span class="rt-forecast-pill">PROJECTION</span></div><div id="rt-headline-forecast-signals">${headlineForecastSignals(summary.headlineStrip, summary.config, summary.forecast, summary.currentMonthPulse)}</div><div id="rt-headline-forecast-body">${renderHeadlineForecastPanelHtml(summary.headlineStrip, summary.config, summary.forecast, summary.currentMonthPulse, summary.recurringForecast)}</div></div>
 
 <div class="rt-section" id="rt-tier-chart-section"><h3>1. Monthly revenue against tier bands</h3>${renderTierChartTable(summary.monthly, keys)}</div>
 
