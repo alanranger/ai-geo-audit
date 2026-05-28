@@ -8,7 +8,9 @@ import {
   blendProjectionWeights,
   buildDefconGauge,
   isLiveMonthLeadWorry,
-  liveMonthWorryText
+  liveMonthWorryText,
+  priorYearSameMonthFullNonJlr,
+  trailing6SameCalendarMonthAvg
 } from '../lib/revenue-truth-current-month-pulse.mjs';
 import { buildExecSummary } from '../lib/revenue-truth-exec-summary.mjs';
 
@@ -43,6 +45,36 @@ describe('revenue-truth current month pulse', () => {
     assert.equal(pulse.comparisons.prior_year_same_month.deltaGbp, -200);
   });
 
+  it('strips JLR from same-day last year and trailing-6 same-day avg', () => {
+    const txns = [
+      txn('2025-05-15', 2000, '1. Courses/masterclasses', true),
+      txn('2025-05-15', 300),
+      txn('2026-05-15', 400),
+      txn('2026-04-15', 5000),
+      txn('2026-04-15', 8000, '2. Workshops Non Residential', true),
+      txn('2026-03-15', 1000)
+    ];
+    const cfg = { tierBands: bands, now: { iso: '2026-05-28T12:00:00.000Z', year: 2026, month: 5 } };
+    const pulse = buildCurrentMonthPulse(txns, cfg, [], null);
+    assert.equal(pulse.comparisons.prior_year_same_month.amount, 300);
+    assert.ok(pulse.comparisons.trailing_6_same_day_avg.amount < 2000);
+    assert.equal(pulse.comparisons.prior_year_same_month.basis, 'nonjlr_net');
+  });
+
+  it('blend anchor prefers prior-year same month non-JLR over 6yr average', () => {
+    const txns = [
+      txn('2024-05-20', 5000),
+      txn('2025-05-20', 1000),
+      txn('2026-05-20', 700)
+    ];
+    assert.equal(priorYearSameMonthFullNonJlr(txns, 2026, 5), 1000);
+    assert.equal(trailing6SameCalendarMonthAvg(txns, 2026, 5), 3000);
+    const cfg = { tierBands: bands, now: { iso: '2026-05-28T12:00:00.000Z', year: 2026, month: 5 } };
+    const pulse = buildCurrentMonthPulse(txns, cfg, [], null);
+    assert.equal(pulse.projection.blend_anchor, 1000);
+    assert.ok(pulse.projection.blended_month_end < pulse.projection.trailing_6_same_month_avg);
+  });
+
   it('flags worst month when projection below historical low', () => {
     const txns = [];
     for (let m = 1; m <= 12; m++) {
@@ -59,10 +91,18 @@ describe('revenue-truth current month pulse', () => {
   });
 
   it('DEFCON hidden before day 5', () => {
-    const cfg = { tierBands: bands, now: { iso: '2026-05-03T12:00:00.000Z', year: 2026, month: 5 } };
-    const g = buildDefconGauge(3, 900);
+    const g = buildDefconGauge(3, 900, 700);
     assert.equal(g.active, false);
     assert.match(g.placeholder, /too early/i);
+  });
+
+  it('DEFCON dual scenario uses worse of pace and blended', () => {
+    const g = buildDefconGauge(28, 1461, 871);
+    assert.equal(g.active, true);
+    assert.equal(g.level, 4);
+    assert.equal(g.projected_month_end, 871);
+    assert.equal(g.best_case.projected_month_end, 1461);
+    assert.equal(g.worst_case.projected_month_end, 871);
   });
 
   it('DEFCON 4 at ~29% of survival', () => {
@@ -83,7 +123,7 @@ describe('revenue-truth current month pulse', () => {
     assert.equal(blendProjectionWeights(8).pace, 0.4);
     assert.equal(blendProjectionWeights(15).pace, 0.5);
     assert.equal(blendProjectionWeights(28).pace, 0.7);
-    const blend = blendedMonthEndProjection(787, 28, 31, 1200);
+    const blend = blendedMonthEndProjection(787, 28, 31, 1058);
     assert.ok(blend > 850 && blend < 980);
   });
 
@@ -98,11 +138,12 @@ describe('revenue-truth current month pulse', () => {
         pct_of_survival: 29,
         exec_worry: true
       },
-      projection: { is_worst_in_history: true },
+      projection: { linear_month_end: 871, blended_month_end: 927, is_worst_in_history: true },
       urgency: { lead_worry: true, score: 296000 }
     };
     assert.equal(isLiveMonthLeadWorry(pulse), true);
     assert.match(liveMonthWorryText(pulse), /DEFCON 4/);
+    assert.match(liveMonthWorryText(pulse), /worst-case/i);
     const out = buildExecSummary({
       summary: { currentMonthPulse: pulse, forecast: { forecastCentral: 56247 } },
       findings: null,
