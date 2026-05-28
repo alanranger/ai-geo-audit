@@ -59,6 +59,7 @@ import {
   isAcademyCommercialSlug,
   normalizePageSlug
 } from '../../lib/revenue-tier-mapping.js';
+import { loadRevenueStreamGscRoles } from '../../lib/revenue-stream-gsc-roles.js';
 
 const SITE_ORIGIN = 'https://www.alanranger.com';
 const GSC_FIRST_DAY = '2025-01-13';
@@ -174,7 +175,7 @@ function createSupabase() {
 const HIDDEN_STATES_DEFAULT = new Set(['insufficient_data', 'skipped_none']);
 
 async function buildPayload(supabase, opts) {
-  const [rows, seasonality, suppression, pageSeasonality, lifetimeRevenue, productTierMap, bookingRevenue, pageTierLookup] = await Promise.all([
+  const [rows, seasonality, suppression, pageSeasonality, lifetimeRevenue, productTierMap, bookingRevenue, pageTierLookup, gscRoleLookup] = await Promise.all([
     fetchJoinedRows(supabase, opts),
     loadBlendedSeasonality(supabase, opts.propertyUrl),
     fetchActiveSuppression(supabase),
@@ -182,8 +183,14 @@ async function buildPayload(supabase, opts) {
     fetchLifetimePageRevenue(supabase),
     fetchProductTierMap(supabase),
     fetchBookingRevenueByTier(supabase, opts.propertyUrl),
-    loadPageTierLookup()
+    loadPageTierLookup(),
+    loadRevenueStreamGscRoles(supabase)
   ]);
+  const gscBySlug = await fetchGscTotalsBySlug(
+    supabase,
+    opts.propertyUrl,
+    collectRoleGscSlugs(gscRoleLookup)
+  );
   const pages = aggregateByPage(rows, opts.windowMonths, opts.includeJlr);
   const ctx = { seasonality, suppression, opts, pageSeasonality, lifetimeRevenue };
   const allDiagnostics = pages.map(page => classifyPage(page, ctx));
@@ -197,7 +204,9 @@ async function buildPayload(supabase, opts) {
     diagnostics: filteredDiagnostics,
     bookingRevenue,
     gscWindow,
-    includeJlr: opts.includeJlr
+    includeJlr: opts.includeJlr,
+    gscRoleLookup,
+    gscBySlug
   });
   return {
     asOf: new Date().toISOString(),
@@ -1266,25 +1275,30 @@ function buildWorkshopsResidentialAttribution(allDiagnostics, includeEvent) {
   };
 }
 
-function buildTierRollup({ diagnostics, bookingRevenue, gscWindow, includeJlr }) {
+function buildTierRollup({ diagnostics, bookingRevenue, gscWindow, includeJlr, gscRoleLookup, gscBySlug }) {
   return TIER_ORDER.map(tierKey => buildTierRow({
     tierKey,
     diagnostics,
     bookingRevenue,
     gscWindow,
-    includeJlr
+    includeJlr,
+    gscRoleLookup,
+    gscBySlug
   }));
 }
 
-function buildTierRow({ tierKey, diagnostics, bookingRevenue, gscWindow, includeJlr }) {
+function buildTierRow({ tierKey, diagnostics, bookingRevenue, gscWindow, includeJlr, gscRoleLookup, gscBySlug }) {
   const def = TIER_DEFINITIONS[tierKey];
   const pagesInTier = diagnostics.filter(d => d.tier_key === tierKey);
+  const roleStream = gscRoleLookup?.streams?.find(s => s.tier_key === tierKey) || null;
   return {
     tier_key: tierKey,
     label: def.label,
     booking_category: def.bookingCategory,
     revenue_trend: tierRevenueTrend(bookingRevenue.byTier.get(tierKey)),
     gsc_trend: tierGscTrend(pagesInTier, gscWindow),
+    hub_gsc_trend: buildRoleGscOverlay('nav_hub', roleStream?.nav_hub_slugs || [], gscBySlug),
+    product_gsc_trend: buildRoleGscOverlay('product', roleStream?.product_slugs || [], gscBySlug),
     page_state_counts: tierPageStateCounts(pagesInTier),
     severity: tierSeverity(pagesInTier),
     page_count: pagesInTier.length,
@@ -1408,6 +1422,102 @@ function tierAtRiskRevenue(pages /* includeJlr handled upstream */) {
     s += Number(p.metrics?.full_window?.revenue_gbp_nonjlr) || 0;
   }
   return round2(s);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — role-aware GSC overlay (hub vs product, metadata only)
+// ---------------------------------------------------------------------------
+
+function collectRoleGscSlugs(gscRoleLookup) {
+  const slugs = new Set();
+  for (const stream of gscRoleLookup?.streams || []) {
+    for (const slug of stream.nav_hub_slugs || []) slugs.add(normalizePageSlug(slug));
+    for (const slug of stream.product_slugs || []) slugs.add(normalizePageSlug(slug));
+  }
+  return [...slugs].filter(Boolean);
+}
+
+async function fetchGscTotalsBySlug(supabase, propertyUrl, slugs) {
+  const out = new Map();
+  if (!slugs?.length) return out;
+  const pageSize = 1000;
+  for (let i = 0; i < slugs.length; i += 150) {
+    const chunk = slugs.slice(i, i + 150);
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from('gsc_page_timeseries')
+        .select('page_url, impressions, clicks, position')
+        .eq('property_url', propertyUrl)
+        .gte('date', GSC_FIRST_DAY)
+        .in('page_url', chunk)
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      const batch = data || [];
+      for (const row of batch) {
+        const slug = normalizePageSlug(row.page_url);
+        if (!slug) continue;
+        let cell = out.get(slug);
+        if (!cell) {
+          cell = { impressions: 0, clicks: 0, weightedPosSum: 0 };
+          out.set(slug, cell);
+        }
+        const imp = Number(row.impressions) || 0;
+        const clicks = Number(row.clicks) || 0;
+        const pos = Number(row.position) || 0;
+        cell.impressions += imp;
+        cell.clicks += clicks;
+        if (imp > 0) cell.weightedPosSum += pos * imp;
+      }
+      if (batch.length < pageSize) break;
+      from += pageSize;
+    }
+  }
+  for (const cell of out.values()) {
+    cell.best_avg_position = cell.impressions > 0
+      ? round2(cell.weightedPosSum / cell.impressions)
+      : null;
+    delete cell.weightedPosSum;
+  }
+  return out;
+}
+
+function buildRoleGscOverlay(role, slugs, gscBySlug) {
+  const rows = (slugs || []).map((slug) => gscMetricsForSlug(slug, gscBySlug));
+  return {
+    role,
+    slugs: rows,
+    totals: sumRoleGscRows(rows)
+  };
+}
+
+function gscMetricsForSlug(slug, gscBySlug) {
+  const key = normalizePageSlug(slug);
+  const cell = gscBySlug?.get(key);
+  return {
+    slug: key,
+    impressions: cell?.impressions || 0,
+    clicks: cell?.clicks || 0,
+    best_avg_position: cell?.best_avg_position ?? null
+  };
+}
+
+function sumRoleGscRows(rows) {
+  let impressions = 0;
+  let clicks = 0;
+  let weightedPosSum = 0;
+  for (const row of rows) {
+    impressions += row.impressions || 0;
+    clicks += row.clicks || 0;
+    if (row.impressions > 0 && row.best_avg_position != null) {
+      weightedPosSum += row.best_avg_position * row.impressions;
+    }
+  }
+  return {
+    impressions,
+    clicks,
+    best_avg_position: impressions > 0 ? round2(weightedPosSum / impressions) : null
+  };
 }
 
 // ---------------------------------------------------------------------------
