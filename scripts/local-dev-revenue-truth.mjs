@@ -33,8 +33,11 @@ const MIME = {
 };
 
 const API_ROUTES = new Map([
-  ['/api/aigeo/revenue-truth-summary',  '../api/aigeo/revenue-truth-summary.js'],
-  ['/api/aigeo/revenue-truth-findings', '../api/aigeo/revenue-truth-findings.js']
+  ['/api/aigeo/revenue-truth-summary',           '../api/aigeo/revenue-truth-summary.js'],
+  ['/api/aigeo/revenue-truth-findings',          '../api/aigeo/revenue-truth-findings.js'],
+  // Phase C / C2 part 2 -- diagnosis section on the Revenue Truth tab.
+  ['/api/aigeo/revenue-funnel-diagnosis',        '../api/aigeo/revenue-funnel-diagnosis.js'],
+  ['/api/aigeo/revenue-funnel-product-breakdown','../api/aigeo/revenue-funnel-product-breakdown.js']
 ]);
 
 function loadDotEnv(p) {
