@@ -60,35 +60,40 @@ test('nav hubs derive from service_page_url not hardcoded list', () => {
   );
 });
 
-test('commissions pick_n_mix and academy use TIER_GSC_ROLE_OVERRIDES', () => {
+test('commissions pick_n_mix and academy derive from canonical_products categories', () => {
   const lookup = buildRevenueStreamGscRoles([
     {
       product_url: 'https://www.alanranger.com/photography-services-near-me/camera-sensor-clean',
-      service_page_url: 'https://www.alanranger.com/photography-shop-services',
+      service_page_url: null,
       category: 'service'
+    },
+    {
+      product_url: null,
+      service_page_url: 'https://www.alanranger.com/hire-a-professional-photographer-in-coventry',
+      category: 'commission'
     },
     {
       product_url: 'https://www.alanranger.com/photography-services-near-me/foundation-digital-pack-plus',
       service_page_url: 'https://www.alanranger.com/free-online-photography-course',
-      category: 'digital download'
+      category: 'academy'
+    },
+    {
+      product_url: 'https://www.alanranger.com/photography-services-near-me/monthly-pick-n-mix-subscription',
+      service_page_url: 'https://www.alanranger.com/photography-payment-plan',
+      category: 'subscription/payment-plan'
     }
   ]);
 
   const commissions = lookup.streams.find((s) => s.tier_key === 'commissions');
-  assert.deepEqual(commissions.nav_hub_slugs, [
-    'corporate-photography-training',
-    'hire-a-professional-photographer-in-coventry',
-    'professional-commercial-photographer-coventry',
-    'professional-photographer-near-me'
-  ]);
-  assert.deepEqual(commissions.product_slugs, []);
+  assert.deepEqual(commissions.nav_hub_slugs, ['hire-a-professional-photographer-in-coventry']);
+  assert.deepEqual(commissions.product_slugs, ['photography-services-near-me/camera-sensor-clean']);
 
   const pickMix = lookup.streams.find((s) => s.tier_key === 'pick_n_mix_inc');
   assert.deepEqual(pickMix.nav_hub_slugs, ['photography-payment-plan']);
-  assert.equal(pickMix.product_slugs.length, 3);
+  assert.deepEqual(pickMix.product_slugs, ['photography-services-near-me/monthly-pick-n-mix-subscription']);
 
   const academy = lookup.streams.find((s) => s.tier_key === 'academy');
   assert.deepEqual(academy.nav_hub_slugs, ['free-online-photography-course']);
-  assert.equal(academy.product_slugs.length, 12);
   assert.ok(academy.product_slugs.includes('photography-services-near-me/foundation-digital-pack-plus'));
+  assert.equal(tierFromProductCategory('academy'), 'academy');
 });
