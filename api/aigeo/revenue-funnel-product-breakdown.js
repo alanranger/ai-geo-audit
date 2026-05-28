@@ -25,9 +25,13 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
+import { slugFromCanonicalUrl } from '../../lib/revenue-stream-gsc-roles.js';
+import { compareWindowMetric } from '../../lib/revenue-truth-gsc-deltas.mjs';
+import { normalizePageSlug } from '../../lib/revenue-tier-mapping.js';
 
 const DEFAULT_WINDOW_MONTHS = 17;
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
+const GSC_FIRST_DAY = '2025-01-13';
 
 // ---------------------------------------------------------------------------
 // Handler
@@ -100,9 +104,21 @@ async function buildPayload(supabase, opts) {
     return emptyPayload(opts, 'no canonical_products matched this page slug');
   }
   const productTitles = products.map(p => p.product_title);
-  const txns = await fetchTxnsForProducts(supabase, productTitles);
+  const [txns, gscBySlug] = await Promise.all([
+    fetchTxnsForProducts(supabase, productTitles),
+    fetchGscBySlug(
+      supabase,
+      opts.propertyUrl,
+      products.map((p) => slugFromCanonicalUrl(p.product_url)).filter(Boolean)
+    )
+  ]);
   const windowStart = computeWindowStartIso(opts.windowMonths);
-  const breakdown = buildProductBreakdown(products, txns, { windowStart, includeJlr: opts.includeJlr });
+  const breakdown = buildProductBreakdown(products, txns, {
+    windowStart,
+    includeJlr: opts.includeJlr,
+    windowMonths: opts.windowMonths,
+    gscBySlug
+  });
   return {
     asOf: new Date().toISOString(),
     propertyUrl: opts.propertyUrl,
@@ -136,9 +152,82 @@ function emptyPayload(opts, note) {
 async function fetchProductsForSlug(supabase, pageSlug) {
   const { data: candidates, error } = await supabase
     .from('canonical_products')
-    .select('product_title, category, typical_price_gbp, service_page_url, seasonality_type, event_months, is_retired, is_redemption');
+    .select('product_title, category, typical_price_gbp, service_page_url, product_url, seasonality_type, event_months, is_retired, is_redemption');
   if (error) throw error;
   return (candidates || []).filter(p => slugFromTargetUrl(p.service_page_url) === pageSlug);
+}
+
+async function fetchGscBySlug(supabase, propertyUrl, slugs) {
+  const out = new Map();
+  if (!slugs?.length) return out;
+  const pageSize = 1000;
+  for (let i = 0; i < slugs.length; i += 150) {
+    const chunk = slugs.slice(i, i + 150);
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from('gsc_page_timeseries')
+        .select('page_url, date, impressions, clicks, position')
+        .eq('property_url', propertyUrl)
+        .gte('date', GSC_FIRST_DAY)
+        .in('page_url', chunk)
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      const batch = data || [];
+      for (const row of batch) {
+        const slug = normalizePageSlug(row.page_url);
+        if (!slug) continue;
+        let cell = out.get(slug);
+        if (!cell) {
+          cell = { impressions: 0, clicks: 0, weightedPosSum: 0, monthly: new Map() };
+          out.set(slug, cell);
+        }
+        const imp = Number(row.impressions) || 0;
+        const clicks = Number(row.clicks) || 0;
+        const pos = Number(row.position) || 0;
+        cell.impressions += imp;
+        cell.clicks += clicks;
+        if (imp > 0) cell.weightedPosSum += pos * imp;
+        const periodStart = String(row.date || '').slice(0, 7) + '-01';
+        let month = cell.monthly.get(periodStart);
+        if (!month) {
+          month = { period_start: periodStart, impressions: 0, clicks: 0 };
+          cell.monthly.set(periodStart, month);
+        }
+        month.impressions += imp;
+        month.clicks += clicks;
+      }
+      if (batch.length < pageSize) break;
+      from += pageSize;
+    }
+  }
+  for (const cell of out.values()) {
+    cell.best_avg_position = cell.impressions > 0
+      ? round2(cell.weightedPosSum / cell.impressions)
+      : null;
+    cell.monthly_series = [...cell.monthly.values()]
+      .sort((a, b) => String(a.period_start).localeCompare(String(b.period_start)));
+    delete cell.monthly;
+    delete cell.weightedPosSum;
+  }
+  return out;
+}
+
+function gscRowForProduct(cell, seasonalityType, windowMonths) {
+  if (!cell) {
+    return { impressions: 0, clicks: 0, best_avg_position: null, impressions_delta_pct: null };
+  }
+  return {
+    impressions: cell.impressions || 0,
+    clicks: cell.clicks || 0,
+    best_avg_position: cell.best_avg_position ?? null,
+    impressions_delta_pct: compareWindowMetric(
+      cell.monthly_series,
+      windowMonths,
+      seasonalityType,
+      'impressions'
+    )
+  };
 }
 
 async function fetchTxnsForProducts(supabase, productTitles) {
@@ -179,8 +268,12 @@ function groupTxnsByProduct(txns) {
 function productRow(product, productTxns, ctx) {
   const lifetime = aggTxns(productTxns, null, ctx.includeJlr);
   const windowed = aggTxns(productTxns, ctx.windowStart, ctx.includeJlr);
+  const productSlug = slugFromCanonicalUrl(product.product_url);
+  const gscCell = productSlug ? ctx.gscBySlug?.get(productSlug) : null;
   return {
     product_title: product.product_title,
+    product_url: product.product_url || null,
+    product_slug: productSlug,
     category: product.category,
     typical_price_gbp: product.typical_price_gbp == null ? null : Number(product.typical_price_gbp),
     seasonality_type: product.seasonality_type,
@@ -197,7 +290,8 @@ function productRow(product, productTxns, ctx) {
     window_revenue_nonjlr: windowed.nonjlr,
     window_revenue_total: windowed.total,
     window_txn_count: windowed.count,
-    extends_before_window: !!(lifetime.first && ctx.windowStart && lifetime.first < ctx.windowStart)
+    extends_before_window: !!(lifetime.first && ctx.windowStart && lifetime.first < ctx.windowStart),
+    gsc: gscRowForProduct(gscCell, product.seasonality_type, ctx.windowMonths)
   };
 }
 

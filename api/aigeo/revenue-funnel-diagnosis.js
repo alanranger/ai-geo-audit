@@ -70,7 +70,7 @@ const TIER_GSC_TREND_WINDOW_MONTHS = 3;
 // ---------------------------------------------------------------------------
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
-const DEFAULT_WINDOW_MONTHS = 6;
+const DEFAULT_WINDOW_MONTHS = 12;
 const DEFAULT_MIN_IMPRESSIONS = 1000;
 const ACTIVE_CYCLE_STATUSES = ['monitoring', 'planned'];
 
@@ -135,7 +135,7 @@ function parseQuery(req) {
   const pagesParam = String(q.pages || '').trim();
   return {
     propertyUrl: String(q.propertyUrl || DEFAULT_PROPERTY).trim(),
-    windowMonths: clampInt(q.windowMonths, 3, 12, DEFAULT_WINDOW_MONTHS),
+    windowMonths: clampInt(q.windowMonths, 3, 18, DEFAULT_WINDOW_MONTHS),
     minImpressions: clampInt(q.minImpressions, 0, 1000000, DEFAULT_MIN_IMPRESSIONS),
     pages: pagesParam
       ? pagesParam.split(',').map(s => s.trim()).filter(Boolean)
@@ -1297,8 +1297,8 @@ function buildTierRow({ tierKey, diagnostics, bookingRevenue, gscWindow, include
     booking_category: def.bookingCategory,
     revenue_trend: tierRevenueTrend(bookingRevenue.byTier.get(tierKey)),
     gsc_trend: tierGscTrend(pagesInTier, gscWindow),
-    hub_gsc_trend: buildRoleGscOverlay('nav_hub', roleStream?.nav_hub_slugs || [], gscBySlug),
-    product_gsc_trend: buildRoleGscOverlay('product', roleStream?.product_slugs || [], gscBySlug),
+    hub_gsc_trend: buildRoleGscOverlay('nav_hub', roleStream?.nav_hub_slugs || [], gscBySlug, gscWindow),
+    product_gsc_trend: buildRoleGscOverlay('product', roleStream?.product_slugs || [], gscBySlug, gscWindow),
     page_state_counts: tierPageStateCounts(pagesInTier),
     severity: tierSeverity(pagesInTier),
     page_count: pagesInTier.length,
@@ -1447,7 +1447,7 @@ async function fetchGscTotalsBySlug(supabase, propertyUrl, slugs) {
     while (true) {
       const { data, error } = await supabase
         .from('gsc_page_timeseries')
-        .select('page_url, impressions, clicks, position')
+        .select('page_url, date, impressions, clicks, position')
         .eq('property_url', propertyUrl)
         .gte('date', GSC_FIRST_DAY)
         .in('page_url', chunk)
@@ -1459,7 +1459,7 @@ async function fetchGscTotalsBySlug(supabase, propertyUrl, slugs) {
         if (!slug) continue;
         let cell = out.get(slug);
         if (!cell) {
-          cell = { impressions: 0, clicks: 0, weightedPosSum: 0 };
+          cell = { impressions: 0, clicks: 0, weightedPosSum: 0, monthly: new Map() };
           out.set(slug, cell);
         }
         const imp = Number(row.impressions) || 0;
@@ -1468,6 +1468,14 @@ async function fetchGscTotalsBySlug(supabase, propertyUrl, slugs) {
         cell.impressions += imp;
         cell.clicks += clicks;
         if (imp > 0) cell.weightedPosSum += pos * imp;
+        const periodStart = String(row.date || row.period_start || '').slice(0, 7) + '-01';
+        let month = cell.monthly.get(periodStart);
+        if (!month) {
+          month = { period_start: periodStart, impressions: 0, clicks: 0 };
+          cell.monthly.set(periodStart, month);
+        }
+        month.impressions += imp;
+        month.clicks += clicks;
       }
       if (batch.length < pageSize) break;
       from += pageSize;
@@ -1477,17 +1485,47 @@ async function fetchGscTotalsBySlug(supabase, propertyUrl, slugs) {
     cell.best_avg_position = cell.impressions > 0
       ? round2(cell.weightedPosSum / cell.impressions)
       : null;
+    cell.monthly_series = [...(cell.monthly?.values() || [])]
+      .sort((a, b) => String(a.period_start).localeCompare(String(b.period_start)));
+    delete cell.monthly;
     delete cell.weightedPosSum;
   }
   return out;
 }
 
-function buildRoleGscOverlay(role, slugs, gscBySlug) {
+function buildRoleGscOverlay(role, slugs, gscBySlug, gscWindow) {
   const rows = (slugs || []).map((slug) => gscMetricsForSlug(slug, gscBySlug));
   return {
     role,
     slugs: rows,
-    totals: sumRoleGscRows(rows)
+    totals: sumRoleGscRows(rows),
+    trend: roleGscTrend(slugs, gscBySlug, gscWindow)
+  };
+}
+
+function roleGscTrend(slugs, gscBySlug, gscWindow) {
+  if (!slugs?.length || !gscWindow?.first_period) {
+    return { pct_change_impressions: null, pct_change_clicks: null };
+  }
+  const byPeriod = new Map();
+  for (const slug of slugs) {
+    const cell = gscBySlug?.get(normalizePageSlug(slug));
+    for (const m of cell?.monthly_series || []) {
+      const key = m.period_start;
+      let agg = byPeriod.get(key);
+      if (!agg) {
+        agg = { period_start: key, impressions: 0, clicks: 0 };
+        byPeriod.set(key, agg);
+      }
+      agg.impressions += Number(m.impressions) || 0;
+      agg.clicks += Number(m.clicks) || 0;
+    }
+  }
+  const pages = [{ metrics: { monthly_series: [...byPeriod.values()].sort((a, b) => String(a.period_start).localeCompare(String(b.period_start))) } }];
+  const trend = tierGscTrend(pages, gscWindow);
+  return {
+    pct_change_impressions: trend.pct_change_impressions,
+    pct_change_clicks: trend.pct_change_clicks
   };
 }
 
