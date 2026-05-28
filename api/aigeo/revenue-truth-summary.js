@@ -29,6 +29,7 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
+import { buildCurrentMonthPulse } from '../../lib/revenue-truth-current-month-pulse.mjs';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
@@ -88,13 +89,16 @@ async function buildPayload(supabase, propertyUrl) {
   const cfg = buildConfig();
   const monthly = annotateMonthly(wide, cfg);
   const yearTotals = buildYearTotals(monthly);
+  const forecast = buildForecast(monthly, cfg);
+  const currentMonthPulse = buildCurrentMonthPulse(transactions, cfg, monthly, forecast);
   return {
     asOf: new Date().toISOString(),
     config: cfg,
     monthly,
     yearTotals,
+    currentMonthPulse,
     headlineStrip: buildHeadlineStrip(monthly, cfg),
-    forecast: buildForecast(monthly, cfg),
+    forecast,
     categoryBreakdown: buildCategoryBreakdown(categories, gp, marketMap, transactions),
     // Channel + new/existing collapsed case-insensitively (canonical = first-
     // seen variant) so "Into The Blue" vs "Into the Blue" do not split into
@@ -143,11 +147,11 @@ async function fetchGp(supabase, propertyUrl) {
 async function fetchTransactions(supabase, propertyUrl) {
   const { data, error } = await supabase
     .from('booking_sheet_transactions')
-    .select('year, txn_date, category_order, category_label, funding, amount, booking_source, channel, client_type')
+    .select('year, txn_date, category_order, category_label, funding, amount, booking_source, channel, client_type, is_jlr, is_redemption')
     .eq('property_url', propertyUrl)
     .order('txn_date', { ascending: true });
   if (error) throw error;
-  return (data || []).map(r => ({ ...r, month: monthOfIso(r.txn_date), amount: Number(r.amount) }));
+  return (data || []).map(r => ({ ...r, month: monthOfIso(r.txn_date), amount: Number(r.amount), is_jlr: r.is_jlr === true, is_redemption: r.is_redemption === true }));
 }
 
 async function fetchMarketMap(supabase, _propertyUrl) {
@@ -381,6 +385,13 @@ function buildForecast(monthly, cfg) {
   const forecastCentral = round2(ytdActual + avg * monthsRemaining);
   const forecastLow = round2(ytdActual + min * monthsRemaining);
   const forecastHigh = round2(ytdActual + max * monthsRemaining);
+  const partial = monthly.find(m => m.year === year && m.isPartial);
+  const partialHeadline = partial ? partial.headlineRevenue : 0;
+  const daysInMo = partial ? new Date(Date.UTC(year, partial.month, 0)).getUTCDate() : 0;
+  const dayEl = cfg.now ? Math.min(daysInMo, new Date(cfg.now.iso).getUTCDate()) : 0;
+  const projectedPartial = dayEl > 0 ? round2((partialHeadline / dayEl) * daysInMo) : partialHeadline;
+  const monthsAfterCurrent = Math.max(0, monthsRemaining - (partial ? 1 : 0));
+  const forecastInclCurrent = round2(ytdActual + projectedPartial + avg * monthsAfterCurrent);
   return {
     year,
     ytdActual,
@@ -392,6 +403,11 @@ function buildForecast(monthly, cfg) {
     forecastCentral,
     forecastLow,
     forecastHigh,
+    forecastInclCurrent,
+    forecastInclCurrentLabel: 'Incl. current-month linear projection',
+    forecastCentralLabel: 'Closed-months-only (trailing-3 × remaining)',
+    forecastInclCurrentDelta: round2(forecastInclCurrent - forecastCentral),
+    partialMonthProjected: projectedPartial,
     annualTarget,
     monthlyTarget: TIER_BANDS.comfortable,
     varianceToAnnualTarget: round2(forecastCentral - annualTarget),

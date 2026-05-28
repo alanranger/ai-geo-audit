@@ -7,18 +7,22 @@ import handlerFindings from '../api/aigeo/revenue-truth-findings.js';
 import handlerDiagnosis from '../api/aigeo/revenue-funnel-diagnosis.js';
 import handlerBreakdown from '../api/aigeo/revenue-funnel-product-breakdown.js';
 import { renderExecSummaryHtml } from '../lib/revenue-truth-exec-summary.mjs';
+import { buildExecSummary } from '../lib/revenue-truth-exec-summary.mjs';
+import { renderCurrentMonthPulseHtml } from '../lib/revenue-truth-current-month-pulse-ui.mjs';
+import { auditExecSummaryBullets, WORRY_MAX_BULLETS } from '../lib/revenue-truth-exec-filters.mjs';
 import { renderSection9Html } from '../lib/revenue-truth-section9-ui.mjs';
 import {
-  renderHeadlineStripHtml, renderForecastHtml, renderMarketTable, renderCategoryTable,
+  renderHeadlineForecastPanelHtml, headlineForecastSignals, renderMarketTable, renderCategoryTable,
   renderProductBreakdownTable, renderPageBreakdownTable, renderReconciliationPivotTable,
   renderFundingTable, renderMoversHtml, renderTierChartTable, visibleMonthKeys
 } from '../lib/revenue-truth-tables-ui.mjs';
-import { headlineSignals, forecastSignals, channelSignals, clientsSignals } from '../lib/revenue-truth-key-signals.mjs';
+import { channelSignals, clientsSignals } from '../lib/revenue-truth-key-signals.mjs';
 import 'dotenv/config';
 
 const PROPERTY_URL = 'https://www.alanranger.com';
 const EXPAND_TIERS = new Set(['workshops_non_residential', 'courses_masterclasses']);
-const WINDOW_MONTHS = 12;
+const WINDOW_MONTHS = 3;
+const EXEC_WINDOW_CHECKS = [3, 6, 12, 18];
 const GDRIVE_FOLDER = '1rSUO_IwO2No9waM25uF-p9jL99ZFoGxv';
 
 const GSC_SPOT_CHECKS = [
@@ -51,6 +55,24 @@ function assertGscSpotChecks(hubProducts) {
     throw new Error('GSC spot-check failed — fix join before preview:\n' + failures.join('\n'));
   }
   console.log('GSC spot-checks PASS (4/4 product rows)');
+}
+
+async function verifyExecSummaryWindows(callHandler, summary, findings) {
+  const failures = [];
+  for (const wm of EXEC_WINDOW_CHECKS) {
+    const diagnosis = await callHandler(handlerDiagnosis, { windowMonths: String(wm) });
+    const { bullets } = buildExecSummary({ summary, findings, diagnosis, windowMonths: wm });
+    const audit = auditExecSummaryBullets(bullets, wm);
+    if ((bullets.worry || []).length > WORRY_MAX_BULLETS) {
+      failures.push(`${wm}mo: ${bullets.worry.length} worry bullets (max ${WORRY_MAX_BULLETS})`);
+    }
+    if (!audit.ok) failures.push(...audit.issues.map((i) => `${wm}mo: ${i}`));
+    console.log(`Exec ${wm}mo: worry=${bullets.worry.length} investigate=${bullets.investigate.length}`);
+  }
+  if (failures.length) {
+    throw new Error('Exec summary filter verification failed:\n' + failures.join('\n'));
+  }
+  console.log('Exec summary window checks PASS (' + EXEC_WINDOW_CHECKS.join('/') + 'mo)');
 }
 
 const envFile = path.resolve('.env.local');
@@ -87,6 +109,16 @@ for (const tierKey of EXPAND_TIERS) {
 }
 
 assertGscSpotChecks(hubProducts);
+await verifyExecSummaryWindows(callHandler, summary, findings);
+
+const pulseHtml = renderCurrentMonthPulseHtml(summary, diagnosis);
+if (!pulseHtml.includes('May 2026') || !/£8\d{2}|£900|£7\d{2}/.test(pulseHtml)) {
+  console.warn('Pulse preview check: May amount may differ from ~£800 — verify manually');
+}
+console.log('Pulse booked so far:', summary.currentMonthPulse?.booked_nonjlr_so_far);
+console.log('Pulse blended projected:', summary.currentMonthPulse?.projection?.blended_month_end);
+console.log('DEFCON:', summary.currentMonthPulse?.defcon?.level, summary.currentMonthPulse?.defcon?.status);
+console.log('Pulse worst in history:', summary.currentMonthPulse?.projection?.is_worst_in_history);
 
 const keys = visibleMonthKeys(summary.monthly, 'rolling13', summary.config.now);
 const section9 = renderSection9Html(diagnosis, { expandTiers: EXPAND_TIERS, windowMonths: WINDOW_MONTHS, hubProducts });
@@ -110,13 +142,13 @@ const html = `<!DOCTYPE html>
 <div class="banner"><strong>REVENUE TRUTH REBUILD PREVIEW</strong> — ${ts} UTC · <strong>NOT DEPLOYED</strong><br>
 <span class="muted">Window ${WINDOW_MONTHS}mo · §9 expanded: ${section9.expandedLabels}</span></div>
 
+<div id="rt-current-month-pulse" class="rt-current-month-pulse"><div class="rt-pulse-head-bar"><h3>Current Month Pulse</h3><span class="rt-basis-badge">Non-JLR / Net · PARTIAL</span></div>${pulseHtml}</div>
+
 <div id="rt-exec-summary" class="rt-exec-summary"><div class="rt-exec-head"><h3>Exec Summary — Revenue Truth</h3><span class="rt-basis-badge">Non-JLR / Net · ${WINDOW_MONTHS}mo</span></div>${execHtml}</div>
 
-<div class="rt-section" id="rt-headline"><h3>2. Headline</h3><div id="rt-headline-signals">${headlineSignals(summary.headlineStrip, summary.config)}</div><div class="rt-strip" id="rt-strip">${renderHeadlineStripHtml(summary.headlineStrip, summary.config)}</div></div>
+<div class="rt-section rt-headline-forecast" id="rt-headline-forecast"><div style="display:flex;gap:0.6rem;align-items:baseline;flex-wrap:wrap;"><h3 style="display:inline;">2. Headline &amp; full-year forecast</h3><span class="rt-basis-badge">Headline (12-category gross)</span><span class="rt-forecast-pill">PROJECTION</span></div><div id="rt-headline-forecast-signals">${headlineForecastSignals(summary.headlineStrip, summary.config, summary.forecast, summary.currentMonthPulse)}</div><div id="rt-headline-forecast-body">${renderHeadlineForecastPanelHtml(summary.headlineStrip, summary.config, summary.forecast, summary.currentMonthPulse)}</div></div>
 
 <div class="rt-section" id="rt-tier-chart-section"><h3>1. Monthly revenue against tier bands</h3>${renderTierChartTable(summary.monthly, keys)}</div>
-
-<div class="rt-section rt-forecast" id="rt-forecast"><h3>F. Forecast (full year)</h3><span class="rt-forecast-pill">PROJECTION</span><div id="rt-forecast-signals">${forecastSignals(summary.forecast)}</div>${renderForecastHtml(summary.forecast)}</div>
 
 <div class="rt-section rt-movers" id="rt-movers"><h3>Top declines &amp; growth</h3><div class="rt-findings-grid">${renderMoversHtml(findings, '2024->2025', false)}</div></div>
 
