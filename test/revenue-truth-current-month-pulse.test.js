@@ -166,6 +166,8 @@ describe('revenue-truth current month pulse', () => {
     assert.equal(chips, PULSE_RESCUE_ACTIONS);
     assert.equal(chips[0].tierScroll, 'courses_masterclasses');
     assert.match(chips[0].text, /photography-courses-coventry/);
+    assert.ok(chips[0].measures?.length >= 2);
+    assert.ok(chips[0].bd?.length >= 2);
     assert.match(chips[1].text, /17 Apr/);
     assert.equal(chips[2].tierScroll, 'academy');
     assert.equal(chips[3].tierScroll, 'one_to_one_lessons');
