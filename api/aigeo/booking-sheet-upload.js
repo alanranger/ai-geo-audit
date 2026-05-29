@@ -44,7 +44,7 @@
 //     filename:       "Booking Sheet 2026 - Alan Ranger Photography.xlsm",
 //     contentBase64:  "UEsDBBQABg..."   // base64 of the .xlsm bytes
 //     propertyUrl?:   "https://www.alanranger.com"
-//     minYear?:       2025               // ignore sheets older than this
+//     minYear?:       2024               // ignore sheets older than this
 //   }
 //
 // Response:
@@ -128,7 +128,7 @@ export default async function handler(req, res) {
     const wb = readWorkbookFromBuffer(buf);
     const parsed = parseBookingSheetTruth(wb, {
       propertyUrl: property,
-      minYear: Number.isFinite(Number(minYear)) ? Number(minYear) : 2025
+      minYear: Number.isFinite(Number(minYear)) ? Number(minYear) : 2024
     });
 
     if (parsed.verification.length === 0) {

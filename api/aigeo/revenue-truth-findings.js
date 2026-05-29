@@ -14,6 +14,12 @@ export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
 import { buildFindings } from '../../lib/revenue-truth-findings.mjs';
+import {
+  attachGscToFindings,
+  collectBreakdownSlugs,
+  fetchGscTotalsBySlug,
+  lastClosedMonthKeys
+} from '../../lib/revenue-truth-gsc-lookup.mjs';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 const TXN_PAGE_SIZE = 1000;
@@ -31,6 +37,11 @@ export default async function handler(req, res) {
       fetchCanonicalProducts(supabase)
     ]);
     const findings = buildFindings({ transactions, canonicalProducts });
+    const currentMonth = findings.closedMonthsCurrentYear + 1;
+    const monthKeys = lastClosedMonthKeys(findings.currentYear, currentMonth, 3);
+    const slugs = collectBreakdownSlugs(findings);
+    const gscBySlug = await fetchGscTotalsBySlug(supabase, propertyUrl, slugs);
+    attachGscToFindings(findings, gscBySlug, monthKeys);
     res.setHeader('Cache-Control', 'no-store');
     res.status(200).json(findings);
   } catch (err) {
