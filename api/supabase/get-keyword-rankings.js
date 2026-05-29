@@ -89,7 +89,50 @@ export default async function handler(req, res) {
       }
 
       let latestTimestamp = null;
-      // Prefer latest timestamp directly from keyword_rankings rows
+      // Prefer last_refreshed_at — only set on a real Ranking & AI scan, not when
+      // GSC audit re-saved cached rows (those only bump updated_at).
+      try {
+        const { data: refreshRow } = await supabase
+          .from('keyword_rankings')
+          .select('last_refreshed_at, audit_date')
+          .eq('property_url', propertyUrl)
+          .not('last_refreshed_at', 'is', null)
+          .order('last_refreshed_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (refreshRow?.last_refreshed_at) {
+          latestTimestamp = refreshRow.last_refreshed_at;
+          console.log(`[Get Keyword Rankings] Using last_refreshed_at: ${latestTimestamp} (audit_date ${refreshRow.audit_date})`);
+        }
+      } catch (refreshErr) {
+        console.log(`[Get Keyword Rankings] Failed to read last_refreshed_at: ${refreshErr.message}`);
+      }
+      // Fall back: rankingAiData.timestamp embedded by saveRankingAiData()
+      if (!latestTimestamp) {
+        try {
+          const { data: auditWithRanking } = await supabase
+            .from('audit_results')
+            .select('timestamp, created_at, ranking_ai_data')
+            .eq('property_url', propertyUrl)
+            .not('ranking_ai_data', 'is', null)
+            .order('created_at', { ascending: false })
+            .limit(5);
+          for (const row of auditWithRanking || []) {
+            const raw = row.ranking_ai_data;
+            const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            const ts = parsed?.timestamp || row.timestamp || row.created_at;
+            if (ts && parsed?.combinedRows?.length) {
+              latestTimestamp = ts;
+              console.log(`[Get Keyword Rankings] Using ranking_ai_data.timestamp: ${latestTimestamp}`);
+              break;
+            }
+          }
+        } catch (auditTsErr) {
+          console.log(`[Get Keyword Rankings] Failed ranking_ai_data timestamp lookup: ${auditTsErr.message}`);
+        }
+      }
+      // Legacy fallback: row updated_at (may reflect GSC re-save — avoid if possible)
+      if (!latestTimestamp) {
       try {
         const { data: latestRankingRow } = await supabase
           .from('keyword_rankings')
@@ -101,10 +144,11 @@ export default async function handler(req, res) {
           .maybeSingle();
         if (latestRankingRow?.updated_at || latestRankingRow?.created_at) {
           latestTimestamp = latestRankingRow.updated_at || latestRankingRow.created_at;
-          console.log(`[Get Keyword Rankings] Using keyword_rankings timestamp: ${latestTimestamp} (audit_date ${latestRankingRow.audit_date})`);
+          console.log(`[Get Keyword Rankings] Legacy fallback keyword_rankings timestamp: ${latestTimestamp} (audit_date ${latestRankingRow.audit_date})`);
         }
       } catch (rankingTsErr) {
         console.log(`[Get Keyword Rankings] Failed to read keyword_rankings timestamp: ${rankingTsErr.message}`);
+      }
       }
       // If we have an audit_date, try to get the timestamp from audit_results
       // CRITICAL FIX: Query for ANY audit_result with ranking_ai_data, not just matching audit_date

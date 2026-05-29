@@ -1734,7 +1734,8 @@ export default async function handler(req, res) {
           opportunity_score: row.opportunityScore !== null && row.opportunityScore !== undefined ? parseInt(row.opportunityScore) : null,
           // Phase 1: per-engine AI citation data (google_aio + google_ai_mode)
           ai_engines: row.ai_engines && typeof row.ai_engines === 'object' ? row.ai_engines : null,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          last_refreshed_at: new Date().toISOString()
         }));
 
         // Delete existing rows for this audit_date and property_url to avoid duplicates
