@@ -4,6 +4,7 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
+import { isRowIndexable } from '../../lib/page-indexability-policy.js';
 
 const need = (k) => {
   const v = process.env[k];
@@ -79,14 +80,102 @@ function classifyPageSegment(pageUrl) {
   return 'money';
 }
 
-// Calculate median from array
-function calculateMedian(values) {
-  if (!values || values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? (sorted[mid - 1] + sorted[mid]) / 2
-    : sorted[mid];
+function slugFromPageUrl(pageUrl) {
+  let path = String(pageUrl || '').toLowerCase();
+  try {
+    const urlObj = new URL(path);
+    path = urlObj.pathname || '/';
+  } catch {
+    path = path.split('?')[0].split('#')[0];
+  }
+  path = path.replace(/\/+$/, '') || '/';
+  return path === '/' ? '' : path.replace(/^\/+/, '');
+}
+
+async function fetchPolicyBySlug(supabase, propertyUrl) {
+  const pageSize = 1000;
+  const map = new Map();
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('revenue_gsc_joined_with_policy')
+      .select('page_slug, policy_value, policy_effective_date')
+      .eq('property_url', propertyUrl)
+      .order('page_slug', { ascending: true })
+      .order('period_start', { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const batch = data || [];
+    for (const row of batch) {
+      if (!map.has(row.page_slug)) {
+        map.set(row.page_slug, {
+          policy_value: row.policy_value ?? null,
+          policy_effective_date: row.policy_effective_date ?? null
+        });
+      }
+    }
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+  return map;
+}
+
+function enrichPageRowsWithPolicy(pageRows, policyBySlug, periodStart) {
+  return (pageRows || []).map((row) => {
+    const pol = policyBySlug.get(slugFromPageUrl(row.page_url)) || {};
+    return {
+      ...row,
+      period_start: periodStart,
+      policy_value: pol.policy_value ?? null,
+      policy_effective_date: pol.policy_effective_date ?? null
+    };
+  });
+}
+
+function computeSegmentMetrics(segmentPages) {
+  if (segmentPages.length === 0) {
+    return {
+      ctr_28d: 0,
+      clicks_28d: 0,
+      impressions_28d: 0,
+      avg_position: null,
+      page_count: 0
+    };
+  }
+
+  const totalClicks = segmentPages.reduce((sum, p) => sum + (parseFloat(p.clicks_28d) || 0), 0);
+  const totalImpressions = segmentPages.reduce((sum, p) => sum + (parseFloat(p.impressions_28d) || 0), 0);
+  const ctr = totalImpressions > 0 ? totalClicks / totalImpressions : 0;
+
+  let totalPositionWeight = 0;
+  let totalPositionImpressions = 0;
+  segmentPages.forEach(p => {
+    const impressions = parseFloat(p.impressions_28d) || 0;
+    const position = parseFloat(p.position_28d);
+    if (position && impressions > 0) {
+      totalPositionWeight += position * impressions;
+      totalPositionImpressions += impressions;
+    }
+  });
+  const avgPosition = totalPositionImpressions > 0 ? totalPositionWeight / totalPositionImpressions : null;
+
+  return {
+    ctr_28d: ctr,
+    clicks_28d: totalClicks,
+    impressions_28d: totalImpressions,
+    avg_position: avgPosition,
+    page_count: segmentPages.length
+  };
+}
+
+function appendIndexableSegmentMetrics(base, segmentPages) {
+  const indexablePages = segmentPages.filter(isRowIndexable);
+  const indexable = computeSegmentMetrics(indexablePages);
+  const out = { ...base };
+  for (const key of Object.keys(base)) out[`${key}_indexable`] = indexable[key];
+  out.rows_total_count = segmentPages.length;
+  out.rows_indexable_count = indexablePages.length;
+  return out;
 }
 
 export default async function handler(req, res) {
@@ -149,6 +238,10 @@ export default async function handler(req, res) {
       });
     }
 
+    const periodStart = dateEnd ? `${String(dateEnd).slice(0, 7)}-01` : null;
+    const policyBySlug = await fetchPolicyBySlug(supabase, siteUrl);
+    const enrichedPages = enrichPageRowsWithPolicy(pages, policyBySlug, periodStart);
+
     // Group pages by segment
     const segmentData = {
       money: [],
@@ -158,7 +251,7 @@ export default async function handler(req, res) {
       all_tracked: []
     };
 
-    pages.forEach(page => {
+    enrichedPages.forEach(page => {
       const segment = classifyPageSegment(page.page_url);
       segmentData[segment].push(page);
       segmentData.all_tracked.push(page); // Include in all_tracked
@@ -170,43 +263,20 @@ export default async function handler(req, res) {
     ['money', 'landing', 'event', 'product', 'all_tracked'].forEach(segment => {
       const segmentPages = segmentData[segment];
       if (segmentPages.length === 0) {
-        aggregates[segment] = {
+        aggregates[segment] = appendIndexableSegmentMetrics({
           ctr_28d: 0,
           clicks_28d: 0,
           impressions_28d: 0,
           avg_position: null,
           page_count: 0
-        };
+        }, []);
         return;
       }
 
-      // Sum clicks and impressions
-      const totalClicks = segmentPages.reduce((sum, p) => sum + (parseFloat(p.clicks_28d) || 0), 0);
-      const totalImpressions = segmentPages.reduce((sum, p) => sum + (parseFloat(p.impressions_28d) || 0), 0);
-      
-      // Calculate CTR (weighted by impressions)
-      const ctr = totalImpressions > 0 ? totalClicks / totalImpressions : 0;
-      
-      // Calculate weighted average position
-      let totalPositionWeight = 0;
-      let totalPositionImpressions = 0;
-      segmentPages.forEach(p => {
-        const impressions = parseFloat(p.impressions_28d) || 0;
-        const position = parseFloat(p.position_28d);
-        if (position && impressions > 0) {
-          totalPositionWeight += position * impressions;
-          totalPositionImpressions += impressions;
-        }
-      });
-      const avgPosition = totalPositionImpressions > 0 ? totalPositionWeight / totalPositionImpressions : null;
-
-      aggregates[segment] = {
-        ctr_28d: ctr,
-        clicks_28d: totalClicks,
-        impressions_28d: totalImpressions,
-        avg_position: avgPosition,
-        page_count: segmentPages.length
-      };
+      aggregates[segment] = appendIndexableSegmentMetrics(
+        computeSegmentMetrics(segmentPages),
+        segmentPages
+      );
     });
 
     return sendJSON(res, 200, { 
@@ -220,4 +290,3 @@ export default async function handler(req, res) {
     return sendJSON(res, 500, { error: err.message });
   }
 }
-

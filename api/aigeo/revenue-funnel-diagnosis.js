@@ -60,6 +60,7 @@ import {
   normalizePageSlug
 } from '../../lib/revenue-tier-mapping.js';
 import { loadRevenueStreamGscRoles } from '../../lib/revenue-stream-gsc-roles.js';
+import { applyPageVisibilityLossPolicyGuard } from '../../lib/page-indexability-policy.js';
 
 const SITE_ORIGIN = 'https://www.alanranger.com';
 const GSC_FIRST_DAY = '2025-01-13';
@@ -256,8 +257,8 @@ async function fetchJoinedRows(supabase, opts) {
   let from = 0;
   while (true) {
     let q = supabase
-      .from('revenue_gsc_joined')
-      .select('page_slug, year, month, period_start, revenue_gbp_nonjlr, revenue_gbp_total, revenue_gbp_jlr, clicks, impressions, ctr_pct, avg_position_imp_weighted, days_with_data, join_state')
+      .from('revenue_gsc_joined_with_policy')
+      .select('page_slug, year, month, period_start, revenue_gbp_nonjlr, revenue_gbp_total, revenue_gbp_jlr, clicks, impressions, ctr_pct, avg_position_imp_weighted, days_with_data, join_state, policy_value, policy_effective_date, policy_url_or_prefix, policy_match_type, policy_redirect_target, policy_note')
       .eq('property_url', opts.propertyUrl);
     if (opts.pages?.length) q = q.in('page_slug', opts.pages);
     const { data, error } = await q
@@ -481,6 +482,7 @@ function buildPageMetrics(pageRows, windowMonths, includeJlr) {
   const prior = rows.slice(priorStart, recentStart);
   return {
     page_slug: rows[0]?.page_slug || '',
+    policy_effective_date: policyEffectiveDateFromRows(rows),
     months_in_window: n,
     first_period: rows[0]?.period_start || null,
     last_period: rows[n - 1]?.period_start || null,
@@ -499,6 +501,13 @@ function buildPageMetrics(pageRows, windowMonths, includeJlr) {
 
 function pickRevenueField(r, includeJlr) {
   return includeJlr ? (Number(r.revenue_gbp_total) || 0) : (Number(r.revenue_gbp_nonjlr) || 0);
+}
+
+function policyEffectiveDateFromRows(rows) {
+  for (const r of rows) {
+    if (r.policy_effective_date) return String(r.policy_effective_date).slice(0, 10);
+  }
+  return null;
 }
 
 function summariseWindow(rows, includeJlr) {
@@ -726,7 +735,12 @@ function runClassifiers(computed, ctx) {
   if (isFunnelBypass(computed)) return buildVerdict('funnel_bypass_revenue_with_minimal_organic', computed);
   if (computed.seasonalImp?.insufficient_history) return buildVerdict('insufficient_history', computed);
   const vl = classifyVisibilityLoss(computed);
-  if (vl) return buildVerdict(vl, computed);
+  if (vl) {
+    const guard = applyPageVisibilityLossPolicyGuard(computed, vl);
+    if (guard.state) return buildVerdict(guard.state, computed, guard.policy_suppression_reason);
+    if (isTrafficRich(computed)) return buildVerdict('traffic_rich_modest_conversion', computed, guard.policy_suppression_reason);
+    return buildVerdict('matched_healthy', computed, guard.policy_suppression_reason);
+  }
   if (isTrafficRich(computed)) return buildVerdict('traffic_rich_modest_conversion', computed);
   return buildVerdict('matched_healthy', computed);
 }
@@ -780,11 +794,12 @@ function computePositionDelta(page) {
 // Verdict builder
 // ---------------------------------------------------------------------------
 
-function buildVerdict(state, c) {
+function buildVerdict(state, c, policySuppressionReason = null) {
   return {
     page_slug: c.page_slug,
     state,
     rank_score: RANK_SCORES[state] ?? 0,
+    policy_suppression_reason: policySuppressionReason,
     page_seasonality: buildPageSeasonalityBlock(c.page_class),
     seasonality_tier_key: c.seasonalImp?.tier_key ?? null,
     suppression: c.suppression_cycles

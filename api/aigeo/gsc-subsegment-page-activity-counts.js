@@ -8,8 +8,16 @@
  *   - impressionPages: unique pages with impressions > 0
  */
 
+import { createClient } from '@supabase/supabase-js';
 import { getGSCAccessToken, normalizePropertyUrl, parseDateRange } from './utils.js';
 import { classifyPageSegment, PageSegment } from './pageSegment.js';
+import { isRowIndexable } from '../../lib/page-indexability-policy.js';
+
+const need = (key) => {
+  const v = process.env[key];
+  if (!v || !String(v).trim()) throw new Error(`missing_env:${key}`);
+  return v;
+};
 
 const normalisePageUrl = (rawUrl, fallbackSiteUrl) => {
   try {
@@ -41,6 +49,74 @@ const getDashboardSubsegment = (url) => {
   }
 };
 
+function slugFromPageUrl(pageUrl) {
+  try {
+    const u = new URL(String(pageUrl || ''), 'https://x/');
+    const p = (u.pathname || '/').toLowerCase().replace(/\/+$/, '') || '/';
+    return p === '/' ? '' : p.replace(/^\/+/, '');
+  } catch {
+    return String(pageUrl || '').toLowerCase().replace(/^\/+/, '');
+  }
+}
+
+async function fetchPolicyBySlug(supabase, propertyUrl) {
+  const pageSize = 1000;
+  const map = new Map();
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('revenue_gsc_joined_with_policy')
+      .select('page_slug, policy_value, policy_effective_date')
+      .eq('property_url', propertyUrl)
+      .order('page_slug', { ascending: true })
+      .order('period_start', { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const batch = data || [];
+    for (const row of batch) {
+      if (!map.has(row.page_slug)) {
+        map.set(row.page_slug, {
+          policy_value: row.policy_value ?? null,
+          policy_effective_date: row.policy_effective_date ?? null
+        });
+      }
+    }
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+  return map;
+}
+
+function policyRowForPage(pageUrl, policyBySlug, periodStart) {
+  const pol = policyBySlug.get(slugFromPageUrl(pageUrl)) || {};
+  return {
+    page_url: pageUrl,
+    period_start: periodStart,
+    policy_value: pol.policy_value ?? null,
+    policy_effective_date: pol.policy_effective_date ?? null
+  };
+}
+
+function emptySegmentSets() {
+  return {
+    landing: new Set(),
+    event: new Set(),
+    product: new Set(),
+    other: new Set()
+  };
+}
+
+function toSegmentCounts(segment, sets) {
+  return {
+    clickPages: sets.click[segment].size,
+    impressionPages: sets.impression[segment].size,
+    clickPages_indexable: sets.clickIndexable[segment].size,
+    impressionPages_indexable: sets.impressionIndexable[segment].size,
+    rows_total_count: sets.allPages[segment].size,
+    rows_indexable_count: sets.indexablePages[segment].size
+  };
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -69,20 +145,19 @@ export default async function handler(req, res) {
 
     const { startDate, endDate } = parseDateRange(req);
     const siteUrl = normalizePropertyUrl(property);
+    const periodStart = `${String(endDate).slice(0, 7)}-01`;
+    const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
+    const policyBySlug = await fetchPolicyBySlug(supabase, siteUrl);
     const accessToken = await getGSCAccessToken();
     const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
 
-    const clickSets = {
-      landing: new Set(),
-      event: new Set(),
-      product: new Set(),
-      other: new Set()
-    };
-    const impressionSets = {
-      landing: new Set(),
-      event: new Set(),
-      product: new Set(),
-      other: new Set()
+    const sets = {
+      click: emptySegmentSets(),
+      impression: emptySegmentSets(),
+      clickIndexable: emptySegmentSets(),
+      impressionIndexable: emptySegmentSets(),
+      allPages: emptySegmentSets(),
+      indexablePages: emptySegmentSets()
     };
 
     const rowLimit = 25000;
@@ -126,8 +201,18 @@ export default async function handler(req, res) {
         const segment = getDashboardSubsegment(pageUrl);
         const clicks = Number(row?.clicks || 0);
         const impressions = Number(row?.impressions || 0);
-        if (clicks > 0) clickSets[segment].add(pageUrl);
-        if (impressions > 0) impressionSets[segment].add(pageUrl);
+        const indexable = isRowIndexable(policyRowForPage(pageUrl, policyBySlug, periodStart));
+
+        sets.allPages[segment].add(pageUrl);
+        if (indexable) sets.indexablePages[segment].add(pageUrl);
+        if (clicks > 0) {
+          sets.click[segment].add(pageUrl);
+          if (indexable) sets.clickIndexable[segment].add(pageUrl);
+        }
+        if (impressions > 0) {
+          sets.impression[segment].add(pageUrl);
+          if (indexable) sets.impressionIndexable[segment].add(pageUrl);
+        }
       });
 
       fetchedRows += rows.length;
@@ -135,20 +220,15 @@ export default async function handler(req, res) {
       startRow += rowLimit;
     }
 
-    const toCounts = (segment) => ({
-      clickPages: clickSets[segment].size,
-      impressionPages: impressionSets[segment].size
-    });
-
     return res.status(200).json({
       status: 'ok',
       source: 'gsc-subsegment-page-activity-counts',
       params: { property: siteUrl, startDate, endDate },
       data: {
-        landing: toCounts('landing'),
-        event: toCounts('event'),
-        product: toCounts('product'),
-        other: toCounts('other')
+        landing: toSegmentCounts('landing', sets),
+        event: toSegmentCounts('event', sets),
+        product: toSegmentCounts('product', sets),
+        other: toSegmentCounts('other', sets)
       },
       meta: {
         fetchedRows,
@@ -164,4 +244,3 @@ export default async function handler(req, res) {
     });
   }
 }
-

@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizePath, resolvePolicy, isPolicyActive } from '../lib/page-indexability-policy.js';
+import {
+  normalizePath,
+  resolvePolicy,
+  isPolicyActive,
+  policyPeriodStatus,
+  isRowIndexable
+} from '../lib/page-indexability-policy.js';
 
 const SEED = [
   {
@@ -45,4 +51,36 @@ test('resolvePolicy precedence and null cases', () => {
 test('isPolicyActive is false when effective_date is null', () => {
   const row = resolvePolicy('https://www.alanranger.com/photographic-workshops-near-me/x', SEED);
   assert.equal(isPolicyActive(row, '2026-05-29'), false);
+});
+
+test('policyPeriodStatus — 15 locked cases', () => {
+  assert.equal(policyPeriodStatus('2025-09-01', null), 'inactive');
+  assert.equal(policyPeriodStatus('2025-09-01', undefined), 'inactive');
+  assert.equal(policyPeriodStatus('2025-09-01', ''), 'inactive');
+  assert.equal(policyPeriodStatus('2025-09-01', '2025-12-01'), 'pre');
+  assert.equal(policyPeriodStatus('2025-09-01', '2025-10-01'), 'pre');
+  assert.equal(policyPeriodStatus('2025-09-01', '2025-09-30'), 'straddle');
+  assert.equal(policyPeriodStatus('2025-09-01', '2025-09-15'), 'straddle');
+  assert.equal(policyPeriodStatus('2025-09-01', '2025-09-01'), 'post');
+  assert.equal(policyPeriodStatus('2025-09-01', '2025-08-15'), 'post');
+  assert.equal(policyPeriodStatus('2025-09-01', '2024-01-01'), 'post');
+  assert.equal(policyPeriodStatus('2025-12-01', '2026-01-01'), 'pre');
+  assert.equal(policyPeriodStatus('2025-12-01', '2025-12-15'), 'straddle');
+  assert.equal(policyPeriodStatus('2025-12-01', '2026-01-15'), 'pre');
+  assert.throws(() => policyPeriodStatus('2025-13-01', '2025-09-01'));
+  assert.throws(() => policyPeriodStatus('', '2025-09-01'));
+});
+
+test('isRowIndexable — 11 locked cases', () => {
+  assert.equal(isRowIndexable({ policy_value: null, period_start: '2025-09-01', policy_effective_date: null }), true);
+  assert.equal(isRowIndexable({ policy_value: null, period_start: '2025-09-01', policy_effective_date: '2025-09-01' }), true);
+  assert.equal(isRowIndexable({ policy_value: 'indexed', period_start: '2025-09-01', policy_effective_date: '2025-08-01' }), true);
+  assert.equal(isRowIndexable({ policy_value: 'other', period_start: '2025-09-01', policy_effective_date: null }), false);
+  assert.equal(isRowIndexable({ policy_value: 'intentional_noindex', period_start: '2025-09-01', policy_effective_date: null }), true);
+  assert.equal(isRowIndexable({ policy_value: 'intentional_noindex', period_start: '2025-06-01', policy_effective_date: '2025-09-15' }), true);
+  assert.equal(isRowIndexable({ policy_value: 'intentional_noindex', period_start: '2025-09-01', policy_effective_date: '2025-09-15' }), false);
+  assert.equal(isRowIndexable({ policy_value: 'intentional_noindex', period_start: '2025-10-01', policy_effective_date: '2025-09-15' }), false);
+  assert.equal(isRowIndexable({ policy_value: 'retired_redirect', period_start: '2025-10-01', policy_effective_date: '2025-09-15' }), false);
+  assert.equal(isRowIndexable({ policy_value: 'retired_redirect', period_start: '2025-06-01', policy_effective_date: '2025-09-15' }), true);
+  assert.equal(isRowIndexable(null), true);
 });

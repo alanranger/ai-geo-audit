@@ -12,6 +12,7 @@ export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
 import { readLatestGa4Metrics } from './ga4-data.js';
+import { isRowIndexable } from '../../lib/page-indexability-policy.js';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
@@ -277,7 +278,54 @@ async function fetchPageMetrics(supabase, propertyUrl) {
   return { rows: data || [], dateEnd: latestEnd };
 }
 
-function computeKpis(pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap) {
+async function fetchPolicyBySlug(supabase, propertyUrl) {
+  const pageSize = 1000;
+  const map = new Map();
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('revenue_gsc_joined_with_policy')
+      .select('page_slug, policy_value, policy_effective_date')
+      .eq('property_url', propertyUrl)
+      .order('page_slug', { ascending: true })
+      .order('period_start', { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const batch = data || [];
+    for (const row of batch) {
+      if (!map.has(row.page_slug)) {
+        map.set(row.page_slug, {
+          policy_value: row.policy_value ?? null,
+          policy_effective_date: row.policy_effective_date ?? null
+        });
+      }
+    }
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+  return map;
+}
+
+function slugFromPageUrl(pageUrl) {
+  const p = pathOf(pageUrl);
+  if (!p || p === '/') return '';
+  return p.replace(/^\/+/, '');
+}
+
+function enrichPageRowsWithPolicy(pageRows, policyBySlug, periodStart) {
+  return (pageRows || []).map((row) => {
+    const slug = slugFromPageUrl(row.page_url);
+    const pol = policyBySlug.get(slug) || {};
+    return {
+      ...row,
+      period_start: periodStart,
+      policy_value: pol.policy_value ?? null,
+      policy_effective_date: pol.policy_effective_date ?? null
+    };
+  });
+}
+
+function computeKpisCore(pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap) {
   const totals = pageRows.reduce((acc, r) => {
     const clicks = Number(r.clicks_28d) || 0;
     const impr = Number(r.impressions_28d) || 0;
@@ -314,6 +362,19 @@ function computeKpis(pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap) {
     audit_date_latest: auditLatest ? auditLatest.audit_date : null,
     audit_date_prior: auditPrior ? auditPrior.audit_date : null
   };
+}
+
+function appendIndexableKpis(kpis, pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap) {
+  const indexableRows = pageRows.filter(isRowIndexable);
+  const indexable = computeKpisCore(indexableRows, auditLatest, auditPrior, revenueSnap, ga4Snap);
+  const out = { ...kpis };
+  for (const key of Object.keys(kpis)) out[`${key}_indexable`] = indexable[key];
+  return out;
+}
+
+function computeKpis(pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap) {
+  const base = computeKpisCore(pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap);
+  return appendIndexableKpis(base, pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap);
 }
 
 function computeFunnel(kpis, revenueSnap, ga4Snap) {
@@ -1244,19 +1305,22 @@ export default async function handler(req, res) {
   const propertyUrl = String(req.query?.propertyUrl || DEFAULT_PROPERTY).trim();
   try {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
-    const [audits, pageMetrics, revenueSnap, aiMap, priorities, revenueHistory, ga4Snap] = await Promise.all([
+    const [audits, pageMetrics, revenueSnap, aiMap, priorities, revenueHistory, ga4Snap, policyBySlug] = await Promise.all([
       fetchLatestAudit(supabase, propertyUrl),
       fetchPageMetrics(supabase, propertyUrl),
       fetchLatestRevenue(supabase, propertyUrl),
       fetchAiOverviewMap(supabase, propertyUrl),
       fetchPrioritiesWithCycle(supabase, propertyUrl),
       fetchRevenueHistory(supabase, propertyUrl),
-      readLatestGa4Metrics(supabase, propertyUrl)
+      readLatestGa4Metrics(supabase, propertyUrl),
+      fetchPolicyBySlug(supabase, propertyUrl)
     ]);
     const pageRows = pageMetrics.rows;
+    const periodStart = pageMetrics.dateEnd ? `${String(pageMetrics.dateEnd).slice(0, 7)}-01` : null;
+    const enrichedPageRows = enrichPageRowsWithPolicy(pageRows, policyBySlug, periodStart);
     const auditLatest = audits[0] || null;
     const auditPrior = audits[1] || null;
-    const kpis = computeKpis(pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap);
+    const kpis = computeKpis(enrichedPageRows, auditLatest, auditPrior, revenueSnap, ga4Snap);
     const funnel = computeFunnel(kpis, revenueSnap, ga4Snap);
     const leakPages = pickLeakPages(pageRows);
     const earningPages = pickEarningPages(pageRows);
@@ -1285,6 +1349,8 @@ export default async function handler(req, res) {
           .map(([eventName, count]) => ({ eventName, count: Number(count) || 0 }))
       } : null,
       kpis,
+      rows_total_count: enrichedPageRows.length,
+      rows_indexable_count: enrichedPageRows.filter(isRowIndexable).length,
       kpi_targets: kpiTargets,
       funnel,
       top_leak_pages: leakPages,
