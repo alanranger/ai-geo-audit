@@ -68,15 +68,15 @@ async function main() {
     else fail('Chevron expands on click');
 
     await page.click('.rt-opp-row[data-tier-anchor="one_to_one_lessons"]');
-    await page.waitForTimeout(1200);
-    const tierRow = page.locator('#rt-diag-tier-one_to_one_lessons');
-    const inView = await tierRow.evaluate((el) => {
-      const r = el.getBoundingClientRect();
-      return r.top >= 0 && r.top < window.innerHeight;
-    }).catch(() => false);
-    const expanded = await tierRow.evaluate((el) => el && !el.classList.contains('is-collapsed')).catch(() => false);
-    if (inView || expanded) pass('Row click scrolls to §9 tier', 'one_to_one_lessons visible/expanded');
-    else fail('Row click scrolls to §9 tier', 'tier row not in view');
+    await page.waitForFunction(() => {
+      const row = document.getElementById('rt-diag-tier-one_to_one_lessons');
+      if (!row) return false;
+      const r = row.getBoundingClientRect();
+      const inView = r.top >= 0 && r.top < window.innerHeight * 0.85;
+      const expanded = !row.classList.contains('is-collapsed');
+      return inView || expanded;
+    }, { timeout: 8000 }).then(() => pass('Row click scrolls to §9 tier', 'one_to_one_lessons visible/expanded'))
+      .catch(() => fail('Row click scrolls to §9 tier', 'tier row not in view after 8s'));
   } catch (err) {
     fail('Unexpected error', err.message);
   } finally {
