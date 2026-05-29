@@ -5,6 +5,8 @@
 // "Sales YYYY" tab (the SINGLE SOURCE OF TRUTH for total revenue), and
 // upserts into:
 //   - public.booking_sheet_monthly_category  (verbatim 12-category truth)
+//   - public.booking_sheet_category_gp       (per-year GP rates)
+//   - public.booking_sheet_transactions      (transaction drilldown rows)
 //   - then refreshes booking_sheet_monthly_wide materialised view
 //
 // 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX (Phase L): this endpoint previously
@@ -52,11 +54,14 @@
 //     verification: [ { sheet, year, derivedYearSum, ytdActualValue,
 //                       ytdActualCell, reconciles } ],
 //     category_rows_written: 133,
+//     gp_rows_written: 24,
+//     transaction_rows_written: 918,
 //     totals_by_year:        { "2025": 46567.46, "2026": 19598.04 },
 //     warnings:              []
 //   }
 
 import { createClient } from '@supabase/supabase-js';
+import { persistBookingSheetTruth } from '../../lib/booking-sheet-persist.mjs';
 import {
   readWorkbookFromBuffer,
   parseBookingSheetTruth
@@ -88,29 +93,6 @@ function totalsByYear(perCategoryRows) {
     out[r.year] = Number(((out[r.year] || 0) + Number(r.revenue_amount || 0)).toFixed(2));
   }
   return out;
-}
-
-function chunk(arr, n) {
-  const out = [];
-  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
-  return out;
-}
-
-async function clearExistingForProperty(supabase, propertyUrl) {
-  const del = await supabase.from('booking_sheet_monthly_category').delete().eq('property_url', propertyUrl);
-  if (del.error) throw new Error(`clear booking_sheet_monthly_category failed: ${del.error.message}`);
-}
-
-async function upsertChunks(supabase, table, rows) {
-  for (const batch of chunk(rows, 500)) {
-    const { error } = await supabase.from(table).upsert(batch);
-    if (error) throw new Error(`${table} upsert failed: ${error.message}`);
-  }
-}
-
-async function refreshWideView(supabase) {
-  const { error } = await supabase.rpc('refresh_booking_sheet_monthly_wide');
-  if (error) throw new Error(`view refresh failed: ${error.message}`);
 }
 
 // Reconcile every parsed sheet against its own "YTD Actual" cell. If any
@@ -170,18 +152,18 @@ export default async function handler(req, res) {
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-    await clearExistingForProperty(supabase, property);
-    await upsertChunks(supabase, 'booking_sheet_monthly_category', parsed.monthlyPerCategory);
-    await refreshWideView(supabase);
+    const written = await persistBookingSheetTruth(supabase, property, parsed);
 
     return res.status(200).json({
       ok: true,
       filename: filename || null,
       tabs_read: parsed.verification.map(v => v.sheet),
       verification: parsed.verification,
-      category_rows_written: parsed.monthlyPerCategory.length,
+      category_rows_written: written.category_rows_written,
+      gp_rows_written: written.gp_rows_written,
+      transaction_rows_written: written.transaction_rows_written,
       totals_by_year: totalsByYear(parsed.monthlyPerCategory),
-      warnings: parsed.warnings
+      warnings: written.warnings
     });
   } catch (e) {
     return res.status(500).json({ error: e?.message || 'Unknown error parsing Booking Sheet' });

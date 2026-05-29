@@ -36,6 +36,13 @@ import {
   buildRecurringForecast,
   buildSeasonalityByProduct
 } from '../../lib/revenue-truth-recurring-baseline.mjs';
+import {
+  applyJlrToCategoryBreakdown,
+  applyJlrToMonthly,
+  buildJlrByCatMonth,
+  buildJlrByMonth,
+  filterTxnsForJlr
+} from '../../lib/revenue-truth-jlr-filter.mjs';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
@@ -67,8 +74,9 @@ export default async function handler(req, res) {
   }
   try {
     const propertyUrl = (req.query?.propertyUrl || DEFAULT_PROPERTY).trim();
+    const includeJlr = parseIncludeJlr(req.query?.includeJlr);
     const supabase = createSupabase();
-    const payload = await buildPayload(supabase, propertyUrl);
+    const payload = await buildPayload(supabase, propertyUrl, includeJlr);
     res.setHeader('Cache-Control', 'no-store');
     res.status(200).json(payload);
   } catch (err) {
@@ -84,7 +92,7 @@ function createSupabase() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-async function buildPayload(supabase, propertyUrl) {
+async function buildPayload(supabase, propertyUrl, includeJlr) {
   const [wide, categories, gp, transactions, marketMap, canonicalProducts] = await Promise.all([
     fetchMonthlyWide(supabase, propertyUrl),
     fetchMonthlyCategory(supabase, propertyUrl),
@@ -93,14 +101,20 @@ async function buildPayload(supabase, propertyUrl) {
     fetchMarketMap(supabase, propertyUrl),
     fetchCanonicalProducts(supabase)
   ]);
-  const cfg = buildConfig();
+  const cfg = buildConfig(includeJlr);
   const seasonalityByProduct = buildSeasonalityByProduct(canonicalProducts);
+  const jlrByMonth = includeJlr ? new Map() : buildJlrByMonth(transactions);
+  const jlrByCatMonth = includeJlr ? new Map() : buildJlrByCatMonth(transactions);
+  const txnRows = filterTxnsForJlr(transactions, includeJlr);
   const monthlyBase = annotateMonthly(wide, cfg);
-  const monthly = attachRecurringToMonthly(monthlyBase, transactions, seasonalityByProduct, cfg, classifyBand);
+  const monthlyWithRecurring = attachRecurringToMonthly(monthlyBase, transactions, seasonalityByProduct, cfg, classifyBand);
+  const monthly = includeJlr ? monthlyWithRecurring : applyJlrToMonthly(monthlyWithRecurring, jlrByMonth, classifyBand);
   const yearTotals = buildYearTotals(monthly);
   const forecast = buildForecast(monthly, cfg);
   const recurringForecast = buildRecurringForecast(monthly, cfg);
   const currentMonthPulse = buildCurrentMonthPulse(transactions, cfg, monthly, forecast, seasonalityByProduct);
+  const categoryBreakdown = buildCategoryBreakdown(categories, gp, marketMap, txnRows);
+  const categoryAdjusted = includeJlr ? categoryBreakdown : applyJlrToCategoryBreakdown(categoryBreakdown, jlrByCatMonth);
   return {
     asOf: new Date().toISOString(),
     config: cfg,
@@ -111,13 +125,10 @@ async function buildPayload(supabase, propertyUrl) {
     recurringBaseline: buildRecurringHeadlineStats(monthly, cfg),
     forecast,
     recurringForecast,
-    categoryBreakdown: buildCategoryBreakdown(categories, gp, marketMap, transactions),
-    // Channel + new/existing collapsed case-insensitively (canonical = first-
-    // seen variant) so "Into The Blue" vs "Into the Blue" do not split into
-    // two rows. The user noted source-data tidying as a future workbook task.
-    channelMix: groupByValue(transactions, t => t.channel || (t.client_type === 'Existing' ? 'Existing' : 'Unknown')),
-    newVsExisting: groupByValue(transactions, t => t.client_type || 'Unknown'),
-    fundingFees: buildFundingFees(transactions),
+    categoryBreakdown: categoryAdjusted,
+    channelMix: groupByValue(txnRows, t => t.channel || (t.client_type === 'Existing' ? 'Existing' : 'Unknown')),
+    newVsExisting: groupByValue(txnRows, t => t.client_type || 'Unknown'),
+    fundingFees: buildFundingFees(txnRows),
     gpRates: gp.map(r => ({ year: r.year, category_order: r.category_order, category_label: r.category_label, gp_rate: Number(r.gp_rate) }))
   };
 }
@@ -190,17 +201,23 @@ async function fetchMarketMap(supabase, _propertyUrl) {
 // Annotation + shaping helpers (each one small)
 // ----------------------------------------------------------------------
 
-function buildConfig() {
+function buildConfig(includeJlr) {
   const now = new Date();
   return {
     tierBands: TIER_BANDS,
     feeRules: FEE_RULES,
+    includeJlr: includeJlr === true,
     now: {
       iso: now.toISOString(),
       year: now.getUTCFullYear(),
       month: now.getUTCMonth() + 1
     }
   };
+}
+
+function parseIncludeJlr(raw) {
+  const v = String(raw ?? 'false').toLowerCase();
+  return v === 'true' || v === '1';
 }
 
 function annotateMonthly(wideRows, cfg) {

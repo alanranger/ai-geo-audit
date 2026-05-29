@@ -41,6 +41,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import { readWorkbookFromBuffer, parseBookingSheetTruth } from '../lib/booking-sheet-truth-parser.mjs';
+import { persistBookingSheetTruth } from '../lib/booking-sheet-persist.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -210,34 +211,6 @@ function printGpTopline(gpPerCategory) {
   }
 }
 
-async function clearExistingRowsForProperty(supabase) {
-  await supabase.from('booking_sheet_monthly_category').delete().eq('property_url', PROPERTY_URL);
-  await supabase.from('booking_sheet_category_gp').delete().eq('property_url', PROPERTY_URL);
-  await supabase.from('booking_sheet_transactions').delete().eq('property_url', PROPERTY_URL);
-}
-
-function chunk(arr, n) {
-  const out = [];
-  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
-  return out;
-}
-
-async function upsertChunks(supabase, table, rows) {
-  for (const batch of chunk(rows, 500)) {
-    const { error } = await supabase.from(table).upsert(batch);
-    if (error) throw new Error(`${table} upsert failed: ${error.message}`);
-  }
-}
-
-async function refreshWideView(supabase) {
-  const { error } = await supabase.rpc('refresh_booking_sheet_monthly_wide');
-  if (error) throw new Error(`view refresh failed: ${error.message}`);
-}
-
-// --------------------------------------------------------------------------
-// Main
-// --------------------------------------------------------------------------
-
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   console.log(`backfill-booking-sheet-monthly: dryRun=${args.dryRun}`);
@@ -265,12 +238,8 @@ async function main() {
   const supabase = createClient(url, key, { auth: { persistSession: false } });
 
   console.log('--- writing to Supabase ---');
-  await clearExistingRowsForProperty(supabase);
-  await upsertChunks(supabase, 'booking_sheet_monthly_category', combined.monthlyPerCategory);
-  await upsertChunks(supabase, 'booking_sheet_category_gp', combined.gpPerCategory);
-  await upsertChunks(supabase, 'booking_sheet_transactions', combined.transactionRows);
-  await refreshWideView(supabase);
-  console.log(`wrote ${combined.monthlyPerCategory.length} category rows + ${combined.gpPerCategory.length} GP rows + ${combined.transactionRows.length} transactions. wide view refreshed.`);
+  const written = await persistBookingSheetTruth(supabase, PROPERTY_URL, combined);
+  console.log(`wrote ${written.category_rows_written} category rows + ${written.gp_rows_written} GP rows + ${written.transaction_rows_written} transactions. wide view refreshed.`);
 }
 
 main().catch(err => {
