@@ -64,7 +64,31 @@ async function fetchRowCount(supabase, propertyUrl, source) {
   return count || 0;
 }
 
+async function fetchBookingSheetTruthStatus(supabase, propertyUrl) {
+  const [{ count: txnCount, error: countErr }, { data: latest, error: latestErr }] = await Promise.all([
+    supabase.from('booking_sheet_transactions')
+      .select('id', { count: 'exact', head: true })
+      .eq('property_url', propertyUrl),
+    supabase.from('booking_sheet_transactions')
+      .select('created_at, txn_date')
+      .eq('property_url', propertyUrl)
+      .order('created_at', { ascending: false })
+      .limit(1)
+  ]);
+  if (countErr) throw countErr;
+  if (latestErr) throw latestErr;
+  const row = latest?.[0] || null;
+  return {
+    source: 'booking_sheet',
+    last_synced_at: row?.created_at || null,
+    last_period_end: row?.txn_date || null,
+    row_count: txnCount || 0,
+    row_count_unit: 'txns'
+  };
+}
+
 async function buildStatusForSource(supabase, propertyUrl, source) {
+  if (source === 'booking_sheet') return fetchBookingSheetTruthStatus(supabase, propertyUrl);
   const latest = await fetchMaxCreatedAt(supabase, propertyUrl, source);
   const rowCount = await fetchRowCount(supabase, propertyUrl, source);
   return {
