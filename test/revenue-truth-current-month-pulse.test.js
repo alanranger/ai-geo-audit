@@ -100,21 +100,29 @@ describe('revenue-truth current month pulse', () => {
   it('DEFCON dual scenario uses worse of pace and blended', () => {
     const g = buildDefconGauge(28, 1461, 871);
     assert.equal(g.active, true);
-    assert.equal(g.level, 4);
+    assert.equal(g.level, 5);
     assert.equal(g.projected_month_end, 871);
     assert.equal(g.best_case.projected_month_end, 1461);
     assert.equal(g.worst_case.projected_month_end, 871);
   });
 
-  it('DEFCON 4 at ~29% of survival', () => {
+  it('DEFCON 5 at ~29% of survival (narrowed 4–5 band)', () => {
     const d = computeDefcon(871, 3000);
+    assert.equal(d.level, 5);
+    assert.equal(d.status, 'EXTREME');
+    assert.equal(d.pips, 5);
+    assert.equal(d.pulse, true);
+    assert.equal(d.pip_display, '●●●●●');
+  });
+
+  it('DEFCON 4 between 30% and 45%', () => {
+    const d = computeDefcon(1200, 3000);
     assert.equal(d.level, 4);
     assert.equal(d.status, 'CRITICAL');
     assert.equal(d.pips, 4);
-    assert.equal(d.pip_display, '●●●●○');
   });
 
-  it('DEFCON 5 below 25% with pulse flag', () => {
+  it('DEFCON 5 below 30% with pulse flag', () => {
     const d = computeDefcon(700, 3000);
     assert.equal(d.level, 5);
     assert.equal(d.pulse, true);
@@ -128,13 +136,16 @@ describe('revenue-truth current month pulse', () => {
     assert.ok(blend > 850 && blend < 980);
   });
 
-  it('exec summary leads with DEFCON line when level >= 3', () => {
+  it('exec summary surfaces DEFCON in tracker when level >= 3', () => {
     const pulse = {
       month_label: 'May 2026',
+      year: 2026,
+      month: 5,
+      booked_nonjlr_so_far: 807,
       defcon: {
         active: true,
-        level: 4,
-        status: 'CRITICAL',
+        level: 5,
+        status: 'EXTREME',
         projected_month_end: 871,
         pct_of_survival: 29,
         exec_worry: true
@@ -143,15 +154,25 @@ describe('revenue-truth current month pulse', () => {
       urgency: { lead_worry: true, score: 296000 }
     };
     assert.equal(isLiveMonthLeadWorry(pulse), true);
-    assert.match(liveMonthWorryText(pulse), /DEFCON 4/);
+    assert.match(liveMonthWorryText(pulse), /DEFCON 5/);
     assert.match(liveMonthWorryText(pulse), /worst-case/i);
     const out = buildExecSummary({
-      summary: { currentMonthPulse: pulse, forecast: { forecastCentral: 56247 } },
+      summary: {
+        monthly: [
+          { year: 2026, month: 3, headlineRevenue: 2800, isClosed: true },
+          { year: 2026, month: 4, headlineRevenue: 2600, isClosed: true },
+          { year: 2026, month: 5, headlineRevenue: 807, isPartial: true }
+        ],
+        config: { tierBands: bands, now: { year: 2026, month: 5 } },
+        currentMonthPulse: pulse,
+        forecast: { forecastCentral: 56247 }
+      },
       findings: null,
       diagnosis: { tier_reconciliation: { passes: true }, diagnostics: [] },
       windowMonths: 3
     });
-    assert.match(out.bullets.worry[0].text, /DEFCON 4/);
+    assert.ok(out.tracker.rows.some((r) => r.chip?.text === 'DEFCON 5'));
+    assert.ok(out.cards.worry.items.length >= 1);
   });
 
   it('classifies bands consistently', () => {

@@ -86,7 +86,7 @@ describe('revenue-truth exec filters', () => {
     assert.equal(delta, null);
   });
 
-  it('caps worry bullets at five', () => {
+  it('caps worry card items at five', () => {
     const baseMonths = [];
     for (let y = 2025; y <= 2026; y++) {
       for (let m = 1; m <= 12; m++) {
@@ -102,12 +102,20 @@ describe('revenue-truth exec filters', () => {
       }
     }));
     const out = buildExecSummary({
-      summary: { forecast: { forecastCentral: 50000 } },
+      summary: {
+        forecast: { forecastCentral: 50000 },
+        monthly: [
+          { year: 2026, month: 1, headlineRevenue: 2000, isClosed: true },
+          { year: 2026, month: 2, headlineRevenue: 2100, isClosed: true },
+          { year: 2026, month: 3, headlineRevenue: 2200, isClosed: true }
+        ],
+        config: { tierBands: { survival: 3000, comfortable: 5000, thrive: 8000 } }
+      },
       findings: null,
       diagnosis: { tier_rollup: [], diagnostics: diags, tier_reconciliation: { passes: true } },
       windowMonths: 3
     });
-    assert.ok(out.bullets.worry.length <= WORRY_MAX_BULLETS);
+    assert.ok(out.cards.worry.items.length <= WORRY_MAX_BULLETS);
   });
 
   it('excludes retired findings from worry', () => {
@@ -133,7 +141,7 @@ describe('revenue-truth exec filters', () => {
 
   it('audit helper flags blocked tokens', () => {
     const audit = auditExecSummaryBullets({
-      worry: [{ text: '/about-alan-ranger: impressions -30%' }]
+      cards: { worry: { items: [{ label: '/about-alan-ranger: impressions -30%' }] } }
     }, 3);
     assert.equal(audit.ok, false);
     assert.match(audit.issues[0], /about-alan-ranger/);
