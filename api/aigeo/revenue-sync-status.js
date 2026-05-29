@@ -64,15 +64,91 @@ async function fetchRowCount(supabase, propertyUrl, source) {
   return count || 0;
 }
 
+function normalizeDomainHost(propertyUrl) {
+  let s = String(propertyUrl || DEFAULT_PROPERTY).trim().toLowerCase();
+  s = s.replace(/^https?:\/\//i, '').split('/')[0].replace(/^www\./, '');
+  return s.replace(/:\d+$/, '') || 'alanranger.com';
+}
+
+function propertyUrlCandidates(propertyUrl) {
+  const raw = String(propertyUrl || DEFAULT_PROPERTY).trim();
+  const out = new Set([raw]);
+  try {
+    const u = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    out.add(`${u.protocol}//${u.hostname}`);
+    if (u.hostname.startsWith('www.')) {
+      out.add(`${u.protocol}//${u.hostname.replace(/^www\./, '')}`);
+    } else {
+      out.add(`${u.protocol}//www.${u.hostname}`);
+    }
+  } catch (_) { /* keep raw only */ }
+  return [...out];
+}
+
+async function fetchDfsBacklinkStatus(supabase, propertyUrl) {
+  const host = normalizeDomainHost(propertyUrl);
+  const { data, error } = await supabase
+    .from('dfs_backlink_ingest_state')
+    .select('last_full_at, domain_host')
+    .eq('domain_host', host)
+    .maybeSingle();
+  if (error) throw error;
+  return {
+    source: 'dfs_backlinks',
+    last_synced_at: data?.last_full_at || null,
+    row_count: data ? 1 : 0,
+    domain_host: host
+  };
+}
+
+async function fetchSchemaAuditStatus(supabase, propertyUrl) {
+  const urls = propertyUrlCandidates(propertyUrl);
+  const { data, error } = await supabase
+    .from('audit_results')
+    .select('created_at, schema_total_pages, property_url')
+    .in('property_url', urls)
+    .gt('schema_total_pages', 0)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  const latest = data?.[0] || null;
+  return {
+    source: 'schema_audit',
+    last_synced_at: latest ? latest.created_at : null,
+    schema_total_pages: latest ? Number(latest.schema_total_pages) : null,
+    row_count: latest ? 1 : 0
+  };
+}
+
+async function fetchCsvTierSyncStatus(supabase) {
+  const { data, error } = await supabase
+    .from('csv_metadata')
+    .select('import_session')
+    .order('import_session', { ascending: false, nullsFirst: false })
+    .limit(1);
+  if (error) throw error;
+  const latest = data?.[0] || null;
+  const { count, error: countErr } = await supabase
+    .from('csv_metadata')
+    .select('id', { count: 'exact', head: true });
+  if (countErr) throw countErr;
+  return {
+    source: 'csv_tier_sync',
+    last_synced_at: latest?.import_session || null,
+    row_count: count || 0,
+    row_count_unit: 'rows'
+  };
+}
+
 async function fetchBookingSheetTruthStatus(supabase, propertyUrl) {
   const [{ count: txnCount, error: countErr }, { data: latest, error: latestErr }] = await Promise.all([
     supabase.from('booking_sheet_transactions')
-      .select('id', { count: 'exact', head: true })
+      .select('property_url', { count: 'exact', head: true })
       .eq('property_url', propertyUrl),
     supabase.from('booking_sheet_transactions')
-      .select('created_at, txn_date')
+      .select('imported_at, txn_date')
       .eq('property_url', propertyUrl)
-      .order('created_at', { ascending: false })
+      .order('imported_at', { ascending: false })
       .limit(1)
   ]);
   if (countErr) throw countErr;
@@ -80,7 +156,7 @@ async function fetchBookingSheetTruthStatus(supabase, propertyUrl) {
   const row = latest?.[0] || null;
   return {
     source: 'booking_sheet',
-    last_synced_at: row?.created_at || null,
+    last_synced_at: row?.imported_at || null,
     last_period_end: row?.txn_date || null,
     row_count: txnCount || 0,
     row_count_unit: 'txns'
@@ -88,16 +164,25 @@ async function fetchBookingSheetTruthStatus(supabase, propertyUrl) {
 }
 
 async function buildStatusForSource(supabase, propertyUrl, source) {
-  if (source === 'booking_sheet') return fetchBookingSheetTruthStatus(supabase, propertyUrl);
-  const latest = await fetchMaxCreatedAt(supabase, propertyUrl, source);
-  const rowCount = await fetchRowCount(supabase, propertyUrl, source);
-  return {
-    source,
-    last_synced_at: latest ? latest.created_at : null,
-    last_period_start: latest ? latest.period_start : null,
-    last_period_end: latest ? latest.period_end : null,
-    row_count: rowCount
-  };
+  try {
+    if (source === 'booking_sheet') return await fetchBookingSheetTruthStatus(supabase, propertyUrl);
+    const latest = await fetchMaxCreatedAt(supabase, propertyUrl, source);
+    const rowCount = await fetchRowCount(supabase, propertyUrl, source);
+    return {
+      source,
+      last_synced_at: latest ? latest.created_at : null,
+      last_period_start: latest ? latest.period_start : null,
+      last_period_end: latest ? latest.period_end : null,
+      row_count: rowCount
+    };
+  } catch (err) {
+    return {
+      source,
+      last_synced_at: null,
+      row_count: 0,
+      error: err?.message || 'Unknown error'
+    };
+  }
 }
 
 export default async function handler(req, res) {
@@ -117,7 +202,33 @@ export default async function handler(req, res) {
       // eslint-disable-next-line no-await-in-loop
       out[src] = await buildStatusForSource(supabase, propertyUrl, src);
     }
-    out.ga4_api = await fetchGa4Status(supabase, propertyUrl);
+    try {
+      out.ga4_api = await fetchGa4Status(supabase, propertyUrl);
+    } catch (err) {
+      out.ga4_api = {
+        source: 'ga4_api',
+        last_synced_at: null,
+        row_count: 0,
+        error: err?.message || 'Unknown error'
+      };
+    }
+    for (const [key, fn] of [
+      ['dfs_backlinks', () => fetchDfsBacklinkStatus(supabase, propertyUrl)],
+      ['schema_audit', () => fetchSchemaAuditStatus(supabase, propertyUrl)],
+      ['csv_tier_sync', () => fetchCsvTierSyncStatus(supabase)]
+    ]) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        out[key] = await fn();
+      } catch (err) {
+        out[key] = {
+          source: key,
+          last_synced_at: null,
+          row_count: 0,
+          error: err?.message || 'Unknown error'
+        };
+      }
+    }
     res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=60');
     return res.status(200).json({
       property_url: propertyUrl,

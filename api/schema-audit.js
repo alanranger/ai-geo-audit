@@ -2016,6 +2016,14 @@ export default async function handler(req, res) {
         : (pagesWithoutSchemasArray.length > 20 ? pagesWithoutSchemasArray.slice(0, 20) : []),
       errorTypes: Object.keys(errorTypes).length > 0 ? errorTypes : undefined,
       errorExamples: Object.keys(errorExamples).length > 0 ? errorExamples : undefined,
+      failedCrawlPages: failedResults.length > 0
+        ? failedResults.map((result) => ({
+            url: result.url,
+            error: result.error,
+            errorType: result.errorType || 'Unknown',
+            statusCode: Number.isFinite(result.statusCode) ? result.statusCode : null
+          }))
+        : undefined,
       note: 'Failed crawls are counted as pages without schema since schema cannot be verified'
     };
     

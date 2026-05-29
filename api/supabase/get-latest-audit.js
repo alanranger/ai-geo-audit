@@ -1049,6 +1049,7 @@ export default async function handler(req, res) {
           // Count error types
           const errorTypes = {};
           const errorExamples = {};
+          const failedCrawlPages = [];
           let failedPages = 0;
           let successfulPages = 0;
           
@@ -1057,6 +1058,12 @@ export default async function handler(req, res) {
               failedPages++;
               const errorType = p.errorType || 'Unknown';
               errorTypes[errorType] = (errorTypes[errorType] || 0) + 1;
+              failedCrawlPages.push({
+                url: p.url,
+                error: p.error,
+                errorType,
+                statusCode: Number.isFinite(p.statusCode) ? p.statusCode : null
+              });
               if (!errorExamples[errorType]) {
                 errorExamples[errorType] = {
                   url: p.url,
@@ -1083,6 +1090,7 @@ export default async function handler(req, res) {
               pagesWithoutInlineSchema: totalPages - pagesWithSchema,
               errorTypes: Object.keys(errorTypes).length > 0 ? errorTypes : undefined,
               errorExamples: Object.keys(errorExamples).length > 0 ? errorExamples : undefined,
+              failedCrawlPages: failedCrawlPages.length > 0 ? failedCrawlPages : undefined,
               note: 'Failed crawls are counted as pages without schema since schema cannot be verified'
             }
           };
