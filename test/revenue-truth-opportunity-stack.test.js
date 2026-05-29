@@ -90,6 +90,13 @@ test('row 1 has tier anchor for §9 scroll', () => {
   assert.match(html, /data-rt-opp-row="row_1"[^>]*data-tier-anchor="one_to_one_lessons"/);
 });
 
+test('column headers have one sort indicator each (no duplicate rt-sort-ind)', () => {
+  const html = renderOpportunityStackHtml();
+  assert.doesNotMatch(html, /rt-sort-ind/);
+  const sortCols = (html.match(/rt-opp-sort-ind/g) || []).length;
+  assert.equal(sortCols, 8);
+});
+
 test('exec summary hub investigate labels fixed', () => {
   assert.equal(isHubInvestigateSlug('/photography-courses-coventry'), true);
   assert.equal(isHubInvestigateSlug('hire-a-professional-photographer-in-coventry'), true);
