@@ -115,7 +115,7 @@ describe('revenue-truth exec filters', () => {
       diagnosis: { tier_rollup: [], diagnostics: diags, tier_reconciliation: { passes: true } },
       windowMonths: 3
     });
-    assert.ok(out.cards.worry.items.length <= WORRY_MAX_BULLETS);
+    assert.ok(out.bullets.worry.length <= WORRY_MAX_BULLETS);
   });
 
   it('excludes retired findings from worry', () => {
@@ -141,7 +141,7 @@ describe('revenue-truth exec filters', () => {
 
   it('audit helper flags blocked tokens', () => {
     const audit = auditExecSummaryBullets({
-      cards: { worry: { items: [{ label: '/about-alan-ranger: impressions -30%' }] } }
+      bullets: { worry: [{ text: '/about-alan-ranger: impressions -30%' }] }
     }, 3);
     assert.equal(audit.ok, false);
     assert.match(audit.issues[0], /about-alan-ranger/);

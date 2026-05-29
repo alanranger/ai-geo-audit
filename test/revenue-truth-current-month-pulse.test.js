@@ -172,7 +172,7 @@ describe('revenue-truth current month pulse', () => {
       windowMonths: 3
     });
     assert.ok(out.tracker.rows.some((r) => r.chip?.text === 'DEFCON 5'));
-    assert.ok(out.cards.worry.items.length >= 1);
+    assert.ok(out.bullets.worry.some((w) => /DEFCON 5/.test(w.text)));
   });
 
   it('classifies bands consistently', () => {
