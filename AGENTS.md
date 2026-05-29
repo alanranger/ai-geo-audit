@@ -12,6 +12,22 @@
 8. **`Docs/DATAFORSEO_BACKLINK_SPAM_FILTERS.md`** — Spam URL filters, domain index tables, **`POST /api/aigeo/dataforseo-backlink-domain`** (`full` / `delta` / `status`), `npm run test:dfs-backlink-filters`.
 9. **Backlinks tab tile aggregates:** **`GET /api/aigeo/dfs-domain-backlink-tiles`**; audit baseline **`GET` / `POST` / `DELETE /api/aigeo/dfs-backlink-tile-baseline`** + Supabase **`dfs_backlink_tile_baseline`** (see **`Docs/CHANGELOG.md` 2026-03-23**).
 
+## Export for Claude (Google Drive snapshot)
+
+When Alan says **"export to google"**, **"export for claude"**, or similar — run from repo root:
+
+```bash
+npm run export:claude
+```
+
+Aliases: `npm run export:google`, `npm run snapshot:dashboard` (same command).
+
+- **Script:** `scripts/snapshot-dashboard-to-drive.mjs` — headless Chromium loads live Vercel dashboard, expands Revenue Truth UI, inlines CSS, writes standalone HTML locally (no Drive API; Google Drive Desktop syncs).
+- **Output folder:** `C:/Users/alan/Google Drive/Claude shared resources`
+- **Stable path for Claude:** `LIVE-DASHBOARD-SNAPSHOT-revenue-truth-LATEST.html` (also writes timestamped copy).
+- **First-time on a machine:** `npm install` then `npx playwright install chromium`
+- **All tabs:** `node scripts/snapshot-dashboard-to-drive.mjs --tab=all`
+
 ## Critical gotchas
 
 - **Vercel deploys from Git.** If the user only edits files in Dropbox, **nothing reaches production** until `git commit` + `git push` to `main` (repo: `ai-geo-audit`).

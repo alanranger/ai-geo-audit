@@ -41,8 +41,10 @@ import {
   applyJlrToMonthly,
   buildJlrByCatMonth,
   buildJlrByMonth,
+  buildJlrSummaryStats,
   filterTxnsForJlr
 } from '../../lib/revenue-truth-jlr-filter.mjs';
+import { buildHeadlineReconciliation } from '../../lib/revenue-truth-headline-reconciliation.mjs';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
@@ -115,6 +117,9 @@ async function buildPayload(supabase, propertyUrl, includeJlr) {
   const currentMonthPulse = buildCurrentMonthPulse(transactions, cfg, monthly, forecast, seasonalityByProduct);
   const categoryBreakdown = buildCategoryBreakdown(categories, gp, marketMap, txnRows);
   const categoryAdjusted = includeJlr ? categoryBreakdown : applyJlrToCategoryBreakdown(categoryBreakdown, jlrByCatMonth);
+  const headlineReconciliation = includeJlr
+    ? null
+    : buildHeadlineReconciliation(wide, monthly, transactions, cfg);
   return {
     asOf: new Date().toISOString(),
     config: cfg,
@@ -125,6 +130,8 @@ async function buildPayload(supabase, propertyUrl, includeJlr) {
     recurringBaseline: buildRecurringHeadlineStats(monthly, cfg),
     forecast,
     recurringForecast,
+    headlineReconciliation,
+    jlrSummary: buildJlrSummaryStats(transactions, cfg.now.year),
     categoryBreakdown: categoryAdjusted,
     channelMix: groupByValue(txnRows, t => t.channel || (t.client_type === 'Existing' ? 'Existing' : 'Unknown')),
     newVsExisting: groupByValue(txnRows, t => t.client_type || 'Unknown'),
