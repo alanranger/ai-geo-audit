@@ -1264,8 +1264,30 @@ export default async function handler(req, res) {
         });
       } else {
         // No existing record found
-        if (isPartialUpdate) {
-          // For partial updates, don't create a new record if it doesn't exist
+        if (isPartialUpdate && hasRankingAiDataOnly) {
+          // Ranking-only scan: keyword_rankings rows are often saved first for
+          // today's date before any full GSC audit exists. Insert a minimal stub
+          // so ranking_ai_data + pillar scores persist (same pattern as /api/keywords/save).
+          console.log('[Supabase Save] No existing record — inserting ranking-only audit stub for', auditDate);
+          response = await fetch(`${supabaseUrl}/rest/v1/audit_results`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`,
+              'Prefer': 'return=representation'
+            },
+            body: JSON.stringify({
+              property_url: propertyUrl,
+              audit_date: auditDate,
+              ranking_ai_data: updatePayload.ranking_ai_data ?? auditRecord.ranking_ai_data,
+              ranking_ai_pillar_scores: updatePayload.ranking_ai_pillar_scores ?? auditRecord.ranking_ai_pillar_scores ?? null,
+              is_partial: true,
+              partial_reason: 'ranking_ai_only'
+            })
+          });
+        } else if (isPartialUpdate) {
+          // For other partial updates, don't create a new record if it doesn't exist
           let partialType = 'topQueries';
           if (hasQueryTotalsOnly) partialType = 'queryTotals';
           else if (hasQueryPagesOnly) partialType = 'queryPages';
@@ -1276,8 +1298,7 @@ export default async function handler(req, res) {
             message: `Cannot save ${partialType}: No existing audit record found. Please run a full audit first.`,
             meta: { generatedAt: new Date().toISOString() }
           });
-        }
-        // For full audits, proceed with INSERT
+        } else {
         console.log('[Supabase Save] No existing record found, inserting new record...');
         response = await fetch(`${supabaseUrl}/rest/v1/audit_results`, {
           method: 'POST',
