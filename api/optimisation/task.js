@@ -325,14 +325,17 @@ export default async function handler(req, res) {
       console.log('[Optimisation Task] Building Phase 5 objective JSONB:', objectiveJsonb);
     }
     
-    // Compute initial objective_status
-    // If we have baseline metrics, status should be 'on_track' (we'll have baseline measurement)
-    // Otherwise, it's 'no_measurement' until first measurement is taken
+    // Compute initial objective_status.
+    // NOTE: the DB check constraint chk_opt_cycle_objective_status only permits
+    // ('not_set','on_track','overdue','met'). The "No measurement" badge is derived
+    // client-side (validateObjectiveStatus) from missing metrics, so we must NOT
+    // persist 'no_measurement' here — doing so violated the constraint and blocked
+    // task creation for brand-new pages with a zero/empty baseline. See fix 2026-05-31.
     let initialObjectiveStatus = 'not_set';
     if (objectiveJsonb) {
-      // If baseline metrics are provided, we'll create a baseline measurement, so status should be 'on_track'
-      // Otherwise, it's 'no_measurement' until measurements are taken
-      initialObjectiveStatus = baselineMetrics ? 'on_track' : 'no_measurement';
+      // With a baseline measurement we can mark on_track; otherwise leave not_set
+      // (UI still shows "No measurement" until the first real measurement lands).
+      initialObjectiveStatus = baselineMetrics ? 'on_track' : 'not_set';
       console.log(`[Optimisation Task] Setting initial objective_status to '${initialObjectiveStatus}' (baselineMetrics provided: ${!!baselineMetrics})`);
     }
     
