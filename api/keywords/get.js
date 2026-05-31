@@ -61,6 +61,13 @@ export default async function handler(req, res) {
     if (latestKrResp.ok) {
       const latestKr = await latestKrResp.json();
       auditDate = latestKr[0]?.audit_date || null;
+    } else if (latestKrResp.status >= 500 || latestKrResp.status === 522) {
+      return res.status(503).json({
+        status: 'error',
+        message: 'Supabase unavailable',
+        keywords: [],
+        meta: { generatedAt: new Date().toISOString(), reason: 'supabase_unavailable' },
+      });
     }
 
     // Fallback: latest audit_results row (include partial ranking-only stubs)
@@ -77,6 +84,13 @@ export default async function handler(req, res) {
       if (auditResp.ok) {
         const auditRows = await auditResp.json();
         auditDate = auditRows[0]?.audit_date || null;
+      } else if (auditResp.status >= 500 || auditResp.status === 522) {
+        return res.status(503).json({
+          status: 'error',
+          message: 'Supabase unavailable',
+          keywords: [],
+          meta: { generatedAt: new Date().toISOString(), reason: 'supabase_unavailable' },
+        });
       }
     }
 
