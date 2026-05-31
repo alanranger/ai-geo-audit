@@ -118,6 +118,7 @@ export function classifyPageSegment(rawUrlOrPath, title = null, kindOverride = n
     // Key service / commercial pages
     '/hire-a-professional-photographer-in-coventry',
     '/professional-commercial-photographer-coventry',
+    '/property-photographer-coventry',
     '/professional-photographer-near-me',
     '/coventry-photographer',
     '/photographer-in-coventry',
