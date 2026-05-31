@@ -7,6 +7,8 @@
 
 import { enqueuePending, normalizeDomain } from '../../lib/domainStrength/domains.js';
 
+export const config = { maxDuration: 60 };
+
 // ---- Schema_pages_detail merge helpers -----------------------------------
 // Added 2026-04-17: When a schema audit run transiently drops a URL (e.g. a
 // fetch timeout or an upstream cache serving a shorter URL list), the saved
