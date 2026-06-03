@@ -108,7 +108,8 @@ export default async function handler(req, res) {
       // treating "refresh/partial" rows as a full audit run.
       // If preferRecent is true, skip schema detail filtering and return the most recent row.
       const buildQueryUrl = (candidateUrl, includeSchemaDetailFilter) => {
-        const base = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(candidateUrl)}&order=audit_date.desc&limit=1`;
+        const orderCol = preferRecentAudits ? 'updated_at.desc' : 'audit_date.desc';
+        const base = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(candidateUrl)}&order=${orderCol}&limit=1`;
         // If includePartial is true, don't filter by is_partial (include both partial and complete audits)
         // Otherwise, only return complete audits (is_partial=eq.false)
         const partialFilter = includePartialAudits ? '' : '&is_partial=eq.false';
