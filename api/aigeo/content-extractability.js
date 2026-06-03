@@ -622,6 +622,30 @@ function anchorOpeningTagHasTargetBlank(innerAttrs = '') {
   return false;
 }
 
+// Decorative images legitimately carry NO alt text. Per WCAG, a decorative image
+// should use an empty alt="" so assistive tech skips it — so a *present* empty
+// alt="" is a deliberate "this is decorative" signal, NOT a missing attribute.
+// The image-alt rule must not fail pages for these, so we exclude any image
+// matching one of these decorative signals from both the total and missing counts.
+// Add new decorative signals here (kept as a small list so it's easy to extend).
+const DECORATIVE_IMG_MATCHERS = [
+  // Brand watermark by CSS class, e.g. <img class="ar-wm" ...>
+  /\bclass\s*=\s*["'][^"']*\bar-wm\b[^"']*["']/i,
+  // Brand watermark by filename in src, e.g. AR-watermark-white-logo.png
+  /\bsrc\s*=\s*["'][^"']*ar-watermark[^"']*["']/i,
+  // Explicit ARIA decorative markers
+  /\brole\s*=\s*["']\s*presentation\s*["']/i,
+  /\baria-hidden\s*=\s*["']\s*true\s*["']/i,
+  // Present-but-empty alt="" (deliberate decorative signal, not missing alt)
+  /\balt\s*=\s*["']\s*["']/i
+];
+
+/** True when an <img> tag is decorative and should be excluded from alt-coverage counts. */
+function isDecorativeImgTag(tag = '') {
+  const s = String(tag || '');
+  return DECORATIVE_IMG_MATCHERS.some((re) => re.test(s));
+}
+
 /** Counts used by Traditional SEO dashboard (H1, images, outbound links). */
 function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
   const out = {
@@ -633,6 +657,7 @@ function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
     metaDescription: '',
     imgTotal: 0,
     imgMissingAlt: 0,
+    imgDecorativeExcluded: 0,
     internalLinkCount: 0,
     internalLinkTargets: [],
     extOutboundCount: 0,
@@ -662,11 +687,18 @@ function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
 
   const imgMatches = [...source.matchAll(/<img\b[^>]*>/gi)];
   imgMatches.forEach((match) => {
-    const tag = match[0];
+    const tag = String(match[0] || '');
+    // Decorative images (watermark / role=presentation / aria-hidden / empty alt="")
+    // are intentionally alt-less and must not count toward total or missing.
+    if (isDecorativeImgTag(tag)) {
+      out.imgDecorativeExcluded += 1;
+      return;
+    }
     out.imgTotal += 1;
-    const altMatch = /\balt\s*=\s*["']([^"']*)["']/i.exec(tag);
-    const altVal = altMatch ? String(altMatch[1]).trim() : '';
-    if (!altVal) out.imgMissingAlt += 1;
+    // Genuinely missing = the alt attribute is absent entirely (empty alt="" is
+    // already handled above as a decorative signal, so it never reaches here).
+    const hasAltAttr = /\balt\s*=\s*["']/i.test(tag);
+    if (!hasAltAttr) out.imgMissingAlt += 1;
   });
 
   let pageHost = '';
@@ -722,6 +754,7 @@ function buildTraditionalSeoSignalsFromHtml(html, htmlForChecks, pageUrl = '') {
     metaDescription: seoMain.metaDescription || seoMerged.metaDescription || '',
     imgTotal: seoMerged.imgTotal,
     imgMissingAlt: seoMerged.imgMissingAlt,
+    imgDecorativeExcluded: seoMerged.imgDecorativeExcluded,
     internalLinkCount: seoMerged.internalLinkCount,
     internalLinkTargets: seoMerged.internalLinkTargets,
     extOutboundCount: seoMerged.extOutboundCount,
@@ -739,6 +772,7 @@ function buildTraditionalSeoSignalsFromHtml(html, htmlForChecks, pageUrl = '') {
     seoIntroSnippet: buildSeoIntroSnippetFromHtml(htmlForChecks, 150),
     seoImgTotal: seo.imgTotal,
     seoImgMissingAlt: seo.imgMissingAlt,
+    seoImgDecorativeExcluded: seo.imgDecorativeExcluded,
     seoInternalLinks: seo.internalLinkCount,
     seoInternalLinkTargets: Array.isArray(seo.internalLinkTargets) ? seo.internalLinkTargets : [],
     seoExtOutbound: seo.extOutboundCount,
@@ -759,6 +793,7 @@ async function checkUrl(url, tierLookup = null, sitemapLastmodMap = null) {
     seoIntroSnippet: '',
     seoImgTotal: 0,
     seoImgMissingAlt: 0,
+    seoImgDecorativeExcluded: 0,
     seoInternalLinks: 0,
     seoInternalLinkTargets: [],
     seoExtOutbound: 0,
