@@ -38,10 +38,11 @@ export default async function handler(req, res) {
     console.log('[get-latest-audit] Method:', req.method);
     console.log('[get-latest-audit] Query:', JSON.stringify(req.query));
     
-    const { propertyUrl, minimal, includePartial, preferRecent } = req.query;
+    const { propertyUrl, minimal, includePartial, preferRecent, requireGsc } = req.query;
     const isMinimalRequest = minimal === 'true';
     const includePartialAudits = includePartial === 'true';
     const preferRecentAudits = preferRecent === 'true';
+    const requireGscAudits = requireGsc === 'true';
 
     if (!propertyUrl) {
       console.log('[get-latest-audit] Missing propertyUrl parameter');
@@ -110,10 +111,12 @@ export default async function handler(req, res) {
       const buildQueryUrl = (candidateUrl, includeSchemaDetailFilter) => {
         const orderCol = preferRecentAudits ? 'updated_at.desc' : 'audit_date.desc';
         const base = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(candidateUrl)}&order=${orderCol}&limit=1`;
-        // If includePartial is true, don't filter by is_partial (include both partial and complete audits)
-        // Otherwise, only return complete audits (is_partial=eq.false)
-        const partialFilter = includePartialAudits ? '' : '&is_partial=eq.false';
-        const schemaFilter = (includeSchemaDetailFilter && !preferRecentAudits)
+        // requireGsc: latest row that actually has GSC payload (skips ranking_ai_only stubs).
+        // Otherwise: complete audits only, unless includePartial=true.
+        const partialFilter = requireGscAudits
+          ? '&gsc_timeseries=not.is.null&visibility_score=not.is.null'
+          : (includePartialAudits ? '' : '&is_partial=eq.false');
+        const schemaFilter = (includeSchemaDetailFilter && !preferRecentAudits && !requireGscAudits)
           ? `&schema_pages_detail=not.is.null${partialFilter}`
           : partialFilter;
         if (isMinimalRequest) {

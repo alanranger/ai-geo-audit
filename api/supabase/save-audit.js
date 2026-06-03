@@ -61,6 +61,25 @@ function previousEntryIsStillUseful(entry, staleSinceMs) {
   return staleSinceMs >= Date.now() - SCHEMA_PAGES_DETAIL_STALE_TTL_MS;
 }
 
+/** True when ranking_ai_data has a non-empty combinedRows array. */
+function hasRealRankingAiData(rankingAiData) {
+  return rankingAiData !== null && rankingAiData !== undefined
+    && typeof rankingAiData === 'object'
+    && Array.isArray(rankingAiData.combinedRows)
+    && rankingAiData.combinedRows.length > 0;
+}
+
+/** Omit ranking columns from PATCH/POST when GSC-only save did not supply rows (prevents wiping JSONB). */
+function stripNullRankingFields(record) {
+  if (!record || typeof record !== 'object') return;
+  if (!hasRealRankingAiData(record.ranking_ai_data)) {
+    delete record.ranking_ai_data;
+  }
+  if (record.ranking_ai_pillar_scores === null || record.ranking_ai_pillar_scores === undefined) {
+    delete record.ranking_ai_pillar_scores;
+  }
+}
+
 function mergeSchemaPagesDetail(newPages, prevPages, prevAuditDate) {
   if (!Array.isArray(newPages) || newPages.length === 0) return newPages;
   if (!Array.isArray(prevPages) || prevPages.length === 0) return newPages;
@@ -1017,6 +1036,9 @@ export default async function handler(req, res) {
       console.warn('[Supabase Save] ⚠ Marking audit as partial:', auditRecord.partial_reason);
     }
 
+    // GSC-only saves send rankingAiData=null — never PATCH that onto audit_results (fa8067b regression).
+    stripNullRankingFields(auditRecord);
+
     // Calculate and log payload size before sending
     const payloadJson = JSON.stringify(auditRecord);
     const payloadSizeKB = Math.round(payloadJson.length / 1024);
@@ -1218,6 +1240,7 @@ export default async function handler(req, res) {
             }
 
             updatePayload = merged;
+            stripNullRankingFields(updatePayload);
             console.warn('[Supabase Save] ⚠ Partial audit merge: preserved existing non-null fields to prevent data loss');
           }
         }
@@ -1225,6 +1248,8 @@ export default async function handler(req, res) {
         console.warn('[Supabase Save] ⚠ Partial audit merge failed (continuing with original payload):', e?.message || String(e));
       }
     }
+
+    stripNullRankingFields(updatePayload);
     
     // First, try to update existing record
     const updateResponse = await fetch(`${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${auditDate}`, {

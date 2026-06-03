@@ -2,6 +2,15 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-31] - GSC audit save + green banner regression (fa8067b follow-up)
+
+**Root cause:** Commit `fa8067b` (2026-05-29) correctly stopped GSC-only runs from re-saving cached `rankingAiData`, but the client still sent `rankingAiData: null`, which PATCHed `audit_results.ranking_ai_data` to NULL. A same-day `ranking_ai_only` stub row (`2026-05-31`) then sat above the last real GSC row in `updated_at` order while lacking `gsc_timeseries`, so `preferRecent` + `is_partial=false` kept the banner on **2026-05-30** (last full audit). Post-run `updateAuditTimestamp` also overwrote the in-session banner because `gsc_banner_last_run` was written but never read back.
+
+**Fixes:**
+- `api/supabase/save-audit.js` — omit `ranking_ai_data` / `ranking_ai_pillar_scores` from PATCH/POST when no real `combinedRows` (no JSONB wipe).
+- `api/supabase/get-latest-audit.js` — `requireGsc=true` returns latest row with `gsc_timeseries` + `visibility_score` (skips ranking-only stubs).
+- `audit-dashboard.html` — GSC banner fetch uses `requireGsc=true`; honours `gsc_banner_last_run` when newer than DB; omits `rankingAiData` key from save payload when absent.
+
 ## [2026-05-27] - Money-page GSC cron — widened to all-pages nightly + scheduled in vercel.json
 
 Sister ticket to the Phase C0 backfill below. C0 patched the 16.4 months of
