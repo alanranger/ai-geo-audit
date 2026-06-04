@@ -5,6 +5,7 @@ export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
 import { isRowIndexable } from '../../lib/page-indexability-policy.js';
+import { isRetiredMoneyPath } from '../../lib/retired-money-pages.mjs';
 
 const need = (k) => {
   const v = process.env[k];
@@ -36,7 +37,9 @@ function classifyPageSegment(pageUrl) {
   
   // Remove trailing slash (except root)
   if (path.length > 1) path = path.replace(/\/+$/, '');
-  
+
+  if (isRetiredMoneyPath(path)) return 'retired';
+
   // Event pages (workshops, courses) - matches frontend classifyMoneyPageSubSegment
   if (path.startsWith('/beginners-photography-lessons') ||
       path.startsWith('/photographic-workshops-near-me') ||
@@ -54,7 +57,6 @@ function classifyPageSegment(pageUrl) {
   if (path.startsWith('/photo-workshops-uk') ||
       path.startsWith('/photography-services-near-me') ||
       path === '/photography-tuition-services' ||
-      path === '/photography-shop-services' ||
       path === '/hire-a-professional-photographer-in-coventry' ||
       path === '/professional-commercial-photographer-coventry' ||
       path === '/professional-photographer-near-me' ||
@@ -253,8 +255,12 @@ export default async function handler(req, res) {
 
     enrichedPages.forEach(page => {
       const segment = classifyPageSegment(page.page_url);
+      if (segment === 'retired') {
+        segmentData.all_tracked.push(page);
+        return;
+      }
       segmentData[segment].push(page);
-      segmentData.all_tracked.push(page); // Include in all_tracked
+      segmentData.all_tracked.push(page);
     });
 
     // Aggregate metrics per segment

@@ -8,6 +8,14 @@ This document describes how the `money` pages are split into `event`, `product`,
 - Blog posts are **not** money pages and are classified separately.
 - A page is labelled `landing` only when it is already in the money-page set and does not match `event` or `product`.
 
+## Retired paths (not money / not landing)
+
+These URLs are excluded from money-page KPIs and portfolio money rollups (`PageSegment.SYSTEM` / `segment: Other`). Historical `booking_sheet_transactions.landing_page_url` rows are unchanged.
+
+- `/photography-shop-services` — legacy shop grid; noindex (2026-06); planned 301 → `/photography-tuition-services` after product remapping.
+
+Source: `lib/retired-money-pages.mjs`, `api/aigeo/pageSegment.js`, `audit-dashboard.html` (`classifyPageSegment`).
+
 ## Source Of Truth
 
 - `audit-dashboard.html` (`classifyMoneyPageSubSegment()` and `classifyUrlForRankingAi()`)
@@ -46,8 +54,8 @@ A URL is labelled `LANDING` only when all of the following are true:
 
 ## URLs Currently Labelled As Landing Pages
 
-Snapshot source: `latest-audit-utf8.json`  
-Total currently labelled `LANDING`: **44**
+Snapshot source: `latest-audit-utf8.json` (regenerate after deploy to refresh counts)  
+Total currently labelled `LANDING`: **43** (`/photography-shop-services` removed — retired)
 
 1. `https://www.alanranger.com/academy-robo-ranger`
 2. `https://www.alanranger.com/academy/ebook`
@@ -80,16 +88,15 @@ Total currently labelled `LANDING`: **44**
 29. `https://www.alanranger.com/photography-mentoring-online-assignments`
 30. `https://www.alanranger.com/photography-payment-plan`
 31. `https://www.alanranger.com/photography-presents-for-photographers`
-32. `https://www.alanranger.com/photography-shop-services`
-33. `https://www.alanranger.com/photography-special-offers`
-34. `https://www.alanranger.com/photography-tuition-services`
-35. `https://www.alanranger.com/photography-workshops`
-36. `https://www.alanranger.com/photography-workshops-near-me`
-37. `https://www.alanranger.com/private-photography-lessons`
-38. `https://www.alanranger.com/professional-commercial-photographer-coventry`
-39. `https://www.alanranger.com/professional-photographer-near-me`
-40. `https://www.alanranger.com/rps-courses-mentoring-distinctions`
-41. `https://www.alanranger.com/schedule-an-appointment`
-42. `https://www.alanranger.com/terms-and-conditions`
-43. `https://www.alanranger.com/website-cookie-policy`
-44. `https://www.alanranger.com/website-terms-and-conditions`
+32. `https://www.alanranger.com/photography-special-offers`
+33. `https://www.alanranger.com/photography-tuition-services`
+34. `https://www.alanranger.com/photography-workshops`
+35. `https://www.alanranger.com/photography-workshops-near-me`
+36. `https://www.alanranger.com/private-photography-lessons`
+37. `https://www.alanranger.com/professional-commercial-photographer-coventry`
+38. `https://www.alanranger.com/professional-photographer-near-me`
+39. `https://www.alanranger.com/rps-courses-mentoring-distinctions`
+40. `https://www.alanranger.com/schedule-an-appointment`
+41. `https://www.alanranger.com/terms-and-conditions`
+42. `https://www.alanranger.com/website-cookie-policy`
+43. `https://www.alanranger.com/website-terms-and-conditions`

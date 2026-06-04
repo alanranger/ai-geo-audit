@@ -1,3 +1,5 @@
+import { isRetiredMoneyPath } from '../../lib/retired-money-pages.mjs';
+
 /**
  * Page Segment Classifier
  * 
@@ -99,6 +101,9 @@ export function classifyPageSegment(rawUrlOrPath, title = null, kindOverride = n
   // These must be checked BEFORE money classification
   if (isFineArtGalleryPage(path)) return PageSegment.SYSTEM;
 
+  // 1.6) Retired commercial URLs (noindex / planned redirect) — not live money pages
+  if (isRetiredMoneyPath(path)) return PageSegment.SYSTEM;
+
   // 2) Money — explicit slugs first (hand-picked from 06-site-urls.csv)
   const MONEY_EXACT = new Set([
     // Workshop / lessons / course landing pages
@@ -113,7 +118,6 @@ export function classifyPageSegment(rawUrlOrPath, title = null, kindOverride = n
     '/course-finder-photography-classes-near-me',
     '/photography-tuition-services',
     '/photography-services-near-me',
-    '/photography-shop-services',
     '/rps-courses-mentoring-distinctions',
     // Key service / commercial pages
     '/hire-a-professional-photographer-in-coventry',
