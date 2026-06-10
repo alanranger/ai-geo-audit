@@ -15,6 +15,7 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 - Query `get-keyword-rankings?latestOnly=true` **first** for Ranking & AI; GSC-row embedded snapshot is fallback only.
 - `fetchSearchConsoleData` uses `getGscDateRange(days, 2)` for period start/end.
 - GSC banner session override moved to **sessionStorage**; legacy `localStorage` keys cleared on load.
+- **Follow-up:** `loadRankingAiData` treated empty `combinedRows: []` as valid (JavaScript truthy array) and skipped the `keyword_rankings` fallback — now requires `length > 0`. GSC banner session dates only persist **after** a successful Supabase save (`persistGscBannerSession`), not on in-browser fetch alone.
 
 **Still accurate (not banner bugs):** Squarespace/Stripe last sync **25-May** (`revenue_snapshots.created_at`); Schema **29-May**; CSV tiers **18-May**; DFS **03-Jun** — those feeds have not been re-synced since those dates.
 
