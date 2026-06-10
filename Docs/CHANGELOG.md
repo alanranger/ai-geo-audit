@@ -2,6 +2,22 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-10] - Green status banner: fix stale Ranking & AI and phantom GSC dates
+
+**Symptoms:** Banner showed Ranking & AI **29-May** after a **10-Jun** scan; GSC 28-day range ended **10-Jun** (impossible — GSC lags ~2 days); GSC audit date **10-Jun** when Supabase last full GSC save was **29-May**.
+
+**Root causes (verified against Supabase):**
+1. **Ranking & AI** — `updateAuditTimestamp` read `ranking_ai_data` embedded on the `requireGsc` audit row (May 29 full GSC run) *before* `get-keyword-rankings` (`keyword_rankings.last_refreshed_at` = 2026-06-10 13:50 UTC).
+2. **GSC date range** — live fetch used `endDate = today` instead of `getGscDateRange(..., 2)`.
+3. **Phantom GSC timestamps** — `localStorage.gsc_banner_last_run` / `gsc_banner_period` persisted in-browser run times across reloads even when Supabase never saved a new GSC row.
+
+**Fixes (`audit-dashboard.html`):**
+- Query `get-keyword-rankings?latestOnly=true` **first** for Ranking & AI; GSC-row embedded snapshot is fallback only.
+- `fetchSearchConsoleData` uses `getGscDateRange(days, 2)` for period start/end.
+- GSC banner session override moved to **sessionStorage**; legacy `localStorage` keys cleared on load.
+
+**Still accurate (not banner bugs):** Squarespace/Stripe last sync **25-May** (`revenue_snapshots.created_at`); Schema **29-May**; CSV tiers **18-May**; DFS **03-Jun** — those feeds have not been re-synced since those dates.
+
 ## [2026-06-10] - Revenue Funnel summary: fix Supabase statement timeout after GA4 sync
 
 **Symptom:** After **Sync GA4**, dashboard showed `Failed to load Revenue Funnel summary: HTTP 500` with `canceling statement due to statement timeout`.
