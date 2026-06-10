@@ -12,7 +12,7 @@ export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
 import { readLatestGa4Metrics } from './ga4-data.js';
-import { isRowIndexable } from '../../lib/page-indexability-policy.js';
+import { isRowIndexable, resolvePolicy } from '../../lib/page-indexability-policy.js';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
@@ -278,30 +278,30 @@ async function fetchPageMetrics(supabase, propertyUrl) {
   return { rows: data || [], dateEnd: latestEnd };
 }
 
-async function fetchPolicyBySlug(supabase, propertyUrl) {
-  const pageSize = 1000;
+/** Small rules table — avoid scanning revenue_gsc_joined_with_policy (LATERAL join timeout). */
+async function fetchIndexabilityPolicies(supabase) {
+  const { data, error } = await supabase
+    .from('page_indexability_policy')
+    .select('url_or_prefix, match_type, policy, redirect_target, effective_date, note');
+  if (error) throw error;
+  return data || [];
+}
+
+function buildPolicyBySlug(pageRows, policies) {
   const map = new Map();
-  let from = 0;
-  while (true) {
-    const { data, error } = await supabase
-      .from('revenue_gsc_joined_with_policy')
-      .select('page_slug, policy_value, policy_effective_date')
-      .eq('property_url', propertyUrl)
-      .order('page_slug', { ascending: true })
-      .order('period_start', { ascending: false })
-      .range(from, from + pageSize - 1);
-    if (error) throw error;
-    const batch = data || [];
-    for (const row of batch) {
-      if (!map.has(row.page_slug)) {
-        map.set(row.page_slug, {
-          policy_value: row.policy_value ?? null,
-          policy_effective_date: row.policy_effective_date ?? null
-        });
-      }
-    }
-    if (batch.length < pageSize) break;
-    from += pageSize;
+  const slugs = new Set();
+  for (const row of pageRows || []) {
+    const slug = slugFromPageUrl(row.page_url);
+    if (slug) slugs.add(slug);
+  }
+  for (const slug of slugs) {
+    const path = slug.startsWith('/') ? slug : `/${slug}`;
+    const match = resolvePolicy(path, policies);
+    if (!match) continue;
+    map.set(slug, {
+      policy_value: match.policy ?? null,
+      policy_effective_date: match.effective_date ?? null
+    });
   }
   return map;
 }
@@ -1305,7 +1305,7 @@ export default async function handler(req, res) {
   const propertyUrl = String(req.query?.propertyUrl || DEFAULT_PROPERTY).trim();
   try {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
-    const [audits, pageMetrics, revenueSnap, aiMap, priorities, revenueHistory, ga4Snap, policyBySlug] = await Promise.all([
+    const [audits, pageMetrics, revenueSnap, aiMap, priorities, revenueHistory, ga4Snap, policies] = await Promise.all([
       fetchLatestAudit(supabase, propertyUrl),
       fetchPageMetrics(supabase, propertyUrl),
       fetchLatestRevenue(supabase, propertyUrl),
@@ -1313,10 +1313,11 @@ export default async function handler(req, res) {
       fetchPrioritiesWithCycle(supabase, propertyUrl),
       fetchRevenueHistory(supabase, propertyUrl),
       readLatestGa4Metrics(supabase, propertyUrl),
-      fetchPolicyBySlug(supabase, propertyUrl)
+      fetchIndexabilityPolicies(supabase)
     ]);
     const pageRows = pageMetrics.rows;
     const periodStart = pageMetrics.dateEnd ? `${String(pageMetrics.dateEnd).slice(0, 7)}-01` : null;
+    const policyBySlug = buildPolicyBySlug(pageRows, policies);
     const enrichedPageRows = enrichPageRowsWithPolicy(pageRows, policyBySlug, periodStart);
     const auditLatest = audits[0] || null;
     const auditPrior = audits[1] || null;

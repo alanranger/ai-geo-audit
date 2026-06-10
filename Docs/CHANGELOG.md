@@ -2,6 +2,24 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-10] - Revenue Funnel summary: fix Supabase statement timeout after GA4 sync
+
+**Symptom:** After **Sync GA4**, dashboard showed `Failed to load Revenue Funnel summary: HTTP 500` with `canceling statement due to statement timeout`.
+
+**Root cause:** `GET /api/aigeo/revenue-funnel-summary` paginated the entire `revenue_gsc_joined_with_policy` view (LATERAL join over all GSC rows) via `fetchPolicyBySlug()` — often >8s per batch on Supabase.
+
+**Fix:** `api/aigeo/revenue-funnel-summary.js` — load the small `page_indexability_policy` rules table once, then resolve policy in-memory for the ~550 GSC page slugs in the current 28d snapshot via `resolvePolicy()` (same helper as Phase 5b indexability work).
+
+## [2026-06-04] - Collection hub noindex: indexability policy + retired money paths
+
+- Migration `20260604_collection_pages_indexability_policy.sql` — exact `intentional_noindex` on `/photo-workshops-uk` and `/photography-services-near-me` (`effective_date` 2026-06-04); **removed** mistaken prefix noindex on `/photographic-workshops-near-me` (hub stays indexed).
+- `lib/retired-money-pages.mjs` — exclude the two product collection hubs from live money KPIs (with `/photography-shop-services`). Detail product URLs unchanged.
+- `api/aigeo/pageSegment.js`, `audit-dashboard.html`, `Docs/MONEY_PAGE_SEGMENT_URL_PATTERNS.md` — aligned. No change to `06-site-urls.csv`, `api/schema-audit.js`, or schema manifests.
+
+## [2026-06-01] - `page_indexability_policy`: beginners-photography-lessons prefix noindex
+
+- Migration `20260601_beginners_photography_lessons_noindex_policy.sql` — prefix `intentional_noindex` on `/beginners-photography-lessons` (`effective_date` 2026-06-01). ~49 URLs stay in `06-site-urls.csv` for schema audit and chat event mapping; indexable KPI variants exclude them on/after effective date.
+
 ## [2026-06-01] - Traditional SEO “Last audit run” follows GSC audit date
 
 **Root cause:** The Traditional SEO tab showed `traditional_seo_score_snapshots.created_at` (last **rules rescore**, e.g. 10 May) even after a fresh **GSC & Backlinks** audit (green banner 01 Jun). Those are different pipelines.
