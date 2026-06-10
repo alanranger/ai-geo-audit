@@ -18,6 +18,8 @@ import {
   urlsFromTierEntries
 } from './aigeo/tier-segmentation.js';
 
+export const config = { runtime: 'nodejs', maxDuration: 300 };
+
 // Rich result eligible schema types
 const RICH_RESULT_TYPES = [
   'Article',

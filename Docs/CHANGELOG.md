@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-10] - Schema audit: raise Vercel timeout so full crawl can finish
+
+**Symptom:** Green banner **Schema audit** stuck on **29-May** after multiple **GSC & Backlink Audit** runs on **10-Jun**. Supabase `audit_results` for `2026-06-10` saved GSC but `schema_total_pages` stayed null (`partial_reason: schema_pages_detail missing`).
+
+**Root cause:** `POST/GET /api/schema-audit` crawls ~549 URLs but had **no `maxDuration`** — Vercel default (~60s) often 504'd before the crawl completed. Dashboard then saved a partial audit (GSC only).
+
+**Fix:** `export const config = { runtime: 'nodejs', maxDuration: 300 }` on `api/schema-audit.js` (matches cron/global-run). After deploy, run **GSC & Backlink Audit** once and wait for schema crawl to finish (~5–10 min).
+
 ## [2026-06-10] - Full audit save: fix save-audit handler crash on Vercel
 
 **Symptom:** `POST /api/supabase/save-audit` returned `FUNCTION_INVOCATION_FAILED` (~0.5s) on every call; GSC daily sync via `save-gsc-timeseries` worked but `audit_results` never received full audit payloads (backlinks, schema scores, GSC snapshot bundled with money-page metrics).
