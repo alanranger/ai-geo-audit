@@ -1326,17 +1326,18 @@ export default async function handler(req, res) {
             meta: { generatedAt: new Date().toISOString() }
           });
         } else {
-        console.log('[Supabase Save] No existing record found, inserting new record...');
-        response = await fetch(`${supabaseUrl}/rest/v1/audit_results`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': supabaseKey,
-            'Authorization': `Bearer ${supabaseKey}`,
-            'Prefer': 'return=representation'
-          },
-          body: JSON.stringify(auditRecord)
-        });
+          console.log('[Supabase Save] No existing record found, inserting new record...');
+          response = await fetch(`${supabaseUrl}/rest/v1/audit_results`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`,
+              'Prefer': 'return=representation'
+            },
+            body: JSON.stringify(auditRecord)
+          });
+        }
       }
     } else if (updateResponse.status === 404) {
       // Record doesn't exist

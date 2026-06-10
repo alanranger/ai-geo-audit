@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-10] - Full audit save: fix save-audit handler crash on Vercel
+
+**Symptom:** `POST /api/supabase/save-audit` returned `FUNCTION_INVOCATION_FAILED` (~0.5s) on every call; GSC daily sync via `save-gsc-timeseries` worked but `audit_results` never received full audit payloads (backlinks, schema scores, GSC snapshot bundled with money-page metrics).
+
+**Root cause:** Syntax error in `api/supabase/save-audit.js` — missing closing brace in the PATCH-empty-result branch (`Unexpected token 'else'` at module load). Vercel crashed before the handler could run.
+
+**Fix:** Restore brace structure in the insert-after-empty-PATCH path. Local probe confirms HTTP 200 merge onto existing `2026-06-10` ranking stub.
+
 ## [2026-06-10] - Green status banner: fix stale Ranking & AI and phantom GSC dates
 
 **Symptoms:** Banner showed Ranking & AI **29-May** after a **10-Jun** scan; GSC 28-day range ended **10-Jun** (impossible — GSC lags ~2 days); GSC audit date **10-Jun** when Supabase last full GSC save was **29-May**.
@@ -16,6 +24,7 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 - `fetchSearchConsoleData` uses `getGscDateRange(days, 2)` for period start/end.
 - GSC banner session override moved to **sessionStorage**; legacy `localStorage` keys cleared on load.
 - **Follow-up:** `loadRankingAiData` treated empty `combinedRows: []` as valid (JavaScript truthy array) and skipped the `keyword_rankings` fallback — now requires `length > 0`. GSC banner session dates only persist **after** a successful Supabase save (`persistGscBannerSession`), not on in-browser fetch alone.
+- **Follow-up (split storage):** GSC runs were saving daily rows to `gsc_timeseries` (Score Trends → **8 Jun**) while the green banner still read stale `audit_results.gsc_timeseries` (**27 May**). New `GET /api/supabase/gsc-timeseries-banner` + banner wiring uses the same table as Score Trends.
 
 **Still accurate (not banner bugs):** Squarespace/Stripe last sync **25-May** (`revenue_snapshots.created_at`); Schema **29-May**; CSV tiers **18-May**; DFS **03-Jun** — those feeds have not been re-synced since those dates.
 
