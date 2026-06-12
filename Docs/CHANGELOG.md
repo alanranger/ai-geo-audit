@@ -50,6 +50,14 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 
 **Fixes:** Correct default panel to Dashboard; Revenue Funnel init only when nav+panel both active; banner uses localStorage/minimal fetch; strip `_` from dedup keys (120s TTL); trend chart uses cached timeseries + resolves before heavy history; audit history session cache.
 
+## [2026-06-12e] - Hotfix: broken main script (dashboard blank on 9cbc778)
+
+**Symptoms:** Version 9cbc778 — spinner clears but Dashboard tab stays empty; console: `Missing catch or finally after try`.
+
+**Cause:** Perf refactor broke parse of the 3.4MB main script (two syntax errors) — `displayDashboard`, `renderDashboardTab`, etc. never loaded.
+
+**Fixes:** Repair `fetchContentSchemaHistory` brace; close chart promise `try` after early `resolve()`; call `renderDashboardTab()` on first paint.
+
 ## [2026-06-12c] - Dashboard load perf: stop always-on Supabase fetch
 
 **Symptoms:** Page load and tab switches felt slow again after spinner fix — dashboard blocked on multiple large `get-latest-audit` round-trips even when localStorage had a complete audit payload.
