@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-12f] - Authority trend chart latest point parity with scorecard
+
+**Symptoms:** Score Trends tooltip showed Authority **45** on the latest GSC day while the Authority pillar card showed **52** (matching live component breakdown).
+
+**Root cause:** Trend chart loop preferred stale Supabase `authorityBySegment` / `authorityMap` values for every date, including the latest audit/GSC day, before checking live scores from the current audit snapshot.
+
+**Fix (`audit-dashboard.html`):** For `isLatestAudit` points, resolve Authority from live audit components (same recompute as scorecard) before historical Supabase segment/map. Historical dates still use stored Supabase values.
+
 ## [2026-06-12] - Dashboard load perf + Authority ranking criteria hardening
 
 **Symptoms:** After Authority chart/pillar parity fix (2026-06-11), dashboard took very long to load and populate — trend chart build was blocking the UI.
