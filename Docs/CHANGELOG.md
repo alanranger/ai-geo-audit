@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-12i] - Trend chart: 15s timeout on get-audit-history fetches
+
+**Symptoms:** Dashboard appeared hung for minutes when Supabase returned 522; `fetchContentSchemaHistory` had no fetch timeout.
+
+**Fix:** Add `AbortSignal.timeout(15000)` to trend-chart history + timeseries fetches so the chart falls back to cached localStorage data instead of blocking indefinitely.
+
 ## [2026-06-12h] - Authority history backfill (May 25–Jun 11) + partial-audit chart fix
 
 **Symptoms:** Score Trends Authority line flat at **45** from late May through early June despite pillar card **52**; Jun 10 partial audit row ignored in `authorityMap`.
