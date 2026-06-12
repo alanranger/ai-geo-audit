@@ -6,6 +6,10 @@
  */
 
 import { enqueuePending, normalizeDomain } from '../../lib/domainStrength/domains.js';
+import {
+  normalizeAuthorityForAuditRecord,
+  recomputeAuthorityTotal,
+} from '../../lib/audit/authorityScore.js';
 
 export const config = { maxDuration: 60 };
 
@@ -963,6 +967,47 @@ export default async function handler(req, res) {
         }
       } catch (err) {
         console.warn('[Save Audit] impl_audit_snapshots qa sync threw:', err?.message || err);
+      }
+    }
+
+    // ---- Authority: persist total derived from 4 components (chart + pillar parity) ----
+    if (scoresToUse && !isPartialUpdate) {
+      const normalized = normalizeAuthorityForAuditRecord(scoresToUse, auditRecord);
+      if (normalized?.authority_score != null) {
+        const prevTotal = auditRecord.authority_score;
+        auditRecord.authority_score = normalized.authority_score;
+        if (normalized.authority_behaviour_score != null) {
+          auditRecord.authority_behaviour_score = normalized.authority_behaviour_score;
+          auditRecord.authority_ranking_score = normalized.authority_ranking_score;
+          auditRecord.authority_backlink_score = normalized.authority_backlink_score;
+          auditRecord.authority_review_score = normalized.authority_review_score;
+        }
+        if (prevTotal !== normalized.authority_score) {
+          console.log(
+            `[Save Audit] Authority aligned to components: ${prevTotal} → ${normalized.authority_score} (${normalized.source})`
+          );
+        }
+      }
+
+      const components = [
+        auditRecord.authority_behaviour_score,
+        auditRecord.authority_ranking_score,
+        auditRecord.authority_backlink_score,
+        auditRecord.authority_review_score,
+      ];
+      const hasAllComponents = components.every((v) => typeof v === 'number' && Number.isFinite(v));
+      if (auditRecord.authority_score != null && hasAllComponents) {
+        const check = recomputeAuthorityTotal(...components);
+        if (check !== null && Math.abs(check - auditRecord.authority_score) > 1) {
+          console.warn(
+            `[Save Audit] Authority total corrected ${auditRecord.authority_score} → ${check} (component mismatch)`
+          );
+          auditRecord.authority_score = check;
+        }
+      } else if (auditRecord.authority_score != null && !hasAllComponents) {
+        console.warn(
+          '[Save Audit] ⚠ Full audit saved authority_score without all 4 component columns — trend chart may diverge'
+        );
       }
     }
 

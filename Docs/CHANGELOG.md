@@ -2,6 +2,23 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-11] - Authority score: chart/pillar parity (4-component single source of truth)
+
+**Symptoms:** Authority pillar showed **51** after refresh but Score Trends chart stuck at **45** from ~24 May; Authority sub-bars sometimes **0/0/0/0** while raw backlink/review metrics displayed; scorecard Data Date (9 Jun) disagreed with chart for same day.
+
+**Root causes:**
+1. **Split data paths** — pillar tile recalculated live; chart read frozen `audit_results.authority_score` even when component columns existed.
+2. **Date mismatch** — chart `isLatestAudit` compared GSC timeseries date (9 Jun) to latest audit row date (11 Jun), so the last chart point never used live scores.
+3. **Bad saves** — some GSC runs persisted `authority_score=45` without valid four component columns.
+
+**Fixes:**
+- `lib/audit/authorityScore.js` — shared recompute from Behaviour/Ranking/Backlinks/Reviews (40/20/20/20).
+- `api/supabase/save-audit.js` — normalize `authority_score` from components before write; warn on mismatch.
+- `audit-dashboard.html` — chart rebuilds Authority from stored components + last-good smoothing; last GSC day uses live session score; recompute pillar when components are all zero.
+- `scripts/backfill-authority-from-components.mjs` — one-off Supabase correction (`--apply`).
+
+**After deploy:** run `node scripts/backfill-authority-from-components.mjs --apply --property=alanranger.com` then hard-refresh dashboard.
+
 ## [2026-06-10] - Schema audit: raise Vercel timeout so full crawl can finish
 
 **Symptom:** Green banner **Schema audit** stuck on **29-May** after multiple **GSC & Backlink Audit** runs on **10-Jun**. Supabase `audit_results` for `2026-06-10` saved GSC but `schema_total_pages` stayed null (`partial_reason: schema_pages_detail missing`).
