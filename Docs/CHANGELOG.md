@@ -38,6 +38,18 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 
 **Fixes:** Reorder audit completion (save → localStorage → await displayDashboard → 100%); await chart `setTimeout` via Promise; remove duplicate post-save render; guard overlapping `displayDashboard` runs; 3-minute loading safety timeout.
 
+## [2026-06-12c] - Dashboard load perf: stop always-on Supabase fetch
+
+**Symptoms:** Page load and tab switches felt slow again after spinner fix — dashboard blocked on multiple large `get-latest-audit` round-trips even when localStorage had a complete audit payload.
+
+**Root causes:**
+1. `loadAuditResults()` **always** fetched full audit from Supabase on every call (plus a redundant minimal fetch beforehand).
+2. Page init called `loadAuditResults()`, then `displayDashboard()` called it **again**.
+3. Overview tab re-ran **full** `displayDashboard()` on every visit (and twice when GBP count changed).
+4. Trend chart logged authority per timeseries point (hundreds of `debugLog` calls per render).
+
+**Fixes:** localStorage fast path when audit data is complete; background Supabase refresh only when cache is >15 min old; 60s session cache; `displayDashboard` uses sync cache when scores/data passed; Overview tab skips full re-render; removed per-point trend debug spam; extended latest-audit dedup TTL to 120s.
+
 ## [2026-06-11] - Authority score: chart/pillar parity (4-component single source of truth)
 
 **Symptoms:** Authority pillar showed **51** after refresh but Score Trends chart stuck at **45** from ~24 May; Authority sub-bars sometimes **0/0/0/0** while raw backlink/review metrics displayed; scorecard Data Date (9 Jun) disagreed with chart for same day.
