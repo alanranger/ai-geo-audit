@@ -12,6 +12,12 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 
 **Fixes:** Return incomplete localStorage immediately with background Supabase refresh; use `window.trendChart instanceof Chart` for chart-instance checks; guard `clearDashboard` destroy.
 
+## [2026-06-12k] - displayDashboard: guard metrics when GSC totals missing
+
+**Symptoms:** Trend chart never built; `Cannot read properties of undefined (reading 'toLocaleString')` on load when cached audit lacked `totalClicks` / `averagePosition`.
+
+**Fix:** `formatNumber` handles null/NaN; metrics grid uses safe defaults; skip if `#metricsGrid` absent.
+
 ## [2026-06-12i] - Trend chart: 15s timeout on get-audit-history fetches
 
 **Symptoms:** Dashboard appeared hung for minutes when Supabase returned 522; `fetchContentSchemaHistory` had no fetch timeout.
