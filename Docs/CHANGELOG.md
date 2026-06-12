@@ -12,6 +12,15 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 
 **Fixes:** Return incomplete localStorage immediately with background Supabase refresh; use `window.trendChart instanceof Chart` for chart-instance checks; guard `clearDashboard` destroy.
 
+## [2026-06-12m] - Stale localStorage authority: recompute + background refresh redisplay
+
+**Symptoms:** GAIO breakdown and pillar card stuck at Authority **45** from cached audit while trend chart partially used Supabase history; user on same-day timestamp never got background refresh.
+
+**Fixes:**
+- Always recompute authority from `queryPages` once per session (current ranking rules).
+- `resolveCanonicalAuthorityScore()` shared by GAIO gauge, pillar card, trend latest point.
+- Background Supabase refresh runs on every load; updates UI via `displayDashboard` when authority or timestamp differs.
+
 ## [2026-06-12l] - get-audit-history: return authority component columns
 
 **Symptoms:** Trend chart could recompute stale Authority from missing component fields even after DB backfill updated `authority_score`.
