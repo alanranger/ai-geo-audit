@@ -12,6 +12,12 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 
 **Fixes:** Return incomplete localStorage immediately with background Supabase refresh; use `window.trendChart instanceof Chart` for chart-instance checks; guard `clearDashboard` destroy.
 
+## [2026-06-12l] - get-audit-history: return authority component columns
+
+**Symptoms:** Trend chart could recompute stale Authority from missing component fields even after DB backfill updated `authority_score`.
+
+**Fix:** Include `authority_behaviour_score`, `authority_ranking_score`, `authority_backlink_score`, `authority_review_score`, and `authority_by_segment` in the Supabase select.
+
 ## [2026-06-12k] - displayDashboard: guard metrics when GSC totals missing
 
 **Symptoms:** Trend chart never built; `Cannot read properties of undefined (reading 'toLocaleString')` on load when cached audit lacked `totalClicks` / `averagePosition`.

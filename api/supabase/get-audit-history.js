@@ -114,7 +114,7 @@ export default async function handler(req, res) {
     };
 
     resolvedPropertyUrl = await resolvePropertyUrl();
-    let queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(resolvedPropertyUrl)}&order=audit_date.asc&select=audit_date,content_schema_score,visibility_score,authority_score,local_entity_score,service_area_score,brand_score,ai_summary_score,money_pages_behaviour_score,money_pages_summary,money_segment_metrics,schema_total_pages,schema_pages_with_schema,schema_coverage,is_partial`;
+    let queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(resolvedPropertyUrl)}&order=audit_date.asc&select=audit_date,content_schema_score,visibility_score,authority_score,authority_behaviour_score,authority_ranking_score,authority_backlink_score,authority_review_score,authority_by_segment,local_entity_score,service_area_score,brand_score,ai_summary_score,money_pages_behaviour_score,money_pages_summary,money_segment_metrics,schema_total_pages,schema_pages_with_schema,schema_coverage,is_partial`;
     
     if (startDate) {
       queryUrl += `&audit_date=gte.${startDate}`;
