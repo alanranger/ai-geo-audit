@@ -26,6 +26,18 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 
 **Note:** Re-run GSC & Backlink Audit for stored scores to reflect new ranking rules; historical chart points use saved component columns until then.
 
+## [2026-06-12b] - GSC audit spinner stuck at 100%
+
+**Symptoms:** After GSC & Backlink Audit, progress showed 100% / "Audit completed successfully!" but the orange spinner kept running indefinitely.
+
+**Root causes:**
+1. Progress jumped to **100% before** Supabase save and dashboard render finished — `finally` (which hides `#loading`) could not run until long async work completed.
+2. `displayDashboard()` was **not awaited**; chart build ran inside a `setTimeout(..., 100)` so the audit thought rendering was done while trend chart was still fetching history.
+3. A **second** `displayDashboard()` was scheduled 1s after save (duplicate full render).
+4. Trend mode toggle called **`displayDashboard()` with no args** (re-entrant full rebuild).
+
+**Fixes:** Reorder audit completion (save → localStorage → await displayDashboard → 100%); await chart `setTimeout` via Promise; remove duplicate post-save render; guard overlapping `displayDashboard` runs; 3-minute loading safety timeout.
+
 ## [2026-06-11] - Authority score: chart/pillar parity (4-component single source of truth)
 
 **Symptoms:** Authority pillar showed **51** after refresh but Score Trends chart stuck at **45** from ~24 May; Authority sub-bars sometimes **0/0/0/0** while raw backlink/review metrics displayed; scorecard Data Date (9 Jun) disagreed with chart for same day.
