@@ -2,6 +2,16 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-12j] - Dashboard load: stop blocking on incomplete Supabase fetch
+
+**Symptoms:** Page hung for minutes when Supabase returned 522; Overview trend chart never built.
+
+**Root causes:**
+1. `loadAuditResults()` blocked on `fetchLatestAuditFromSupabase` when localStorage cache was incomplete (waiting for Supabase timeout).
+2. `<canvas id="trendChart">` shadows `window.trendChart` — Overview tab check `!window.trendChart` was always false, skipping `displayDashboard` chart build.
+
+**Fixes:** Return incomplete localStorage immediately with background Supabase refresh; use `window.trendChart instanceof Chart` for chart-instance checks; guard `clearDashboard` destroy.
+
 ## [2026-06-12i] - Trend chart: 15s timeout on get-audit-history fetches
 
 **Symptoms:** Dashboard appeared hung for minutes when Supabase returned 522; `fetchContentSchemaHistory` had no fetch timeout.
