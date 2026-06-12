@@ -2,6 +2,30 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-12] - Dashboard load perf + Authority ranking criteria hardening
+
+**Symptoms:** After Authority chart/pillar parity fix (2026-06-11), dashboard took very long to load and populate — trend chart build was blocking the UI.
+
+**Root causes (perf):**
+1. **`loadAuditResultsSync()` inside trend chart loop** — full `JSON.parse` of large `last_audit_results` (incl. `query_pages`) on every timeseries point × multiple pillars.
+2. **O(n²) map scans** — each chart point ran `forEach` over entire `localEntityMap`, `authorityMap`, `contentSchemaMap`, etc.
+3. **Repeated authority recompute** — `calculatePillarScores()` over full `queryPages` could run on every page load when stale 0/0/0/0 components were cached in localStorage.
+4. **Verbose debug logging** — dumping entire historical maps on every chart build.
+
+**Perf fixes (`audit-dashboard.html`):**
+- Cache parsed localStorage audit snapshot (invalidate on `safeSetLocalStorage('last_audit_results', …)`).
+- Pre-build O(n) “latest as-of” sweep readers for historical pillar maps.
+- Run authority component recompute at most once per session; pass saved backlink metrics into recalc.
+- Remove full-map debug dumps from trend chart path.
+
+**Authority ranking criteria (`lib/audit/rankingCriteria.js`, `pillarScores.js`, dashboard):**
+- Soft top-10 band: position ≤ **10.5** (was strict ≤ 10).
+- Cap any single query+page row at **25%** of pool impressions before scoring.
+- Ranking blend **70%** avg position / **30%** top-10 share (was 50/50).
+- Help text updated to match.
+
+**Note:** Re-run GSC & Backlink Audit for stored scores to reflect new ranking rules; historical chart points use saved component columns until then.
+
 ## [2026-06-11] - Authority score: chart/pillar parity (4-component single source of truth)
 
 **Symptoms:** Authority pillar showed **51** after refresh but Score Trends chart stuck at **45** from ~24 May; Authority sub-bars sometimes **0/0/0/0** while raw backlink/review metrics displayed; scorecard Data Date (9 Jun) disagreed with chart for same day.
