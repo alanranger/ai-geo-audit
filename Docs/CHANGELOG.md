@@ -2,6 +2,16 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-12g] - Authority trend chart: use live scorecard totals (52 not 45)
+
+**Symptoms:** After 2026-06-12f, latest GSC day tooltip still showed Authority **45** while pillar card showed **52**.
+
+**Root causes:**
+1. Trend chart read `loadAuditResultsSync()` only — missed `window.latestAuditScores` from `displayDashboard` queryPages recompute.
+2. `resolveTrendLiveAuthorityScore` recomputed from stale `authorityComponents` before checking `bySegment.total`, overriding a correct **52** with **45** (scorecard uses `.total` directly).
+
+**Fix:** Prefer `window.latestAuditScores || scores` for live points; match scorecard by using stored segment total first, recompute only when total missing. Chart date-fill path uses same live resolver on latest audit / last GSC day.
+
 ## [2026-06-12f] - Authority trend chart latest point parity with scorecard
 
 **Symptoms:** Score Trends tooltip showed Authority **45** on the latest GSC day while the Authority pillar card showed **52** (matching live component breakdown).
