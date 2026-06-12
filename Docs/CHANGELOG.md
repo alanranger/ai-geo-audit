@@ -2,6 +2,21 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-12h] - Authority history backfill (May 25–Jun 11) + partial-audit chart fix
+
+**Symptoms:** Score Trends Authority line flat at **45** from late May through early June despite pillar card **52**; Jun 10 partial audit row ignored in `authorityMap`.
+
+**Root causes:**
+1. Supabase rows stored ranking scores computed under old strict top-10 rules (~41–42 → total **45**).
+2. Trend chart skipped partial audits for `authorityMap` even when component columns were valid (Jun 10).
+3. GSC daily points between sparse audit dates carry-forward last mapped authority (stale **45** plateau).
+
+**Fixes:**
+- **`scripts/backfill-authority-ranking-period.mjs`** — recompute behaviour/ranking/total/`authority_by_segment` from stored `query_pages` using current `rankingCriteria.js` rules (dry-run verified: May 25–29 **45→54**, Jun 10–11 **51→55**). Run: `node scripts/backfill-authority-ranking-period.mjs --from=2026-05-25 --to=2026-06-11 --apply`
+- **`audit-dashboard.html`** — map Authority from partial audits when component columns exist.
+- **`scripts/verify-authority-trend-chart.mjs`** — Playwright parity check (pillar card vs trend last point).
+- **`scripts/test-authority-trend-logic.mjs`** — offline unit test for live-total resolution.
+
 ## [2026-06-12g] - Authority trend chart: use live scorecard totals (52 not 45)
 
 **Symptoms:** After 2026-06-12f, latest GSC day tooltip still showed Authority **45** while pillar card showed **52**.
