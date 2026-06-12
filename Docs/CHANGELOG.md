@@ -38,6 +38,18 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 
 **Fixes:** Reorder audit completion (save → localStorage → await displayDashboard → 100%); await chart `setTimeout` via Promise; remove duplicate post-save render; guard overlapping `displayDashboard` runs; 3-minute loading safety timeout.
 
+## [2026-06-12d] - Dashboard load perf (measured): default tab, dedup, defer trend chart
+
+**Playwright measurement (before):** 4.3s to hide spinner but trend chart ~34s; two 1.8MB `get-latest-audit` calls; Revenue Funnel APIs firing on every load.
+
+**Root causes found in live test:**
+1. **Wrong default panel** — `revenue-funnel` had `is-active` while nav showed Dashboard → `rfInit()` pulled ~2MB of revenue APIs on every page open.
+2. **`updateAuditTimestamp`** fetched full audit (1.8MB) with cache-bust `&_=` bypassing fetch dedup.
+3. **`displayDashboard` blocked** on trend chart Supabase history (2-year `get-audit-history` ×2 + timeseries refetch).
+4. Fetch dedup keyed on full URL so `_=` bust params never hit cache.
+
+**Fixes:** Correct default panel to Dashboard; Revenue Funnel init only when nav+panel both active; banner uses localStorage/minimal fetch; strip `_` from dedup keys (120s TTL); trend chart uses cached timeseries + resolves before heavy history; audit history session cache.
+
 ## [2026-06-12c] - Dashboard load perf: stop always-on Supabase fetch
 
 **Symptoms:** Page load and tab switches felt slow again after spinner fix — dashboard blocked on multiple large `get-latest-audit` round-trips even when localStorage had a complete audit payload.
