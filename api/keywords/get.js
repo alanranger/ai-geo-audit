@@ -4,10 +4,11 @@
  * Source priority:
  *   1. audit_results.ranking_ai_data.targetKeywords (Edit Keywords / CSV upload)
  *   2. Largest keyword_rankings snapshot by row count (not merely latest date)
- *   3. Latest keyword_rankings snapshot (legacy fallback)
  *
  * GET /api/keywords/get
  */
+
+export const config = { runtime: 'nodejs', maxDuration: 60 };
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 const SB_HEADERS = (supabaseKey) => ({
@@ -60,35 +61,35 @@ async function loadTargetKeywordsFromAudit(supabaseUrl, supabaseKey, propertyUrl
   };
 }
 
-async function loadKeywordsForAuditDate(supabaseUrl, supabaseKey, propertyUrl, auditDate) {
-  const keywordsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${auditDate}&select=keyword&order=keyword.asc`;
-  const keywordsResp = await sbFetch(keywordsUrl, supabaseKey, 20000);
-  if (!keywordsResp.ok) return [];
-
-  const keywordRows = await keywordsResp.json();
-  if (!Array.isArray(keywordRows)) return [];
-  return dedupeSortKeywords(keywordRows.map((row) => row?.keyword));
-}
-
 async function loadLargestKeywordSnapshot(supabaseUrl, supabaseKey, propertyUrl) {
-  const datesUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&select=audit_date&order=audit_date.desc&limit=5000`;
-  const datesResp = await sbFetch(datesUrl, supabaseKey, 20000);
-  if (!datesResp.ok) return null;
+  // Single round-trip: group keywords by audit_date in memory (avoids 20 sequential queries).
+  const url = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&select=audit_date,keyword&limit=10000`;
+  const resp = await sbFetch(url, supabaseKey, 45000);
+  if (!resp.ok) return null;
 
-  const dateRows = await datesResp.json();
-  if (!Array.isArray(dateRows) || dateRows.length === 0) return null;
+  const rows = await resp.json();
+  if (!Array.isArray(rows) || rows.length === 0) return null;
 
-  const uniqueDates = [...new Set(dateRows.map((r) => r?.audit_date).filter(Boolean))].slice(0, 20);
-  let best = { auditDate: null, keywords: [], source: 'largest_snapshot' };
+  const byDate = new Map();
+  for (const row of rows) {
+    const auditDate = row?.audit_date;
+    const keyword = String(row?.keyword || '').trim();
+    if (!auditDate || !keyword) continue;
+    if (!byDate.has(auditDate)) byDate.set(auditDate, new Set());
+    byDate.get(auditDate).add(keyword);
+  }
 
-  for (const auditDate of uniqueDates) {
-    const keywords = await loadKeywordsForAuditDate(supabaseUrl, supabaseKey, propertyUrl, auditDate);
-    if (keywords.length > best.keywords.length) {
-      best = { auditDate, keywords, source: 'largest_snapshot' };
+  let bestDate = null;
+  let bestKeywords = [];
+  for (const [auditDate, keywordSet] of byDate) {
+    if (keywordSet.size > bestKeywords.length) {
+      bestDate = auditDate;
+      bestKeywords = dedupeSortKeywords([...keywordSet]);
     }
   }
 
-  return best.keywords.length > 0 ? best : null;
+  if (bestKeywords.length === 0) return null;
+  return { auditDate: bestDate, keywords: bestKeywords, source: 'largest_snapshot' };
 }
 
 export default async function handler(req, res) {

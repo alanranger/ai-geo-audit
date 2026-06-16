@@ -11,6 +11,15 @@
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
+const DEFAULT_PROPERTY = 'https://www.alanranger.com';
+
+function resolvePropertyUrl(raw) {
+  const v = String(raw || process.env.GSC_PROPERTY_URL || process.env.NEXT_PUBLIC_SITE_DOMAIN || process.env.SITE_DOMAIN || DEFAULT_PROPERTY).trim();
+  if (!v) return DEFAULT_PROPERTY;
+  if (/^https?:\/\//i.test(v)) return v.replace(/\/+$/, '');
+  return `https://${v.replace(/^www\./, '')}`.replace(/\/+$/, '');
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -37,7 +46,7 @@ export default async function handler(req, res) {
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    const propertyUrl = String(body?.propertyUrl || '').trim();
+    const propertyUrl = resolvePropertyUrl(body?.propertyUrl);
     const auditDate = String(body?.auditDate || '').trim();
     const summary = body?.summary || null;
     const rankingAiPillarScores = body?.rankingAiPillarScores ?? null;
@@ -65,67 +74,41 @@ export default async function handler(req, res) {
       patchPayload.ranking_ai_pillar_scores = rankingAiPillarScores;
     }
 
-    const patchUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${encodeURIComponent(auditDate)}`;
-    const patchResp = await fetch(patchUrl, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: supabaseKey,
-        Authorization: `Bearer ${supabaseKey}`,
-        Prefer: 'return=representation'
-      },
-      body: JSON.stringify(patchPayload)
-    });
-
-    if (patchResp.ok) {
-      const patched = await patchResp.json().catch(() => []);
-      if (Array.isArray(patched) && patched.length > 0) {
-        return res.status(200).json({
-          status: 'ok',
-          message: 'Ranking summary saved',
-          data: patched,
-          meta: { generatedAt: new Date().toISOString(), action: 'patch' }
-        });
-      }
-    }
-
-    const insertPayload = {
+    const upsertPayload = {
       property_url: propertyUrl,
       audit_date: auditDate,
-      ranking_ai_data: rankingAiData,
-      ranking_ai_pillar_scores: rankingAiPillarScores,
+      ...patchPayload,
       is_partial: true,
       partial_reason: 'ranking_ai_only',
-      updated_at: new Date().toISOString()
     };
 
-    const insertResp = await fetch(`${supabaseUrl}/rest/v1/audit_results`, {
+    const upsertResp = await fetch(`${supabaseUrl}/rest/v1/audit_results?on_conflict=property_url,audit_date`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         apikey: supabaseKey,
         Authorization: `Bearer ${supabaseKey}`,
-        Prefer: 'return=representation'
+        Prefer: 'resolution=merge-duplicates,return=representation',
       },
-      body: JSON.stringify(insertPayload)
+      body: JSON.stringify(upsertPayload),
     });
 
-    if (!insertResp.ok) {
-      const detail = await insertResp.text().catch(() => '');
-      return res.status(insertResp.status).json({
+    if (!upsertResp.ok) {
+      const detail = await upsertResp.text().catch(() => '');
+      return res.status(upsertResp.status).json({
         status: 'error',
         message: 'Failed to save ranking summary',
         details: detail.slice(0, 500),
-        meta: { generatedAt: new Date().toISOString() }
+        meta: { generatedAt: new Date().toISOString() },
       });
     }
 
-    const inserted = await insertResp.json().catch(() => []);
+    const upserted = await upsertResp.json().catch(() => []);
     return res.status(200).json({
       status: 'ok',
-      message: 'Ranking summary saved (new stub)',
-      data: inserted,
-      meta: { generatedAt: new Date().toISOString(), action: 'insert' }
+      message: 'Ranking summary saved',
+      data: upserted,
+      meta: { generatedAt: new Date().toISOString(), action: 'upsert' },
     });
   } catch (err) {
     console.error('[save-ranking-ai-summary]', err);
