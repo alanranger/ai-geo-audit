@@ -4,9 +4,13 @@
  * Source priority:
  *   1. audit_results.ranking_ai_data.targetKeywords (Edit Keywords / CSV upload)
  *   2. Largest keyword_rankings snapshot by row count (not merely latest date)
+ *   3. Bundled public/tracked-keywords-fallback.json (when Supabase is down)
  *
  * GET /api/keywords/get
  */
+
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
@@ -36,12 +40,28 @@ function dedupeSortKeywords(keywords) {
   )].sort((a, b) => a.localeCompare(b));
 }
 
-async function sbFetch(url, supabaseKey, timeoutMs = 12000) {
+async function sbFetch(url, supabaseKey, timeoutMs = 8000) {
   return fetch(url, {
     method: 'GET',
     headers: SB_HEADERS(supabaseKey),
     signal: AbortSignal.timeout(timeoutMs),
   });
+}
+
+function loadBundledKeywordsFallback() {
+  try {
+    const filePath = join(process.cwd(), 'public/tracked-keywords-fallback.json');
+    const parsed = JSON.parse(readFileSync(filePath, 'utf8'));
+    const keywords = dedupeSortKeywords(parsed?.keywords);
+    if (!keywords.length) return null;
+    return {
+      keywords,
+      auditDate: parsed.auditDate || null,
+      source: 'bundled_fallback',
+    };
+  } catch (_e) {
+    return null;
+  }
 }
 
 async function loadTargetKeywordsFromAudit(supabaseUrl, supabaseKey, propertyUrl) {
@@ -64,7 +84,7 @@ async function loadTargetKeywordsFromAudit(supabaseUrl, supabaseKey, propertyUrl
 async function loadLargestKeywordSnapshot(supabaseUrl, supabaseKey, propertyUrl) {
   // Single round-trip: group keywords by audit_date in memory (avoids 20 sequential queries).
   const url = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&select=audit_date,keyword&limit=10000`;
-  const resp = await sbFetch(url, supabaseKey, 45000);
+  const resp = await sbFetch(url, supabaseKey, 8000);
   if (!resp.ok) return null;
 
   const rows = await resp.json();
@@ -126,6 +146,10 @@ export default async function handler(req, res) {
     }
 
     if (!result) {
+      result = loadBundledKeywordsFallback();
+    }
+
+    if (!result) {
       return res.status(200).json({
         status: 'ok',
         keywords: [],
@@ -147,6 +171,20 @@ export default async function handler(req, res) {
   } catch (e) {
     console.error('[Get Keywords] Error:', e);
     const isTimeout = e?.name === 'TimeoutError' || String(e?.message || '').includes('timeout');
+    const bundled = loadBundledKeywordsFallback();
+    if (isTimeout && bundled) {
+      return res.status(200).json({
+        status: 'ok',
+        keywords: bundled.keywords,
+        auditDate: bundled.auditDate,
+        propertyUrl: resolvePropertyUrl(),
+        meta: {
+          generatedAt: new Date().toISOString(),
+          source: bundled.source,
+          reason: 'supabase_unavailable_bundled_fallback',
+        },
+      });
+    }
     if (isTimeout) {
       return res.status(503).json({
         status: 'error',
