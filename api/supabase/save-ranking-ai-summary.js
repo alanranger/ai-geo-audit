@@ -9,7 +9,7 @@
  * Body: { propertyUrl, auditDate, summary, rankingAiPillarScores }
  */
 
-export const config = { maxDuration: 30 };
+export const config = { runtime: 'nodejs', maxDuration: 60 };
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');

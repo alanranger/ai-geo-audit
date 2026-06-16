@@ -3,6 +3,8 @@
  * This allows partial results to be saved even if later batches fail
  */
 
+export const config = { runtime: 'nodejs', maxDuration: 60 };
+
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');

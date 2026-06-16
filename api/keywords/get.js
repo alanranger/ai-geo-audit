@@ -55,6 +55,7 @@ export default async function handler(req, res) {
         apikey: supabaseKey,
         Authorization: `Bearer ${supabaseKey}`,
       },
+      signal: AbortSignal.timeout(12000),
     });
 
     let auditDate = null;
@@ -80,6 +81,7 @@ export default async function handler(req, res) {
           apikey: supabaseKey,
           Authorization: `Bearer ${supabaseKey}`,
         },
+        signal: AbortSignal.timeout(12000),
       });
       if (auditResp.ok) {
         const auditRows = await auditResp.json();
@@ -110,6 +112,7 @@ export default async function handler(req, res) {
         apikey: supabaseKey,
         Authorization: `Bearer ${supabaseKey}`,
       },
+      signal: AbortSignal.timeout(12000),
     });
 
     let keywords = [];

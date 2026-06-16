@@ -9,6 +9,8 @@
 // so the remaining keywords don't fire paid requests after the account is
 // depleted. Matches the behaviour in serp-rank-test.js.
 
+export const config = { runtime: 'nodejs', maxDuration: 300 };
+
 const DFS_FATAL_STATUS_CODES_AI = new Set([40100, 40101, 40200, 40300, 40400]);
 
 function isDfsFatalStatusAi(statusCode) {

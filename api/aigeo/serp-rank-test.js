@@ -20,6 +20,8 @@
 
 import { extractCitationsFromDfsResult } from '../../lib/ai-citation-extract.js';
 
+export const config = { runtime: 'nodejs', maxDuration: 300 };
+
 function normalizeDomain(value) {
   if (!value) return null;
   try {
@@ -469,13 +471,17 @@ export default async function handler(req, res) {
   
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   
   // Handle preflight
   if (req.method === 'OPTIONS') {
     console.log(`[SERP-RANK-TEST] OPTIONS preflight request`);
     return res.status(200).end();
+  }
+
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed. Use GET or POST.' });
   }
 
   const login = process.env.DATAFORSEO_LOGIN;
@@ -488,10 +494,19 @@ export default async function handler(req, res) {
     return;
   }
 
-  // Parse keyword or keywords query param
+  // Parse keywords from GET query or POST JSON body ({ keywords: string[], depth?: number })
   let keywords = [];
-  
-  if (req.query.keyword) {
+  let body = null;
+  if (req.method === 'POST') {
+    try {
+      body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+    } catch {
+      body = {};
+    }
+    if (Array.isArray(body.keywords)) {
+      keywords = body.keywords.map(String).map((k) => k.trim()).filter((k) => k.length > 0);
+    }
+  } else if (req.query.keyword) {
     keywords = [String(req.query.keyword)];
   } else if (req.query.keywords) {
     keywords = String(req.query.keywords)
@@ -527,11 +542,11 @@ export default async function handler(req, res) {
   // Optional ?depth= override. Default 50, clamped to [10, 100]. Lets us
   // verify "not ranked at all" vs. "ranks at 51-100" without changing the
   // default cost profile of the audit.
-  const depth = resolveSerpDepth(req.query.depth);
+  const depth = resolveSerpDepth(body?.depth ?? req.query.depth);
   // 2026-04-22: AIO expansion is now opt-in. Pass ?ai_overview=1 to request
   // Google AI Overview citations (expensive). Default false keeps routine
   // audits cheap (~$0.002/keyword instead of ~$0.025).
-  const expandAiOverview = /^(1|true|yes)$/i.test(String(req.query.ai_overview ?? ''));
+  const expandAiOverview = /^(1|true|yes)$/i.test(String(body?.ai_overview ?? req.query.ai_overview ?? ''));
   console.log(`[Handler] Using SERP depth: ${depth}, expand_ai_overview: ${expandAiOverview}`);
 
   try {
