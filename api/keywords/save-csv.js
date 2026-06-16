@@ -228,6 +228,7 @@ export default async function handler(req, res) {
         ranking_ai_data: {
           combinedRows: [],
           summary: { totalKeywords: keywords.length },
+          targetKeywords: keywords,
           keywordsUpdated: new Date().toISOString()
         }
       }),

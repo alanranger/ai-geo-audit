@@ -271,6 +271,7 @@ export default async function handler(req, res) {
       summary: {
         totalKeywords: newKeywords.length
       },
+      targetKeywords: newKeywords,
       keywordsUpdated: new Date().toISOString()
     };
 

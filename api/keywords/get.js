@@ -1,10 +1,20 @@
 /**
- * Get current keyword list from latest keyword_rankings snapshot
+ * Get the canonical tracked keyword list for Ranking & AI scans.
+ *
+ * Source priority:
+ *   1. audit_results.ranking_ai_data.targetKeywords (Edit Keywords / CSV upload)
+ *   2. Largest keyword_rankings snapshot by row count (not merely latest date)
+ *   3. Latest keyword_rankings snapshot (legacy fallback)
  *
  * GET /api/keywords/get
  */
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
+const SB_HEADERS = (supabaseKey) => ({
+  'Content-Type': 'application/json',
+  apikey: supabaseKey,
+  Authorization: `Bearer ${supabaseKey}`,
+});
 
 function resolvePropertyUrl() {
   const raw = process.env.GSC_PROPERTY_URL
@@ -15,6 +25,70 @@ function resolvePropertyUrl() {
   if (!v) return DEFAULT_PROPERTY;
   if (/^https?:\/\//i.test(v)) return v.replace(/\/+$/, '');
   return `https://${v.replace(/^www\./, '')}`.replace(/\/+$/, '');
+}
+
+function dedupeSortKeywords(keywords) {
+  return [...new Set(
+    (keywords || [])
+      .map((kw) => String(kw || '').trim())
+      .filter((kw) => kw.length > 0)
+  )].sort((a, b) => a.localeCompare(b));
+}
+
+async function sbFetch(url, supabaseKey, timeoutMs = 12000) {
+  return fetch(url, {
+    method: 'GET',
+    headers: SB_HEADERS(supabaseKey),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+}
+
+async function loadTargetKeywordsFromAudit(supabaseUrl, supabaseKey, propertyUrl) {
+  const auditUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=audit_date,ranking_ai_data`;
+  const auditResp = await sbFetch(auditUrl, supabaseKey);
+  if (!auditResp.ok) return null;
+
+  const rows = await auditResp.json();
+  const row = Array.isArray(rows) ? rows[0] : null;
+  const target = row?.ranking_ai_data?.targetKeywords;
+  if (!Array.isArray(target) || target.length === 0) return null;
+
+  return {
+    keywords: dedupeSortKeywords(target),
+    auditDate: row.audit_date || null,
+    source: 'target_keywords',
+  };
+}
+
+async function loadKeywordsForAuditDate(supabaseUrl, supabaseKey, propertyUrl, auditDate) {
+  const keywordsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${auditDate}&select=keyword&order=keyword.asc`;
+  const keywordsResp = await sbFetch(keywordsUrl, supabaseKey, 20000);
+  if (!keywordsResp.ok) return [];
+
+  const keywordRows = await keywordsResp.json();
+  if (!Array.isArray(keywordRows)) return [];
+  return dedupeSortKeywords(keywordRows.map((row) => row?.keyword));
+}
+
+async function loadLargestKeywordSnapshot(supabaseUrl, supabaseKey, propertyUrl) {
+  const datesUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&select=audit_date&order=audit_date.desc&limit=5000`;
+  const datesResp = await sbFetch(datesUrl, supabaseKey, 20000);
+  if (!datesResp.ok) return null;
+
+  const dateRows = await datesResp.json();
+  if (!Array.isArray(dateRows) || dateRows.length === 0) return null;
+
+  const uniqueDates = [...new Set(dateRows.map((r) => r?.audit_date).filter(Boolean))].slice(0, 20);
+  let best = { auditDate: null, keywords: [], source: 'largest_snapshot' };
+
+  for (const auditDate of uniqueDates) {
+    const keywords = await loadKeywordsForAuditDate(supabaseUrl, supabaseKey, propertyUrl, auditDate);
+    if (keywords.length > best.keywords.length) {
+      best = { auditDate, keywords, source: 'largest_snapshot' };
+    }
+  }
+
+  return best.keywords.length > 0 ? best : null;
 }
 
 export default async function handler(req, res) {
@@ -45,58 +119,12 @@ export default async function handler(req, res) {
   try {
     const propertyUrl = resolvePropertyUrl();
 
-    // Prefer the most recent keyword_rankings snapshot (includes ranking-only
-    // runs on partial audit dates — e.g. 98 keywords on 2026-05-31).
-    const latestKrUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&select=audit_date&order=audit_date.desc&limit=1`;
-    const latestKrResp = await fetch(latestKrUrl, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: supabaseKey,
-        Authorization: `Bearer ${supabaseKey}`,
-      },
-      signal: AbortSignal.timeout(12000),
-    });
-
-    let auditDate = null;
-    if (latestKrResp.ok) {
-      const latestKr = await latestKrResp.json();
-      auditDate = latestKr[0]?.audit_date || null;
-    } else if (latestKrResp.status >= 500 || latestKrResp.status === 522) {
-      return res.status(503).json({
-        status: 'error',
-        message: 'Supabase unavailable',
-        keywords: [],
-        meta: { generatedAt: new Date().toISOString(), reason: 'supabase_unavailable' },
-      });
+    let result = await loadTargetKeywordsFromAudit(supabaseUrl, supabaseKey, propertyUrl);
+    if (!result) {
+      result = await loadLargestKeywordSnapshot(supabaseUrl, supabaseKey, propertyUrl);
     }
 
-    // Fallback: latest audit_results row (include partial ranking-only stubs)
-    if (!auditDate) {
-      const auditUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=audit_date`;
-      const auditResp = await fetch(auditUrl, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: supabaseKey,
-          Authorization: `Bearer ${supabaseKey}`,
-        },
-        signal: AbortSignal.timeout(12000),
-      });
-      if (auditResp.ok) {
-        const auditRows = await auditResp.json();
-        auditDate = auditRows[0]?.audit_date || null;
-      } else if (auditResp.status >= 500 || auditResp.status === 522) {
-        return res.status(503).json({
-          status: 'error',
-          message: 'Supabase unavailable',
-          keywords: [],
-          meta: { generatedAt: new Date().toISOString(), reason: 'supabase_unavailable' },
-        });
-      }
-    }
-
-    if (!auditDate) {
+    if (!result) {
       return res.status(200).json({
         status: 'ok',
         keywords: [],
@@ -104,41 +132,28 @@ export default async function handler(req, res) {
       });
     }
 
-    const keywordsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${auditDate}&select=keyword&order=keyword.asc`;
-    const keywordsResp = await fetch(keywordsUrl, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: supabaseKey,
-        Authorization: `Bearer ${supabaseKey}`,
-      },
-      signal: AbortSignal.timeout(12000),
-    });
-
-    let keywords = [];
-    if (keywordsResp.ok) {
-      const keywordRows = await keywordsResp.json();
-      if (Array.isArray(keywordRows)) {
-        keywords = keywordRows
-          .map(row => row?.keyword)
-          .filter(kw => kw && typeof kw === 'string' && kw.trim().length > 0)
-          .map(kw => kw.trim());
-        keywords = [...new Set(keywords)].sort();
-      }
-    }
-
     return res.status(200).json({
       status: 'ok',
-      keywords,
-      auditDate,
+      keywords: result.keywords,
+      auditDate: result.auditDate,
       propertyUrl,
       meta: {
         generatedAt: new Date().toISOString(),
-        debug: `Found ${keywords.length} keywords from keyword_rankings (audit_date: ${auditDate})`,
+        source: result.source,
+        debug: `Found ${result.keywords.length} keywords (${result.source}${result.auditDate ? `, audit_date: ${result.auditDate}` : ''})`,
       },
     });
   } catch (e) {
     console.error('[Get Keywords] Error:', e);
+    const isTimeout = e?.name === 'TimeoutError' || String(e?.message || '').includes('timeout');
+    if (isTimeout) {
+      return res.status(503).json({
+        status: 'error',
+        message: 'Supabase unavailable',
+        keywords: [],
+        meta: { generatedAt: new Date().toISOString(), reason: 'supabase_unavailable' },
+      });
+    }
     return res.status(500).json({
       status: 'error',
       message: e.message || 'Internal server error',
