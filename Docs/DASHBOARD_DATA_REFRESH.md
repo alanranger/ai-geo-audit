@@ -18,7 +18,7 @@ also hammers Supabase Nano.
 | **`loadAuditResults` session cache** | 60s | Avoid repeat parse/fetch in one flow |
 | **`__auditHistoryCache`** | 120s | Trend chart pillar history |
 | **`__trendTimeseriesSession`** | 10 min | GSC timeseries for Score Trends |
-| **`__optimisationTasksLoadedAt`** | 60s | Optimisation dashboard API |
+| **`__optimisationTasksLoadedAt`** | 60s | Optimisation dashboard API (uses `__origFetch`, not global dedup) |
 | **`isSupabaseDegraded()`** | 5 min after 522 | Stop upstream calls; use cache |
 
 ## When Supabase is called
@@ -42,7 +42,7 @@ also hammers Supabase Nano.
 
 - **60s session TTL** for normal loads (tab open, drawer, filters).
 - **`forceRefresh: true`** only for “Update All Tasks”, bulk rebaseline, global run.
-- Included in global GET dedup (no `_t=` cache buster unless forced).
+- **Not** in global GET dedup (auth headers per caller; dedup caused cached 500s).
 
 ### Tab switch
 

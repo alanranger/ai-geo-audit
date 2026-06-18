@@ -2,6 +2,18 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-12o] - Hotfix: Optimisation tracker empty after refresh-policy commit
+
+**Symptoms:** Optimisation tab showed Active/Done (0), “Server error”, console
+`[Optimisation Dashboard] API error`.
+
+**Cause:** Commit 596e919 added `/api/optimisation/dashboard` to global GET dedup.
+That endpoint is auth-header-sensitive; dedup cached the first response (including
+HTTP 500 from Supabase blips) for 120s and ignored per-call admin headers.
+
+**Fix:** Remove optimisation from dedup; call via `window.__origFetch`; only
+cache 2xx in global dedup; log server error body in console for diagnosis.
+
 ## [2026-06-12n] - Data refresh audit: stop request storms across tabs
 
 **Symptoms:** After recent refresh hardening, tabs felt stale or empty while
