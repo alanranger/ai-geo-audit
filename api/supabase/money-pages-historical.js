@@ -4,6 +4,7 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
+import { isRowIndexable } from '../../lib/page-indexability-policy.js';
 
 const need = (k) => {
   const v = process.env[k];
@@ -32,6 +33,105 @@ function normalizeUrl(url) {
   }
   normalized = normalized.replace(/^\/+/, '').replace(/\/+$/, '');
   return normalized;
+}
+
+function slugFromTargetUrl(targetUrl) {
+  const n = normalizeUrl(targetUrl);
+  return n || '';
+}
+
+async function fetchPolicyForSlug(supabase, propertyUrl, slug) {
+  const { data, error } = await supabase
+    .from('revenue_gsc_joined_with_policy')
+    .select('policy_value, policy_effective_date')
+    .eq('property_url', propertyUrl)
+    .eq('page_slug', slug)
+    .order('period_start', { ascending: false })
+    .limit(1);
+  if (error || !data?.length) return { policy_value: null, policy_effective_date: null };
+  return {
+    policy_value: data[0].policy_value ?? null,
+    policy_effective_date: data[0].policy_effective_date ?? null
+  };
+}
+
+function periodStartFromDate(dateStr) {
+  return `${String(dateStr).slice(0, 7)}-01`;
+}
+
+function policyRowForDay(targetUrl, propertyUrl, dateStr, policy) {
+  return {
+    page_url: targetUrl,
+    property_url: propertyUrl,
+    period_start: periodStartFromDate(dateStr),
+    policy_value: policy.policy_value,
+    policy_effective_date: policy.policy_effective_date
+  };
+}
+
+function aggregateDailyMap(dailyMap, targetUrl, propertyUrl, policy) {
+  let totalClicks = 0;
+  let totalImpressions = 0;
+  let positionSum = 0;
+  let positionWeight = 0;
+  let dataPoints = 0;
+  let idxClicks = 0;
+  let idxImpressions = 0;
+  let idxPosSum = 0;
+  let idxPosWeight = 0;
+  let idxPoints = 0;
+
+  dailyMap.forEach(({ clicks, impr, pos }, dateStr) => {
+    totalClicks += clicks || 0;
+    totalImpressions += impr || 0;
+    if (pos != null && impr > 0) {
+      positionSum += pos * impr;
+      positionWeight += impr;
+    }
+    dataPoints += 1;
+    if (!isRowIndexable(policyRowForDay(targetUrl, propertyUrl, dateStr, policy))) return;
+    idxClicks += clicks || 0;
+    idxImpressions += impr || 0;
+    if (pos != null && impr > 0) {
+      idxPosSum += pos * impr;
+      idxPosWeight += impr;
+    }
+    idxPoints += 1;
+  });
+
+  return {
+    totalClicks,
+    totalImpressions,
+    positionSum,
+    positionWeight,
+    dataPoints,
+    idxClicks,
+    idxImpressions,
+    idxPosSum,
+    idxPosWeight,
+    idxPoints
+  };
+}
+
+function buildAggregatePayload(totals) {
+  const avgCtr = totals.totalImpressions > 0 ? (totals.totalClicks / totals.totalImpressions) * 100 : null;
+  const avgPosition = totals.positionWeight > 0 ? totals.positionSum / totals.positionWeight : null;
+  const idxCtr = totals.idxImpressions > 0 ? (totals.idxClicks / totals.idxImpressions) * 100 : null;
+  const idxPosition = totals.idxPosWeight > 0 ? totals.idxPosSum / totals.idxPosWeight : null;
+  return {
+    clicks_90d: totals.totalClicks,
+    impressions_90d: totals.totalImpressions,
+    ctr_90d: avgCtr,
+    avg_position_90d: avgPosition,
+    clicks_90d_indexable: totals.idxClicks,
+    impressions_90d_indexable: totals.idxImpressions,
+    ctr_90d_indexable: idxCtr,
+    avg_position_90d_indexable: idxPosition,
+    data_points: totals.dataPoints,
+    data_points_indexable: totals.idxPoints,
+    rows_total_count: totals.dataPoints,
+    rows_indexable_count: totals.idxPoints
+  };
 }
 
 export default async function handler(req, res) {
@@ -150,14 +250,11 @@ export default async function handler(req, res) {
       });
     }
 
-    let totalClicks = 0;
-    let totalImpressions = 0;
-    let positionSum = 0;
-    let positionWeight = 0;
-    let dataPoints = 0;
+    const policy = await fetchPolicyForSlug(supabase, property_url, slugFromTargetUrl(target_url));
 
     // Deduplicate by date to avoid double counting the same day across multiple audits
     const dailyMap = new Map(); // key: date -> { clicks, impressions, position }
+    let fromTimeseries = false;
 
     try {
       for (const audit of audits) {
@@ -215,24 +312,15 @@ export default async function handler(req, res) {
                       entry.avgPosition != null ? Number(entry.avgPosition) : null;
 
           dailyMap.set(dateStr, { clicks, impr, pos });
+          fromTimeseries = true;
         });
       }
     } catch (parseErr) {
       console.error('[Money Pages Historical] Error processing timeseries:', parseErr);
     }
 
-    dailyMap.forEach(({ clicks, impr, pos }) => {
-      totalClicks += clicks || 0;
-      totalImpressions += impr || 0;
-      if (pos != null && impr > 0) {
-        positionSum += pos * impr;
-        positionWeight += impr;
-      }
-      dataPoints += 1;
-    });
-
     // If no timeseries data matched, fallback to latest audit money_pages_metrics as a proxy
-    if (dataPoints === 0) {
+    if (dailyMap.size === 0) {
       const latestAuditWithData = audits[0];
       try {
         let moneyPagesMetrics = latestAuditWithData.money_pages_metrics;
@@ -268,14 +356,12 @@ export default async function handler(req, res) {
           });
 
           if (matchingRow) {
-            totalClicks = matchingRow.clicks || matchingRow.clicks_28d || 0;
-            totalImpressions = matchingRow.impressions || matchingRow.impressions_28d || 0;
+            const auditDate = String(latestAuditWithData.audit_date || '').slice(0, 10)
+              || new Date().toISOString().slice(0, 10);
+            const clicks = matchingRow.clicks || matchingRow.clicks_28d || 0;
+            const impr = matchingRow.impressions || matchingRow.impressions_28d || 0;
             const position = matchingRow.avg_position || matchingRow.position || matchingRow.avgPosition || null;
-            if (position != null && totalImpressions > 0) {
-              positionSum = position * totalImpressions;
-              positionWeight = totalImpressions;
-            }
-            dataPoints = 1;
+            dailyMap.set(auditDate, { clicks, impr, pos: position });
           }
         }
       } catch (parseError) {
@@ -283,32 +369,34 @@ export default async function handler(req, res) {
       }
     }
 
-    if (dataPoints === 0) {
+    if (dailyMap.size === 0) {
       return sendJSON(res, 200, {
         status: 'ok',
         data: {
           clicks_90d: null,
           impressions_90d: null,
           ctr_90d: null,
-          avg_position_90d: null
+          avg_position_90d: null,
+          clicks_90d_indexable: null,
+          impressions_90d_indexable: null,
+          ctr_90d_indexable: null,
+          avg_position_90d_indexable: null,
+          rows_total_count: 0,
+          rows_indexable_count: 0
         },
         message: 'No historical data found for this URL in timeseries or money_pages_metrics'
       });
     }
 
-    const avgCtr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : null;
-    const avgPosition = positionWeight > 0 ? positionSum / positionWeight : null;
+    const totals = aggregateDailyMap(dailyMap, target_url, property_url, policy);
+    const payload = buildAggregatePayload(totals);
 
     return sendJSON(res, 200, {
       status: 'ok',
       data: {
-        clicks_90d: totalClicks,
-        impressions_90d: totalImpressions,
-        ctr_90d: avgCtr,
-        avg_position_90d: avgPosition,
-        data_points: dataPoints,
-        data_source: dailyMap.size > 0 ? 'gsc_timeseries' : 'money_pages_metrics',
-        note: dailyMap.size > 0 
+        ...payload,
+        data_source: fromTimeseries ? 'gsc_timeseries' : 'money_pages_metrics',
+        note: fromTimeseries
           ? 'Aggregated from daily timeseries (no double-counting across audits)'
           : 'Fallback to latest audit 28-day metrics as proxy (no timeseries data)'
       },

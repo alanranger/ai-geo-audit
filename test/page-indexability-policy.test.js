@@ -10,6 +10,14 @@ import {
 
 const SEED = [
   {
+    url_or_prefix: '/beginners-photography-lessons',
+    match_type: 'prefix',
+    policy: 'intentional_noindex',
+    redirect_target: null,
+    effective_date: '2026-06-01',
+    note: 'beginners prefix seed'
+  },
+  {
     url_or_prefix: '/photographic-workshops-near-me',
     match_type: 'prefix',
     policy: 'intentional_noindex',
@@ -35,6 +43,13 @@ test('normalizePath strips host, query, trailing slash; keeps leading slash', ()
 });
 
 test('resolvePolicy precedence and null cases', () => {
+  const beginners = resolvePolicy(
+    'https://www.alanranger.com/beginners-photography-lessons/camera-courses-for-beginners-coventry-oct1',
+    SEED
+  );
+  assert.equal(beginners?.policy, 'intentional_noindex');
+  assert.equal(beginners?.url_or_prefix, '/beginners-photography-lessons');
+
   const case1 = resolvePolicy('https://www.alanranger.com/photographic-workshops-near-me/some-event-2025-09', SEED);
   assert.equal(case1?.policy, 'intentional_noindex');
 

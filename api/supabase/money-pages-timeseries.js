@@ -4,6 +4,7 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
+import { isRowIndexable } from '../../lib/page-indexability-policy.js';
 
 const need = (k) => {
   const v = process.env[k];
@@ -47,12 +48,52 @@ const buildPropertyCandidates = (propertyUrl) => {
   return Array.from(candidates);
 };
 
-const buildMeta = (property_url, target_url, count) => ({
+const buildMeta = (property_url, target_url, count, rowCounts) => ({
   property_url,
   target_url,
   count,
+  rows_total_count: rowCounts.total,
+  rows_indexable_count: rowCounts.indexable,
   generatedAt: new Date().toISOString()
 });
+
+async function fetchPolicyForSlug(supabase, propertyUrl, slug) {
+  const { data, error } = await supabase
+    .from('revenue_gsc_joined_with_policy')
+    .select('policy_value, policy_effective_date')
+    .eq('property_url', propertyUrl)
+    .eq('page_slug', slug)
+    .order('period_start', { ascending: false })
+    .limit(1);
+  if (error || !data?.length) return { policy_value: null, policy_effective_date: null };
+  return {
+    policy_value: data[0].policy_value ?? null,
+    policy_effective_date: data[0].policy_effective_date ?? null
+  };
+}
+
+function appendIndexablePoints(data, targetUrl, propertyUrl, policy) {
+  let indexableCount = 0;
+  const enriched = (data || []).map((point) => {
+    const periodStart = `${String(point.date).slice(0, 7)}-01`;
+    const indexable = isRowIndexable({
+      page_url: targetUrl,
+      property_url: propertyUrl,
+      period_start: periodStart,
+      policy_value: policy.policy_value,
+      policy_effective_date: policy.policy_effective_date
+    });
+    if (indexable) indexableCount += 1;
+    return {
+      ...point,
+      clicks_indexable: indexable ? point.clicks : 0,
+      impressions_indexable: indexable ? point.impressions : 0,
+      ctr_indexable: indexable && point.impressions > 0 ? point.clicks / point.impressions : 0,
+      position_indexable: indexable ? point.position : null
+    };
+  });
+  return { enriched, rowCounts: { total: enriched.length, indexable: indexableCount } };
+}
 
 const toNumberOrNull = (value) => (
   value === null || value === undefined ? null : Number(value)
@@ -169,6 +210,7 @@ export default async function handler(req, res) {
     const daysNum = Number.parseInt(days, 10) || 28;
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysNum);
+    const policy = await fetchPolicyForSlug(supabase, property_url, targetUrlNormalized);
 
     const propertyCandidates = buildPropertyCandidates(property_url);
     const { data: storedRows, error: storedError } = await supabase
@@ -180,11 +222,12 @@ export default async function handler(req, res) {
       .order('date', { ascending: true });
 
     if (!storedError && Array.isArray(storedRows) && storedRows.length > 0) {
-      const data = fillMissingDates(mapStoredRows(storedRows), daysNum);
+      const filled = fillMissingDates(mapStoredRows(storedRows), daysNum);
+      const { enriched, rowCounts } = appendIndexablePoints(filled, target_url, property_url, policy);
       return sendJSON(res, 200, {
         status: 'ok',
-        data,
-        meta: buildMeta(property_url, target_url, data.length)
+        data: enriched,
+        meta: buildMeta(property_url, target_url, enriched.length, rowCounts)
       });
     }
 
@@ -198,12 +241,13 @@ export default async function handler(req, res) {
       return sendJSON(res, 200, { status: 'ok', data: [], message: 'No audit data found' });
     }
 
-    const data = fillMissingDates(readFromAuditResults(audits, cutoffDate, targetUrlNormalized), daysNum);
+    const filled = fillMissingDates(readFromAuditResults(audits, cutoffDate, targetUrlNormalized), daysNum);
+    const { enriched, rowCounts } = appendIndexablePoints(filled, target_url, property_url, policy);
 
     return sendJSON(res, 200, {
       status: 'ok',
-      data,
-      meta: buildMeta(property_url, target_url, data.length)
+      data: enriched,
+      meta: buildMeta(property_url, target_url, enriched.length, rowCounts)
     });
   } catch (err) {
     return sendJSON(res, 200, {

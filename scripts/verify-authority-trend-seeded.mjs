@@ -64,9 +64,18 @@ await context.addInitScript(({ auditPayload, property }) => {
 }, { auditPayload: audit, property: audit.propertyUrl });
 
 const page = await context.newPage();
+const t0 = Date.now();
 await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 180000 });
+console.log('domcontentloaded:', `${Date.now() - t0}ms`);
 await page.waitForFunction(() => !document.getElementById('loading')?.classList.contains('show'), { timeout: 180000 }).catch(() => null);
-await page.waitForFunction(() => window.trendChart?.data?.datasets?.length > 0, { timeout: 180000 }).catch(() => null);
+console.log('spinner hidden:', `${Date.now() - t0}ms`);
+
+const overviewBtn = page.locator('.aigeo-nav-item[data-panel="overview"]');
+if (await overviewBtn.count()) await overviewBtn.click();
+await page.waitForTimeout(1500);
+
+await page.waitForFunction(() => window.trendChart?.data?.datasets?.length > 0, { timeout: 120000 }).catch(() => null);
+console.log('trend chart:', `${Date.now() - t0}ms`);
 
 const version = await page.evaluate(() => document.body.innerText.match(/Version:\s*([a-f0-9]+)/)?.[1] || 'unknown');
 

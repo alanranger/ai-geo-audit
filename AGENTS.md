@@ -23,8 +23,9 @@ npm run export:claude
 Aliases: `npm run export:google`, `npm run snapshot:dashboard` (same command).
 
 - **Script:** `scripts/snapshot-dashboard-to-drive.mjs` — headless Chromium loads live Vercel dashboard, expands Revenue Truth UI, inlines CSS, writes standalone HTML locally (no Drive API; Google Drive Desktop syncs).
-- **Output folder:** `C:/Users/alan/Google Drive/Claude shared resources`
+- **Output folder (dashboard npm script):** `C:/Users/alan/Google Drive/Claude shared resources`
 - **Stable path for Claude:** `LIVE-DASHBOARD-SNAPSHOT-revenue-truth-LATEST.html` (also writes timestamped copy).
+- **Cursor agent exports (default):** `C:/Users/alan/Google Drive/Claude shared resources/Cursor Outputs for Claude/` — PDFs, MD handoffs, analysis snapshots from Cursor sessions (see README in that folder).
 - **First-time on a machine:** `npm install` then `npx playwright install chromium`
 - **All tabs:** `node scripts/snapshot-dashboard-to-drive.mjs --tab=all`
 

@@ -117,7 +117,6 @@ export function classifyPageSegment(rawUrlOrPath, title = null, kindOverride = n
     '/photography-courses-coventry',
     '/course-finder-photography-classes-near-me',
     '/photography-tuition-services',
-    '/photography-services-near-me',
     '/rps-courses-mentoring-distinctions',
     // Key service / commercial pages
     '/hire-a-professional-photographer-in-coventry',

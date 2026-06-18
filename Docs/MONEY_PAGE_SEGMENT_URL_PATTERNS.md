@@ -10,9 +10,17 @@ This document describes how the `money` pages are split into `event`, `product`,
 
 ## Retired paths (not money / not landing)
 
-These URLs are excluded from money-page KPIs and portfolio money rollups (`PageSegment.SYSTEM` / `segment: Other`). Historical `booking_sheet_transactions.landing_page_url` rows are unchanged.
+These **exact hub URLs** are excluded from money-page KPIs and portfolio money rollups (`PageSegment.SYSTEM` / `segment: Other`). Child product/event detail URLs under `/photo-workshops-uk/…`, `/photography-services-near-me/…`, etc. remain money/product/event as before. Historical `booking_sheet_transactions.landing_page_url` rows are unchanged.
 
-- `/photography-shop-services` — legacy shop grid; noindex (2026-06); planned 301 → `/photography-tuition-services` after product remapping.
+| Path | Status (2026-06-04) |
+|------|---------------------|
+| `/photography-shop-services` | Legacy shop grid; noindex; planned 301 → `/photography-tuition-services` |
+| `/photo-workshops-uk` | Product collection hub; intentional noindex (cannibaliser) |
+| `/photography-services-near-me` | Product collection hub; intentional noindex (cannibaliser) |
+
+**Still indexed (not retired):** `/photographic-workshops-near-me` — event collection hub; best GSC performer.
+
+**Indexability policy (separate):** prefix `intentional_noindex` on `/beginners-photography-lessons` (event tree); exact hubs above also have `page_indexability_policy` rows.
 
 Source: `lib/retired-money-pages.mjs`, `api/aigeo/pageSegment.js`, `audit-dashboard.html` (`classifyPageSegment`).
 
@@ -27,8 +35,8 @@ Source: `lib/retired-money-pages.mjs`, `api/aigeo/pageSegment.js`, `audit-dashbo
 
 A money page is labelled `PRODUCT` when URL contains either of:
 
-- `/photo-workshops-uk`
-- `/photography-services-near-me`
+- `/photo-workshops-uk/` (detail paths only — hub `/photo-workshops-uk` is **retired**)
+- `/photography-services-near-me/` (detail paths only — hub `/photography-services-near-me` is **retired**)
 
 ## Event Page URL Patterns
 
