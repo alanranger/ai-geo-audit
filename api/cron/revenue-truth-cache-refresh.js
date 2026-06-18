@@ -22,14 +22,16 @@ import {
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
-// The combinations the dashboard actually requests on load. windowMonths=12 +
-// minImpressions=1000 are the defaults; we warm both JLR and event toggles so
-// whichever the user has selected is already cached.
+// The combinations the dashboard requests on load (windowMonths=12,
+// minImpressions=1000). includeJlr defaults to TRUE in the client, so jlr1:event0
+// is the most important to keep warm and is built first. We deliberately warm
+// only the two event:false combos: each diagnosis build runs ~9 heavy Supabase
+// queries and they slow down when chained, so keeping the cron to 3 builds keeps
+// it well inside its time budget. The rarer event:true combos populate lazily
+// via the endpoint's write-through cache on first use (one slow load, then fast).
 const DIAGNOSIS_COMBOS = [
-  { includeJlr: false, includeEvent: false },
-  { includeJlr: true, includeEvent: false },
-  { includeJlr: false, includeEvent: true },
-  { includeJlr: true, includeEvent: true }
+  { includeJlr: true, includeEvent: false },   // client default
+  { includeJlr: false, includeEvent: false }   // JLR-excluded view
 ];
 
 const send = (res, status, body) => {
