@@ -6,11 +6,12 @@
 2. **`Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md`** — **the single source of truth for revenue data.** 12 verbatim Booking Sheet categories + 3 derived markets (D2C / B2B / ADJUSTMENT). Operational headline = D2C + B2B. ADJUSTMENT (voucher timing) shown as its own line, never silently in headline. Phase L1 (2026-05-26) replaced the old 5-tier rollup; the 12-cat truth lives in `public.booking_sheet_monthly_category`, the category → market mapping in `public.booking_sheet_category_market`, and the dashboard reads from `public.booking_sheet_monthly_wide`.
 3. **`Docs/HANDOVER_REVENUE_FUNNEL_2026-05-20.md`** — file-by-file pitfalls + open task list for the Revenue Funnel / Scenario Planning Phase H+ work (suppression + seasonality). Note: revenue data layer has since been rebuilt by Phase L + L1 — see item 2 above before touching anything that reads revenue.
 4. **`Docs/CHANGELOG.md`** — chronological history. Read the top entry first.
-5. **`HANDOVER.md`** (root) — entry-point only; links here.
-6. **`Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md`** — Traditional SEO **③** Keywords Everywhere cache, API, DB, deploy pitfalls.
-7. **`Docs/TRADITIONAL_SEO_BACKLINKS_DFS.md`** — Backlinks product spec: DFS summary tile, per-URL modal, disavow toggle, explicit fetch (no auto-spend on load).
-8. **`Docs/DATAFORSEO_BACKLINK_SPAM_FILTERS.md`** — Spam URL filters, domain index tables, **`POST /api/aigeo/dataforseo-backlink-domain`** (`full` / `delta` / `status`), `npm run test:dfs-backlink-filters`.
-9. **Backlinks tab tile aggregates:** **`GET /api/aigeo/dfs-domain-backlink-tiles`**; audit baseline **`GET` / `POST` / `DELETE /api/aigeo/dfs-backlink-tile-baseline`** + Supabase **`dfs_backlink_tile_baseline`** (see **`Docs/CHANGELOG.md` 2026-03-23**).
+5. **`Docs/DASHBOARD_DATA_REFRESH.md`** — **cache/dedup/Supabase refresh policy** for `audit-dashboard.html`. Read before changing tab load, trend chart, or optimisation fetch paths.
+6. **`HANDOVER.md`** (root) — entry-point only; links here.
+7. **`Docs/TRADITIONAL_SEO_KEYWORD_METRICS.md`** — Traditional SEO **③** Keywords Everywhere cache, API, DB, deploy pitfalls.
+8. **`Docs/TRADITIONAL_SEO_BACKLINKS_DFS.md`** — Backlinks product spec: DFS summary tile, per-URL modal, disavow toggle, explicit fetch (no auto-spend on load).
+9. **`Docs/DATAFORSEO_BACKLINK_SPAM_FILTERS.md`** — Spam URL filters, domain index tables, **`POST /api/aigeo/dataforseo-backlink-domain`** (`full` / `delta` / `status`), `npm run test:dfs-backlink-filters`.
+10. **Backlinks tab tile aggregates:** **`GET /api/aigeo/dfs-domain-backlink-tiles`**; audit baseline **`GET` / `POST` / `DELETE /api/aigeo/dfs-backlink-tile-baseline`** + Supabase **`dfs_backlink_tile_baseline`** (see **`Docs/CHANGELOG.md` 2026-03-23**).
 
 ## Export for Claude (Google Drive snapshot)
 

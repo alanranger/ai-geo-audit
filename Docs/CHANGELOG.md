@@ -2,6 +2,33 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-12n] - Data refresh audit: stop request storms across tabs
+
+**Symptoms:** After recent refresh hardening, tabs felt stale or empty while
+Network showed hundreds of duplicate Supabase/API calls; tab hopping triggered
+full audit refetches; Optimisation “Update All Tasks” path collided with
+dashboard re-renders.
+
+**Root causes (cumulative regressions):**
+1. `renderDashboardTab()` **awaited full `get-latest-audit` on every call** —
+   contradicting 2026-06-12c cache-first policy.
+2. `fetchTrendTimeseriesFromSupabase()` **always** hit `get-audit-history` after
+   2260bd0 (fixed stale chart but caused per-render fetches).
+3. `loadAuditResults()` background refresh ran on **every** load, not only when
+   cache >15 min stale.
+4. Tab switch handler fetched full audit when >1 h old and called
+   `renderDashboardTab()` again (cascade).
+5. `loadAllOptimisationTasks()` used `_t=` cache buster every call; success/error
+   paths called `renderDashboardTab()` (loop with dashboard auto-load).
+
+**Fixes:**
+- **`Docs/DASHBOARD_DATA_REFRESH.md`** — single documented refresh policy.
+- Central TTLs: audit 15m, trend timeseries session 10m, optimisation 60s.
+- `renderDashboardTab`, tab switch, trend chart, optimisation load aligned to policy.
+- GET dedup extended to `gsc-timeseries-banner` + `/api/optimisation/dashboard`.
+- `loadAllOptimisationTasks({ forceRefresh: true })` for explicit user refresh only.
+- `bustAuditReadCaches()` also clears trend/optimisation session + latest-audit cache.
+
 ## [2026-06-12j] - Dashboard load: stop blocking on incomplete Supabase fetch
 
 **Symptoms:** Page hung for minutes when Supabase returned 522; Overview trend chart never built.
