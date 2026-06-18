@@ -14,6 +14,12 @@ import { createClient } from '@supabase/supabase-js';
 import { readLatestGa4Metrics } from './ga4-data.js';
 import { isRowIndexable, resolvePolicy } from '../../lib/page-indexability-policy.js';
 import { synthesiseLegacyTierRevenue } from '../../lib/booking-sheet-parser.mjs';
+import { parseIncludeJlr } from '../../lib/parse-include-jlr.mjs';
+import {
+  applyJlrToFunnelWideRow,
+  buildJlrByMonth,
+  buildJlrTierByMonth
+} from '../../lib/revenue-truth-jlr-filter.mjs';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
@@ -586,14 +592,8 @@ function synthesiseLegacyTierRevenueFromRow(row) {
   return synthesiseLegacyTierRevenue(row.category_revenue);
 }
 
-function shapeWideViewRow(row) {
-  // Surface ALL new Phase L1 columns to the caller so the dashboard can
-  // start consuming them (revenue_amount = the spreadsheet headline figure,
-  // operational_revenue as the "service revenue excl. voucher timing"
-  // breakdown line, adjustment_net as the voucher timing line, market
-  // breakdown, verbatim categories) while the legacy tier_revenue field
-  // continues to drive existing UI until the rebuild turn.
-  return {
+function shapeWideViewRow(row, jlrCtx) {
+  const shaped = {
     period_start: row.period_start,
     period_end: row.period_end,
     revenue_amount: Number(row.revenue_amount) || 0,
@@ -607,9 +607,38 @@ function shapeWideViewRow(row) {
     market_revenue: row.market_revenue || null,
     category_revenue: row.category_revenue || null
   };
+  if (!jlrCtx) return shaped;
+  return applyJlrToFunnelWideRow(shaped, jlrCtx.jlrByMonth, jlrCtx.jlrTierByMonth);
 }
 
-async function fetchRevenueHistory(supabase, propertyUrl) {
+function monthOfTxnIso(iso) {
+  return Number(String(iso || '').slice(5, 7));
+}
+
+async function fetchBookingTransactions(supabase, propertyUrl) {
+  const { data, error } = await supabase
+    .from('booking_sheet_transactions')
+    .select('year, txn_date, category_label, amount, is_jlr')
+    .eq('property_url', propertyUrl)
+    .order('txn_date', { ascending: true });
+  if (error) throw error;
+  return (data || []).map((r) => ({
+    ...r,
+    month: monthOfTxnIso(r.txn_date),
+    amount: Number(r.amount),
+    is_jlr: r.is_jlr === true
+  }));
+}
+
+async function buildJlrSubtractCtx(supabase, propertyUrl) {
+  const txns = await fetchBookingTransactions(supabase, propertyUrl);
+  return {
+    jlrByMonth: buildJlrByMonth(txns),
+    jlrTierByMonth: buildJlrTierByMonth(txns)
+  };
+}
+
+async function fetchRevenueHistory(supabase, propertyUrl, jlrCtx) {
   // 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX (Phase L): source is now
   // `booking_sheet_monthly_wide`, which holds exactly one authoritative
   // row per (property, year, month) sourced from the Booking Sheet
@@ -637,7 +666,7 @@ async function fetchRevenueHistory(supabase, propertyUrl) {
     .order('period_end', { ascending: false })
     .limit(120);
   if (error) throw error;
-  const shaped = (data || []).map(shapeWideViewRow);
+  const shaped = (data || []).map((row) => shapeWideViewRow(row, jlrCtx));
   const monthly = shaped.filter(isCalendarMonthRow);
   const merged = mergeRowsByMonth(monthly);
   const sorted = merged.toSorted((a, b) => a.period_end.localeCompare(b.period_end));
@@ -1246,7 +1275,7 @@ function pickBestRevenueRow(rows) {
   return rows[0];
 }
 
-async function fetchLatestRevenue(supabase, propertyUrl) {
+async function fetchLatestRevenue(supabase, propertyUrl, jlrCtx) {
   // 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX (Phase L): see fetchRevenueHistory.
   // The picker (pickBestRevenueRow) will skip future-dated rows (e.g. the
   // in-progress current month) and pick the latest CLOSED calendar month
@@ -1265,7 +1294,7 @@ async function fetchLatestRevenue(supabase, propertyUrl) {
     .order('period_end', { ascending: false })
     .limit(36);
   if (error) throw error;
-  const allShaped = (data || []).map(r => ({ ...shapeWideViewRow(r), notes: r.notes }));
+  const allShaped = (data || []).map((r) => ({ ...shapeWideViewRow(r, jlrCtx), notes: r.notes }));
   const base = pickBestRevenueRow(allShaped);
   if (!base) return null;
   // Merge any other rows that cover the EXACT same window (different source).
@@ -1284,15 +1313,17 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return send(res, 405, { error: 'method_not_allowed' });
 
   const propertyUrl = String(req.query?.propertyUrl || DEFAULT_PROPERTY).trim();
+  const includeJlr = parseIncludeJlr(req.query?.includeJlr);
   try {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
+    const jlrCtx = includeJlr ? null : await buildJlrSubtractCtx(supabase, propertyUrl);
     const [audits, pageMetrics, revenueSnap, aiMap, priorities, revenueHistory, ga4Snap, policies] = await Promise.all([
       fetchLatestAudit(supabase, propertyUrl),
       fetchPageMetrics(supabase, propertyUrl),
-      fetchLatestRevenue(supabase, propertyUrl),
+      fetchLatestRevenue(supabase, propertyUrl, jlrCtx),
       fetchAiOverviewMap(supabase, propertyUrl),
       fetchPrioritiesWithCycle(supabase, propertyUrl),
-      fetchRevenueHistory(supabase, propertyUrl),
+      fetchRevenueHistory(supabase, propertyUrl, jlrCtx),
       readLatestGa4Metrics(supabase, propertyUrl),
       fetchIndexabilityPolicies(supabase)
     ]);
@@ -1314,6 +1345,7 @@ export default async function handler(req, res) {
     const profitPyramid = buildProfitPyramid(tierHistory);
     return send(res, 200, {
       property_url: propertyUrl,
+      include_jlr: includeJlr,
       generated_at: new Date().toISOString(),
       page_metrics_date_end: pageMetrics.dateEnd,
       ga4_metrics_date_end: ga4Snap?.date_end || null,

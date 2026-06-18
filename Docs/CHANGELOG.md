@@ -2,6 +2,29 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-12q] - JLR included by default; Revenue Funnel honours same toggle
+
+**Symptoms:** Revenue Truth and Revenue Funnel numbers did not match the
+Booking Sheet Alan recognises; JLR woodland walks were excluded by default
+while money-page tiles used raw category totals.
+
+**Fix:**
+- `parseIncludeJlr()` defaults to **true** (Booking Sheet headline).
+- Revenue Truth + Revenue Funnel toggles default **checked**; preference
+  persisted in `localStorage` (`aigeo.includeJlr`) and synced across tabs.
+- `revenue-funnel-summary` accepts `?includeJlr=` and strips JLR from
+  `tier_revenue` / headline when off (same transaction-level logic as
+  Revenue Truth).
+- Money-pages subtitle clarifies actual £ = latest **closed Booking Sheet
+  month**, not GSC rolling 28d.
+
+**Files:** `lib/parse-include-jlr.mjs`, `lib/dashboard-jlr-preference.mjs`,
+`lib/revenue-truth-jlr-filter.mjs`, `revenue-truth-summary.js`,
+`revenue-funnel-summary.js`, `revenue-funnel-diagnosis.js`,
+`revenue-truth-controller.mjs`, `audit-dashboard.html`
+
+---
+
 ## [2026-06-12p] - Revenue Funnel: map Commissions/Prints into Hire tier revenue
 
 **Symptoms:** Money pages performance showed Hire / Commercial and 1-2-1 &

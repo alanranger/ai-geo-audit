@@ -45,6 +45,7 @@ import {
   filterTxnsForJlr
 } from '../../lib/revenue-truth-jlr-filter.mjs';
 import { buildHeadlineReconciliation } from '../../lib/revenue-truth-headline-reconciliation.mjs';
+import { parseIncludeJlr } from '../../lib/parse-include-jlr.mjs';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
@@ -213,18 +214,13 @@ function buildConfig(includeJlr) {
   return {
     tierBands: TIER_BANDS,
     feeRules: FEE_RULES,
-    includeJlr: includeJlr === true,
+    includeJlr: includeJlr !== false,
     now: {
       iso: now.toISOString(),
       year: now.getUTCFullYear(),
       month: now.getUTCMonth() + 1
     }
   };
-}
-
-function parseIncludeJlr(raw) {
-  const v = String(raw ?? 'false').toLowerCase();
-  return v === 'true' || v === '1';
 }
 
 function annotateMonthly(wideRows, cfg) {

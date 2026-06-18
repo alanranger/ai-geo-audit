@@ -61,6 +61,7 @@ import {
 } from '../../lib/revenue-tier-mapping.js';
 import { loadRevenueStreamGscRoles } from '../../lib/revenue-stream-gsc-roles.js';
 import { applyPageVisibilityLossPolicyGuard } from '../../lib/page-indexability-policy.js';
+import { parseIncludeJlr } from '../../lib/parse-include-jlr.mjs';
 
 const SITE_ORIGIN = 'https://www.alanranger.com';
 const GSC_FIRST_DAY = '2025-01-13';
@@ -143,9 +144,9 @@ function parseQuery(req) {
       : null,
     includeAllPages: q.includeAllPages === 'true',
     // Phase C / C2 part 2 -- when true, classify using JLR-inclusive revenue
-    // (revenue_gbp_total). Default false keeps the canonical non-JLR view
-    // used in C2 part 1 verifications. Affects verdict math + cards.
-    includeJlr: q.includeJlr === 'true',
+    // (revenue_gbp_total). Default true matches Booking Sheet headline; set
+    // includeJlr=false to use the non-JLR view.
+    includeJlr: parseIncludeJlr(q.includeJlr),
     // Phase C / C2 part 3 -- page-type tier filter. Default = Tier A landing
     // + Tier B product + Tier E academy (sellable surfaces only). Set
     // includeEvent=true to also include Tier C event-instance pages. Tier D
