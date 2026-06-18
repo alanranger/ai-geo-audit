@@ -1275,7 +1275,26 @@ function pickBestRevenueRow(rows) {
   return rows[0];
 }
 
-async function fetchLatestRevenue(supabase, propertyUrl, jlrCtx) {
+// Money-page tier actuals: use the latest Booking Sheet month Alan is editing,
+// including the in-progress calendar month (partial). Closed-month-only pickers
+// hide June commissions/workshops while May can be a sparse voucher-timing month.
+function pickLatestBookingMonthRow(rows) {
+  if (!rows.length) return null;
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const eligible = rows.filter((r) => r.period_start <= todayIso);
+  const pool = eligible.length ? eligible : rows;
+  return pool.toSorted((a, b) => b.period_start.localeCompare(a.period_start))[0];
+}
+
+function mergeRevenuePick(allShaped, base) {
+  if (!base) return null;
+  const siblings = allShaped.filter((r) =>
+    r !== base && r.period_start === base.period_start && r.period_end === base.period_end
+  );
+  return mergeRevenueRows(base, siblings);
+}
+
+async function fetchRevenueSnaps(supabase, propertyUrl, jlrCtx) {
   // 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX (Phase L): see fetchRevenueHistory.
   // The picker (pickBestRevenueRow) will skip future-dated rows (e.g. the
   // in-progress current month) and pick the latest CLOSED calendar month
@@ -1295,13 +1314,12 @@ async function fetchLatestRevenue(supabase, propertyUrl, jlrCtx) {
     .limit(36);
   if (error) throw error;
   const allShaped = (data || []).map((r) => ({ ...shapeWideViewRow(r, jlrCtx), notes: r.notes }));
-  const base = pickBestRevenueRow(allShaped);
-  if (!base) return null;
-  // Merge any other rows that cover the EXACT same window (different source).
-  const siblings = allShaped.filter(r =>
-    r !== base && r.period_start === base.period_start && r.period_end === base.period_end
-  );
-  return mergeRevenueRows(base, siblings);
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const tierSnap = mergeRevenuePick(allShaped, pickLatestBookingMonthRow(allShaped));
+  const kpiSnap = mergeRevenuePick(allShaped, pickBestRevenueRow(allShaped));
+  if (tierSnap) tierSnap.is_partial = tierSnap.period_end > todayIso;
+  if (kpiSnap) kpiSnap.is_partial = kpiSnap.period_end > todayIso;
+  return { kpiSnap, tierSnap };
 }
 
 export default async function handler(req, res) {
@@ -1317,16 +1335,19 @@ export default async function handler(req, res) {
   try {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
     const jlrCtx = includeJlr ? null : await buildJlrSubtractCtx(supabase, propertyUrl);
-    const [audits, pageMetrics, revenueSnap, aiMap, priorities, revenueHistory, ga4Snap, policies] = await Promise.all([
+    const revenueSnapsPromise = fetchRevenueSnaps(supabase, propertyUrl, jlrCtx);
+    const [audits, pageMetrics, revenueSnaps, aiMap, priorities, revenueHistory, ga4Snap, policies] = await Promise.all([
       fetchLatestAudit(supabase, propertyUrl),
       fetchPageMetrics(supabase, propertyUrl),
-      fetchLatestRevenue(supabase, propertyUrl, jlrCtx),
+      revenueSnapsPromise,
       fetchAiOverviewMap(supabase, propertyUrl),
       fetchPrioritiesWithCycle(supabase, propertyUrl),
       fetchRevenueHistory(supabase, propertyUrl, jlrCtx),
       readLatestGa4Metrics(supabase, propertyUrl),
       fetchIndexabilityPolicies(supabase)
     ]);
+    const revenueSnap = revenueSnaps.kpiSnap;
+    const tierRevenueSnap = revenueSnaps.tierSnap;
     const pageRows = pageMetrics.rows;
     const periodStart = pageMetrics.dateEnd ? `${String(pageMetrics.dateEnd).slice(0, 7)}-01` : null;
     const policyBySlug = buildPolicyBySlug(pageRows, policies);
@@ -1338,7 +1359,7 @@ export default async function handler(req, res) {
     const leakPages = pickLeakPages(pageRows);
     const earningPages = pickEarningPages(pageRows);
     const revenueHistoryDecorated = decorateHistoryWithTargets(revenueHistory);
-    const moneyPagePerformance = pickMoneyPagePerformance(pageRows, aiMap, revenueSnap, revenueHistoryDecorated);
+    const moneyPagePerformance = pickMoneyPagePerformance(pageRows, aiMap, tierRevenueSnap, revenueHistoryDecorated);
     const kpiTargets = computeKpiTargets(kpis, revenueSnap);
     const tierHistory = buildTierHistory(revenueHistoryDecorated);
     const ytdSummary = buildYtdSummary(revenueHistoryDecorated);
@@ -1372,7 +1393,8 @@ export default async function handler(req, res) {
       priorities,
       earning_pages: earningPages,
       money_page_performance: moneyPagePerformance,
-      latest_revenue: revenueSnap,
+      latest_revenue: tierRevenueSnap,
+      kpi_revenue_snap: revenueSnap,
       revenue_history: revenueHistoryDecorated,
       tier_history: tierHistory,
       ytd_summary: ytdSummary,

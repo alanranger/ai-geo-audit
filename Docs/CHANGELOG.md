@@ -2,6 +2,21 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-12r] - Money pages use in-progress Booking Sheet month for tier £
+
+**Symptoms:** Live API still showed Hire/Workshops at £0 after JLR fix — KPI
+picker used May (last closed month) while June partial row held Commissions
+£620 and workshop splits.
+
+**Fix:** Split revenue pickers — funnel KPIs keep closed-month
+`pickBestRevenueRow`; money-page tier actuals use `pickLatestBookingMonthRow`
+(includes current calendar month). Response adds `kpi_revenue_snap` alongside
+`latest_revenue` (tier basis).
+
+**Files:** `api/aigeo/revenue-funnel-summary.js`
+
+---
+
 ## [2026-06-12q] - JLR included by default; Revenue Funnel honours same toggle
 
 **Symptoms:** Revenue Truth and Revenue Funnel numbers did not match the
