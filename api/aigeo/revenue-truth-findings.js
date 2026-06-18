@@ -10,7 +10,7 @@
 // Method: GET
 // Query:  ?propertyUrl=https://www.alanranger.com   (optional, default below)
 
-export const config = { runtime: 'nodejs' };
+export const config = { runtime: 'nodejs', maxDuration: 60 };
 
 import { createClient } from '@supabase/supabase-js';
 import { buildFindings } from '../../lib/revenue-truth-findings.mjs';
@@ -20,6 +20,7 @@ import {
   fetchGscTotalsBySlug,
   lastClosedMonthKeys
 } from '../../lib/revenue-truth-gsc-lookup.mjs';
+import { findingsCacheKey, resolveWithCache } from '../../lib/revenue-truth-cache.mjs';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 const TXN_PAGE_SIZE = 1000;
@@ -32,22 +33,33 @@ export default async function handler(req, res) {
   try {
     const propertyUrl = (req.query?.propertyUrl || DEFAULT_PROPERTY).trim();
     const supabase = createSupabase();
-    const [transactions, canonicalProducts] = await Promise.all([
-      fetchAllTransactions(supabase, propertyUrl),
-      fetchCanonicalProducts(supabase)
-    ]);
-    const findings = buildFindings({ transactions, canonicalProducts });
-    const currentMonth = findings.closedMonthsCurrentYear + 1;
-    const monthKeys = lastClosedMonthKeys(findings.currentYear, currentMonth, 3);
-    const slugs = collectBreakdownSlugs(findings);
-    const gscBySlug = await fetchGscTotalsBySlug(supabase, propertyUrl, slugs);
-    attachGscToFindings(findings, gscBySlug, monthKeys);
+    const payload = await resolveWithCache(
+      supabase,
+      propertyUrl,
+      findingsCacheKey(),
+      () => buildFindingsPayload(supabase, propertyUrl)
+    );
     res.setHeader('Cache-Control', 'no-store');
-    res.status(200).json(findings);
+    res.status(200).json(payload);
   } catch (err) {
     console.error('[revenue-truth-findings] failed:', err);
     res.status(500).json({ error: err.message || 'internal error' });
   }
+}
+
+// Heavy build extracted so the warming cron can reuse it.
+export async function buildFindingsPayload(supabase, propertyUrl) {
+  const [transactions, canonicalProducts] = await Promise.all([
+    fetchAllTransactions(supabase, propertyUrl),
+    fetchCanonicalProducts(supabase)
+  ]);
+  const findings = buildFindings({ transactions, canonicalProducts });
+  const currentMonth = findings.closedMonthsCurrentYear + 1;
+  const monthKeys = lastClosedMonthKeys(findings.currentYear, currentMonth, 3);
+  const slugs = collectBreakdownSlugs(findings);
+  const gscBySlug = await fetchGscTotalsBySlug(supabase, propertyUrl, slugs);
+  attachGscToFindings(findings, gscBySlug, monthKeys);
+  return findings;
 }
 
 function createSupabase() {

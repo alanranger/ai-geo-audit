@@ -2,6 +2,40 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-18b] - Revenue Truth: precompute cache (≈31s → <2s) + harden diagnosis 500
+
+**Symptoms:** Opening Revenue Truth took ~31s. The tab fires three sequential
+Supabase-backed APIs — summary (~1s), findings (~8.6s, 301KB) and diagnosis
+(~12–26s, ~600KB) — and **none were cached** (`Cache-Control: no-store` on the
+endpoints + globally in `vercel.json`), so every visit recomputed from scratch.
+The diagnosis endpoint also intermittently returned **HTTP 500** (~12s timeout).
+
+**Fix (three parts):**
+
+1. **Client parallelisation** (`lib/revenue-truth-controller.mjs`): summary /
+   findings / diagnosis now fetch in parallel; the top of the tab paints as soon
+   as findings resolves instead of waiting behind diagnosis (~9s sooner).
+2. **Server precompute cache:** new `public.revenue_truth_payload_cache` table +
+   `lib/revenue-truth-cache.mjs` helper. `revenue-truth-findings` and
+   `revenue-funnel-diagnosis` now serve the precomputed blob (fresh-cache →
+   live build with write-through → **stale fallback on error**, which also fixes
+   the 500). New cron `/api/cron/revenue-truth-cache-refresh` (07:30 daily, after
+   the revenue syncs) warms findings + the 4 diagnosis toggle combos. Manual
+   Booking Sheet upload invalidates the cache (next load re-warms).
+3. **Hardening:** `maxDuration` raised to 60s on both endpoints (300s on the
+   cron); param-specific requests (`?pages=` / `includeAllPages`) bypass cache.
+
+**Net:** warm tab loads drop from ~31s to <2s; first load after a data change is
+slow once then cached. Data freshness bounded by the daily warm + upload
+invalidation (26h TTL guard as a safety net).
+
+**Files:** `lib/revenue-truth-cache.mjs` (new), `lib/revenue-truth-controller.mjs`,
+`api/aigeo/revenue-funnel-diagnosis.js`, `api/aigeo/revenue-truth-findings.js`,
+`api/cron/revenue-truth-cache-refresh.js` (new), `api/aigeo/booking-sheet-upload.js`,
+`vercel.json`, Supabase table `revenue_truth_payload_cache`.
+
+---
+
 ## [2026-06-18a] - Shared tab-load progress bar across all data-heavy tabs
 
 **Symptoms:** Only Traditional SEO showed a load indicator. Other tabs that hydrate

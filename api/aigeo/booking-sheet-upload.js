@@ -154,6 +154,14 @@ export default async function handler(req, res) {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
     const written = await persistBookingSheetTruth(supabase, property, parsed);
 
+    // The Booking Sheet is the input to the Revenue Truth findings + diagnosis
+    // payload cache, so drop the cached rows; the next tab load recomputes fresh
+    // (and re-warms via write-through), and the nightly cron re-warms all combos.
+    try {
+      const { invalidateCache } = await import('../../lib/revenue-truth-cache.mjs');
+      await invalidateCache(supabase, property);
+    } catch (_cacheErr) { /* best-effort: cache invalidation must not fail the upload */ }
+
     return res.status(200).json({
       ok: true,
       filename: filename || null,

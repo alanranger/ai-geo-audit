@@ -37,9 +37,10 @@
 // No UI. No Vercel deploy planned in this change. Phase C / C2 part 2
 // (UI integration) is a separate, separately-approved sub-phase.
 
-export const config = { runtime: 'nodejs' };
+export const config = { runtime: 'nodejs', maxDuration: 60 };
 
 import { createClient } from '@supabase/supabase-js';
+import { diagnosisCacheKey, resolveWithCache } from '../../lib/revenue-truth-cache.mjs';
 import {
   loadBlendedSeasonality,
   factorFromBlend
@@ -123,7 +124,17 @@ export default async function handler(req, res) {
   try {
     const opts = parseQuery(req);
     const supabase = createSupabase();
-    const payload = await buildPayload(supabase, opts);
+    // Param-specific requests (explicit page list / include-all) are never
+    // cached; the normal dashboard load is served from the precomputed cache
+    // with a live build + write-through fallback.
+    const cacheable = !opts.pages && !opts.includeAllPages;
+    const payload = await resolveWithCache(
+      supabase,
+      opts.propertyUrl,
+      diagnosisCacheKey(opts),
+      () => buildPayload(supabase, opts),
+      { cacheable }
+    );
     res.setHeader('Cache-Control', 'no-store');
     res.status(200).json(payload);
   } catch (err) {
@@ -131,6 +142,21 @@ export default async function handler(req, res) {
     res.status(500).json({ error: err.message || 'internal error' });
   }
 }
+
+// Build the opts object the warming cron uses (mirrors parseQuery defaults).
+export function buildDiagnosisOpts(overrides = {}) {
+  return {
+    propertyUrl: overrides.propertyUrl || DEFAULT_PROPERTY,
+    windowMonths: overrides.windowMonths || DEFAULT_WINDOW_MONTHS,
+    minImpressions: overrides.minImpressions == null ? DEFAULT_MIN_IMPRESSIONS : overrides.minImpressions,
+    pages: null,
+    includeAllPages: false,
+    includeJlr: !!overrides.includeJlr,
+    includeEvent: !!overrides.includeEvent
+  };
+}
+
+export { buildPayload as buildDiagnosisPayload, createSupabase as createDiagnosisSupabase };
 
 function parseQuery(req) {
   const q = req.query || {};
