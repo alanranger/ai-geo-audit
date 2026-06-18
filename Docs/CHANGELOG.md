@@ -2,6 +2,18 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-12p] - Revenue Funnel: map Commissions/Prints into Hire tier revenue
+
+**Symptoms:** Money pages performance showed Hire / Commercial and 1-2-1 &
+Services at £0 earned despite Booking Sheet Commissions (e.g. Jun £620, YTD
+£2,865).
+
+**Cause:** Phase L1 `synthesiseLegacyTierRevenue` only mapped 4 verbatim
+categories and hard-coded `hire` and `services` to `null`.
+
+**Fix:** Aggregate all 12 `category_revenue` keys via `classifyCategory()`
+(Commissions + Prints → `hire`; Mentoring/1-2-1/vouchers → `services`).
+
 ## [2026-06-12o] - Hotfix: Optimisation tracker empty after refresh-policy commit
 
 **Symptoms:** Optimisation tab showed Active/Done (0), “Server error”, console

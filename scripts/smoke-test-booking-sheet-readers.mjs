@@ -15,26 +15,9 @@ import { dirname, resolve } from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import { loadBlendedSeasonality } from '../lib/revenue-funnel-seasonality-blend.js';
 import { academyTierHealth } from '../lib/revenue-funnel-academy-economics.js';
-
-// Smoke-test the revenue-funnel-summary fetch path end-to-end by replaying
-// the same SELECT + shape it performs. The endpoint's fetch functions live
-// inside a 2000-line file and aren't exported, so we mirror the SELECT
-// shape here. This proves the back-compat tier_revenue synthesis the
-// dashboard relies on emits the 4 real 1-to-1 mappings + null for the
-// fabricated services/hire keys.
-const LEGACY_TIER_TO_CATEGORY = {
-  courses:               '1. Courses/masterclasses',
-  workshops_nonres:      '2. Workshops Non Residential',
-  workshops_residential: '3. Workshops Residential',
-  academy:               '12. Academy'
-};
+import { synthesiseLegacyTierRevenue } from '../lib/booking-sheet-parser.mjs';
 function shapeWideViewRow(row) {
-  const cats = row.category_revenue || {};
-  const tier_revenue = { services: null, hire: null };
-  for (const [tier, label] of Object.entries(LEGACY_TIER_TO_CATEGORY)) {
-    const v = Number(cats[label]);
-    tier_revenue[tier] = Number.isFinite(v) ? v : null;
-  }
+  const tier_revenue = synthesiseLegacyTierRevenue(row.category_revenue);
   return {
     period_start: row.period_start,
     period_end: row.period_end,

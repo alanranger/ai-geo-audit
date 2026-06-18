@@ -13,6 +13,7 @@ export const config = { runtime: 'nodejs' };
 import { createClient } from '@supabase/supabase-js';
 import { readLatestGa4Metrics } from './ga4-data.js';
 import { isRowIndexable, resolvePolicy } from '../../lib/page-indexability-policy.js';
+import { synthesiseLegacyTierRevenue } from '../../lib/booking-sheet-parser.mjs';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
@@ -577,32 +578,12 @@ function mergeRowsByMonth(rows) {
 }
 
 // Back-compat: synthesize the legacy `tier_revenue` jsonb shape the UI
-// still consumes (per-tier sparklines, KPI tiles via tierRevenueFromRow).
-//
-// 2026-05-26 Phase L1: only the 4 categories that 1-to-1 map to a real
-// tier ID are populated. The Phase L "services" rollup is GONE (it merged
-// 8 unrelated D2C, B2B, ADJUSTMENT lines into one bucket). The legacy
-// `hire` key never had a Booking Sheet category and is also null. Until
-// the UI rebuild turn deletes the per-tier sparklines and replaces them
-// with the 3-line D2C / B2B / ADJUSTMENT chart, the `services` and `hire`
-// sparklines will render as empty -- which is the truthful state.
-const LEGACY_TIER_TO_CATEGORY = {
-  courses:               '1. Courses/masterclasses',
-  workshops_nonres:      '2. Workshops Non Residential',
-  workshops_residential: '3. Workshops Residential',
-  academy:               '12. Academy'
-};
-
-function synthesiseLegacyTierRevenue(row) {
-  const cats = row.category_revenue || {};
-  const out = {};
-  for (const [tier, label] of Object.entries(LEGACY_TIER_TO_CATEGORY)) {
-    const v = Number(cats[label]);
-    out[tier] = Number.isFinite(v) ? v : null;
-  }
-  out.services = null;
-  out.hire = null;
-  return out;
+// still consumes (per-tier sparklines, money-page performance tiles).
+// Phase L1 originally only mapped 4 verbatim categories and nullled hire/
+// services — that hid B2B Commissions/Prints and D2C Mentoring/1-2-1 etc.
+// Now aggregate all 12 categories via classifyCategory() in booking-sheet-parser.
+function synthesiseLegacyTierRevenueFromRow(row) {
+  return synthesiseLegacyTierRevenue(row.category_revenue);
 }
 
 function shapeWideViewRow(row) {
@@ -619,7 +600,7 @@ function shapeWideViewRow(row) {
     currency: row.currency,
     source: row.source,
     transactions: row.transactions,
-    tier_revenue: synthesiseLegacyTierRevenue(row),
+    tier_revenue: synthesiseLegacyTierRevenueFromRow(row),
     tier_transactions: row.tier_transactions,
     operational_revenue: Number(row.operational_revenue) || 0,
     adjustment_net: Number(row.adjustment_net) || 0,
