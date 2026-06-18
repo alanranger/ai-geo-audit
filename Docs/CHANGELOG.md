@@ -2,6 +2,20 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-12s] - Revenue Funnel summary: fix statement timeout after sync
+
+**Symptom:** `Failed to load Revenue Funnel summary: HTTP 500` with
+`canceling statement due to statement timeout` (often after Stripe/GA4 sync
+reload).
+
+**Fix:** `revenue-funnel-summary.js` — one `booking_sheet_monthly_wide`
+query (was two); JLR strip reads `is_jlr=true` rows only; AI Overview map
+fetches latest `audit_date` slice instead of 2000 mixed-date rows.
+
+**Also:** Money-pages + 12-month history tables get a **Total** footer row.
+
+---
+
 ## [2026-06-12r] - Money pages use in-progress Booking Sheet month for tier £
 
 **Symptoms:** Live API still showed Hire/Workshops at £0 after JLR fix — KPI

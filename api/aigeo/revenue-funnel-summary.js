@@ -476,20 +476,23 @@ function classifyAiMapRow(row) {
 }
 
 async function fetchAiOverviewMap(supabase, propertyUrl) {
+  const { data: latestRows, error: latestErr } = await supabase
+    .from('keyword_rankings')
+    .select('audit_date')
+    .eq('property_url', propertyUrl)
+    .order('audit_date', { ascending: false })
+    .limit(1);
+  if (latestErr) throw latestErr;
+  const auditDate = latestRows?.[0]?.audit_date;
+  if (!auditDate) return [];
   const { data, error } = await supabase
     .from('keyword_rankings')
     .select('audit_date, keyword, best_rank_group, search_volume, has_ai_overview, ai_alan_citations_count, segment, page_type, best_url')
     .eq('property_url', propertyUrl)
-    .order('audit_date', { ascending: false })
-    .limit(2000);
+    .eq('audit_date', auditDate)
+    .limit(600);
   if (error) throw error;
-  const latest = new Map();
-  for (let i = 0; i < (data || []).length; i += 1) {
-    const row = data[i];
-    if (!latest.has(row.keyword)) latest.set(row.keyword, row);
-  }
-  const out = [];
-  for (const row of latest.values()) out.push(classifyAiMapRow(row));
+  const out = (data || []).map((row) => classifyAiMapRow(row));
   out.sort((a, b) => (b.search_volume || 0) - (a.search_volume || 0));
   return out.slice(0, 200);
 }
@@ -620,13 +623,14 @@ async function fetchBookingTransactions(supabase, propertyUrl) {
     .from('booking_sheet_transactions')
     .select('year, txn_date, category_label, amount, is_jlr')
     .eq('property_url', propertyUrl)
+    .eq('is_jlr', true)
     .order('txn_date', { ascending: true });
   if (error) throw error;
   return (data || []).map((r) => ({
     ...r,
     month: monthOfTxnIso(r.txn_date),
     amount: Number(r.amount),
-    is_jlr: r.is_jlr === true
+    is_jlr: true
   }));
 }
 
@@ -638,39 +642,44 @@ async function buildJlrSubtractCtx(supabase, propertyUrl) {
   };
 }
 
-async function fetchRevenueHistory(supabase, propertyUrl, jlrCtx) {
-  // 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX (Phase L): source is now
-  // `booking_sheet_monthly_wide`, which holds exactly one authoritative
-  // row per (property, year, month) sourced from the Booking Sheet
-  // row-18 Totals. The legacy `revenue_snapshots` table was summing
-  // squarespace_api + stripe_supplemental + booking_sheet sources -- those
-  // sources overlap (a SQ order paid by Bank Transfer appears in BOTH the
-  // SQ Orders API and the Booking Sheet's Bank receipts), so the monthly
-  // history was double-counted. See Docs/REVENUE-TRUTH-FROM-BOOKING-SHEET.md.
-  //
-  // 2026-05-26 Phase L1 correction: SELECT the new view columns
-  // (category_revenue, market_revenue, operational_revenue, adjustment_net)
-  // instead of Phase L's invented `tier_revenue` jsonb. `shapeWideViewRow`
-  // synthesises a back-compat `tier_revenue` for the 4 real 1-to-1
-  // category mappings so the existing UI keeps rendering until the UI
-  // rebuild turn replaces the per-tier sparklines with the 3-line
-  // operational chart.
-  //
-  // The view already returns one row per month -- the isCalendarMonthRow
-  // filter and mergeRowsByMonth ceremony are now no-ops but kept in place
-  // for resilience if the view's shape ever changes.
+const BOOKING_WIDE_SELECT = 'period_start, period_end, revenue_amount, currency, source, transactions, tier_transactions, operational_revenue, adjustment_net, market_revenue, category_revenue, notes';
+
+async function fetchBookingSheetWideRows(supabase, propertyUrl) {
   const { data, error } = await supabase
     .from('booking_sheet_monthly_wide')
-    .select('period_start, period_end, revenue_amount, currency, source, transactions, tier_transactions, operational_revenue, adjustment_net, market_revenue, category_revenue')
+    .select(BOOKING_WIDE_SELECT)
     .eq('property_url', propertyUrl)
     .order('period_end', { ascending: false })
     .limit(120);
   if (error) throw error;
-  const shaped = (data || []).map((row) => shapeWideViewRow(row, jlrCtx));
-  const monthly = shaped.filter(isCalendarMonthRow);
+  return data || [];
+}
+
+function buildRevenueSnapsFromShaped(allShaped) {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const tierSnap = mergeRevenuePick(allShaped, pickLatestBookingMonthRow(allShaped));
+  const kpiSnap = mergeRevenuePick(allShaped, pickBestRevenueRow(allShaped));
+  if (tierSnap) tierSnap.is_partial = tierSnap.period_end > todayIso;
+  if (kpiSnap) kpiSnap.is_partial = kpiSnap.period_end > todayIso;
+  return { kpiSnap, tierSnap };
+}
+
+function buildRevenueHistoryFromShaped(allShaped) {
+  const monthly = allShaped.filter(isCalendarMonthRow);
   const merged = mergeRowsByMonth(monthly);
-  const sorted = merged.toSorted((a, b) => a.period_end.localeCompare(b.period_end));
-  return sorted.slice(-12);
+  return merged.toSorted((a, b) => a.period_end.localeCompare(b.period_end)).slice(-12);
+}
+
+async function fetchBookingSheetBundle(supabase, propertyUrl, includeJlr) {
+  const [jlrCtx, wideRows] = await Promise.all([
+    includeJlr ? Promise.resolve(null) : buildJlrSubtractCtx(supabase, propertyUrl),
+    fetchBookingSheetWideRows(supabase, propertyUrl)
+  ]);
+  const allShaped = wideRows.map((r) => ({ ...shapeWideViewRow(r, jlrCtx), notes: r.notes }));
+  return {
+    revenueSnaps: buildRevenueSnapsFromShaped(allShaped),
+    revenueHistory: buildRevenueHistoryFromShaped(allShaped)
+  };
 }
 
 function targetForMonth(periodStart) {
@@ -1294,34 +1303,6 @@ function mergeRevenuePick(allShaped, base) {
   return mergeRevenueRows(base, siblings);
 }
 
-async function fetchRevenueSnaps(supabase, propertyUrl, jlrCtx) {
-  // 2026-05-26 SINGLE-SOURCE-OF-TRUTH FIX (Phase L): see fetchRevenueHistory.
-  // The picker (pickBestRevenueRow) will skip future-dated rows (e.g. the
-  // in-progress current month) and pick the latest CLOSED calendar month
-  // from the Booking Sheet, which is the correct rolling-window denominator
-  // for the funnel KPI tiles.
-  //
-  // 2026-05-26 Phase L1 correction: SELECT the new view columns and shape
-  // them via `shapeWideViewRow` (which synthesises a back-compat
-  // tier_revenue jsonb for the 4 real 1-to-1 category mappings) so the
-  // KPI tiles and tierRevenueFromRow lookups keep working until the UI
-  // rebuild turn.
-  const { data, error } = await supabase
-    .from('booking_sheet_monthly_wide')
-    .select('period_start, period_end, revenue_amount, currency, source, transactions, tier_transactions, operational_revenue, adjustment_net, market_revenue, category_revenue, notes')
-    .eq('property_url', propertyUrl)
-    .order('period_end', { ascending: false })
-    .limit(36);
-  if (error) throw error;
-  const allShaped = (data || []).map((r) => ({ ...shapeWideViewRow(r, jlrCtx), notes: r.notes }));
-  const todayIso = new Date().toISOString().slice(0, 10);
-  const tierSnap = mergeRevenuePick(allShaped, pickLatestBookingMonthRow(allShaped));
-  const kpiSnap = mergeRevenuePick(allShaped, pickBestRevenueRow(allShaped));
-  if (tierSnap) tierSnap.is_partial = tierSnap.period_end > todayIso;
-  if (kpiSnap) kpiSnap.is_partial = kpiSnap.period_end > todayIso;
-  return { kpiSnap, tierSnap };
-}
-
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -1334,18 +1315,17 @@ export default async function handler(req, res) {
   const includeJlr = parseIncludeJlr(req.query?.includeJlr);
   try {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
-    const jlrCtx = includeJlr ? null : await buildJlrSubtractCtx(supabase, propertyUrl);
-    const revenueSnapsPromise = fetchRevenueSnaps(supabase, propertyUrl, jlrCtx);
-    const [audits, pageMetrics, revenueSnaps, aiMap, priorities, revenueHistory, ga4Snap, policies] = await Promise.all([
+    const [audits, pageMetrics, bookingBundle, aiMap, priorities, ga4Snap, policies] = await Promise.all([
       fetchLatestAudit(supabase, propertyUrl),
       fetchPageMetrics(supabase, propertyUrl),
-      revenueSnapsPromise,
+      fetchBookingSheetBundle(supabase, propertyUrl, includeJlr),
       fetchAiOverviewMap(supabase, propertyUrl),
       fetchPrioritiesWithCycle(supabase, propertyUrl),
-      fetchRevenueHistory(supabase, propertyUrl, jlrCtx),
       readLatestGa4Metrics(supabase, propertyUrl),
       fetchIndexabilityPolicies(supabase)
     ]);
+    const revenueSnaps = bookingBundle.revenueSnaps;
+    const revenueHistory = bookingBundle.revenueHistory;
     const revenueSnap = revenueSnaps.kpiSnap;
     const tierRevenueSnap = revenueSnaps.tierSnap;
     const pageRows = pageMetrics.rows;
