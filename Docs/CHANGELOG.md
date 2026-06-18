@@ -2,6 +2,28 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-18a] - Shared tab-load progress bar across all data-heavy tabs
+
+**Symptoms:** Only Traditional SEO showed a load indicator. Other tabs that hydrate
+from Supabase / localStorage (Revenue Truth, Revenue Funnel, Money Pages, Dashboard,
+Ranking, Backlinks, AI Health Scorecard, AI Sources, Portfolio, Implementation
+Progress) just showed silent “Loading…” placeholders, so they looked broken/frozen
+during the fetch delay.
+
+**Fix:** New generic sticky amber progress bar (`#aigeo-tab-load`) injected once at the
+top of `.aigeo-main`, driven by a shared `window.AigeoTabLoad` controller. `setActivePanel`
+calls `AigeoTabLoad.onPanel(panelId)` on every tab switch (Traditional SEO excluded — it
+keeps its own richer step banner). The bar shows immediately with a pulsing dot, elapsed
+counter and indeterminate fill, then hides once the active panel has **no visible loading
+placeholder** (`.rt-loading` / `.spinner` / `.trend-chart-loading` / money refresh overlay)
+for 2 consecutive polls. Guards: 800ms min-show (no flicker), 18s “still loading” nudge,
+45s hard safety hide so it can never stick. Untracked tabs (config, scenario, optimisation,
+authority, history, local) hide any lingering bar.
+
+**Files:** `audit-dashboard.html`
+
+---
+
 ## [2026-06-12u] - Traditional SEO: prominent tab load progress (bar, countdown, steps)
 
 **Symptoms:** Amber load strip was easy to miss; it hid before DFS / domain tiles
