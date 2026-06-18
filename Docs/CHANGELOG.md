@@ -2,6 +2,21 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-12u] - Traditional SEO: prominent tab load progress (bar, countdown, steps)
+
+**Symptoms:** Amber load strip was easy to miss; it hid before DFS / domain tiles
+finished updating, so the page looked broken after the banner vanished.
+
+**Fix:** High-contrast amber progress panel with pulsing indicator, countdown,
+progress bar, live step checklist, and 15s timeout message. Banner stays until
+**all** steps complete (rules, domain strength, DFS tiles, click movers, results
+table). Fast path now fetches DFS summary on tab open (was skipped). Removed
+silent early-return when a prior load was in flight.
+
+**Files:** `audit-dashboard.html`
+
+---
+
 ## [2026-06-12t] - Traditional SEO tab: fix stuck “Loading…” click movers + load banner
 
 **Symptoms:** Traditional SEO tab looked broken — **Top click gainers/losers**
