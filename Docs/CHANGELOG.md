@@ -2,6 +2,27 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-12t] - Traditional SEO tab: fix stuck “Loading…” click movers + load banner
+
+**Symptoms:** Traditional SEO tab looked broken — **Top click gainers/losers**
+stuck on “Loading…” while health score and rules loaded fine. Domain rank /
+strength / backlinks tiles empty (expected until DFS / Labs snapshot run).
+
+**Root cause (client):** `traditionalSeoRefreshCtrTopTenTiles` treated a
+successful GSC 40d movers API response as a miss when filtered gainers/losers
+were empty, then fell through to `traditionalSeoLoadAuditData` +
+`fetchPreviousAuditForDeltas` (heavy, could hang). Fast tab path also skipped
+explicit CTR refresh on tab switch.
+
+**Fix:** Accept empty Supabase movers as success; 8s fetch timeout on GSC
+movers + domain strength; 10s cap on audit fallback; tab load status banner
+(`#traditional-seo-tab-load-status`) with 5s “still working” nudge; loading
+guard reduced from 90s → 15s with visible message.
+
+**Files:** `audit-dashboard.html`
+
+---
+
 ## [2026-06-12s] - Revenue Funnel summary: fix statement timeout after sync
 
 **Symptom:** `Failed to load Revenue Funnel summary: HTTP 500` with
