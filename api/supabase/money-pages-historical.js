@@ -15,7 +15,7 @@ const need = (k) => {
 const sendJSON = (res, status, obj) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.status(status).send(JSON.stringify(obj));
 };
@@ -53,6 +53,29 @@ async function fetchPolicyForSlug(supabase, propertyUrl, slug) {
     policy_value: data[0].policy_value ?? null,
     policy_effective_date: data[0].policy_effective_date ?? null
   };
+}
+
+// Batch variant: latest policy per slug in a single query (avoids N round-trips).
+async function fetchPoliciesForSlugs(supabase, propertyUrl, slugs) {
+  const map = new Map();
+  const unique = Array.from(new Set(slugs.filter(Boolean)));
+  if (!unique.length) return map;
+  const { data, error } = await supabase
+    .from('revenue_gsc_joined_with_policy')
+    .select('page_slug, policy_value, policy_effective_date, period_start')
+    .eq('property_url', propertyUrl)
+    .in('page_slug', unique)
+    .order('period_start', { ascending: false });
+  if (error || !data) return map;
+  for (const row of data) {
+    if (!map.has(row.page_slug)) {
+      map.set(row.page_slug, {
+        policy_value: row.policy_value ?? null,
+        policy_effective_date: row.policy_effective_date ?? null
+      });
+    }
+  }
+  return map;
 }
 
 function periodStartFromDate(dateStr) {
@@ -134,16 +157,173 @@ function buildAggregatePayload(totals) {
   };
 }
 
+// True when a timeseries/metrics URL matches the requested target URL.
+function urlMatchesTarget(normalized, targetUrlNormalizedForMatch) {
+  if (!normalized) return false;
+  const targetPathParts = targetUrlNormalizedForMatch.split('/').filter(p => p);
+  const normalizedPathParts = normalized.split('/').filter(p => p);
+
+  if (normalized === targetUrlNormalizedForMatch) return true;
+  if (targetPathParts.length > 0 && normalizedPathParts.length === targetPathParts.length) {
+    if (targetPathParts.every((part, idx) => normalizedPathParts[idx] === part)) return true;
+  }
+  const shorter = targetPathParts.length <= normalizedPathParts.length ? targetPathParts : normalizedPathParts;
+  const longer = targetPathParts.length > normalizedPathParts.length ? targetPathParts : normalizedPathParts;
+  if (shorter.length > 0 && longer.length >= shorter.length) {
+    return shorter.every((part, idx) => longer[idx] === part);
+  }
+  return false;
+}
+
+// Build the deduplicated daily metric map for one URL from already-fetched audits.
+function buildDailyMapForUrl(audits, target_url, cutoffDate) {
+  const targetUrlNormalizedForMatch = normalizeUrl(target_url);
+  const dailyMap = new Map();
+  let fromTimeseries = false;
+
+  for (const audit of audits) {
+    if (!audit?.gsc_timeseries) continue;
+    let ts = audit.gsc_timeseries;
+    if (typeof ts === 'string') {
+      try { ts = JSON.parse(ts); } catch { ts = null; }
+    }
+    if (!Array.isArray(ts)) continue;
+
+    ts.forEach(entry => {
+      const dateStr = entry?.date || entry?.day || entry?.created_at || entry?.updated_at || null;
+      const url = entry?.url || entry?.page || entry?.page_url || entry?.target_url || '';
+      if (!dateStr || !url) return;
+      const d = new Date(dateStr);
+      if (Number.isNaN(d.getTime()) || d < cutoffDate) return;
+      if (!urlMatchesTarget(normalizeUrl(url), targetUrlNormalizedForMatch)) return;
+      if (dailyMap.has(dateStr)) return;
+
+      const clicks = Number(entry.clicks || entry.clicks_28d || 0);
+      const impr = Number(entry.impressions || entry.impressions_28d || 0);
+      const pos = entry.position != null ? Number(entry.position) :
+                  entry.avg_position != null ? Number(entry.avg_position) :
+                  entry.avgPosition != null ? Number(entry.avgPosition) : null;
+      dailyMap.set(dateStr, { clicks, impr, pos });
+      fromTimeseries = true;
+    });
+  }
+  return { dailyMap, fromTimeseries };
+}
+
+// Fallback: use the latest audit's money_pages_metrics row when no timeseries matched.
+function fillFromMoneyPagesMetrics(dailyMap, audits, target_url) {
+  const targetUrlNormalizedForMatch = normalizeUrl(target_url);
+  const latestAuditWithData = audits[0];
+  try {
+    let moneyPagesMetrics = latestAuditWithData.money_pages_metrics;
+    if (typeof moneyPagesMetrics === 'string') {
+      try { moneyPagesMetrics = JSON.parse(moneyPagesMetrics); } catch { moneyPagesMetrics = null; }
+    }
+    if (!moneyPagesMetrics?.rows || !Array.isArray(moneyPagesMetrics.rows)) return;
+    const matchingRow = moneyPagesMetrics.rows.find(row => {
+      const rowUrl = row.url || row.page_url || '';
+      if (!rowUrl) return false;
+      if (rowUrl === target_url) return true;
+      return urlMatchesTarget(normalizeUrl(rowUrl), targetUrlNormalizedForMatch);
+    });
+    if (matchingRow) {
+      const auditDate = String(latestAuditWithData.audit_date || '').slice(0, 10)
+        || new Date().toISOString().slice(0, 10);
+      dailyMap.set(auditDate, {
+        clicks: matchingRow.clicks || matchingRow.clicks_28d || 0,
+        impr: matchingRow.impressions || matchingRow.impressions_28d || 0,
+        pos: matchingRow.avg_position || matchingRow.position || matchingRow.avgPosition || null
+      });
+    }
+  } catch (parseError) {
+    console.error('[Money Pages Historical] Fallback parse error:', parseError);
+  }
+}
+
+const EMPTY_DATA = {
+  clicks_90d: null, impressions_90d: null, ctr_90d: null, avg_position_90d: null,
+  clicks_90d_indexable: null, impressions_90d_indexable: null,
+  ctr_90d_indexable: null, avg_position_90d_indexable: null,
+  rows_total_count: 0, rows_indexable_count: 0
+};
+
+// Compute the full `data` payload for one URL from already-fetched audits + policy.
+function computeUrlData(audits, target_url, property_url, policy, cutoffDate) {
+  const { dailyMap, fromTimeseries } = buildDailyMapForUrl(audits, target_url, cutoffDate);
+  if (dailyMap.size === 0) fillFromMoneyPagesMetrics(dailyMap, audits, target_url);
+  if (dailyMap.size === 0) return { ...EMPTY_DATA };
+
+  const totals = aggregateDailyMap(dailyMap, target_url, property_url, policy);
+  const payload = buildAggregatePayload(totals);
+  return {
+    ...payload,
+    data_source: fromTimeseries ? 'gsc_timeseries' : 'money_pages_metrics',
+    note: fromTimeseries
+      ? 'Aggregated from daily timeseries (no double-counting across audits)'
+      : 'Fallback to latest audit 28-day metrics as proxy (no timeseries data)'
+  };
+}
+
+async function fetchAuditsForProperty(supabase, property_url) {
+  const { data, error } = await supabase
+    .from('audit_results')
+    .select('audit_date, gsc_timeseries, money_pages_metrics')
+    .eq('property_url', property_url)
+    .order('audit_date', { ascending: false });
+  if (error || !data || data.length === 0) return null;
+  return data;
+}
+
+// Batch path: fetch audits + policies once, compute every requested URL.
+async function handleBatch(req, res) {
+  let body = req.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch { body = {}; }
+  }
+  const property_url = body?.property_url;
+  const days = body?.days || 90;
+  const targetUrls = Array.isArray(body?.target_urls) ? body.target_urls.filter(Boolean) : [];
+  if (!property_url || targetUrls.length === 0) {
+    return sendJSON(res, 400, { error: 'property_url and target_urls[] are required' });
+  }
+
+  const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
+  const daysNum = parseInt(days, 10) || 90;
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysNum);
+
+  const audits = await fetchAuditsForProperty(supabase, property_url);
+  if (!audits) return sendJSON(res, 404, { status: 'error', error: 'No audit data found for property URL' });
+
+  const policyMap = await fetchPoliciesForSlugs(supabase, property_url, targetUrls.map(slugFromTargetUrl));
+
+  const results = {};
+  for (const url of targetUrls) {
+    const policy = policyMap.get(slugFromTargetUrl(url)) || { policy_value: null, policy_effective_date: null };
+    results[url] = computeUrlData(audits, url, property_url, policy, cutoffDate);
+  }
+  return sendJSON(res, 200, { status: 'ok', results, audit_date: audits[0]?.audit_date || null });
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     return res.status(200).end();
   }
 
+  if (req.method === 'POST') {
+    try {
+      return await handleBatch(req, res);
+    } catch (err) {
+      console.error('[Money Pages Historical] Batch error:', err);
+      return sendJSON(res, 200, { status: 'error', error: err.message, results: {} });
+    }
+  }
+
   if (req.method !== 'GET') {
-    return sendJSON(res, 405, { error: `Method not allowed. Expected: GET` });
+    return sendJSON(res, 405, { error: `Method not allowed. Expected: GET or POST` });
   }
 
   try {
@@ -167,239 +347,29 @@ export default async function handler(req, res) {
       });
     }
 
-    const targetUrlNormalized = normalizeUrl(target_url);
     const daysNum = parseInt(days, 10) || 90;
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysNum);
 
-    // Get latest audit date
-    let latestAudit;
-    try {
-      const { data, error: auditError } = await supabase
-        .from('audit_results')
-        .select('audit_date')
-        .eq('property_url', property_url)
-        .order('audit_date', { ascending: false })
-        .limit(1)
-        .single();
-      
-      if (auditError || !data) {
-        console.error('[Money Pages Historical] Audit query error:', auditError);
-        return sendJSON(res, 404, { 
-          status: 'error',
-          error: 'No audit found for property URL' 
-        });
-      }
-      latestAudit = data;
-    } catch (queryError) {
-      console.error('[Money Pages Historical] Query exception:', queryError);
-      return sendJSON(res, 500, { 
-        status: 'error',
-        error: 'Database query failed',
-        details: queryError.message
-      });
-    }
-
-    // Normalize target URL for query (same as get-gsc-page-metrics.js)
-    const normalizeUrlForQuery = (url, siteUrl) => {
-      if (!url || typeof url !== 'string') return '';
-      
-      let u = url.trim();
-      if (u.startsWith("/")) {
-        u = (siteUrl || property_url).replace(/\/+$/, '') + u;
-      } else if (!u.startsWith("http")) {
-        u = (siteUrl || property_url).replace(/\/+$/, '') + "/" + u.replace(/^\/+/, "");
-      }
-      
-      try {
-        const urlObj = new URL(u);
-        let path = urlObj.pathname || "/";
-        if (path.length > 1) path = path.replace(/\/+$/, "");
-        return urlObj.origin.toLowerCase() + path;
-      } catch {
-        return u.split('?')[0].split('#')[0].replace(/\/+$/, '').toLowerCase();
-      }
-    };
-
-    const normalizedPageUrl = normalizeUrlForQuery(target_url, property_url);
-    const targetUrlNormalizedForMatch = normalizeUrl(target_url);
-
-    // Pull audits (with timeseries) within the 90d window, order newest-first
-    let audits = [];
-    try {
-      const { data, error: auditError } = await supabase
-        .from('audit_results')
-        .select('audit_date, gsc_timeseries, money_pages_metrics')
-        .eq('property_url', property_url)
-        .order('audit_date', { ascending: false });
-
-      if (auditError || !data || data.length === 0) {
-        console.error('[Money Pages Historical] Audit data query error:', auditError);
-        return sendJSON(res, 404, { 
-          status: 'error',
-          error: 'No audit data found for property URL' 
-        });
-      }
-      audits = data;
-    } catch (queryError) {
-      console.error('[Money Pages Historical] Query exception:', queryError);
-      return sendJSON(res, 500, { 
-        status: 'error',
-        error: 'Database query failed',
-        details: queryError.message
-      });
+    const audits = await fetchAuditsForProperty(supabase, property_url);
+    if (!audits) {
+      return sendJSON(res, 404, { status: 'error', error: 'No audit data found for property URL' });
     }
 
     const policy = await fetchPolicyForSlug(supabase, property_url, slugFromTargetUrl(target_url));
+    const data = computeUrlData(audits, target_url, property_url, policy, cutoffDate);
 
-    // Deduplicate by date to avoid double counting the same day across multiple audits
-    const dailyMap = new Map(); // key: date -> { clicks, impressions, position }
-    let fromTimeseries = false;
-
-    try {
-      for (const audit of audits) {
-        if (!audit?.gsc_timeseries) continue;
-        let ts = audit.gsc_timeseries;
-        if (typeof ts === 'string') {
-          try { ts = JSON.parse(ts); } catch { ts = null; }
-        }
-        if (!Array.isArray(ts)) continue;
-
-        ts.forEach(entry => {
-          const dateStr = entry?.date || entry?.day || entry?.created_at || entry?.updated_at || null;
-          const url = entry?.url || entry?.page || entry?.page_url || entry?.target_url || '';
-          if (!dateStr || !url) return;
-
-          const d = new Date(dateStr);
-          if (Number.isNaN(d.getTime())) return;
-          if (d < cutoffDate) return; // outside window
-
-          const normalized = normalizeUrl(url);
-          if (!normalized) return;
-          
-          // Strict URL matching: exact match or same path segments (not substring matching)
-          // This prevents matching "landscape-photography-workshops" when looking for "photography-workshops"
-          const targetPathParts = targetUrlNormalizedForMatch.split('/').filter(p => p);
-          const normalizedPathParts = normalized.split('/').filter(p => p);
-          
-          // Exact match
-          let matches = normalized === targetUrlNormalizedForMatch;
-          
-          // If not exact, check if path segments match exactly (same depth, same segments)
-          if (!matches && targetPathParts.length > 0 && normalizedPathParts.length === targetPathParts.length) {
-            matches = targetPathParts.every((part, idx) => normalizedPathParts[idx] === part);
-          }
-          
-          // Also allow matching if one is a prefix of the other at path segment level
-          // (e.g., "photography-workshops" matches "photography-workshops/something")
-          if (!matches) {
-            const shorter = targetPathParts.length <= normalizedPathParts.length ? targetPathParts : normalizedPathParts;
-            const longer = targetPathParts.length > normalizedPathParts.length ? targetPathParts : normalizedPathParts;
-            if (shorter.length > 0 && longer.length >= shorter.length) {
-              matches = shorter.every((part, idx) => longer[idx] === part);
-            }
-          }
-          
-          if (!matches) return;
-
-          // Use newest audit first; if date already present, skip to avoid double count
-          if (dailyMap.has(dateStr)) return;
-
-          const clicks = Number(entry.clicks || entry.clicks_28d || 0);
-          const impr = Number(entry.impressions || entry.impressions_28d || 0);
-          const pos = entry.position != null ? Number(entry.position) :
-                      entry.avg_position != null ? Number(entry.avg_position) :
-                      entry.avgPosition != null ? Number(entry.avgPosition) : null;
-
-          dailyMap.set(dateStr, { clicks, impr, pos });
-          fromTimeseries = true;
-        });
-      }
-    } catch (parseErr) {
-      console.error('[Money Pages Historical] Error processing timeseries:', parseErr);
-    }
-
-    // If no timeseries data matched, fallback to latest audit money_pages_metrics as a proxy
-    if (dailyMap.size === 0) {
-      const latestAuditWithData = audits[0];
-      try {
-        let moneyPagesMetrics = latestAuditWithData.money_pages_metrics;
-        if (typeof moneyPagesMetrics === 'string') {
-          try { moneyPagesMetrics = JSON.parse(moneyPagesMetrics); } catch { moneyPagesMetrics = null; }
-        }
-
-        if (moneyPagesMetrics?.rows && Array.isArray(moneyPagesMetrics.rows)) {
-          const matchingRow = moneyPagesMetrics.rows.find(row => {
-            const rowUrl = row.url || row.page_url || '';
-            if (!rowUrl) return false;
-            const rowUrlNormalized = normalizeUrl(rowUrl);
-            
-            // Exact match first
-            if (rowUrlNormalized === targetUrlNormalizedForMatch || rowUrl === target_url) {
-              return true;
-            }
-            
-            // Strict path segment matching (same logic as timeseries matching)
-            const targetPathParts = targetUrlNormalizedForMatch.split('/').filter(p => p);
-            const rowPathParts = rowUrlNormalized.split('/').filter(p => p);
-            
-            if (targetPathParts.length > 0 && rowPathParts.length === targetPathParts.length) {
-              return targetPathParts.every((part, idx) => rowPathParts[idx] === part);
-            }
-            
-            // Prefix matching at path segment level
-            if (targetPathParts.length > 0 && rowPathParts.length >= targetPathParts.length) {
-              return targetPathParts.every((part, idx) => rowPathParts[idx] === part);
-            }
-            
-            return false;
-          });
-
-          if (matchingRow) {
-            const auditDate = String(latestAuditWithData.audit_date || '').slice(0, 10)
-              || new Date().toISOString().slice(0, 10);
-            const clicks = matchingRow.clicks || matchingRow.clicks_28d || 0;
-            const impr = matchingRow.impressions || matchingRow.impressions_28d || 0;
-            const position = matchingRow.avg_position || matchingRow.position || matchingRow.avgPosition || null;
-            dailyMap.set(auditDate, { clicks, impr, pos: position });
-          }
-        }
-      } catch (parseError) {
-        console.error('[Money Pages Historical] Fallback parse error:', parseError);
-      }
-    }
-
-    if (dailyMap.size === 0) {
+    if (data.rows_total_count === 0 && data.clicks_90d === null) {
       return sendJSON(res, 200, {
         status: 'ok',
-        data: {
-          clicks_90d: null,
-          impressions_90d: null,
-          ctr_90d: null,
-          avg_position_90d: null,
-          clicks_90d_indexable: null,
-          impressions_90d_indexable: null,
-          ctr_90d_indexable: null,
-          avg_position_90d_indexable: null,
-          rows_total_count: 0,
-          rows_indexable_count: 0
-        },
+        data,
         message: 'No historical data found for this URL in timeseries or money_pages_metrics'
       });
     }
 
-    const totals = aggregateDailyMap(dailyMap, target_url, property_url, policy);
-    const payload = buildAggregatePayload(totals);
-
     return sendJSON(res, 200, {
       status: 'ok',
-      data: {
-        ...payload,
-        data_source: fromTimeseries ? 'gsc_timeseries' : 'money_pages_metrics',
-        note: fromTimeseries
-          ? 'Aggregated from daily timeseries (no double-counting across audits)'
-          : 'Fallback to latest audit 28-day metrics as proxy (no timeseries data)'
-      },
+      data,
       audit_date: audits[0]?.audit_date || null
     });
 
