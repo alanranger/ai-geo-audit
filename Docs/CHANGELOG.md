@@ -2,6 +2,34 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-20] - Money Pages: batch money-pages-historical N+1 (policy banner)
+
+**Symptoms:** Money Pages section was slow to settle; the policy banner count
+("N of M money pages affected by active policy") lagged and added load on every
+dashboard/Money-Pages render.
+
+**Root cause:** `updateMoneyPagesPolicyBanner()` fired **one
+`/api/supabase/money-pages-historical?days=28` GET per money-page row** (chunked
+8 at a time). Each call independently re-pulled **all** of the property's audits
+including their large `gsc_timeseries` blobs **and** ran a per-slug policy query
+— an N+1 that re-resolved the same data once per URL and competed for the
+browser connection pool.
+
+**Fix (batch the N+1):**
+
+1. **API** (`api/supabase/money-pages-historical.js`): added a **POST batch
+   mode** — `{ property_url, target_urls[], days? }` fetches audits **once** and
+   the latest policy per slug in a **single** `.in('page_slug', …)` query, then
+   computes the aggregate for every URL server-side and returns
+   `{ results: { url: data } }`. Extracted the per-URL daily-map build,
+   fallback, and aggregate into shared helpers; the single-URL GET path (used by
+   the per-page performance modal) is unchanged and reuses them.
+2. **Client** (`audit-dashboard.html` → `updateMoneyPagesPolicyBanner`):
+   replaced the chunked per-row GET loop with a **single POST** for all rows.
+
+**Net:** the banner's N per-row historical calls collapse to 1 request that
+resolves the audits/timeseries/policy blobs only once.
+
 ## [2026-06-20] - Dashboard ~1min stall fixed: batch Money-Pages AI-citation N+1 (245 calls → 1)
 
 **Symptoms:** After the loading bar finished, the Dashboard tab took up to a
