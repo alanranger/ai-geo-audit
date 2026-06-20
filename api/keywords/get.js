@@ -112,6 +112,19 @@ async function loadLargestKeywordSnapshot(supabaseUrl, supabaseKey, propertyUrl)
   return { auditDate: bestDate, keywords: bestKeywords, source: 'largest_snapshot' };
 }
 
+async function handleProbe(supabaseUrl, supabaseKey, res) {
+  try {
+    const pingUrl = `${supabaseUrl}/rest/v1/audit_results?select=audit_date&limit=1`;
+    const ping = await sbFetch(pingUrl, supabaseKey, 6000);
+    if (!ping.ok) {
+      return res.status(503).json({ status: 'error', probe: true, message: 'Supabase unavailable' });
+    }
+    return res.status(200).json({ status: 'ok', probe: true });
+  } catch (e) {
+    return res.status(503).json({ status: 'error', probe: true, message: 'Supabase unavailable' });
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -135,6 +148,13 @@ export default async function handler(req, res) {
       message: 'Supabase not configured.',
       meta: { generatedAt: new Date().toISOString() },
     });
+  }
+
+  // Lightweight health probe: the UI calls this on every page load purely to
+  // detect a Supabase outage (503). Doing a tiny ping here avoids pulling the
+  // full keyword set (up to 10k rows / several seconds) just for a liveness check.
+  if (req.query && (req.query.probe === '1' || req.query.probe === 'true')) {
+    return handleProbe(supabaseUrl, supabaseKey, res);
   }
 
   try {
