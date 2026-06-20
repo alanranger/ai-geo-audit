@@ -14,7 +14,7 @@ const need = (k) => {
 const sendJSON = (res, status, obj) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.status(status).send(JSON.stringify(obj));
 };
@@ -124,16 +124,136 @@ const fetchAuditRecord = async (supabase, propertyFilter, auditDateToUse) => {
   return data;
 };
 
+// Count citations within combinedRows that point at a single (already-normalized) target URL.
+// Returns { count, uniqueKeywords, citingKeywords }.
+function countCitationsForTarget(combinedRows, targetUrlNormalized) {
+  const targetPathParts = targetUrlNormalized.split('/').filter(p => p);
+  const citingKeywords = [];
+  let totalCitationCount = 0;
+
+  combinedRows.forEach(row => {
+    const citationsArray = row.ai_alan_citations || [];
+    if (!Array.isArray(citationsArray) || citationsArray.length === 0) return;
+
+    let keywordCitationCount = 0;
+    citationsArray.forEach(citation => {
+      const citedUrl = typeof citation === 'string'
+        ? citation
+        : (citation && typeof citation === 'object'
+            ? (citation.url || citation.URL || citation.link || citation.href || citation.page || citation.pageUrl || citation.target || citation.targetUrl || citation.best_url || citation.bestUrl || '')
+            : null);
+      if (!citedUrl) return;
+
+      const citedUrlNormalized = normalizeUrl(citedUrl);
+      const citedPathParts = citedUrlNormalized.split('/').filter(p => p);
+
+      let matches = citedUrlNormalized === targetUrlNormalized;
+      if (!matches && targetPathParts.length > 0 && citedPathParts.length >= targetPathParts.length) {
+        matches = targetPathParts.every((part, idx) => citedPathParts[idx] === part);
+      }
+      if (matches) keywordCitationCount++;
+    });
+
+    if (keywordCitationCount > 0) {
+      totalCitationCount += keywordCitationCount;
+      citingKeywords.push({
+        keyword: row.keyword || '',
+        has_ai_overview: row.has_ai_overview === true || row.hasAiOverview === true,
+        best_url: row.best_url || row.bestUrl || '',
+        best_rank_group: row.best_rank_group || row.bestRankGroup || null,
+        search_volume: row.search_volume || row.monthly_search_volume || row.volume || null,
+        best_rank: row.best_rank_group || row.bestRankGroup || null,
+        citation_count: keywordCitationCount
+      });
+    }
+  });
+
+  return { count: totalCitationCount, uniqueKeywords: citingKeywords.length, citingKeywords };
+}
+
+// Resolve the combinedRows + audit date for a property once (shared by single + batch paths).
+// Returns { combinedRows, auditDateToUse } on success, or { error: {status, body} } on failure.
+async function resolveCombinedRows(supabase, property_url, audit_date) {
+  const propertyCandidates = buildPropertyCandidates(property_url);
+  const propertyFilter = propertyCandidates.length ? propertyCandidates : [property_url];
+
+  let auditDateToUse = audit_date;
+  let auditRecord = null;
+  if (!auditDateToUse) {
+    const latestRanking = await findLatestRankingAudit(supabase, propertyFilter);
+    if (latestRanking) {
+      auditDateToUse = latestRanking.auditDate;
+      auditRecord = { ranking_ai_data: latestRanking.ranking_ai_data };
+    }
+  }
+  if (!auditDateToUse) {
+    auditDateToUse = await findLatestAuditDate(supabase, propertyFilter);
+    if (!auditDateToUse) {
+      return { error: { status: 404, body: { status: 'error', error: 'No audit found for property URL' } } };
+    }
+  }
+  if (!auditRecord) {
+    auditRecord = await fetchAuditRecord(supabase, propertyFilter, auditDateToUse);
+    if (!auditRecord) {
+      return { error: { status: 404, body: { status: 'error', error: 'No audit found for property URL and audit date' } } };
+    }
+  }
+
+  let rankingAiData = parseRankingAiData(auditRecord.ranking_ai_data);
+  const combinedRows = Array.isArray(rankingAiData?.combinedRows) ? rankingAiData.combinedRows : [];
+  return { combinedRows, auditDateToUse };
+}
+
+// Batch path: one request resolves the ranking blob once and counts citations for many URLs.
+async function handleBatch(req, res) {
+  let body = req.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch (e) { body = {}; }
+  }
+  const property_url = body?.property_url;
+  const audit_date = body?.audit_date;
+  const targetUrls = Array.isArray(body?.target_urls) ? body.target_urls : [];
+
+  if (!property_url || targetUrls.length === 0) {
+    return sendJSON(res, 400, { error: 'property_url and target_urls[] are required' });
+  }
+
+  const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
+  const resolved = await resolveCombinedRows(supabase, property_url, audit_date);
+  if (resolved.error) return sendJSON(res, resolved.error.status, resolved.error.body);
+
+  const { combinedRows, auditDateToUse } = resolved;
+  const counts = {};
+  for (const url of targetUrls) {
+    if (!url) continue;
+    const { count } = combinedRows.length
+      ? countCitationsForTarget(combinedRows, normalizeUrl(url))
+      : { count: 0 };
+    counts[url] = count;
+  }
+
+  return sendJSON(res, 200, { status: 'ok', counts, audit_date: auditDateToUse });
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     return res.status(200).end();
   }
 
+  if (req.method === 'POST') {
+    try {
+      return await handleBatch(req, res);
+    } catch (err) {
+      console.error('[Query Keywords Citing URL] Batch error:', err);
+      return sendJSON(res, 500, { status: 'error', error: err.message });
+    }
+  }
+
   if (req.method !== 'GET') {
-    return sendJSON(res, 405, { error: `Method not allowed. Expected: GET` });
+    return sendJSON(res, 405, { error: `Method not allowed. Expected: GET or POST` });
   }
 
   try {
@@ -148,139 +268,21 @@ export default async function handler(req, res) {
       need('SUPABASE_SERVICE_ROLE_KEY')
     );
 
-    // Normalize target URL
     const targetUrlNormalized = normalizeUrl(target_url);
-    
-    const propertyCandidates = buildPropertyCandidates(property_url);
-    const propertyFilter = propertyCandidates.length ? propertyCandidates : [property_url];
 
-    // Get latest audit date if not provided (prefer audits with ranking_ai_data)
-    let auditDateToUse = audit_date;
-    let auditRecord = null;
-    if (!auditDateToUse) {
-      const latestRanking = await findLatestRankingAudit(supabase, propertyFilter);
-      if (latestRanking) {
-        auditDateToUse = latestRanking.auditDate;
-        auditRecord = { ranking_ai_data: latestRanking.ranking_ai_data };
-      }
-    }
+    const resolved = await resolveCombinedRows(supabase, property_url, audit_date);
+    if (resolved.error) return sendJSON(res, resolved.error.status, resolved.error.body);
 
-    if (!auditDateToUse) {
-      auditDateToUse = await findLatestAuditDate(supabase, propertyFilter);
-      if (!auditDateToUse) {
-        return sendJSON(res, 404, { 
-          status: 'error',
-          error: 'No audit found for property URL' 
-        });
-      }
-    }
-
-    if (!auditRecord) {
-      auditRecord = await fetchAuditRecord(supabase, propertyFilter, auditDateToUse);
-      if (!auditRecord) {
-        return sendJSON(res, 404, { 
-          status: 'error',
-          error: 'No audit found for property URL and audit date' 
-        });
-      }
-    }
-
-    // Parse ranking_ai_data (stored as JSONB)
-    let rankingAiData = auditRecord.ranking_ai_data;
-    if (typeof rankingAiData === 'string') {
-      try {
-        rankingAiData = JSON.parse(rankingAiData);
-      } catch (e) {
-        console.warn('[Query Keywords Citing URL] Failed to parse ranking_ai_data JSON:', e.message);
-        return sendJSON(res, 200, {
-          status: 'ok',
-          data: [],
-          count: 0,
-          target_url: target_url,
-          target_url_normalized: targetUrlNormalized,
-          audit_date: auditDateToUse
-        });
-      }
-    }
-
-    // Extract combinedRows from ranking_ai_data
-    const combinedRows = rankingAiData?.combinedRows || [];
-    if (!Array.isArray(combinedRows) || combinedRows.length === 0) {
-      return sendJSON(res, 200, {
-        status: 'ok',
-        data: [],
-        count: 0,
-        target_url: target_url,
-        target_url_normalized: targetUrlNormalized,
-        audit_date: auditDateToUse
-      });
-    }
-
-    // Filter keywords where ai_alan_citations array contains the target URL
-    // Count TOTAL citations (not just unique keywords) - same URL can be cited multiple times from different keywords
-    const citingKeywords = [];
-    let totalCitationCount = 0; // Count total citations across all keywords
-    
-    combinedRows.forEach(row => {
-      const citationsArray = row.ai_alan_citations || [];
-      if (!Array.isArray(citationsArray) || citationsArray.length === 0) {
-        return; // Skip if no citations
-      }
-      
-      // Count how many citations in this keyword match the target URL
-      let keywordCitationCount = 0;
-      citationsArray.forEach(citation => {
-        // Try multiple field names to extract citation URL
-        const citedUrl = typeof citation === 'string' 
-          ? citation 
-          : (citation && typeof citation === 'object' 
-              ? (citation.url || citation.URL || citation.link || citation.href || citation.page || citation.pageUrl || citation.target || citation.targetUrl || citation.best_url || citation.bestUrl || '') 
-              : null);
-        
-        if (!citedUrl) return;
-        
-        const citedUrlNormalized = normalizeUrl(citedUrl);
-        
-        // Strict URL matching: exact match or same path segments (not substring matching)
-        // This prevents matching "photography-workshops" when looking for "landscape-photography-workshops"
-        const targetPathParts = targetUrlNormalized.split('/').filter(p => p);
-        const citedPathParts = citedUrlNormalized.split('/').filter(p => p);
-        
-        // Exact match
-        let matches = citedUrlNormalized === targetUrlNormalized;
-        
-        // If not exact, check if paths match (same segments, allowing query/fragment variants)
-        // Only match if the citation path starts with the target path (not substring matching)
-        if (!matches && targetPathParts.length > 0 && citedPathParts.length >= targetPathParts.length) {
-          // Check if citation path starts with target path segments
-          matches = targetPathParts.every((part, idx) => citedPathParts[idx] === part);
-        }
-        
-        if (matches) {
-          keywordCitationCount++; // Count this citation
-        }
-      });
-      
-      // If this keyword has citations for the target URL, track it
-      if (keywordCitationCount > 0) {
-        totalCitationCount += keywordCitationCount; // Add to total count
-        citingKeywords.push({
-          keyword: row.keyword || '',
-          has_ai_overview: row.has_ai_overview === true || row.hasAiOverview === true,
-          best_url: row.best_url || row.bestUrl || '',
-          best_rank_group: row.best_rank_group || row.bestRankGroup || null,
-          search_volume: row.search_volume || row.monthly_search_volume || row.volume || null,
-          best_rank: row.best_rank_group || row.bestRankGroup || null,
-          citation_count: keywordCitationCount // Track how many citations this keyword has for the URL
-        });
-      }
-    });
+    const { combinedRows, auditDateToUse } = resolved;
+    const { count, uniqueKeywords, citingKeywords } = combinedRows.length
+      ? countCitationsForTarget(combinedRows, targetUrlNormalized)
+      : { count: 0, uniqueKeywords: 0, citingKeywords: [] };
 
     return sendJSON(res, 200, {
       status: 'ok',
       data: citingKeywords,
-      count: totalCitationCount, // Return total citations, not unique keywords
-      unique_keywords: citingKeywords.length, // Also provide unique keyword count for reference
+      count: count,
+      unique_keywords: uniqueKeywords,
       target_url: target_url,
       target_url_normalized: targetUrlNormalized,
       audit_date: auditDateToUse

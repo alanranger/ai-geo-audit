@@ -2,6 +2,34 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-20] - Dashboard ~1min stall fixed: batch Money-Pages AI-citation N+1 (245 calls → 1)
+
+**Symptoms:** After the loading bar finished, the Dashboard tab took up to a
+minute before charts/tables/pills populated.
+
+**Root cause:** On initial page load the Money Pages section renders eagerly
+(via `setTimeout` in the main results render) even while the user is on the
+Dashboard tab. `populateMoneyPagesAiCitations()` then fired **one
+`/api/supabase/query-keywords-citing-url` GET per money-page URL — 245 requests**
+(an N+1), each re-fetching and re-parsing the *same* large `ranking_ai_data`
+JSONB blob server-side. With the browser capped at ~6 concurrent connections,
+this storm saturated the pool and Supabase, so the Dashboard's own fetches
+(`get-audit-history`, `money-pages-historical`, `revenue-sync-status`, etc.)
+queued behind it and inflated to 12–20s each.
+
+**Fix (batch the N+1):**
+
+1. **API** (`api/supabase/query-keywords-citing-url.js`): added a **POST batch
+   mode** — `{ property_url, target_urls[], audit_date? }` resolves the ranking
+   blob **once** and returns `{ counts: { url: n } }` for every URL. The
+   single-URL GET path is unchanged (refactored to share the same helpers).
+2. **Client** (`audit-dashboard.html` → `populateMoneyPagesAiCitations`):
+   replaced the per-URL batched-10 loop with a **single POST**; the existing
+   cache/cell-application logic is preserved.
+
+**Net:** 245 citation requests collapse to 1, freeing the connection pool so the
+Dashboard populates promptly instead of stalling ~1 min.
+
 ## [2026-06-18b] - Revenue Truth: precompute cache (≈31s → <2s) + harden diagnosis 500
 
 **Symptoms:** Opening Revenue Truth took ~31s. The tab fires three sequential
