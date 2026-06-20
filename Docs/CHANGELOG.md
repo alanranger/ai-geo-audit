@@ -2,6 +2,39 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-20] - Initial-load perf: lazy Money Pages render + lightweight health probe
+
+**Symptoms:** After the loading bar finished, the Dashboard took a long time to
+settle and felt unresponsive to tab clicks; other tabs (notably Revenue Truth)
+showed dozens of API calls that weren't even theirs.
+
+**Profiling:** Added `scripts/profile-tabs.mjs` (Playwright) — loads the live
+dashboard, clicks each of the 16 tabs, and ranks them by settle time + API cost.
+It revealed the cause: a large background request storm kicked off on page load
+spilling into whichever tab was active and saturating the ~6-connection pool.
+
+**Fixes:**
+
+1. **Lazy Money Pages render** (`audit-dashboard.html`): the Money Pages subtree
+   (which fires AI-citation, policy-banner, `money-pages-historical` and
+   `/api/actions` requests) used to render eagerly on initial load even while the
+   user was on the Dashboard. It's now **deferred until the Money tab is first
+   opened** (`window.__renderMoneyPagesPending`, guarded by
+   `window.__moneyPagesRendered`, triggered + awaited from `setActivePanel('money')`).
+   The cheap metric resolution stays eager, so `window.currentMoneyPagesMetrics`
+   is still populated for any data-only consumer. Verified live: on load the money
+   section is not built but the metrics global is set; opening the Money tab builds
+   the section and populates the table (10 rows).
+2. **Lightweight Supabase health probe** (`api/keywords/get.js` + client): the
+   page-load outage probe fetched the full `/api/keywords/get` (up to 10k
+   `keyword_rankings` rows, ~8s) just to detect a 503. Added a `?probe=1` mode
+   that does a tiny `audit_results` ping and preserves the 503 contract; the
+   client now calls `/api/keywords/get?probe=1` (≈0.7s vs ~8s).
+
+**Net:** the Money Pages storm no longer runs on initial load — it runs on the
+Money tab (behind its progress bar). Revenue Truth's spillover dropped from
+~60 to ~42 calls; the Dashboard's initial fetches are now just its own data.
+
 ## [2026-06-20] - Money Pages: batch money-pages-historical N+1 (policy banner)
 
 **Symptoms:** Money Pages section was slow to settle; the policy banner count
