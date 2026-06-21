@@ -2,6 +2,36 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-21] - Perf: batch fetch-search-console canonical totals (N+1)
+
+**Symptoms:** Live profiling showed the Dashboard / Revenue-funnel render firing a
+burst of `fetch-search-console` POSTs (6 in one render path, 8 in another), each
+~2s, that dominated those tabs' API cost.
+
+**Root cause:** `fetchDashboardCanonicalTotals` was called once per date window
+inside a `Promise.all`. Each call was a separate browser→serverless round trip
+that (a) did its own OAuth token exchange and (b) also fetched a top-queries list
+the caller never used. 6–8 windows = 6–8 token exchanges + 6–8 unused query calls,
+all competing for the browser's ~6-connection pool.
+
+**Fix:**
+
+1. **`api/fetch-search-console.js` — batch mode.** New
+   `{ propertyUrl, windows: [{startDate,endDate}, ...] }` request shape
+   (`handleBatchTotals`): resolves the access token **once**, then fetches every
+   window's site-wide aggregate totals in parallel server-side (no top-queries
+   call). Returns `{ ok: true, results: [...] }` aligned 1:1 with `windows`.
+   Existing single-window + page-dimension behaviour is unchanged. Extracted
+   `getGscAccessToken` / `resolveSiteUrl` / `fetchAggregateTotals` helpers.
+2. **`audit-dashboard.html` — single batched call.** Both render paths now call
+   `fetchDashboardCanonicalTotalsBatch(propertyUrl, windows)` (one POST) instead
+   of a `Promise.all` of 6/8 single-window POSTs. Same `{clicks, impressions,
+   ctrPct, avgPosition}` shape and per-window null fallback as before, so callers
+   degrade identically on failure.
+
+**Net:** 6–8 GSC round trips per render collapse to 1, with a single token
+exchange and no wasted top-queries fetches.
+
 ## [2026-06-21] - Perf: parallelise Traditional SEO tab load (slowest tab)
 
 **Symptoms:** Live profiling consistently ranked Traditional SEO as the #1 slowest

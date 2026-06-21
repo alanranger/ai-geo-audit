@@ -13,6 +13,78 @@
 //      -H "Content-Type: application/json" \
 //      -d '{"propertyUrl":"https://www.alanranger.com","startDate":"2026-01-18","endDate":"2026-02-14","dimensions":["page"],"rowLimit":25000}'
 
+// Exchange the refresh token for a short-lived access token (once per request).
+async function getGscAccessToken() {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+  if (!clientId || !clientSecret || !refreshToken) {
+    return { status: 500, error: 'OAuth2 credentials not configured. Please set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Vercel environment variables.' };
+  }
+  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token'
+    })
+  });
+  if (!tokenResponse.ok) {
+    return { status: 401, error: 'Failed to get access token', details: await tokenResponse.text() };
+  }
+  const tokenData = await tokenResponse.json();
+  return { accessToken: tokenData.access_token };
+}
+
+// Search Console requires the exact registered site URL (https:// + no trailing slash).
+function resolveSiteUrl(propertyUrl) {
+  let siteUrl = String(propertyUrl || '').trim().replace(/\/$/, '');
+  if (!/^https?:\/\//.test(siteUrl)) siteUrl = `https://${siteUrl}`;
+  return siteUrl;
+}
+
+// Site-wide aggregate totals for one date window (no dimensions). Returns null on failure
+// so a single bad window can't fail the whole batch.
+async function fetchAggregateTotals(searchConsoleUrl, accessToken, startDate, endDate) {
+  const r = await fetch(searchConsoleUrl, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ startDate, endDate })
+  });
+  if (!r.ok) return null;
+  const data = await r.json();
+  const row = data?.rows?.[0] || null;
+  const totalClicks = row?.clicks || 0;
+  const totalImpressions = row?.impressions || 0;
+  const averagePosition = row?.position || 0;
+  const ctrRaw = row?.ctr || 0;
+  const ctr = ctrRaw > 0 ? ctrRaw * 100 : (totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0);
+  return { startDate, endDate, totalClicks, totalImpressions, averagePosition, ctr };
+}
+
+// Batch path: resolve one access token and fetch every requested window in parallel.
+// Collapses the dashboard's 6–8 per-window POSTs (each its own token exchange + an
+// unused top-queries call) into a single round trip. Results align 1:1 with `windows`.
+async function handleBatchTotals(req, res) {
+  const { propertyUrl, windows } = req.body;
+  if (!propertyUrl || !Array.isArray(windows) || windows.length === 0) {
+    return res.status(400).json({ error: 'Missing required parameters: propertyUrl, windows[]' });
+  }
+  const tok = await getGscAccessToken();
+  if (tok.error) {
+    return res.status(tok.status || 500).json({ error: tok.error, details: tok.details });
+  }
+  const siteUrl = resolveSiteUrl(propertyUrl);
+  const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
+  const results = await Promise.all(windows.map((w) => {
+    if (!w?.startDate || !w?.endDate) return Promise.resolve(null);
+    return fetchAggregateTotals(searchConsoleUrl, tok.accessToken, w.startDate, w.endDate).catch(() => null);
+  }));
+  return res.status(200).json({ ok: true, results });
+}
+
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -27,6 +99,16 @@ export default async function handler(req, res) {
   // Only allow POST requests
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  // Batch totals mode: { propertyUrl, windows: [{startDate, endDate}, ...] }
+  if (Array.isArray(req.body?.windows)) {
+    try {
+      return await handleBatchTotals(req, res);
+    } catch (error) {
+      console.error('Error fetching Search Console batch totals:', error);
+      return res.status(500).json({ error: 'Internal server error', message: error.message });
+    }
   }
 
   try {
