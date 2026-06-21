@@ -2,6 +2,37 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-21] - Perf: batch gsc-page-level per-window calls (revenue-funnel N+1)
+
+**Symptoms:** After the fetch-search-console batch, the Revenue-funnel render's
+slowest calls were `gsc-page-level` (fired once per window — latest/7d/28d/90d —
+~1.3–1.5s each).
+
+**Root cause:** `fetchDashboardPageRowsForWindow` was called once per window inside
+a `Promise.all`. Each was a separate serverless invocation, and `gsc-page-level`
+does a fresh OAuth token exchange every call (`getGSCAccessToken` is uncached) —
+so 4 windows = 4 token exchanges + 4 browser round trips.
+
+**Fix:**
+
+1. **`api/aigeo/gsc-page-level.js` — batch mode.** New
+   `{ propertyUrl, windows: [{startDate,endDate}, ...] }` request shape
+   (`handleGscPageBatch`): one token exchange, all windows fetched in parallel
+   server-side, returns `{ status:'ok', results:[{startDate,endDate,rows,totalRows}, ...] }`
+   aligned 1:1 with `windows`. Single-window behaviour unchanged. Extracted
+   `mapGscPageRows` + `fetchGscPageWindow` helpers. (Payload is safe — a 90-day
+   window returns ~1.3k rows for this property, so a 4-window batch is well under
+   serverless response limits.)
+2. **`audit-dashboard.html` — single batched call.** Extracted
+   `aggregateDashboardPageRows` (the per-window URL-variant merge) and added
+   `fetchDashboardPageRowsForWindowsBatch` / `fetchDashboardPageRowsMergedForWindowsBatch`,
+   which honour the existing per-window cache (only uncached windows are fetched)
+   and apply the Traditional-SEO universe merge per window. The 4-window
+   `Promise.all` is now one batched POST.
+
+**Net:** 4 GSC page-level round trips per render collapse to 1, with a single
+token exchange.
+
 ## [2026-06-21] - Perf: batch fetch-search-console canonical totals (N+1)
 
 **Symptoms:** Live profiling showed the Dashboard / Revenue-funnel render firing a

@@ -8,6 +8,68 @@
 
 import { getGSCAccessToken, normalizePropertyUrl, parseDateRange, getGscDateRange } from './utils.js';
 
+// Normalise GSC page rows to our compact shape (position null when not a valid rank).
+function mapGscPageRows(pageData) {
+  return (pageData?.rows || []).map((row) => {
+    const posNum = Number.parseFloat(row.position);
+    const position = (row.position != null && !Number.isNaN(posNum) && posNum > 0) ? posNum : null;
+    return {
+      keys: row.keys || [],
+      clicks: row.clicks || 0,
+      impressions: row.impressions || 0,
+      ctr: row.ctr || 0,
+      position
+    };
+  });
+}
+
+// Fetch one date window's page-level rows. Returns a result object (never throws) so a
+// single bad window can't fail the whole batch.
+async function fetchGscPageWindow(searchConsoleUrl, accessToken, startDate, endDate, dimensions, rowLimit) {
+  try {
+    const pageResponse = await fetch(searchConsoleUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ startDate, endDate, dimensions, rowLimit })
+    });
+    if (!pageResponse.ok) {
+      return { startDate, endDate, rows: [], totalRows: 0, ok: false };
+    }
+    const rows = mapGscPageRows(await pageResponse.json());
+    return { startDate, endDate, rows, totalRows: rows.length, ok: true };
+  } catch (e) {
+    console.error(`[gsc-page-level] window ${startDate}..${endDate} failed:`, e?.message || e);
+    return { startDate, endDate, rows: [], totalRows: 0, ok: false };
+  }
+}
+
+// Batch path: one token exchange, every requested window fetched in parallel server-side.
+// Collapses the dashboard's per-window POSTs (each doing its own token exchange) into one
+// round trip. Results align 1:1 with `windows`.
+async function handleGscPageBatch(req, res) {
+  const { propertyUrl, windows, dimensions = ['page'], rowLimit = 25000 } = req.body;
+  if (!propertyUrl || !Array.isArray(windows) || windows.length === 0) {
+    return res.status(400).json({
+      status: 'error', source: 'gsc-page-level',
+      message: 'Missing required parameters: propertyUrl, windows[]',
+      meta: { generatedAt: new Date().toISOString() }
+    });
+  }
+  const siteUrl = normalizePropertyUrl(propertyUrl);
+  const accessToken = await getGSCAccessToken();
+  const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
+  const results = await Promise.all(windows.map((w) => {
+    if (!w?.startDate || !w?.endDate) {
+      return Promise.resolve({ startDate: w?.startDate || null, endDate: w?.endDate || null, rows: [], totalRows: 0, ok: false });
+    }
+    return fetchGscPageWindow(searchConsoleUrl, accessToken, w.startDate, w.endDate, dimensions, rowLimit);
+  }));
+  return res.status(200).json({
+    status: 'ok', source: 'gsc-page-level', results,
+    meta: { generatedAt: new Date().toISOString(), propertyUrl: siteUrl }
+  });
+}
+
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -27,6 +89,20 @@ export default async function handler(req, res) {
       message: 'Method not allowed. Use POST.',
       meta: { generatedAt: new Date().toISOString() }
     });
+  }
+
+  // Batch mode: { propertyUrl, windows: [{startDate, endDate}, ...] }
+  if (Array.isArray(req.body?.windows)) {
+    try {
+      return await handleGscPageBatch(req, res);
+    } catch (error) {
+      console.error('[gsc-page-level] Batch error:', error);
+      return res.status(500).json({
+        status: 'error', source: 'gsc-page-level',
+        message: error.message || 'Unknown error',
+        meta: { generatedAt: new Date().toISOString() }
+      });
+    }
   }
 
   try {
