@@ -2,6 +2,36 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-21] - Perf: batch gsc-subsegment-page-activity-counts (revenue-funnel N+1)
+
+**Symptoms:** After the `gsc-page-level` batch, the Revenue-funnel render's slowest
+remaining call was `gsc-subsegment-page-activity-counts` (~2.2s), fired up to 4×
+per render (latest / 7d / 28d in the fallback + a separate 28d call for the policy
+banner).
+
+**Root cause:** Each call re-fetched the **paginated policy map**
+(`revenue_gsc_joined_with_policy`, via `fetchPolicyBySlug`) **and** re-exchanged the
+GSC OAuth token (`getGSCAccessToken` is uncached) before doing its own GSC page
+query — so 4 calls = 4 policy fetches + 4 token exchanges. The policy map is
+identical across windows for a given property, so most of that work was redundant.
+
+**Fix:**
+
+1. **`api/aigeo/gsc-subsegment-page-activity-counts.js` — batch mode.** New
+   `POST { property, windows: [{startDate,endDate}, ...] }` shape
+   (`handleSubsegmentBatch`): fetches the policy map + OAuth token **once**, then
+   computes every window in parallel server-side, returning
+   `{ status:'ok', results:[{startDate,endDate,data}, ...] }` aligned 1:1 with
+   `windows` (null per failed window). Extracted `classifyRowIntoSets` +
+   `computeSubsegmentCountsForWindow`; the single GET path now reuses the same
+   helper (behaviour unchanged).
+2. **`audit-dashboard.html` — single batched call + policy-banner reuse.** Added
+   `fetchDashboardSubsegmentPageActivityCountsBatch`. The dashboard render's
+   3-window fallback `Promise.all` is now one POST, and the 28d policy banner
+   reuses that batched 28d result when the fallback ran (eliminating the 4th call).
+   When the fallback is skipped, the policy banner still does its single 28d GET —
+   no regression.
+
 ## [2026-06-21] - Perf: batch gsc-page-level per-window calls (revenue-funnel N+1)
 
 **Symptoms:** After the fetch-search-console batch, the Revenue-funnel render's

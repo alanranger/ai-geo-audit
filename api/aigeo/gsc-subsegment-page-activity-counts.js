@@ -117,17 +117,128 @@ function toSegmentCounts(segment, sets) {
   };
 }
 
+function classifyRowIntoSets(row, siteUrl, policyBySlug, periodStart, sets) {
+  const pageUrl = normalisePageUrl(row?.keys?.[0] || '', siteUrl);
+  const segment = getDashboardSubsegment(pageUrl);
+  const clicks = Number(row?.clicks || 0);
+  const impressions = Number(row?.impressions || 0);
+  const indexable = isRowIndexable(policyRowForPage(pageUrl, policyBySlug, periodStart));
+  sets.allPages[segment].add(pageUrl);
+  if (indexable) sets.indexablePages[segment].add(pageUrl);
+  if (clicks > 0) {
+    sets.click[segment].add(pageUrl);
+    if (indexable) sets.clickIndexable[segment].add(pageUrl);
+  }
+  if (impressions > 0) {
+    sets.impression[segment].add(pageUrl);
+    if (indexable) sets.impressionIndexable[segment].add(pageUrl);
+  }
+}
+
+// Compute sub-segment activity counts for one window. Throws (with gscStatus/gscDetails)
+// on a GSC failure so the single GET path can surface the status; the batch path catches.
+async function computeSubsegmentCountsForWindow(searchConsoleUrl, accessToken, siteUrl, policyBySlug, startDate, endDate) {
+  const periodStart = `${String(endDate).slice(0, 7)}-01`;
+  const sets = {
+    click: emptySegmentSets(),
+    impression: emptySegmentSets(),
+    clickIndexable: emptySegmentSets(),
+    impressionIndexable: emptySegmentSets(),
+    allPages: emptySegmentSets(),
+    indexablePages: emptySegmentSets()
+  };
+  const rowLimit = 25000;
+  let startRow = 0;
+  let fetchedRows = 0;
+  while (true) {
+    const response = await fetch(searchConsoleUrl, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ startDate, endDate, dimensions: ['page'], rowLimit, startRow })
+    });
+    if (!response.ok) {
+      const err = new Error('Failed to fetch Search Console page activity');
+      err.gscStatus = response.status;
+      err.gscDetails = await response.text();
+      throw err;
+    }
+    const data = await response.json();
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    if (rows.length === 0) break;
+    rows.forEach((row) => classifyRowIntoSets(row, siteUrl, policyBySlug, periodStart, sets));
+    fetchedRows += rows.length;
+    if (rows.length < rowLimit) break;
+    startRow += rowLimit;
+  }
+  return {
+    fetchedRows,
+    data: {
+      landing: toSegmentCounts('landing', sets),
+      event: toSegmentCounts('event', sets),
+      product: toSegmentCounts('product', sets),
+      other: toSegmentCounts('other', sets)
+    }
+  };
+}
+
+// Batch path: fetch the policy map + access token once, then compute every window in
+// parallel. Collapses the dashboard's 3 per-window GETs (each re-fetching the paginated
+// policy map and re-exchanging the token) into one POST.
+async function handleSubsegmentBatch(req, res) {
+  const { property, windows } = req.body || {};
+  if (!property || !Array.isArray(windows) || windows.length === 0) {
+    return res.status(400).json({
+      status: 'error', source: 'gsc-subsegment-page-activity-counts',
+      message: 'Missing required parameters: property, windows[]',
+      meta: { generatedAt: new Date().toISOString() }
+    });
+  }
+  const siteUrl = normalizePropertyUrl(property);
+  const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
+  const policyBySlug = await fetchPolicyBySlug(supabase, siteUrl);
+  const accessToken = await getGSCAccessToken();
+  const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
+  const results = await Promise.all(windows.map(async (w) => {
+    if (!w?.startDate || !w?.endDate) return null;
+    try {
+      const { data } = await computeSubsegmentCountsForWindow(searchConsoleUrl, accessToken, siteUrl, policyBySlug, w.startDate, w.endDate);
+      return { startDate: w.startDate, endDate: w.endDate, data };
+    } catch (e) {
+      console.error(`[gsc-subsegment-batch] window ${w.startDate}..${w.endDate} failed:`, e?.message || e);
+      return null;
+    }
+  }));
+  return res.status(200).json({
+    status: 'ok', source: 'gsc-subsegment-page-activity-counts', results,
+    meta: { generatedAt: new Date().toISOString(), propertyUrl: siteUrl }
+  });
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  if (req.method === 'POST') {
+    try {
+      return await handleSubsegmentBatch(req, res);
+    } catch (error) {
+      return res.status(500).json({
+        status: 'error',
+        source: 'gsc-subsegment-page-activity-counts',
+        message: error.message || 'Unknown error',
+        meta: { generatedAt: new Date().toISOString() }
+      });
+    }
+  }
+
   if (req.method !== 'GET') {
     return res.status(405).json({
       status: 'error',
       source: 'gsc-subsegment-page-activity-counts',
-      message: 'Method not allowed. Use GET.',
+      message: 'Method not allowed. Use GET or POST.',
       meta: { generatedAt: new Date().toISOString() }
     });
   }
@@ -145,93 +256,34 @@ export default async function handler(req, res) {
 
     const { startDate, endDate } = parseDateRange(req);
     const siteUrl = normalizePropertyUrl(property);
-    const periodStart = `${String(endDate).slice(0, 7)}-01`;
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
     const policyBySlug = await fetchPolicyBySlug(supabase, siteUrl);
     const accessToken = await getGSCAccessToken();
     const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
 
-    const sets = {
-      click: emptySegmentSets(),
-      impression: emptySegmentSets(),
-      clickIndexable: emptySegmentSets(),
-      impressionIndexable: emptySegmentSets(),
-      allPages: emptySegmentSets(),
-      indexablePages: emptySegmentSets()
-    };
-
-    const rowLimit = 25000;
-    let startRow = 0;
-    let fetchedRows = 0;
-
-    while (true) {
-      const response = await fetch(searchConsoleUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          startDate,
-          endDate,
-          dimensions: ['page'],
-          rowLimit,
-          startRow
-        })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        return res.status(response.status).json({
+    let result;
+    try {
+      result = await computeSubsegmentCountsForWindow(searchConsoleUrl, accessToken, siteUrl, policyBySlug, startDate, endDate);
+    } catch (gscError) {
+      if (gscError.gscStatus) {
+        return res.status(gscError.gscStatus).json({
           status: 'error',
           source: 'gsc-subsegment-page-activity-counts',
           message: 'Failed to fetch Search Console page activity',
-          details: errorText,
+          details: gscError.gscDetails,
           meta: { generatedAt: new Date().toISOString() }
         });
       }
-
-      const data = await response.json();
-      const rows = Array.isArray(data?.rows) ? data.rows : [];
-      if (rows.length === 0) break;
-
-      rows.forEach((row) => {
-        const rawPage = row?.keys?.[0] || '';
-        const pageUrl = normalisePageUrl(rawPage, siteUrl);
-        const segment = getDashboardSubsegment(pageUrl);
-        const clicks = Number(row?.clicks || 0);
-        const impressions = Number(row?.impressions || 0);
-        const indexable = isRowIndexable(policyRowForPage(pageUrl, policyBySlug, periodStart));
-
-        sets.allPages[segment].add(pageUrl);
-        if (indexable) sets.indexablePages[segment].add(pageUrl);
-        if (clicks > 0) {
-          sets.click[segment].add(pageUrl);
-          if (indexable) sets.clickIndexable[segment].add(pageUrl);
-        }
-        if (impressions > 0) {
-          sets.impression[segment].add(pageUrl);
-          if (indexable) sets.impressionIndexable[segment].add(pageUrl);
-        }
-      });
-
-      fetchedRows += rows.length;
-      if (rows.length < rowLimit) break;
-      startRow += rowLimit;
+      throw gscError;
     }
 
     return res.status(200).json({
       status: 'ok',
       source: 'gsc-subsegment-page-activity-counts',
       params: { property: siteUrl, startDate, endDate },
-      data: {
-        landing: toSegmentCounts('landing', sets),
-        event: toSegmentCounts('event', sets),
-        product: toSegmentCounts('product', sets),
-        other: toSegmentCounts('other', sets)
-      },
+      data: result.data,
       meta: {
-        fetchedRows,
+        fetchedRows: result.fetchedRows,
         generatedAt: new Date().toISOString()
       }
     });
