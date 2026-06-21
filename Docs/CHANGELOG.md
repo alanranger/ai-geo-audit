@@ -2,6 +2,36 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-21] - Perf: parallelise Traditional SEO tab load (slowest tab)
+
+**Symptoms:** Live profiling consistently ranked Traditional SEO as the #1 slowest
+tab (~12–14s settle, ~25s total API), driven by a fully serialised `await` chain
+in `traditionalSeoTabLoadOrchestrate`.
+
+**Root cause:** the orchestrator ran every step back-to-back: rules → rule/keyword
+overrides → table hydration → keyword-metrics lookup (~10s) → **then** the tiles
+(domain strength, DFS backlinks/rank, CTR gainers) one after another. The three
+tile groups and the two override loaders were independent but still awaited in
+series, so their network time stacked on top of the table/metrics chain.
+
+**Fix (`audit-dashboard.html`):**
+
+1. **Overlap domain + DFS tiles with the whole rules/table/metrics chain.** These
+   tiles don't depend on the evaluation rows, so `traditionalSeoTabLoadOrchestrate`
+   now kicks off `traditionalSeoTabLoadRefreshDomainDfsAsync(false)` up front and
+   `await`s it in `finally` (it never rejects — each tile sets its own step status),
+   so its time runs concurrently instead of after the ~10s keyword-metrics lookup.
+2. **Run domain strength and DFS concurrently with each other** (`Promise.all`) —
+   split out of the old sequential `traditionalSeoTabLoadRefreshTilesAsync`.
+3. **Parallelise the two independent override loaders** (rule overrides + target
+   keyword overrides) with `Promise.all`.
+4. **CTR gainers/losers stays after the table phase** — it reads
+   `TRADITIONAL_SEO_STATE.evaluationRows`, so it can't start early
+   (`traditionalSeoTabLoadRefreshCtrAsync`).
+
+Step-banner sequencing is preserved (each step still flips running/done/error
+independently); only the await ordering changed.
+
 ## [2026-06-21] - Perf: make get-portfolio-segment-metrics dedup cache actually hit
 
 **Symptoms:** Live profiling (`scripts/profile-tabs.mjs`) ranked the Local
