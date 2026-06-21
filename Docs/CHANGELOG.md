@@ -2,6 +2,30 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-21] - Perf: make get-portfolio-segment-metrics dedup cache actually hit
+
+**Symptoms:** Live profiling (`scripts/profile-tabs.mjs`) ranked the Local
+(7.0s) and Authority (2.3s settle, but ~11s total API) tabs as slow, driven by
+`/api/supabase/get-portfolio-segment-metrics` taking ~9s and being re-fetched on
+Local (×3), Authority (×2), and Portfolio — including on every re-render and
+tab revisit.
+
+**Root cause:** all four client call sites built the `from`/`to` query params
+with `new Date().toISOString()` — full **millisecond-precision** timestamps. The
+server floors these to date-only (`toDateOnly` → `slice(0,10)`), so the time
+portion is meaningless, but the global 120s fetch-dedup cache (installed for
+exactly these heavy idempotent endpoints) keys on the full URL. The per-call ms
+jitter made every URL unique, so the cache **never hit** and the ~9s endpoint
+re-ran on every render and across the Local/Authority/Portfolio tabs.
+
+**Fix (`audit-dashboard.html`):** normalise `from`/`to` to date-only
+(`toISOString().slice(0, 10)`) at all four `get-portfolio-segment-metrics` call
+sites. Semantically identical to the server (it already floors to day), but now
+identical logical requests produce identical URLs, so the existing dedup +
+120s TTL cache collapses repeat calls within a session and shares results across
+tabs. First cold fetch of each unique segment/scope/range combo is unchanged;
+re-renders and revisits are now served from cache.
+
 ## [2026-06-20] - Initial-load perf: lazy Money Pages render + lightweight health probe
 
 **Symptoms:** After the loading bar finished, the Dashboard took a long time to
