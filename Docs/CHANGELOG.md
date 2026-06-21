@@ -28,6 +28,13 @@ series, so their network time stacked on top of the table/metrics chain.
 4. **CTR gainers/losers stays after the table phase** — it reads
    `TRADITIONAL_SEO_STATE.evaluationRows`, so it can't start early
    (`traditionalSeoTabLoadRefreshCtrAsync`).
+5. **Parallelise the "keyword & backlink cache" step itself** — this was the real
+   critical path. `traditionalSeoKeywordMetricsLookupSilently` ran four independent
+   lookups in series: keyword demand (`keyword-target-metrics`) → DFS summary → DFS
+   domain status → DFS page backlinks. Now they run concurrently
+   (`Promise.allSettled`). In tab-load mode the DFS summary/status are skipped here
+   entirely (the orchestrator's concurrent domain/DFS promise already fetches them),
+   removing duplicate calls; keyword demand + DFS page backlinks run in parallel.
 
 Step-banner sequencing is preserved (each step still flips running/done/error
 independently); only the await ordering changed.
