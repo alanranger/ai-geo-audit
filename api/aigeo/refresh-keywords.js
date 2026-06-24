@@ -6,7 +6,7 @@
  *     keywords:    string[]   // 1..MAX_BATCH keywords to refetch
  *     propertyUrl: string     // e.g. "https://www.alanranger.com"
  *     auditDate:   string     // "YYYY-MM-DD" — which audit snapshot to patch into
- *     depth?:      number     // optional DFS SERP depth (10..100, default 100)
+ *     depth?:      number     // optional DFS SERP depth (10..100, default 50)
  *   }
  *
  * Response:

@@ -2,6 +2,27 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-24] - Keyword refresh: drop stale SERP depth 100 → 50 + parallel single-keyword chunks (HTTP 504 fix)
+
+**Request (Alan):** "refresh money pages fails" → "it shouldn't be depth of 100,
+we changed that yonks ago."
+
+**Root cause:** `serp-rank-test.js` was lowered to `DEFAULT_SERP_DEPTH = 50` back in
+2026-04-17 for cost/speed, but the ad-hoc refresh path was never updated — it still
+forced `depth=100` per keyword, ~2× the DFS work, pushing the 60s Vercel function
+over its limit (HTTP 504) when refreshing a tier of ~15 keywords.
+
+**Changes:**
+
+- `lib/keyword-ranking/refresh-core.js`: `DEFAULT_DEPTH` 100 → 50 (now matches
+  `serp-rank-test.js`). `DEFAULT_REFRESH_DEPTH` derives from it, so
+  `api/aigeo/refresh-keywords.js` inherits 50 unless a caller passes `?depth=`.
+- `audit-dashboard.html` `refreshKeywordsViaApi`: rewrote the sequential chunk loop
+  into a bounded worker pool — `REFRESH_CHUNK_SIZE = 1`, `REFRESH_CONCURRENCY = 4`.
+  Each serverless invocation now does a single keyword (well under 60s), 4 in flight
+  at once, with live progress + the refresh progress modal driving `onProgress`.
+- `api/aigeo/refresh-keywords.js`: doc comment default depth 100 → 50.
+
 ## [2026-06-24] - Revenue Truth: recurring baseline now includes residential workshops + seasonal event products
 
 **Request (Alan):** "include residential workshops as they are not so much seasonal
