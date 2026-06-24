@@ -34,6 +34,24 @@ the Include-JLR toggle (banner shows "(JLR incl.) £1,912" on / "non-JLR £1,864
 fewer/possibly no months below the £3k survival line, reflecting that residential +
 seasonal events are genuine year-round income. Tests updated; 163/163 pass; lint clean.
 
+**Follow-up — "how can recurring be more than actual?" (Alan):** with the widened
+definition the recurring baseline now equals **operational revenue (D2C + B2B)**
+exactly (verified Jan–May 2026: `txn_recurring == operational_revenue`). The solid
+headline bar = operational + the voucher-timing **ADJUSTMENT**. In months where
+redemptions outweigh voucher sales the adjustment is negative and pulls the *cash*
+headline below the operational run-rate, so the hatched recurring bar legitimately
+sits **above** the solid bar (e.g. Jan 2026: headline £4,773 vs recurring £5,793,
+adjustment −£1,020; Apr: £6,066 vs £6,191, −£125). Data reconciles — not a
+double-count bug. Per Alan's choice (keep the truthful run-rate) we added an
+explanatory footnote rather than capping the bar:
+
+- `revenue-truth-tables-ui.mjs`: chart basis note reworded to define recurring as
+  the operational run-rate and explain it can exceed headline in heavy-redemption
+  months; stale "Excludes workshops residential & event-bound" forecast alt-method
+  meta corrected to "Excludes voucher tiers + redemptions only".
+- `revenue-truth-controller.mjs`: recurring-baseline legend badge tooltip updated to
+  the new definition + the can-exceed-headline note.
+
 ## [2026-06-24] - Revenue Truth: recurring baseline now follows the "Include JLR" toggle
 
 **Symptom:** With **Include JLR revenue** ticked **on**, the Current Month Pulse
