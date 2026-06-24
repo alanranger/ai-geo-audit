@@ -62,6 +62,31 @@ describe('revenue-truth current month pulse', () => {
     assert.equal(pulse.comparisons.prior_year_same_month.basis, 'nonjlr_net');
   });
 
+  it('includes JLR in booked-so-far when cfg.includeJlr is true', () => {
+    const txns = [
+      txn('2026-05-10', 600),
+      txn('2026-05-12', 942, '2. Workshops Non Residential', true), // JLR
+      txn('2026-05-15', 200, '1. Courses/masterclasses', false)
+    ];
+    const now = { iso: '2026-05-20T12:00:00.000Z', year: 2026, month: 5 };
+    const excl = buildCurrentMonthPulse(txns, { tierBands: bands, now }, [], null);
+    const incl = buildCurrentMonthPulse(txns, { tierBands: bands, now, includeJlr: true }, [], null);
+    assert.equal(excl.booked_nonjlr_so_far, 800);   // JLR stripped (default)
+    assert.equal(excl.include_jlr, false);
+    assert.equal(incl.booked_nonjlr_so_far, 1742);  // JLR included via toggle
+    assert.equal(incl.include_jlr, true);
+  });
+
+  it('always excludes redemptions even when includeJlr is true', () => {
+    const txns = [
+      txn('2026-05-10', 600),
+      { ...txn('2026-05-11', 500), is_redemption: true }
+    ];
+    const now = { iso: '2026-05-20T12:00:00.000Z', year: 2026, month: 5 };
+    const incl = buildCurrentMonthPulse(txns, { tierBands: bands, now, includeJlr: true }, [], null);
+    assert.equal(incl.booked_nonjlr_so_far, 600);
+  });
+
   it('blend anchor prefers prior-year same month non-JLR over 6yr average', () => {
     const txns = [
       txn('2024-05-20', 5000),

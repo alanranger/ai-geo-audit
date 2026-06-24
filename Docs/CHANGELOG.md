@@ -2,6 +2,42 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-24] - Fix: Current Month Pulse ignored the "Include JLR" toggle
+
+**Symptom:** With **Include JLR revenue** toggled **on**, the Current Month Pulse
+hero still showed a JLR-*stripped* projection (e.g. June 2026 "£3,347 projected"
+on the non-JLR net basis = £2,677 booked), which looked lower than the gross
+headline (£3,619) the rest of the tab shows. Alan: "it should not be stripping
+jlr from projected as i have include JLR toggle switched to include".
+
+**Root cause:** `buildCurrentMonthPulse` was called with the raw `transactions`
+array, and its internal `isCountableTxn` **always** did `!t.is_jlr && !t.is_redemption`
+— it never read `cfg.includeJlr`. So the whole headline projection path (booked
+so far, pace, blended anchor, DEFCON, tier gaps, history low, comparisons) was
+permanently non-JLR regardless of the toggle, while every other section honoured
+`?includeJlr=`.
+
+**Fix:**
+
+1. **`lib/revenue-truth-current-month-pulse.mjs`** — `isCountableTxn(t, includeJlr)`
+   now always excludes redemptions (voucher double-counts) but only excludes JLR
+   when `includeJlr !== true`. Threaded `includeJlr` (read from `cfg.includeJlr`)
+   through every headline helper: same-day / full-month sums, trailing-6 (same-day
+   + same-month), prior-year anchor, monthly-history low, and tier gaps. The
+   recurring-baseline sub-block is unchanged (separate lens). Added `include_jlr`
+   to the pulse payload and made `blend_anchor_label` reflect the basis. Extracted
+   `buildTierGaps` to keep `buildCurrentMonthPulse` under the complexity limit.
+2. **`lib/revenue-truth-current-month-pulse-ui.mjs`** — "Booked so far" and
+   "Prior low" glance-row labels now say "JLR incl." or "non-JLR" per
+   `pulse.include_jlr`.
+3. **`audit-dashboard.html` + `lib/revenue-truth-controller.mjs`** — the Pulse
+   head-bar basis badge (`#rt-pulse-basis-badge`) now flips between
+   "JLR incl. / Net · PARTIAL" and "Non-JLR / Net · PARTIAL" on render.
+
+**Tests:** added two cases (JLR counted when toggle on; redemptions always
+excluded). Full suite 153 pass / 0 fail. Default (no `includeJlr` in cfg) still
+strips JLR, so existing tests are unaffected.
+
 ## [2026-06-21] - Perf: batch gsc-subsegment-page-activity-counts (revenue-funnel N+1)
 
 **Symptoms:** After the `gsc-page-level` batch, the Revenue-funnel render's slowest
