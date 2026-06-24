@@ -35,6 +35,29 @@ describe('revenue-truth recurring baseline', () => {
     assert.equal(r.recurringBaseline, 0);
   });
 
+  it('includes JLR in recurring baseline when includeJlr is true', () => {
+    const txns = [
+      { year: 2026, month: 5, txn_date: '2026-05-01', amount: 500, category_label: '7. 1-2-1', is_jlr: true, is_redemption: false },
+      { year: 2026, month: 5, txn_date: '2026-05-03', amount: 300, category_label: '7. 1-2-1', is_jlr: false, is_redemption: false },
+      { year: 2026, month: 5, txn_date: '2026-05-04', amount: 999, category_label: '7. 1-2-1', is_jlr: true, is_redemption: true }
+    ];
+    const off = sumRecurringForMonth(txns, seasonality, 2026, 5, null, false);
+    assert.equal(off.recurringBaseline, 300);
+    const on = sumRecurringForMonth(txns, seasonality, 2026, 5, null, true);
+    assert.equal(on.recurringBaseline, 800);
+  });
+
+  it('attachRecurringToMonthly honours cfg.includeJlr', () => {
+    const cfg = { now: { iso: '2026-05-28T12:00:00.000Z', year: 2026, month: 5 }, tierBands: { survival: 3000 }, includeJlr: true };
+    const monthly = [{ year: 2026, month: 5, isPartial: false }];
+    const txns = [
+      { year: 2026, month: 5, txn_date: '2026-05-10', amount: 400, category_label: '7. 1-2-1', is_jlr: true, is_redemption: false },
+      { year: 2026, month: 5, txn_date: '2026-05-11', amount: 100, category_label: '7. 1-2-1', is_jlr: false, is_redemption: false }
+    ];
+    const out = attachRecurringToMonthly(monthly, txns, seasonality, cfg, () => 'below_survival');
+    assert.equal(out[0].recurringBaseline, 500);
+  });
+
   it('flags lumpy txn helper', () => {
     assert.equal(isLumpyTxn({ category_label: '3. Workshops Residential', is_jlr: false, is_redemption: false }, seasonality), true);
     assert.equal(isLumpyTxn({ category_label: '2. Workshops Non Residential', canonical_product: 'BLUEBELL WOODLANDS', is_jlr: false, is_redemption: false }, seasonality), true);

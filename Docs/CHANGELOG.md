@@ -2,6 +2,34 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-24] - Revenue Truth: recurring baseline now follows the "Include JLR" toggle
+
+**Symptom:** With **Include JLR revenue** ticked **on**, the Current Month Pulse
+recurring-baseline banner + rows still showed JLR-*excluded* figures (e.g.
+"Recurring baseline averaged £1,864/mo across 5 closed months YTD"), which looked
+inconsistent against the JLR-inclusive headline hero. Alan: "why is it excluding
+jlr when jlr toggle include is ticked on".
+
+**Cause (by design, previously):** the recurring baseline was defined as strictly
+non-JLR — `isCountableNonJlrTxn` always dropped `is_jlr` regardless of the toggle.
+
+**Change (per Alan's choice — make it follow the toggle):**
+
+- `revenue-truth-recurring-baseline.mjs`: new `isCountableTxn(t, includeJlr)`
+  (always drops redemptions; drops JLR only when `includeJlr !== true`).
+  `isLumpyTxn` and `sumRecurringForMonth` take an `includeJlr` flag;
+  `attachRecurringToMonthly` reads `cfg.includeJlr`. Lumpy tiers (residential
+  workshops, vouchers, event-bound products) are still excluded either way.
+- `buildRecurringHeadlineStats` now exposes `includeJlr` so the UI can label basis.
+- `revenue-truth-current-month-pulse.mjs`: recurring sub-block (`recurringSoFar`,
+  trailing-6 recurring avg) threads `includeJlr` so the pulse projection matches.
+- UI: banner reads "Recurring baseline (JLR incl. | non-JLR) averaged …" and the
+  at-a-glance row shows the basis; extracted `recurringYtdGlanceRow` helper to keep
+  `renderAtAGlance` within complexity budget.
+
+**Tests:** +2 (recurring baseline includes JLR when toggle on; attach honours
+`cfg.includeJlr`). Full suite green (163/163).
+
 ## [2026-06-24] - Revenue Truth: wire rescue chips + opportunity stack to live data (hybrid)
 
 Following the provenance-pill pass, Alan asked to convert the two remaining
