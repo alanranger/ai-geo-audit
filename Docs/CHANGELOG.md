@@ -2,6 +2,38 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-24] - Revenue Truth: recurring baseline now includes residential workshops + seasonal event products
+
+**Request (Alan):** "include residential workshops as they are not so much seasonal
+as i run them all year round and also include seasonal event bound bluebells,
+heathers, lavender etc as they do happen every year and are part of my business
+baseline products."
+
+**Change — `lib/revenue-truth-recurring-baseline.mjs`:**
+
+- `RECURRING_LUMPY_TIER_KEYS` reduced from `{workshops_residential, pick_n_mix_inc,
+  gift_vouchers_inc}` to just `{pick_n_mix_inc, gift_vouchers_inc}` — residential
+  workshops are now part of the baseline.
+- `isLumpyTxn` no longer strips `event_bound` products (Bluebell/Heather/Lavender
+  etc.); only voucher tiers + redemptions are removed. Voucher tiers stay excluded
+  because they are timing artefacts (purchased now, redeemed later as a redemption,
+  which would double-count).
+- `seasonalityByProduct` param retained for signature stability but no longer
+  affects the lumpy decision.
+
+**Tooltip — `revenue-truth-ui-core.mjs`:** `RECURRING_BASELINE_TIP` reworded to
+"headline minus voucher tiers (gift vouchers + Pick-n-Mix) and redemptions only;
+residential workshops and seasonal event products included as year-round baseline".
+
+**JLR toggle confirmation:** verified the recurring baseline already recomputes per
+the Include-JLR toggle (banner shows "(JLR incl.) £1,912" on / "non-JLR £1,864" off
+— builders read `cfg.includeJlr`). Unrelated `isSeasonalAnnualisationProduct`
+(movers/declines YoY annualisation) deliberately left untouched.
+
+**Impact:** recurring baseline (hatched chart bars + pulse banner) rises materially;
+fewer/possibly no months below the £3k survival line, reflecting that residential +
+seasonal events are genuine year-round income. Tests updated; 163/163 pass; lint clean.
+
 ## [2026-06-24] - Revenue Truth: recurring baseline now follows the "Include JLR" toggle
 
 **Symptom:** With **Include JLR revenue** ticked **on**, the Current Month Pulse

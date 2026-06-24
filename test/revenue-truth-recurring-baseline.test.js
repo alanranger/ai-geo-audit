@@ -12,7 +12,7 @@ describe('revenue-truth recurring baseline', () => {
     { product_title: 'BLUEBELL WOODLANDS', seasonality_type: 'event_bound' }
   ]);
 
-  it('excludes residential tier and event-bound products', () => {
+  it('includes residential + event-bound, excludes only voucher tiers', () => {
     const txns = [
       { year: 2026, month: 4, txn_date: '2026-04-10', amount: 2720, category_label: '3. Workshops Residential', is_jlr: false, is_redemption: false },
       { year: 2026, month: 4, txn_date: '2026-04-12', amount: 744, category_label: '2. Workshops Non Residential', canonical_product: 'BLUEBELL WOODLANDS', is_jlr: false, is_redemption: false },
@@ -21,8 +21,9 @@ describe('revenue-truth recurring baseline', () => {
     ];
     const r = sumRecurringForMonth(txns, seasonality, 2026, 4);
     assert.equal(r.nonJlrNet, 6391);
-    assert.equal(r.lumpyExcluded, 3664);
-    assert.equal(r.recurringBaseline, 2727);
+    // Only the £200 gift voucher is stripped now; residential + Bluebell stay in.
+    assert.equal(r.lumpyExcluded, 200);
+    assert.equal(r.recurringBaseline, 6191);
   });
 
   it('strips JLR and redemptions before lumpy math', () => {
@@ -58,9 +59,10 @@ describe('revenue-truth recurring baseline', () => {
     assert.equal(out[0].recurringBaseline, 500);
   });
 
-  it('flags lumpy txn helper', () => {
-    assert.equal(isLumpyTxn({ category_label: '3. Workshops Residential', is_jlr: false, is_redemption: false }, seasonality), true);
-    assert.equal(isLumpyTxn({ category_label: '2. Workshops Non Residential', canonical_product: 'BLUEBELL WOODLANDS', is_jlr: false, is_redemption: false }, seasonality), true);
+  it('flags only voucher tiers as lumpy; residential + event-bound now count', () => {
+    assert.equal(isLumpyTxn({ category_label: '8. Gift Vouchers Inc', is_jlr: false, is_redemption: false }, seasonality), true);
+    assert.equal(isLumpyTxn({ category_label: '3. Workshops Residential', is_jlr: false, is_redemption: false }, seasonality), false);
+    assert.equal(isLumpyTxn({ category_label: '2. Workshops Non Residential', canonical_product: 'BLUEBELL WOODLANDS', is_jlr: false, is_redemption: false }, seasonality), false);
     assert.equal(isLumpyTxn({ category_label: '7. 1-2-1', is_jlr: false, is_redemption: false }, seasonality), false);
   });
 
