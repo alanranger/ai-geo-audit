@@ -13,7 +13,7 @@ import {
   trailing6SameCalendarMonthAvg
 } from '../lib/revenue-truth-current-month-pulse.mjs';
 import { buildExecSummary } from '../lib/revenue-truth-exec-summary.mjs';
-import { buildPulseRescueActions, PULSE_RESCUE_ACTIONS } from '../lib/revenue-truth-current-month-pulse-ui.mjs';
+import { buildPulseRescueActions, RESCUE_PLAYBOOK } from '../lib/revenue-truth-current-month-pulse-ui.mjs';
 
 const bands = { survival: 3000, comfortable: 5000, thrive: 8000 };
 
@@ -206,17 +206,32 @@ describe('revenue-truth current month pulse', () => {
     assert.equal(classifyBand(6000, bands), 'comfortable');
   });
 
-  it('pulse rescue chips are static high-margin priorities', () => {
-    const chips = buildPulseRescueActions();
-    assert.equal(chips.length, 4);
-    assert.equal(chips, PULSE_RESCUE_ACTIONS);
-    assert.equal(chips[0].tierScroll, 'courses_masterclasses');
-    assert.match(chips[0].text, /photography-courses-coventry/);
-    assert.ok(chips[0].measures?.length >= 2);
-    assert.ok(chips[0].bd?.length >= 2);
-    assert.match(chips[1].text, /17 Apr/);
-    assert.equal(chips[2].tierScroll, 'academy');
-    assert.equal(chips[3].tierScroll, 'one_to_one_lessons');
-    assert.ok(!chips.some((c) => /workshop/i.test(c.text)));
+  it('pulse rescue chips derive from live at-risk and rank high-margin tiers first', () => {
+    const diagnosis = {
+      tier_rollup: [
+        { tier_key: 'commissions', label: 'Commissions', pages_at_risk_gbp: 10282, revenue_trend: { y2024: { non_jlr: 7056 }, y2025: { non_jlr: 2680 }, y2026_ytd: { non_jlr: 2245 } } },
+        { tier_key: 'one_to_one_lessons', label: '1-2-1 Lessons', pages_at_risk_gbp: 14157, revenue_trend: { y2024: { non_jlr: 10022 }, y2025: { non_jlr: 4330 }, y2026_ytd: { non_jlr: 1440 } } },
+        { tier_key: 'courses_masterclasses', label: 'Courses / Masterclasses', pages_at_risk_gbp: 8495, revenue_trend: { y2024: { non_jlr: 5580 }, y2025: { non_jlr: 2580 }, y2026_ytd: { non_jlr: 2390 } } },
+        { tier_key: 'academy', label: 'Academy', pages_at_risk_gbp: 0, revenue_trend: { y2024: { non_jlr: 757 }, y2025: { non_jlr: 1200 }, y2026_ytd: { non_jlr: 1303 } } },
+        { tier_key: 'workshops_residential', label: 'Workshops Residential', pages_at_risk_gbp: 99999, revenue_trend: { y2024: { non_jlr: 100 }, y2025: { non_jlr: 50 }, y2026_ytd: { non_jlr: 10 } } }
+      ]
+    };
+    const pulse = { include_jlr: false, tier_gaps: [{ tier_key: 'commissions', gap_gbp: -1500 }] };
+    const chips = buildPulseRescueActions(diagnosis, pulse, false);
+    assert.ok(chips.length >= 1 && chips.length <= 4);
+    // Volatile workshop tier must never surface even with huge at-risk £.
+    assert.ok(!chips.some((c) => c.tierScroll === 'workshops_residential'));
+    // Highest combined score (1-2-1 £14,157 at risk) ranks first.
+    assert.equal(chips[0].tierScroll, 'one_to_one_lessons');
+    // Curated strategy text is attached from the playbook.
+    assert.equal(chips[0].text, RESCUE_PLAYBOOK.one_to_one_lessons.headline);
+    assert.ok(chips[0].measures.length >= 2);
+    // Live numbers are computed and exposed for rendering.
+    assert.equal(chips[0].live.at_risk_gbp, 14157);
+    assert.equal(chips.find((c) => c.tierScroll === 'commissions').live.yoy_25_26 < 0, true);
+  });
+
+  it('rescue chips empty when no diagnosis supplied', () => {
+    assert.deepEqual(buildPulseRescueActions(null, null, false), []);
   });
 });

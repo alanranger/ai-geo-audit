@@ -6,7 +6,8 @@ import {
   computeOpportunityTotals,
   sortOpportunityRowsInGroups,
   renderOpportunityStackHtml,
-  setOpportunityStackState
+  setOpportunityStackState,
+  setOpportunityLiveFacts
 } from '../lib/revenue-truth-opportunity-stack.mjs';
 import { buildExecSummary } from '../lib/revenue-truth-exec-summary.mjs';
 import { isHubInvestigateSlug } from '../lib/revenue-truth-exec-filters.mjs';
@@ -95,6 +96,42 @@ test('column headers have one sort indicator each (no duplicate rt-sort-ind)', (
   assert.doesNotMatch(html, /rt-sort-ind/);
   const sortCols = (html.match(/rt-opp-sort-ind/g) || []).length;
   assert.equal(sortCols, 8);
+});
+
+test('hybrid: no live facts → curated only, no live metric line', () => {
+  setOpportunityLiveFacts(null);
+  const html = renderOpportunityStackHtml();
+  assert.doesNotMatch(html, /Live \(tier/);
+  assert.match(html, /Evidence \(curated\)/);
+});
+
+test('hybrid: live facts inject tier numbers + drift badge over 20%', () => {
+  const diagnosis = {
+    tier_rollup: [
+      { tier_key: 'mentoring', label: 'Mentoring', pages_at_risk_gbp: 0,
+        revenue_trend: { y2024: { non_jlr: 1080, total: 1080 }, y2025: { non_jlr: 815, total: 815 }, y2026_ytd: { non_jlr: 240, total: 240 } } }
+    ]
+  };
+  setOpportunityLiveFacts(diagnosis, false);
+  const html = renderOpportunityStackHtml({ expanded: new Set(['row_9']) });
+  assert.match(html, /Live \(tier, auto\):/);
+  // mentoring row baseline_y2026 = 100, live = 240 → +140% drift badge.
+  assert.match(html, /⟳ updated \+140%/);
+  setOpportunityLiveFacts(null);
+});
+
+test('hybrid: live facts within 20% of baseline → no drift badge', () => {
+  const diagnosis = {
+    tier_rollup: [
+      { tier_key: 'mentoring', label: 'Mentoring', pages_at_risk_gbp: 0,
+        revenue_trend: { y2024: { non_jlr: 1080 }, y2025: { non_jlr: 815 }, y2026_ytd: { non_jlr: 110 } } }
+    ]
+  };
+  setOpportunityLiveFacts(diagnosis, false);
+  const html = renderOpportunityStackHtml();
+  assert.match(html, /Live \(tier, auto\):/);
+  assert.doesNotMatch(html, /⟳ updated/);
+  setOpportunityLiveFacts(null);
 });
 
 test('exec summary hub investigate labels fixed', () => {

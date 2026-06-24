@@ -2,6 +2,44 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-24] - Revenue Truth: wire rescue chips + opportunity stack to live data (hybrid)
+
+Following the provenance-pill pass, Alan asked to convert the two remaining
+**Editorial Static** blocks to live data. Both are now **Hybrid**: numeric facts
+are computed live from the diagnosis on render, while the curated strategy text
+(prescriptive actions, £ uplift ranges, difficulty, confidence) is preserved —
+no financial projections are fabricated.
+
+**New shared resolver — `lib/revenue-truth-live-facts.mjs`:**
+- `buildTierFactsMap(diagnosis, includeJlr)` → per-tier `{ y2024, y2025, y2026_ytd,
+  y2026_nonjlr, yoy_24_25, yoy_25_26, at_risk_gbp, severity }` from
+  `tier_rollup[].revenue_trend` + `pages_at_risk_gbp` (basis follows the JLR toggle).
+- `findSlugFacts(diagnosis, slug)` → `{ impressions, clicks, position }` scanned
+  across `hub_gsc_trend` / `product_gsc_trend` slug overlays (`best_avg_position`).
+- `pctChange` / `driftPct` helpers.
+
+**Rescue chips ("What to do next") — now DERIVED:**
+- `PULSE_RESCUE_ACTIONS` (fixed array) → `RESCUE_PLAYBOOK` keyed by tier_key
+  (curated measures/BD/headline/page only).
+- `buildPulseRescueActions(diagnosis, pulse, includeJlr)` ranks non-volatile,
+  non-workshop, non-adjustment tiers by £-at-risk + worst current-month gap + YoY
+  decline, takes the top 4, and attaches curated text where a playbook entry exists.
+  Each chip shows a live sub-line (£ at risk · YoY% · primary-slug imp/pos).
+
+**Opportunity stack — now HYBRID per row:**
+- Each curated row gained `primary_slug` + `baseline_y2026` (canonical non-JLR
+  snapshot). On expand, a "Live (tier, auto)" line shows live 2026 YTD £, YoY%,
+  at-risk £ and primary-slug GSC. A "⟳ updated ±N%" badge appears when live drifts
+  >20% from the curated baseline. Curated evidence relabelled "Evidence (curated)".
+- `setOpportunityLiveFacts(diagnosis, includeJlr)` wired from the controller
+  (`renderOpportunityStack` + after diagnosis resolves).
+
+**Pills:** both blocks now show a blue **Hybrid** pill (`rt-prov-hybrid`) instead of
+the amber Editorial Static pill, with tooltips explaining what's live vs curated.
+
+**Tests:** +8 (live-facts unit tests, derived-chip ranking + volatile exclusion,
+opp-stack drift badge thresholds). Full suite green (161/161).
+
 ## [2026-06-24] - Revenue Truth: de-hardcode stale "Jan–Apr / £3k / May" narrative
 
 **Symptom:** Alan flagged the Current Month Pulse insight banner —
