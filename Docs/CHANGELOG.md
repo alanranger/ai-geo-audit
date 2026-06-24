@@ -2,6 +2,45 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-24] - Revenue Truth: de-hardcode stale "Jan–Apr / £3k / May" narrative
+
+**Symptom:** Alan flagged the Current Month Pulse insight banner —
+*"Recurring baseline was £2,166/mo for 4 months. Already below £3k survival before
+May. May exposed it. This is structural, not a May problem."* — as frozen text.
+The £ figure was dynamic but *"for 4 months"*, *"before May"*, *"May exposed it"*
+and the £3k literal were all hardcoded and going stale as the year rolled on.
+
+**Fix (option 1 + 2 — rolling YTD window + survival-line-sourced threshold):**
+
+- `revenue-truth-recurring-baseline.mjs` `buildRecurringHeadlineStats` now also
+  emits `closedYtdRecurringAvg`, `closedYtdCount`, `ytdMonthsBelowSurvival` and
+  `survivalLine` (all closed months YTD, not a fixed Jan–Apr slice; threshold from
+  `cfg.tierBands.survival`, not a `3000` literal).
+- `revenue-truth-current-month-pulse-ui.mjs` `renderPulseInsight` rewritten:
+  *"Recurring baseline averaged £X/mo across N closed months YTD — M of N below the
+  £Y survival floor — structural, not a one-month dip."* No month names, no literals.
+- At-a-glance "Jan-Apr recurring avg" row → "Recurring avg (N-mo YTD closed)" with
+  survival-sourced benchmark; pace benchmark hint → "YTD closed avg".
+- `revenue-truth-current-month-pulse.mjs` pulse `recurring_baseline.jan_apr_avg`
+  (display-only, not in any math) → `closed_ytd_avg` + `closed_ytd_count`.
+
+**Other hardcoded → dynamic (same audit pass):**
+
+- `revenue-truth-exec-summary.mjs`: recurring-baseline worry bullet now uses rolling
+  YTD avg + configured survival; `addHeadlineTrends`, `gapText`, `bandChip` all read
+  `cfg.tierBands` instead of literal "£3k"/"£5k".
+- `revenue-truth-tables-ui.mjs` chart reference-line labels and
+  `revenue-truth-controller.mjs` section-1 subtitle now derive `£Nk` band labels
+  from `config.tierBands` instead of hardcoded "£3k / £5k / £8k".
+
+**Still intentionally static (flagged, not changed):** the "What to do next" pulse
+rescue chips (`PULSE_RESCUE_ACTIONS`) and the Opportunity Stack levers are curated
+editorial action lists with specific dates/figures (e.g. "17 Apr", "pos 26 → top 10",
+"£360 4-for-3"), not computed metrics. Test `pulse rescue chips are static
+high-margin priorities` documents this. Deriving them from data would be a feature.
+
+**Tests:** full suite green (153/153).
+
 ## [2026-06-24] - Fix: Current Month Pulse ignored the "Include JLR" toggle
 
 **Symptom:** With **Include JLR revenue** toggled **on**, the Current Month Pulse
