@@ -69,7 +69,7 @@ function normalizePageTierParam(raw) {
   return PAGE_TIER_SET.has(t) ? t : '';
 }
 
-function applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search }) {
+function applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search, target }) {
   let q = query;
   if (follow === 'follow' || follow === 'dofollow') q = q.eq('dofollow', true);
   else if (follow === 'nofollow') q = q.eq('dofollow', false);
@@ -81,7 +81,14 @@ function applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search }) {
     const pat = `%${escapeIlike(search)}%`.replace(/"/g, '');
     q = q.or(`url_from.ilike."${pat}",url_to.ilike."${pat}",anchor.ilike."${pat}"`);
   }
+  // Dedicated "backlinks to this page" filter — matches the target URL (url_to) only.
+  if (target) q = q.ilike('url_to', `%${escapeIlike(target)}%`);
   return q;
+}
+
+function rowMatchesTarget(row, target) {
+  if (!target) return true;
+  return String(row?.url_to || '').toLowerCase().includes(target.toLowerCase());
 }
 
 const ROW_SELECT =
@@ -189,7 +196,7 @@ function compareBacklinkRows(a, b, sortCol, ascending) {
 
 async function collectBaselineFilteredRows(
   supabase,
-  { domainHost, baselineMode, follow, rankMin, rankMax, search, tierFilter, tierLookup }
+  { domainHost, baselineMode, follow, rankMin, rankMax, search, target, tierFilter, tierLookup }
 ) {
   const all = [];
   let rowsScanned = 0;
@@ -200,7 +207,7 @@ async function collectBaselineFilteredRows(
     const baselineSet = await loadRowHashSet(supabase, 'dfs_backlink_baseline_edges', domainHost);
     while (rowsScanned < MAX_ROWS_SCAN) {
       let query = supabase.from('dfs_domain_backlink_rows').select(ROW_SELECT).eq('domain_host', domainHost);
-      query = applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search });
+      query = applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search, target });
       query = query.order('domain_from_rank', { ascending: false, nullsFirst: false });
       query = query.range(dbFrom, dbFrom + DB_PAGE - 1);
       const { data, error } = await query;
@@ -252,6 +259,7 @@ async function collectBaselineFilteredRows(
         if (currentSet.has(String(edge?.row_hash || ''))) continue;
         const row = baselineEdgeToRow(edge, domainHost);
         if (!rowMatchesSearch(row, search, false)) continue;
+        if (!rowMatchesTarget(row, target)) continue;
         const er = enrichBacklinkRow(row, tierLookup);
         if (tierFilter && er.page_tier !== tierFilter) continue;
         all.push(er);
@@ -277,6 +285,7 @@ async function fetchRowsWithBaselineFilter(supabase, opts) {
     rankMin,
     rankMax,
     search,
+    target,
     tierFilter,
     tierLookup,
     sortCol,
@@ -292,6 +301,7 @@ async function fetchRowsWithBaselineFilter(supabase, opts) {
     rankMin,
     rankMax,
     search,
+    target,
     tierFilter: tierFilter || null,
     tierLookup
   });
@@ -341,7 +351,7 @@ function compareRowsForPageTierSort(a, b, tierAscending) {
  */
 async function collectRowsForPageTierSort(
   supabase,
-  { domainHost, follow, rankMin, rankMax, search, tierFilter, tierLookup }
+  { domainHost, follow, rankMin, rankMax, search, target, tierFilter, tierLookup }
 ) {
   const all = [];
   let dbFrom = 0;
@@ -350,7 +360,7 @@ async function collectRowsForPageTierSort(
 
   while (rowsScanned < MAX_ROWS_SCAN) {
     let query = supabase.from('dfs_domain_backlink_rows').select(ROW_SELECT).eq('domain_host', domainHost);
-    query = applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search });
+    query = applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search, target });
     query = query.order('domain_from_rank', { ascending: false, nullsFirst: false });
     query = query.range(dbFrom, dbFrom + DB_PAGE - 1);
 
@@ -389,6 +399,7 @@ async function fetchRowsPageTierSort(supabase, opts) {
     rankMin,
     rankMax,
     search,
+    target,
     tierFilter,
     tierLookup,
     ascending,
@@ -402,6 +413,7 @@ async function fetchRowsPageTierSort(supabase, opts) {
     rankMin,
     rankMax,
     search,
+    target,
     tierFilter,
     tierLookup
   });
@@ -430,6 +442,7 @@ async function fetchRowsWithPageTierFilter(supabase, opts) {
     rankMin,
     rankMax,
     search,
+    target,
     sort,
     ascending,
     tier,
@@ -445,7 +458,7 @@ async function fetchRowsWithPageTierFilter(supabase, opts) {
 
   while (collected.length < limit && rowsScanned < MAX_ROWS_SCAN) {
     let query = supabase.from('dfs_domain_backlink_rows').select(ROW_SELECT).eq('domain_host', domainHost);
-    query = applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search });
+    query = applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search, target });
     query = query.order(sort, { ascending, nullsFirst: false });
     query = query.range(dbFrom, dbFrom + DB_PAGE - 1);
 
@@ -505,6 +518,13 @@ export default async function handler(req, res) {
     const rankMax = q.rankMax != null && String(q.rankMax).trim() !== '' ? toNumOpt(q.rankMax) : null;
     let search = String(q.q || q.search || '').trim().slice(0, 240);
     search = search.replace(/,/g, ' ').trim();
+    // "Backlinks to this page" — substring of the target URL (url_to). Strip an
+    // optional leading scheme/host so the user can paste a full URL or just a slug.
+    const target = String(q.target || q.urlTo || '')
+      .trim()
+      .replace(/^https?:\/\/(www\.)?[^/]+/i, '')
+      .slice(0, 300)
+      .trim();
 
     const pageTierFilter = normalizePageTierParam(q.tier);
     const sortByPageTier = sortCol === 'page_tier';
@@ -541,6 +561,7 @@ export default async function handler(req, res) {
         rankMin,
         rankMax,
         search,
+        target,
         tierFilter: pageTierFilter || null,
         tierLookup,
         sortCol: sortByPageTier ? 'page_tier' : sortCol,
@@ -577,6 +598,7 @@ export default async function handler(req, res) {
         rankMin,
         rankMax,
         search,
+        target,
         tierFilter: pageTierFilter || null,
         tierLookup,
         ascending,
@@ -612,6 +634,7 @@ export default async function handler(req, res) {
         rankMin,
         rankMax,
         search,
+        target,
         sort: sortCol,
         ascending,
         tier: pageTierFilter,
@@ -646,7 +669,7 @@ export default async function handler(req, res) {
       .select(ROW_SELECT, { count: 'exact' })
       .eq('domain_host', domainHost);
 
-    query = applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search });
+    query = applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search, target });
 
     query = query.order(sortCol, { ascending, nullsFirst: false });
     query = query.range(offset, offset + limit - 1);
