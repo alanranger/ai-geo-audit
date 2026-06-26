@@ -2,6 +2,24 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-26] - §9 hub product table: relabel "Lifetime", add current-year YTD, clarify window
+
+**Request (Alan):** "It's not lifetime, it's from 2024 to current. And what's window —
+last 13 months or 11 months? And also show a current Year YTD."
+
+- **"Lifetime £" → "Since 2024 £"** — the Booking Sheet history starts 2024, so the
+  column was never truly lifetime. Tooltip: "Total booked revenue 2024→now".
+- **New "{year} YTD £" column** — current calendar-year-to-date booked revenue per
+  product (and a grand-total). API (`revenue-funnel-product-breakdown.js`) now
+  aggregates `current_year_revenue_{nonjlr,total,active}` from `year_start`
+  (`{currentYear}-01-01`) and returns `current_year` / `year_start` in the payload;
+  UI picks total vs non_jlr by the Include-JLR toggle like the other money columns.
+- **Window clarified** — the window is exactly `windowMonths` calendar months (default
+  12), computed as `day-1-of-current-month − (windowMonths−1)` → today that's
+  2025‑07‑01 → now. Tooltip now shows the literal start date "(from <window_start> to
+  now)" so it's unambiguous (not 11 or 13 months).
+- Table grew 14 → 15 columns; grand-total footer + empty-state colspan updated.
+
 ## [2026-06-26] - §9 tier "Revenue trend" tile now follows the Include-JLR toggle
 
 **Request (Alan):** "I have the JLR toggle include turned on so why isn't it showing

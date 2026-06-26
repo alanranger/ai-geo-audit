@@ -113,8 +113,11 @@ async function buildPayload(supabase, opts) {
     )
   ]);
   const windowStart = computeWindowStartIso(opts.windowMonths);
+  const currentYear = new Date().getUTCFullYear();
+  const yearStart = `${currentYear}-01-01`;
   const breakdown = buildProductBreakdown(products, txns, {
     windowStart,
+    yearStart,
     includeJlr: opts.includeJlr,
     windowMonths: opts.windowMonths,
     gscBySlug
@@ -125,6 +128,8 @@ async function buildPayload(supabase, opts) {
     page_slug: opts.pageSlug,
     windowMonths: opts.windowMonths,
     window_start: windowStart,
+    current_year: currentYear,
+    year_start: yearStart,
     includeJlr: opts.includeJlr,
     revenue_basis: opts.includeJlr ? 'JLR-inclusive' : 'JLR-excluded',
     page_seasonality_class: derivePageSeasonalityClass(products),
@@ -269,6 +274,7 @@ function groupTxnsByProduct(txns) {
 function productRow(product, productTxns, ctx) {
   const lifetime = aggTxns(productTxns, null, ctx.includeJlr);
   const windowed = aggTxns(productTxns, ctx.windowStart, ctx.includeJlr);
+  const ytd = aggTxns(productTxns, ctx.yearStart, ctx.includeJlr);
   const productSlug = slugFromCanonicalUrl(product.product_url);
   const gscCell = productSlug ? ctx.gscBySlug?.get(productSlug) : null;
   return {
@@ -291,6 +297,10 @@ function productRow(product, productTxns, ctx) {
     window_revenue_nonjlr: windowed.nonjlr,
     window_revenue_total: windowed.total,
     window_txn_count: windowed.count,
+    current_year_revenue_active: ytd.active,
+    current_year_revenue_nonjlr: ytd.nonjlr,
+    current_year_revenue_total: ytd.total,
+    current_year_txn_count: ytd.count,
     extends_before_window: !!(lifetime.first && ctx.windowStart && lifetime.first < ctx.windowStart),
     gsc: gscRowForProduct(gscCell, product.seasonality_type, ctx.windowMonths)
   };
@@ -320,6 +330,7 @@ function aggTxns(txns, sinceIso, includeJlr) {
 
 function rollupTotals(breakdown) {
   let life = 0, win = 0, lifeNon = 0, winNon = 0, lifeTot = 0, winTot = 0;
+  let ytdNon = 0, ytdTot = 0, ytdAct = 0;
   for (const r of breakdown) {
     life     += r.lifetime_revenue_active || 0;
     win      += r.window_revenue_active   || 0;
@@ -327,6 +338,9 @@ function rollupTotals(breakdown) {
     winNon   += r.window_revenue_nonjlr   || 0;
     lifeTot  += r.lifetime_revenue_total  || 0;
     winTot   += r.window_revenue_total    || 0;
+    ytdNon   += r.current_year_revenue_nonjlr || 0;
+    ytdTot   += r.current_year_revenue_total  || 0;
+    ytdAct   += r.current_year_revenue_active || 0;
   }
   return {
     lifetime_revenue_active: round2(life),
@@ -335,6 +349,9 @@ function rollupTotals(breakdown) {
     window_revenue_nonjlr: round2(winNon),
     lifetime_revenue_total: round2(lifeTot),
     window_revenue_total: round2(winTot),
+    current_year_revenue_active: round2(ytdAct),
+    current_year_revenue_nonjlr: round2(ytdNon),
+    current_year_revenue_total: round2(ytdTot),
     products_with_zero_lifetime: breakdown.filter(r => (r.lifetime_revenue_total || 0) === 0).length
   };
 }
@@ -347,6 +364,9 @@ function emptyTotals() {
     window_revenue_nonjlr: 0,
     lifetime_revenue_total: 0,
     window_revenue_total: 0,
+    current_year_revenue_active: 0,
+    current_year_revenue_nonjlr: 0,
+    current_year_revenue_total: 0,
     products_with_zero_lifetime: 0
   };
 }
