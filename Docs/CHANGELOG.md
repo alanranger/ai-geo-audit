@@ -2,6 +2,34 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-26] - Add /property-photographer-coventry to Commissions tier + Money Pages
+
+**Request (Alan):** the new hub page `/property-photographer-coventry` (added after the
+revenue tabs were built) was missing from §9 Commissions and Money Pages.
+
+**Root cause:** §9 tier assignment (`tier_key`) and the hub-discovery GSC overlay both
+derive from `canonical_products` (service_page_url slug → category → tier). The page had
+GSC data (already in `revenue_gsc_joined_with_policy`, 166 imp / 3 clicks since 2026-05-31)
+but **no `canonical_products` row**, so `tier_key` was null and it never joined Commissions.
+Money Pages is a separate hardcoded prefix list that also lacked it.
+
+**Changes:**
+- Inserted a `canonical_products` row (`category='commission'`, `seasonality_type='year_round'`,
+  `service_page_url=…/property-photographer-coventry`, no `product_url` — manual commission,
+  mirrors the existing "Commercial / Product Shoot" hub). Mirrored into the source-of-truth
+  CSV `alan-shared-resources/csv/files/canonical-products-amended.csv` (the "processed" CSV
+  intentionally excludes manual commissions, so left untouched).
+- `lib/revenue-funnel-money-pages.js`: added `/property-photographer-coventry` **and** its
+  sibling `/professional-commercial-photographer-coventry` (same pre-existing gap) to
+  `MONEY_PAGE_PREFIXES`.
+- Invalidated `revenue_truth_payload_cache` (findings + both diagnosis variants).
+
+**Verified live:** the page now resolves `tier_key=commissions`, `page_tier=landing`, joins
+the Commissions hub-discovery overlay, and Commissions page_count went 4 → 5. Its own
+diagnostic card + product breakdown stays hidden under the default view until it escapes the
+`insufficient_data` state (only ~3 weeks of GSC history, no bookings yet) — its traffic is
+already reflected in the tier hub totals.
+
 ## [2026-06-26] - §9 hub product table: relabel "Lifetime", add current-year YTD, clarify window
 
 **Request (Alan):** "It's not lifetime, it's from 2024 to current. And what's window —
