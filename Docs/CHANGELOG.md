@@ -44,6 +44,19 @@ carry the entry with a comment cross-referencing the policy registry.
   hub remap); updated `test/revenue-stream-gsc-roles.test.js` to expect the
   canonicalised hub slug.
 
+**Follow-up (caught on the live §9 card):** the merge above covered the GSC/revenue
+view layer + GSC role attribution, but the §9 hub product table groups by the raw
+`canonical_products.service_page_url`, and 6 one-day workshops (BATSFORD, BLUEBELL
+WOODLANDS, North Cotswolds, PEAK DISTRICT 1-day, Shropshire, Secrets of WOODLAND)
+were still pointed at `/one-day-landscape-photography-workshops`, so they went
+missing from the landscape card instead of merging in. Re-pointed all 6 to
+`/landscape-photography-workshops` (title → "Landscape Photography Workshops") in
+both the DB and the source-of-truth CSVs (`alan-shared-resources` repo:
+`csv/files/canonical-products-amended.csv` [loader source] + `csv processed/
+canonical-products.csv`). Landscape hub now maps 24 products (22 GSC-active),
+verified live. The `event-product-mapping-FINAL.csv` carries no hub references, so no
+change needed there.
+
 **Live-deploy gotcha (caught during verification):** `revenue_gsc_joined_with_policy`
 is a **materialized view** (not a plain view) and the §9/Funnel diagnosis payload is
 additionally cached in `revenue_truth_payload_cache` (26h TTL). The base-view merge
