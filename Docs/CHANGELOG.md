@@ -44,6 +44,16 @@ carry the entry with a comment cross-referencing the policy registry.
   hub remap); updated `test/revenue-stream-gsc-roles.test.js` to expect the
   canonicalised hub slug.
 
+**Live-deploy gotcha (caught during verification):** `revenue_gsc_joined_with_policy`
+is a **materialized view** (not a plain view) and the §9/Funnel diagnosis payload is
+additionally cached in `revenue_truth_payload_cache` (26h TTL). The base-view merge
+was therefore invisible to the live app until: (1) `REFRESH MATERIALIZED VIEW
+revenue_gsc_joined_with_policy` (now appended to the migration), and (2) the stale
+`diagnosis:*` / `findings:*` cache rows for the property were deleted. Verified live:
+deployed commit `93965ff`; fresh diagnosis build has zero `one-day-...` slugs and
+`workshops_non_residential` lists only `landscape-photography-workshops`
+(£18,898.40 non-JLR / 754 clicks merged).
+
 ## [2026-06-24] - Keyword refresh: drop stale SERP depth 100 → 50 + parallel single-keyword chunks (HTTP 504 fix)
 
 **Request (Alan):** "refresh money pages fails" → "it shouldn't be depth of 100,

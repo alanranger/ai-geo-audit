@@ -189,6 +189,14 @@ SET effective_date = '2026-06-16'
 WHERE url_or_prefix = '/one-day-landscape-photography-workshops'
   AND match_type = 'exact';
 
+-- -------------------------------------------------------------------------
+-- 4. CRITICAL: revenue_gsc_joined_with_policy is a MATERIALIZED VIEW that
+--    wraps revenue_gsc_joined. The Revenue Truth §9 cards + Revenue Funnel
+--    diagnosis (api/aigeo/revenue-funnel-diagnosis.js) read it, so the merge
+--    above is invisible to them until the matview is refreshed.
+-- -------------------------------------------------------------------------
+REFRESH MATERIALIZED VIEW revenue_gsc_joined_with_policy;
+
 -- =========================================================================
 -- End of migration.
 -- =========================================================================
