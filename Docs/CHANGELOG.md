@@ -2,6 +2,35 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-26] - §9: landing-page-authoritative hub attribution (Acuity combined products)
+
+**Request (Alan):** property engagements are booked through the shared **Acuity block**, so
+they carry the combined product `Commission - Commercial / Product Shoot` in Booking-Sheet
+**Column I** (`canonical_product`) and are distinguished only by the landing-page tag in
+**Column J** (`landing_page_url`). The 5 property bookings (£570, 2025-05 → 2026-03) were
+therefore stuck under the Commercial/Product Shoot product on
+`/professional-commercial-photographer-coventry` and never reached the property hub card.
+
+**Decision (Alan):** *landing-page wins.* A booking with a Column J tag belongs to THAT hub,
+overriding the `canonical_product → service_page_url` mapping. No double-counting.
+
+**Change — `api/aigeo/revenue-funnel-product-breakdown.js`:**
+- `fetchTxnsForProducts` now also selects `landing_page_url`.
+- New `fetchTxnsLandedOnPage(pageSlug)` — txns whose `landing_page_url` slug matches the hub.
+- `buildProductBreakdown(products, txns, landingTxns, ctx)`:
+  - product-tagged txns re-tagged to a *different* hub via Column J are **dropped** from this
+    page (they belong to the other hub now → removes the £570 from the Commercial card);
+  - txns landed on this hub whose `canonical_product` maps elsewhere become **orphan rows**
+    (`buildLandingOrphanRows`), grouped by product, flagged `landing_attributed: true`.
+- This rule is symmetric, so the same revenue can never appear on two cards; the Commissions
+  *tier* total is unchanged (category-driven) — only the split between hub cards moves.
+
+**UI — `lib/revenue-truth-section9-ui.mjs`:** orphan rows in the §9 hub product table get a
+small **`landing-tagged`** pill (tooltip explains Column-J attribution / Acuity combined
+bookings). Property hub card now shows the £570; Commercial/Product card no longer does.
+
+All 172 tests pass. Property + commercial `canonical_products` rows confirmed in Supabase.
+
 ## [2026-06-26] - §9: "Show new / low-data pages" toggle
 
 **Request (Alan):** surface new hub pages (e.g. `/property-photographer-coventry`) that are

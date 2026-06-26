@@ -104,8 +104,9 @@ async function buildPayload(supabase, opts) {
     return emptyPayload(opts, 'no canonical_products matched this page slug');
   }
   const productTitles = products.map(p => p.product_title);
-  const [txns, gscBySlug] = await Promise.all([
+  const [txns, landingTxns, gscBySlug] = await Promise.all([
     fetchTxnsForProducts(supabase, productTitles),
+    fetchTxnsLandedOnPage(supabase, opts.pageSlug),
     fetchGscBySlug(
       supabase,
       opts.propertyUrl,
@@ -115,7 +116,8 @@ async function buildPayload(supabase, opts) {
   const windowStart = computeWindowStartIso(opts.windowMonths);
   const currentYear = new Date().getUTCFullYear();
   const yearStart = `${currentYear}-01-01`;
-  const breakdown = buildProductBreakdown(products, txns, {
+  const breakdown = buildProductBreakdown(products, txns, landingTxns, {
+    pageSlug: opts.pageSlug,
     windowStart,
     yearStart,
     includeJlr: opts.includeJlr,
@@ -239,10 +241,31 @@ async function fetchTxnsForProducts(supabase, productTitles) {
   if (!productTitles.length) return [];
   const { data, error } = await supabase
     .from('booking_sheet_transactions')
-    .select('canonical_product, amount, txn_date, is_jlr')
+    .select('canonical_product, amount, txn_date, is_jlr, landing_page_url')
     .in('canonical_product', productTitles);
   if (error) throw error;
   return data || [];
+}
+
+// Landing-page-authoritative attribution (Acuity combined-product workflow):
+// a booking tagged with a landing_page_url (Booking Sheet Column J) belongs to
+// THAT hub, overriding the canonical_product -> service_page_url mapping. This
+// surfaces combined-product bookings (e.g. property engagements booked through
+// the shared Acuity / Commercial-Product-Shoot block) on the correct hub card
+// and prevents the same revenue showing on two cards.
+async function fetchTxnsLandedOnPage(supabase, pageSlug) {
+  if (!pageSlug) return [];
+  const { data, error } = await supabase
+    .from('booking_sheet_transactions')
+    .select('canonical_product, amount, txn_date, is_jlr, landing_page_url')
+    .not('landing_page_url', 'is', null)
+    .ilike('landing_page_url', `%${pageSlug}`);
+  if (error) throw error;
+  return (data || []).filter((t) => slugFromTargetUrl(t.landing_page_url) === pageSlug);
+}
+
+function txnLandingSlug(t) {
+  return t.landing_page_url ? slugFromTargetUrl(t.landing_page_url) : null;
 }
 
 function computeWindowStartIso(windowMonths) {
@@ -252,12 +275,43 @@ function computeWindowStartIso(windowMonths) {
   return d.toISOString().slice(0, 10);
 }
 
-function buildProductBreakdown(products, txns, ctx) {
-  const byProduct = groupTxnsByProduct(txns);
-  return products
-    .map(p => productRow(p, byProduct.get(p.product_title) || [], ctx))
-    .filter((r) => !(r.is_retired && (r.lifetime_txn_count || 0) === 0))
+function buildProductBreakdown(products, txns, landingTxns, ctx) {
+  const titles = new Set(products.map((p) => p.product_title));
+  // Drop product-tagged txns that have been re-tagged to a DIFFERENT hub via
+  // landing_page_url (they now belong to that other hub, not this page).
+  const kept = txns.filter((t) => {
+    const ls = txnLandingSlug(t);
+    return !ls || ls === ctx.pageSlug;
+  });
+  const byProduct = groupTxnsByProduct(kept);
+  const productRows = products
+    .map((p) => productRow(p, byProduct.get(p.product_title) || [], ctx, false))
+    .filter((r) => !(r.is_retired && (r.lifetime_txn_count || 0) === 0));
+  const orphanRows = buildLandingOrphanRows(landingTxns, titles, ctx);
+  return [...productRows, ...orphanRows]
     .sort((a, b) => b.lifetime_revenue_active - a.lifetime_revenue_active);
+}
+
+// Txns landed on this hub whose canonical_product belongs to another page
+// (combined Acuity bookings). Grouped by canonical_product and flagged so the
+// UI can show they were attributed via the landing-page tag, not a product tag.
+function buildLandingOrphanRows(landingTxns, titles, ctx) {
+  const byProduct = new Map();
+  for (const t of landingTxns) {
+    if (titles.has(t.canonical_product)) continue;
+    const key = t.canonical_product || '(untagged booking)';
+    let arr = byProduct.get(key);
+    if (!arr) { arr = []; byProduct.set(key, arr); }
+    arr.push(t);
+  }
+  return [...byProduct.entries()].map(([title, rows]) => productRow({
+    product_title: title,
+    product_url: null,
+    category: null,
+    typical_price_gbp: null,
+    seasonality_type: null,
+    event_months: null
+  }, rows, ctx, true));
 }
 
 function groupTxnsByProduct(txns) {
@@ -271,7 +325,7 @@ function groupTxnsByProduct(txns) {
   return out;
 }
 
-function productRow(product, productTxns, ctx) {
+function productRow(product, productTxns, ctx, landingAttributed = false) {
   const lifetime = aggTxns(productTxns, null, ctx.includeJlr);
   const windowed = aggTxns(productTxns, ctx.windowStart, ctx.includeJlr);
   const ytd = aggTxns(productTxns, ctx.yearStart, ctx.includeJlr);
@@ -281,6 +335,7 @@ function productRow(product, productTxns, ctx) {
     product_title: product.product_title,
     product_url: product.product_url || null,
     product_slug: productSlug,
+    landing_attributed: landingAttributed === true,
     category: product.category,
     typical_price_gbp: product.typical_price_gbp == null ? null : Number(product.typical_price_gbp),
     seasonality_type: product.seasonality_type,
