@@ -2,6 +2,22 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-26] - §9: "Show new / low-data pages" toggle
+
+**Request (Alan):** surface new hub pages (e.g. `/property-photographer-coventry`) that are
+hidden as `insufficient_data` so reattributed bookings show on the right hub now.
+
+The diagnosis API already supported `includeAllPages=true` (bypasses the default
+`insufficient_data` / `skipped_none` hide filter; responses intentionally not server-cached).
+Wired a checkbox **"Show new / low-data pages"** into the §9 window bar
+(`#rt-diag-show-new` in `audit-dashboard.html`) → controller `rtDiagShowNewPages` →
+`&includeAllPages=` on the diagnosis fetch, clearing `rtDiagnosis` + breakdown cache on
+toggle. When on, pages under 1,000 impressions or fewer than 6 months of GSC history (which
+are normally gated out before any revenue classifier runs) render their own card + product
+breakdown. Note: per-product attribution still comes from Booking-Sheet **Column I**
+(`canonical_product`, user-tagged); the tier total is driven by the booking *category*, so
+re-tagging only re-splits revenue within the breakdown, never the tier headline.
+
 ## [2026-06-26] - Add /property-photographer-coventry to Commissions tier + Money Pages
 
 **Request (Alan):** the new hub page `/property-photographer-coventry` (added after the
