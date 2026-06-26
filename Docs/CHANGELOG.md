@@ -2,6 +2,23 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-26] - §9 tier "Revenue trend" tile now follows the Include-JLR toggle
+
+**Request (Alan):** "I have the JLR toggle include turned on so why isn't it showing
+[JLR-inclusive] both the tile summary and sub card."
+
+**Bug:** the §9 tier-summary "Revenue trend" tile (`renderRevenueBlock` in
+`lib/revenue-truth-section9-ui.mjs`) was hardcoded to `revenue_trend.*.non_jlr` with a
+fixed "(Booking Sheet, non-JLR)" label, so it ignored the Include-JLR toggle. The
+hub product table + per-page "Window £" tile already respected it (the latter via the
+JLR-aware `summariseWindow` value), so only this one tile was wrong.
+
+**Fix:** `renderRevenueBlock(t, includeJlr)` now selects `total` (JLR-incl) vs
+`non_jlr` and labels the tile "JLR incl." / "non-JLR" accordingly; `includeJlr` is
+threaded through `renderTierRoleGscPair` → `renderTierRowHtml`. Verified by rendering
+the live diagnosis payload both ways: ON → 2024 £8,854 / 2025 £18,897 / 2026 YTD
+£5,866 (matches Booking Sheet); OFF → £8,854 / £7,262 / £4,809.
+
 ## [2026-06-26] - Retire /one-day-landscape-photography-workshops: canonical-slug merge into /landscape-photography-workshops
 
 **Request (Alan):** "we decided to retire /one-day-landscape-photography-workshops
