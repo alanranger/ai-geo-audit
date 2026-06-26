@@ -2,6 +2,48 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-06-26] - Retire /one-day-landscape-photography-workshops: canonical-slug merge into /landscape-photography-workshops
+
+**Request (Alan):** "we decided to retire /one-day-landscape-photography-workshops
+and just use /landscape-photography-workshops for all non residential workshops…
+roll the revenue history out of one day into landscape so we can drop the extra
+tile" — full merge across ALL history, 301 effective 2026-06-16.
+
+**Single source of truth:** the existing `page_indexability_policy` `retired_redirect`
+row for this URL. SQL mirrors it with a new `canonical_gsc_slug()` helper; JS mirrors
+it with a new `lib/canonical-slug.js` primitive. The static touch-point lists
+(`NAV_HUB_SLUG_OVERRIDES`, `RETIRED_MONEY_PATHS`, commercial-tier tokens) now each
+carry the entry with a comment cross-referencing the policy registry.
+
+**Changes:**
+
+- **`migrations/20260626_canonical_slug_merge_one_day_landscape.sql`** (applied to
+  `igzvwbvgvmzvvzoclufx`):
+  - New `canonical_gsc_slug(text)` STABLE fn — resolves a slug to its surviving
+    target via `retired_redirect` policy rows (exact > longest prefix), else identity.
+  - `revenue_gsc_joined` rewritten so both the revenue (`booking_sheet_monthly_wide.
+    page_revenue_nonjlr/total/jlr`) and GSC (`gsc_page_timeseries`) sides are
+    canonicalised and aggregated **before** the FULL OUTER JOIN, collapsing the old
+    slug into landscape across all history. Output column set preserved exactly
+    (incl. `revenue_gbp_total`, `revenue_gbp_jlr`). The alias is applied via a cheap
+    `LEFT JOIN` to a tiny `retired_redirect` CTE (not the scalar fn per row) to keep
+    the view fast.
+  - `page_indexability_policy.effective_date = 2026-06-16` for the URL.
+  - Verified: old slug no longer appears as a distinct `page_slug`; landscape row now
+    carries the merged revenue (£18,898.40 non-JLR) + GSC totals (754 clicks).
+- **`lib/canonical-slug.js`** (new): `STATIC_SLUG_ALIASES`, `buildSlugAliasMap`,
+  `resolveCanonicalSlug`, `DEFAULT_SLUG_ALIAS_MAP` — JS-side canonical resolver.
+- **`lib/revenue-stream-gsc-roles.js`**: `resolveNavHubSlug` now routes through
+  `resolveCanonicalSlug`; `NAV_HUB_SLUG_OVERRIDES` seeded with the one-day→landscape
+  remap so §9 GSC role attribution matches the SQL merge.
+- **`lib/retired-money-pages.mjs`**: added `/one-day-landscape-photography-workshops`
+  to `RETIRED_MONEY_PATHS` (dropped from live money-page KPIs; history not folded).
+- **`api/aigeo/commercial-tier.js`**: removed the dead `/one-day-...` token from the
+  `workshops` `urlTokens` (canonical `/landscape-photography-workshops` remains).
+- Tests: new `test/canonical-slug.test.js` (alias map + resolve + retired-path + nav
+  hub remap); updated `test/revenue-stream-gsc-roles.test.js` to expect the
+  canonicalised hub slug.
+
 ## [2026-06-24] - Keyword refresh: drop stale SERP depth 100 → 50 + parallel single-keyword chunks (HTTP 504 fix)
 
 **Request (Alan):** "refresh money pages fails" → "it shouldn't be depth of 100,

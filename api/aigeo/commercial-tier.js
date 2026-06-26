@@ -180,7 +180,7 @@ const RULES = [
   // non-res using the same location list.
   { id: 'workshops',
     nameTokens: ['workshop', 'photo walk', 'photo-walk', ...WORKSHOP_RESIDENTIAL_NAME_TOKENS],
-    urlTokens: ['/photo-workshops-uk', '/photography-workshops', '/landscape-photography-workshops', '/one-day-landscape-photography-workshops', '/photographic-workshops-near-me'] },
+    urlTokens: ['/photo-workshops-uk', '/photography-workshops', '/landscape-photography-workshops', '/photographic-workshops-near-me'] },
 
   // Courses: in-person and online classes / lightroom / masterclass /
   // beginners course / portrait course.

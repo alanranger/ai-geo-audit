@@ -53,7 +53,9 @@ test('nav hubs derive from service_page_url not hardcoded list', () => {
     }
   ]);
   const stream = lookup.streams.find((s) => s.tier_key === 'workshops_non_residential');
-  assert.deepEqual(stream.nav_hub_slugs, ['one-day-landscape-photography-workshops']);
+  // /one-day-landscape-photography-workshops is a retired_redirect -> the nav
+  // hub canonicalises to /landscape-photography-workshops (consolidation merge).
+  assert.deepEqual(stream.nav_hub_slugs, ['landscape-photography-workshops']);
   assert.equal(
     slugFromCanonicalUrl('https://www.alanranger.com/photo-workshops-uk/bluebell-woodlands-photography-workshops'),
     'photo-workshops-uk/bluebell-woodlands-photography-workshops'
