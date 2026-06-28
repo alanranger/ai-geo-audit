@@ -15,6 +15,12 @@
 -- you choose, editing the jobid / schedule placeholders to match section 1 output.
 -- Requires the pg_cron extension (already installed) and superuser/owner rights
 -- (run from the Supabase SQL editor as the postgres role).
+--
+-- STATUS: SECTION 2 + SECTION 3 APPLIED 2026-06-28 via migration
+--   "db_overload_mitigation_stagger_cron_and_timeouts".
+-- Discovery (section 1) confirmed the collision: jobs 26 (75s) + 39 (~30s) both ran
+-- "0 */4 * * *" and job 21 (~30s) ran "0 */8 * * *" -> all three fired together at
+-- 00/08/16h. Now staggered (see section 3 applied values). Frequency unchanged.
 
 -- =====================================================================
 -- SECTION 1 — DISCOVERY (read-only; run these first)
@@ -70,22 +76,17 @@ alter role authenticated set idle_in_transaction_session_timeout = '15s';
 -- cron.alter_job changes schedule in place without losing the job definition.
 -- =====================================================================
 
--- 3a. trigger_refresh_master_job: hourly is overkill for a content refresh and
---     it is the single biggest offender (75s + timing-out HTTP). Move it to a few
---     times a day, OFF the top of the hour, and away from the 11:20 audit window.
---     Example: 02:15, 08:15, 14:15, 20:15.
--- select cron.alter_job(<JOBID_MASTER_REFRESH>, schedule => '15 2,8,14,20 * * *');
+-- APPLIED 2026-06-28 (real jobids from section 1a). Frequency kept the same;
+-- only the minute/offset changed so the three heavy jobs never coincide and never
+-- land on the 11:20 audit window.
+select cron.alter_job(26, schedule => '10 */4 * * *');  -- trigger_refresh_master_job (~75s)  00:10,04:10,08:10,12:10,16:10,20:10
+select cron.alter_job(21, schedule => '25 */8 * * *');  -- refresh_v_products_unified (~30s)   00:25,08:25,16:25
+select cron.alter_job(39, schedule => '40 */4 * * *');  -- db_health_monitor (~15-30s)         00:40,04:40,08:40,12:40,16:40,20:40
 
--- 3b. refresh_v_products_unified_with_regression_test: stagger off :00 so it does
---     not overlap the master refresh or the audit. Example: every 6h at :35.
--- select cron.alter_job(<JOBID_PRODUCTS_REFRESH>, schedule => '35 1,7,13,19 * * *');
-
--- 3c. db_health_monitor: keep frequent but move off :00 to :45 so it is not
---     queued behind the big refreshes.
--- select cron.alter_job(<JOBID_HEALTH_MONITOR>, schedule => '45 * * * *');
-
--- 3d. After changing schedules, re-run section 1b over the next day to confirm
---     the 75s/30s jobs no longer overlap each other or the 11:20 audit.
+-- 3d. Re-run section 1b over the next day to confirm the 75s/30s jobs no longer
+--     overlap each other or the 11:20 audit. If load is still high, the next lever
+--     is reducing job 26 frequency (e.g. '10 1,9,17 * * *') and/or fixing its
+--     timing-out pg_net HTTP call (see section 4) so it stops burning ~75s.
 
 -- =====================================================================
 -- SECTION 4 — FOLLOW-UPS (not SQL; tracked here so they are not lost)
