@@ -91,10 +91,22 @@ select cron.alter_job(39, schedule => '40 */4 * * *');  -- db_health_monitor (~1
 -- =====================================================================
 -- SECTION 4 — FOLLOW-UPS (not SQL; tracked here so they are not lost)
 -- =====================================================================
--- * trigger_refresh_master_job() makes pg_net HTTP calls to an edge function that
---   time out after 30s ("After test HTTP request failed (job 26)"). Fix or shorten
---   that call — a 75s function that mostly waits on a timing-out HTTP request is
---   burning a connection + CPU for nothing.
--- * Structural cure: this micro instance serves the chat bot + chat-refresh
---   pipeline + the GEO audit dashboard. Either upgrade compute, or split the
---   chat-bot pipeline onto its own Supabase project so audits can't contend with it.
+-- * [DONE 2026-06-28] trigger_refresh_master_job() / job 26 ran a flat 75.2s every
+--   run. Diagnosis (edge logs + net._http_response): the edge functions were NOT
+--   broken (all 200). The 75s was two waits on pg_net HTTP calls:
+--     - ~45s: 3x light-refresh batch waits (15s cap each). pg_net's single worker
+--       was STARVED by the CPU overload and didn't even send the requests for ~75s.
+--       Fixed by the SECTION 3 cron staggering (instance no longer pegged -> pg_net
+--       sends promptly -> each wait resolves in ~2-3s).
+--     - ~30s: the "after" regression-test wait inside
+--       light_refresh_all_batches_with_regression_test(). run-40q-regression-test
+--       genuinely takes ~55s, so a 30s wait ALWAYS timed out; the result is linked
+--       asynchronously by link_pending_test_results() regardless, so the wait was
+--       dead time. Applied via migration "trim_wasted_after_test_wait_job26":
+--       changed wait_for_http_response(v_request_id, 30) -> (..., 5). Only that one
+--       literal changed; function otherwise byte-for-byte identical. Regression
+--       safety is unchanged (it never depended on that synchronous wait).
+--   Expected job-26 duration now ~15-20s (was 75.2s), and it runs alone (staggered).
+-- * Structural cure (still open): this micro instance serves the chat bot +
+--   chat-refresh pipeline + the GEO audit dashboard. Either upgrade compute, or split
+--   the chat-bot pipeline onto its own Supabase project so audits can't contend.
