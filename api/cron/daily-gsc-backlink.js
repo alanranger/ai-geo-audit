@@ -1,6 +1,47 @@
+import { createClient } from '@supabase/supabase-js';
 import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
 import { runFullAudit } from '../../lib/audit/fullAudit.js';
 import { logCronEvent } from '../../lib/cron/logCron.js';
+
+const MAINTENANCE_KEY = 'gsc_audit';
+
+// Self-lock so the dashboard's pre-flight guard (and a second audit) can see an
+// audit is in progress. Fails open: a missing service key never blocks the run.
+const getMaintenanceClient = () => {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  try {
+    return createClient(url, key);
+  } catch {
+    return null;
+  }
+};
+
+const setAuditState = async (supabase, patch) => {
+  if (!supabase) return;
+  try {
+    await supabase
+      .from('system_maintenance_state')
+      .upsert(
+        { key: MAINTENANCE_KEY, updated_at: new Date().toISOString(), ...patch },
+        { onConflict: 'key' }
+      );
+  } catch (err) {
+    console.warn('[Daily Cron] Failed to update maintenance state:', err.message);
+  }
+};
+
+// Pre-flight: don't pile onto an overloaded DB. Fails open on any error.
+const checkDbBusy = async (baseUrl) => {
+  try {
+    const resp = await fetch(`${baseUrl}/api/system/db-busy`);
+    if (!resp.ok) return { busy: false };
+    return await resp.json();
+  } catch {
+    return { busy: false };
+  }
+};
 
 const normalizeUrl = (url) => {
   if (!url) return '';
@@ -129,7 +170,10 @@ export default async function handler(req, res) {
 
   const nowIso = new Date().toISOString();
   const startedAt = Date.now();
-  let schedule = { frequency: 'daily', timeOfDay: '11:00' };
+  // 11:20 (not 11:00): the shared DB runs heavy refresh cron jobs on the hour;
+  // starting the audit at the top of the hour collides with them and pegs the instance.
+  let schedule = { frequency: 'daily', timeOfDay: '11:20' };
+  let maintenance = null;
   const updateScheduleStatus = async (status, errorMessage = null) => {
     try {
       const nextRunAt = computeNextRunAt({
@@ -170,6 +214,31 @@ export default async function handler(req, res) {
         meta: { generatedAt: nowIso }
       });
     }
+
+    const busy = await checkDbBusy(baseUrl);
+    if (busy.busy && !forceRun) {
+      await updateScheduleStatus('deferred', busy.reason || 'database busy');
+      await logCronEvent({
+        jobKey: 'gsc_backlinks',
+        status: 'deferred',
+        propertyUrl,
+        durationMs: Date.now() - startedAt,
+        details: busy.reason || 'database busy'
+      });
+      return res.status(200).json({
+        status: 'deferred',
+        message: `Audit deferred: ${busy.reason || 'database busy'}. Will retry next schedule.`,
+        meta: { generatedAt: nowIso }
+      });
+    }
+
+    maintenance = getMaintenanceClient();
+    await setAuditState(maintenance, {
+      state: 'running',
+      started_at: new Date().toISOString(),
+      finished_at: null,
+      last_error: null
+    });
 
     const audit = await runFullAudit({
       baseUrl,
@@ -264,6 +333,12 @@ export default async function handler(req, res) {
       dashboardWindowSave = { status: 'error', message: err.message };
     }
 
+    await setAuditState(maintenance, {
+      state: 'idle',
+      finished_at: new Date().toISOString(),
+      last_success_at: new Date().toISOString(),
+      last_error: null
+    });
     await updateScheduleStatus('ok');
     await logCronEvent({
       jobKey: 'gsc_backlinks',
@@ -288,6 +363,11 @@ export default async function handler(req, res) {
       meta: { generatedAt: new Date().toISOString() }
     });
   } catch (error) {
+    await setAuditState(maintenance, {
+      state: 'idle',
+      finished_at: new Date().toISOString(),
+      last_error: error.message
+    });
     await updateScheduleStatus('error', error.message);
     await logCronEvent({
       jobKey: 'gsc_backlinks',

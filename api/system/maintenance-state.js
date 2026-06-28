@@ -8,7 +8,7 @@ export const config = { runtime: 'nodejs' };
 import { createClient } from '@supabase/supabase-js';
 
 const STALE_AFTER_MS = 5 * 60 * 1000;
-const DEFAULT_KEYS = ['optimisation_backup'];
+const DEFAULT_KEYS = ['optimisation_backup', 'gsc_audit'];
 
 const need = (key) => {
   const value = process.env[key];
