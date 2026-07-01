@@ -1156,8 +1156,9 @@ function pageTierForSlug(slug, lookup) {
 function assignTiersToDiagnostics(diagnostics, productTierMap, pageTierLookup) {
   for (const d of diagnostics) {
     const pageTier = pageTierForSlug(d.page_slug, pageTierLookup);
-    let revTier = productTierMap.bySlug.get(d.page_slug) || null;
-    if (!revTier && isAcademyCommercialSlug(d.page_slug)) revTier = 'academy';
+    const revTier = isAcademyCommercialSlug(d.page_slug)
+      ? 'academy'
+      : (productTierMap.bySlug.get(d.page_slug) || null);
     d.page_tier = pageTier;
     d.tier_key = revTier;
   }
