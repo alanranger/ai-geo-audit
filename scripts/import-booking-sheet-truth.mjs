@@ -12,7 +12,7 @@ import { readWorkbookFromBuffer, parseBookingSheetTruth } from '../lib/booking-s
 import { persistBookingSheetTruth } from '../lib/booking-sheet-persist.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SOURCE = 'G:/Dropbox/alan ranger photography/Website Code/alan-shared-resources/csv/files/Booking_Sheet_2026_-_WITH_PRODUCT_MAPPING.xlsm';
+const SOURCE = 'G:/Dropbox/alan ranger photography/Website Code/alan-shared-resources/csv/Booking_Sheet_2026_-_WITH_PRODUCT_MAPPING_3.xlsm';
 const PROPERTY_URL = 'https://www.alanranger.com';
 
 function loadDotEnv(p) {

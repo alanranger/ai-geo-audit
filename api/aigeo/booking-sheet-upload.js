@@ -151,6 +151,16 @@ export default async function handler(req, res) {
       });
     }
 
+    if (!(parsed.monthlyPerCategory || []).length) {
+      return res.status(422).json({
+        ok: false,
+        filename: filename || null,
+        verification: parsed.verification,
+        warnings: parsed.warnings,
+        error: 'No monthly category revenue parsed. Open the workbook in Excel, recalculate (Ctrl+Alt+F9), save, and upload again.'
+      });
+    }
+
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
     const written = await persistBookingSheetTruth(supabase, property, parsed);
 
