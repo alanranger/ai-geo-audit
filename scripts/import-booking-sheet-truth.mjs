@@ -1,4 +1,5 @@
 // Full Booking Sheet truth import (2024+): category grid, GP, transactions, wide refresh.
+// Also invalidates revenue_truth_payload_cache (same as dashboard upload).
 //
 // Usage:
 //   node scripts/import-booking-sheet-truth.mjs --dry-run
@@ -59,6 +60,17 @@ async function main() {
 
   const supabase = createClient(url, key, { auth: { persistSession: false } });
   const written = await persistBookingSheetTruth(supabase, PROPERTY_URL, parsed);
+
+  // Match dashboard upload: bust Revenue Truth findings + diagnosis cache so
+  // Money Pages / Funnel tabs pick up new booking data on next load.
+  try {
+    const { invalidateCache } = await import('../lib/revenue-truth-cache.mjs');
+    await invalidateCache(supabase, PROPERTY_URL);
+    console.log('revenue_truth_payload_cache: invalidated');
+  } catch (_cacheErr) {
+    console.warn('revenue_truth_payload_cache: invalidation skipped (non-fatal)');
+  }
+
   console.log('import complete:', written);
 }
 
