@@ -2,6 +2,23 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-07-02] - Portfolio tab: loading banner + faster monthly table
+
+**Symptom:** Portfolio tab appeared empty for a long time with no loading banner (unlike Money Pages / Revenue tabs). Data eventually appeared after ~15–30s.
+
+**Root cause:**
+- Tab-load banner (`AigeoTabLoad`) hides once the panel has no visible `.trend-chart-loading` elements — Portfolio had none, so the banner disappeared after ~800ms while fetches were still running.
+- Monthly KPI table fires **10 parallel** `get-portfolio-segment-metrics` calls; each ran expensive `enrichMetricsWithIndexable()` server-side (~9s per call before dedup).
+
+**Fix:**
+- **`audit-dashboard.html`:** chart + table section spinners (`#portfolio-chart-loading`, `#portfolio-table-loading`, class `trend-chart-loading`); `setPortfolioSectionLoading()` wired through `renderPortfolioTab`, `loadPortfolioData`, and `renderPortfolioTable`.
+- **`api/supabase/get-portfolio-segment-metrics.js`:** `skipIndexable=1` query param skips indexable enrichment for bulk table fetches (chart load still full enrichment for policy banner).
+- Tab-load subtext updated to note first load can take 15–30s.
+
+**Deploy:** `git commit` + push to `main` (Vercel). Hard-refresh dashboard after deploy.
+
+---
+
 ## [2026-06-26] - §9: landing-page-authoritative hub attribution (Acuity combined products)
 
 **Request (Alan):** property engagements are booked through the shared **Acuity block**, so

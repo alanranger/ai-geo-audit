@@ -319,7 +319,10 @@ export default async function handler(req, res) {
       return sendJSON(res, 500, { error: error.message });
     }
 
-    const metrics = await enrichMetricsWithIndexable(supabase, data || [], siteUrl);
+    const skipIndexable = ['1', 'true', 'yes'].includes(String(req.query.skipIndexable || '').toLowerCase());
+    const metrics = skipIndexable
+      ? (data || [])
+      : await enrichMetricsWithIndexable(supabase, data || [], siteUrl);
 
     return sendJSON(res, 200, { 
       metrics,
