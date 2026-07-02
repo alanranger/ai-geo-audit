@@ -85,11 +85,10 @@ export function classifyPageSegment(rawUrlOrPath, title = null, kindOverride = n
     if (v === 'system') return PageSegment.SYSTEM;
   }
 
-  // 1) Education — all blogs + free course + calculator + tips hub
+  // 1) Education — blogs + calculator + tips hub (not Academy signup funnel)
   if (path.startsWith('/blog-on-photography/')) return PageSegment.EDUCATION;
   if (
     path === '/blog-on-photography' ||
-    path === '/free-online-photography-course' ||
     path === '/outdoor-photography-exposure-calculator' ||
     path === '/free-photography-tips' ||
     path === '/photography-news-blog'
@@ -128,6 +127,7 @@ export function classifyPageSegment(rawUrlOrPath, title = null, kindOverride = n
     '/photography-mentoring-programme',
     '/photography-academy-membership',
     '/photography-academy',
+    '/free-online-photography-course',
     '/photography-session-vouchers',
     '/photography-gift-vouchers',
     '/photography-presents-for-photographers',

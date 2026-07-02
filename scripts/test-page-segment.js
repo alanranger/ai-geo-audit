@@ -13,7 +13,7 @@ const testCases = [
   // Education
   { url: 'https://www.alanranger.com/blog-on-photography/', expected: PageSegment.EDUCATION },
   { url: 'https://www.alanranger.com/blog-on-photography/some-post', expected: PageSegment.EDUCATION },
-  { url: 'https://www.alanranger.com/free-online-photography-course', expected: PageSegment.EDUCATION },
+  { url: 'https://www.alanranger.com/free-online-photography-course', expected: PageSegment.MONEY },
   { url: 'https://www.alanranger.com/outdoor-photography-exposure-calculator', expected: PageSegment.EDUCATION },
   { url: 'https://www.alanranger.com/free-photography-tips', expected: PageSegment.EDUCATION },
   

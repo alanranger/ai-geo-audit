@@ -2,6 +2,19 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-05-31] - Reclassify Academy signup landing as Money page
+
+**Decision (Alan):** `/free-online-photography-course` is the Stripe-backed Academy lead-magnet / paid-membership conversion hub (14-day trial → £79/yr), not educational content.
+
+**Change:**
+- **`api/aigeo/pageSegment.js`** + inline mirror in **`audit-dashboard.html`:** removed from `PageSegment.EDUCATION`; added to `MONEY_EXACT`.
+- **`classifyUrlForRankingAi`:** no longer forces Education for this slug.
+- **`alan-shared-resources/csv/06-site-urls.csv`:** `kind_override=money` on the canonical row.
+
+**Note:** Portfolio tab still tracks this URL under the **Academy** sub-segment for funnel reporting; Money Pages Opportunity Table now includes it in the 164+ money URL set after deploy + hard refresh.
+
+---
+
 ## [2026-07-02] - Portfolio tab: loading banner + faster monthly table
 
 **Symptom:** Portfolio tab appeared empty for a long time with no loading banner (unlike Money Pages / Revenue tabs). Data eventually appeared after ~15–30s.
