@@ -2,6 +2,15 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-07-08] - Revenue Truth: DEFCON pulse tile colour by level
+
+**Change:** Current Month Pulse DEFCON verdict tile now uses a distinct background/border per level:
+DEFCON 1 green · 2 greeny-orange · 3 amber · 4 reddy-amber · 5 red.
+
+**Files:** `lib/revenue-truth-current-month-pulse.mjs`, `assets/revenue-truth-tab.css`
+
+---
+
 ## [2026-05-31] - Reclassify Academy signup landing as Money page
 
 **Decision (Alan):** `/free-online-photography-course` is the Stripe-backed Academy lead-magnet / paid-membership conversion hub (14-day trial → £79/yr), not educational content.

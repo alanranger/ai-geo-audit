@@ -145,6 +145,15 @@ describe('revenue-truth current month pulse', () => {
     assert.equal(d.level, 4);
     assert.equal(d.status, 'CRITICAL');
     assert.equal(d.pips, 4);
+    assert.equal(d.colour, '#ea580c');
+  });
+
+  it('DEFCON level colours follow green → red scale', () => {
+    assert.equal(computeDefcon(3500, 3000).colour, '#22c55e');
+    assert.equal(computeDefcon(2800, 3000).colour, '#a3c04a');
+    assert.equal(computeDefcon(2100, 3000).colour, '#f59e0b');
+    assert.equal(computeDefcon(1200, 3000).colour, '#ea580c');
+    assert.equal(computeDefcon(700, 3000).colour, '#dc2626');
   });
 
   it('DEFCON 5 below 30% with pulse flag', () => {
