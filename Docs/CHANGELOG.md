@@ -2,6 +2,20 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-07-12] - Locked per-keyword tracking locations (113 keywords)
+
+**Supersedes** the provisional pattern rules from earlier the same day.
+
+**Change:** Alan-signed CSV `keyword-tracking-locations-LOCKED.csv` (71 Local / 42 UK) is now the authoritative map:
+- Runtime: `lib/keyword-ranking/keyword-tracking-locations-LOCKED.json`
+- Rebuild: `node scripts/build-keyword-tracking-locations.mjs`
+- Key rulings encoded: masterclasses→Local; rps/mentor→UK; tuition/training/tutor→Local; corporate* training→UK; gifts/vouchers→UK; all workshops→UK
+- Unmapped new keywords default to UK and set `location_unmapped=true` (dashboard: **UK (unmapped)**)
+
+**Files:** `config/keyword-tracking-locations-LOCKED.csv`, `lib/keyword-ranking/tracking-location.js`, `lib/keyword-ranking/keyword-tracking-locations-LOCKED.json`, `scripts/build-keyword-tracking-locations.mjs`, `migrations/20260712_keyword_rankings_location_unmapped.sql`, `lib/keyword-ranking/refresh-core.js`, `api/supabase/get-latest-audit.js`, `audit-dashboard.html`
+
+---
+
 ## [2026-07-12] - Per-keyword SERP tracking location (Coventry vs UK)
 
 **Problem:** `keyword_rankings` for "near me" / local-buyer terms was collected from national UK SERPs (`location_code: 2826` / `location_name: United Kingdom`), so Coventry-local ranks looked artificially weak vs live Coventry SERPs.

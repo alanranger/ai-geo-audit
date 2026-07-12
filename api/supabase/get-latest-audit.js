@@ -486,6 +486,7 @@ export default async function handler(req, res) {
             return {
               keyword: row.keyword,
               location_name: row.location_name || null,
+              location_unmapped: row.location_unmapped === true,
               best_rank_group: row.best_rank_group,
               best_rank_absolute: row.best_rank_absolute,
               best_url: row.best_url,
