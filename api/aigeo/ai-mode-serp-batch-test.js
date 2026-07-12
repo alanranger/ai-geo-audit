@@ -96,7 +96,7 @@ function extractCitationsFromTask(task) {
   };
 }
 
-async function fetchAiModeForKeyword(keyword, auth) {
+async function fetchAiModeForKeyword(keyword, auth, locationName = "United Kingdom") {
   const endpoint =
     "https://api.dataforseo.com/v3/serp/google/ai_mode/live/advanced";
 
@@ -110,7 +110,7 @@ async function fetchAiModeForKeyword(keyword, auth) {
       {
         keyword,
         language_name: "English",
-        location_name: "United Kingdom",
+        location_name: locationName || "United Kingdom",
         device: "desktop",
         os: "windows",
       },
@@ -214,6 +214,7 @@ export default async function handler(req, res) {
           }
         });
       });
+      req._aiModeBody = body;
       if (Array.isArray(body.queries) && body.queries.length > 0) {
         queries = body.queries.map(String);
       }
@@ -224,6 +225,17 @@ export default async function handler(req, res) {
 
   const auth = Buffer.from(`${login}:${password}`).toString("base64");
 
+  let locationsByKeyword = {};
+  // Re-parse body for locations when POST (queries already extracted above)
+  if (req.method === "POST" && req._aiModeBody?.locations) {
+    locationsByKeyword = req._aiModeBody.locations;
+  }
+
+  const resolveLocName = (keyword) => {
+    const loc = locationsByKeyword[keyword] || locationsByKeyword[String(keyword).toLowerCase()] || {};
+    return loc.location_name || "United Kingdom";
+  };
+
   const perQuery = [];
   let dfsFatalHit = false;
   let dfsFatalReason = null;
@@ -233,8 +245,8 @@ export default async function handler(req, res) {
       continue;
     }
     try {
-      const result = await fetchAiModeForKeyword(keyword, auth);
-      perQuery.push(result);
+      const result = await fetchAiModeForKeyword(keyword, auth, resolveLocName(keyword));
+      perQuery.push({ ...result, location_name: resolveLocName(keyword) });
       if (result?.fatal) {
         dfsFatalHit = true;
         dfsFatalReason = `${result.error_code || ''} ${result.error || ''}`.trim() || 'DFS fatal status';

@@ -2,6 +2,22 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-07-12] - Per-keyword SERP tracking location (Coventry vs UK)
+
+**Problem:** `keyword_rankings` for "near me" / local-buyer terms was collected from national UK SERPs (`location_code: 2826` / `location_name: United Kingdom`), so Coventry-local ranks looked artificially weak vs live Coventry SERPs.
+
+**Change:**
+- New `lib/keyword-ranking/tracking-location.js` — Tier L = `Coventry,England,United Kingdom`; Tier N = `United Kingdom` (workshops incl. near-me, online, geo-explicit, other).
+- Organic SERP + AI Mode collectors accept per-keyword locations; refresh pipeline passes them and stores `location_name` on each row.
+- Migration: `keyword_rankings.location_name` (historical NULL = legacy national; no backfill).
+- Ranking & AI table: **Track loc** column (Coventry / UK / UK ⚠ for workshops near me / — legacy).
+
+**Files:** `lib/keyword-ranking/tracking-location.js`, `lib/keyword-ranking/refresh-core.js`, `api/aigeo/serp-rank-test.js`, `api/aigeo/ai-mode-serp-batch-test.js`, `api/supabase/get-latest-audit.js`, `migrations/20260712_keyword_rankings_location_name.sql`, `audit-dashboard.html`
+
+**Note:** Search volume calls stay UK national. Re-run Ranking & AI (or per-row refresh) for near-me terms to populate Coventry ranks.
+
+---
+
 ## [2026-07-08] - Revenue Truth: DEFCON pulse tile colour by level
 
 **Change:** Current Month Pulse DEFCON verdict tile now uses a distinct background/border per level:

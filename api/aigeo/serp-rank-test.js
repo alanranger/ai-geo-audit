@@ -325,9 +325,10 @@ function isDfsFatalStatus(statusCode) {
   return DFS_FATAL_STATUS_CODES.has(n);
 }
 
-function buildEmptySerpResult(keyword, depth, errorMessage, errorCode) {
+function buildEmptySerpResult(keyword, depth, errorMessage, errorCode, locationName = null) {
   return {
     keyword,
+    location_name: locationName,
     best_rank_group: null,
     best_rank_absolute: null,
     best_url: null,
@@ -358,26 +359,31 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
   // sets expandAiOverview: true here. has_ai_overview flag (from the item list)
   // still works without expansion — only the full citation list is skipped.
   const expandAiOverview = Boolean(opts.expandAiOverview);
+  const locationName = opts.location_name || "United Kingdom";
+  const locationCode = opts.location_code != null ? opts.location_code : null;
 
   try {
+    const taskPayload = {
+      keyword,
+      language_code: "en",
+      device: "desktop",
+      os: "windows",
+      depth,
+      load_async_ai_overview: expandAiOverview,
+      expand_ai_overview: expandAiOverview,
+    };
+    // Prefer location_code when present (national UK = 2826); else location_name
+    // (Coventry,England,United Kingdom for local-buyer terms).
+    if (locationCode != null) taskPayload.location_code = locationCode;
+    else taskPayload.location_name = locationName;
+
     const dfResponse = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Basic ${auth}`,
       },
-      body: JSON.stringify([
-        {
-          keyword,
-          language_code: "en",
-          location_code: 2826, // United Kingdom
-          device: "desktop",
-          os: "windows",
-          depth,
-          load_async_ai_overview: expandAiOverview,
-          expand_ai_overview: expandAiOverview,
-        },
-      ]),
+      body: JSON.stringify([taskPayload]),
     });
 
     const data = await dfResponse.json();
@@ -444,6 +450,7 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
 
     return {
       keyword,
+      location_name: locationName,
       best_rank_group: bestRankGroup,
       best_rank_absolute: bestRankAbsolute,
       best_url: bestUrl,
@@ -549,6 +556,19 @@ export default async function handler(req, res) {
   const expandAiOverview = /^(1|true|yes)$/i.test(String(body?.ai_overview ?? req.query.ai_overview ?? ''));
   console.log(`[Handler] Using SERP depth: ${depth}, expand_ai_overview: ${expandAiOverview}`);
 
+  // Optional per-keyword locations map: { [keyword]: { location_name, location_code } }
+  // Missing entries default to United Kingdom / 2826 (legacy national).
+  const locationsByKeyword =
+    body && body.locations && typeof body.locations === 'object' ? body.locations : {};
+
+  const resolveLoc = (keyword) => {
+    const loc = locationsByKeyword[keyword] || locationsByKeyword[String(keyword).toLowerCase()] || {};
+    return {
+      location_name: loc.location_name || 'United Kingdom',
+      location_code: loc.location_code != null ? loc.location_code : (loc.location_name && !/united kingdom/i.test(loc.location_name) ? null : 2826),
+    };
+  };
+
   try {
     // Log handler entry with keywords
     console.log(`[Handler] === START === Processing ${keywords.length} keywords`);
@@ -576,7 +596,8 @@ export default async function handler(req, res) {
         const remaining = keywords.slice(i);
         console.warn(`[Handler] ABORTING remaining ${remaining.length} keyword(s) after fatal DFS status: ${dfsFatalReason}`);
         remaining.forEach((kw) => {
-          perKeyword.push(buildEmptySerpResult(kw, depth, `Aborted after fatal DFS error: ${dfsFatalReason}`, null));
+          const loc = resolveLoc(kw);
+          perKeyword.push(buildEmptySerpResult(kw, depth, `Aborted after fatal DFS error: ${dfsFatalReason}`, null, loc.location_name));
         });
         break;
       }
@@ -585,7 +606,12 @@ export default async function handler(req, res) {
       
       const batchPromises = batch.map(async (keyword) => {
         try {
-          const result = await fetchSerpForKeyword(keyword, auth, targetRoot, depth, { expandAiOverview });
+          const loc = resolveLoc(keyword);
+          const result = await fetchSerpForKeyword(keyword, auth, targetRoot, depth, {
+            expandAiOverview,
+            location_name: loc.location_name,
+            location_code: loc.location_code,
+          });
           
           // Merge search volume data using normalized keyword lookup
           const normalizedKw = normalizeKeyword(keyword);
@@ -602,6 +628,7 @@ export default async function handler(req, res) {
           
           const mergedResult = {
             ...result,
+            location_name: result.location_name || loc.location_name,
             search_volume: searchVolume, // Can be 0, null, or a number
             search_volume_trend: searchVolumeTrend,
           };
