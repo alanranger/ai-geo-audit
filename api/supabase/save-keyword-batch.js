@@ -3,6 +3,8 @@
  * This allows partial results to be saved even if later batches fail
  */
 
+import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
+
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
 export default async function handler(req, res) {
@@ -65,6 +67,13 @@ export default async function handler(req, res) {
       if (!row.audit_date || !row.property_url || !row.keyword) {
         errors.push(`Row missing required fields: ${JSON.stringify(row)}`);
         continue;
+      }
+
+      // Never leave location_name NULL on new/updated rows — NULL is legacy only.
+      if (!row.location_name) {
+        const loc = resolveTrackingLocation(row.keyword);
+        row.location_name = loc.location_name;
+        row.location_unmapped = loc.unmapped === true;
       }
 
       // Try to update existing row first using PATCH

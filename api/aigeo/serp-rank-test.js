@@ -19,6 +19,7 @@
  */
 
 import { extractCitationsFromDfsResult } from '../../lib/ai-citation-extract.js';
+import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -562,10 +563,26 @@ export default async function handler(req, res) {
     body && body.locations && typeof body.locations === 'object' ? body.locations : {};
 
   const resolveLoc = (keyword) => {
-    const loc = locationsByKeyword[keyword] || locationsByKeyword[String(keyword).toLowerCase()] || {};
+    const fromBody = locationsByKeyword[keyword]
+      || locationsByKeyword[String(keyword).toLowerCase()]
+      || null;
+    if (fromBody && fromBody.location_name) {
+      const isUk = /united kingdom/i.test(fromBody.location_name);
+      return {
+        location_name: fromBody.location_name,
+        location_code: fromBody.location_code != null
+          ? fromBody.location_code
+          : (isUk ? 2826 : null),
+        location_unmapped: fromBody.unmapped === true || fromBody.location_unmapped === true,
+      };
+    }
+    // Dashboard full-audit historically omitted `locations` — always fall back
+    // to the locked per-keyword map so Coventry terms never silently go national.
+    const resolved = resolveTrackingLocation(keyword);
     return {
-      location_name: loc.location_name || 'United Kingdom',
-      location_code: loc.location_code != null ? loc.location_code : (loc.location_name && !/united kingdom/i.test(loc.location_name) ? null : 2826),
+      location_name: resolved.location_name,
+      location_code: resolved.location_code,
+      location_unmapped: resolved.unmapped === true,
     };
   };
 
@@ -629,6 +646,7 @@ export default async function handler(req, res) {
           const mergedResult = {
             ...result,
             location_name: result.location_name || loc.location_name,
+            location_unmapped: loc.location_unmapped === true,
             search_volume: searchVolume, // Can be 0, null, or a number
             search_volume_trend: searchVolumeTrend,
           };

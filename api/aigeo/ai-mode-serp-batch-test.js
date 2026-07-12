@@ -9,6 +9,8 @@
 // so the remaining keywords don't fire paid requests after the account is
 // depleted. Matches the behaviour in serp-rank-test.js.
 
+import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
+
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 const DFS_FATAL_STATUS_CODES_AI = new Set([40100, 40101, 40200, 40300, 40400]);
@@ -232,8 +234,9 @@ export default async function handler(req, res) {
   }
 
   const resolveLocName = (keyword) => {
-    const loc = locationsByKeyword[keyword] || locationsByKeyword[String(keyword).toLowerCase()] || {};
-    return loc.location_name || "United Kingdom";
+    const loc = locationsByKeyword[keyword] || locationsByKeyword[String(keyword).toLowerCase()] || null;
+    if (loc && loc.location_name) return loc.location_name;
+    return resolveTrackingLocation(keyword).location_name;
   };
 
   const perQuery = [];

@@ -10,6 +10,7 @@ import {
   normalizeAuthorityForAuditRecord,
   recomputeAuthorityTotal,
 } from '../../lib/audit/authorityScore.js';
+import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
 
 export const config = { maxDuration: 60 };
 
@@ -1802,35 +1803,47 @@ export default async function handler(req, res) {
         console.log(`[Supabase Save] Saving ${rankingAiData.combinedRows.length} keyword rows to keyword_rankings table...`);
         
         // Prepare keyword rows for insertion
-        const keywordRows = rankingAiData.combinedRows.map(row => ({
-          audit_date: auditDate,
-          property_url: String(propertyUrl).trim(),
-          keyword: String(row.keyword || '').trim(),
-          best_rank_group: row.best_rank_group !== null && row.best_rank_group !== undefined ? parseInt(row.best_rank_group) : null,
-          best_rank_absolute: row.best_rank_absolute !== null && row.best_rank_absolute !== undefined ? parseInt(row.best_rank_absolute) : null,
-          best_url: row.best_url ? String(row.best_url).trim() : null,
-          best_title: row.best_title ? String(row.best_title).trim() : null,
-          search_volume: row.search_volume !== null && row.search_volume !== undefined ? parseInt(row.search_volume) : null,
-          has_ai_overview: row.has_ai_overview === true,
-          ai_total_citations: row.ai_total_citations !== null && row.ai_total_citations !== undefined ? parseInt(row.ai_total_citations) : null,
-          ai_alan_citations_count: row.ai_alan_citations_count !== null && row.ai_alan_citations_count !== undefined ? parseInt(row.ai_alan_citations_count) : null,
-          ai_alan_citations: row.ai_alan_citations ? (Array.isArray(row.ai_alan_citations) ? row.ai_alan_citations : []) : null,
-          competitor_counts: row.competitor_counts ? (typeof row.competitor_counts === 'object' ? row.competitor_counts : {}) : null,
-          serp_features: row.serp_features ? (typeof row.serp_features === 'object' ? row.serp_features : {}) : null,
-          // New boolean fields for SERP feature coverage
-          ai_overview_present_any: row.ai_overview_present_any === true || row.has_ai_overview === true,
-          local_pack_present_any: row.local_pack_present_any === true || (row.serp_features && row.serp_features.local_pack === true),
-          paa_present_any: row.paa_present_any === true || (row.serp_features && row.serp_features.people_also_ask === true),
-          featured_snippet_present_any: row.featured_snippet_present_any === true || (row.serp_features && row.serp_features.featured_snippet === true),
-          segment: row.segment ? String(row.segment).trim() : null,
-          page_type: row.pageType ? String(row.pageType).trim() : null,
-          demand_share: row.demand_share !== null && row.demand_share !== undefined ? parseFloat(row.demand_share) : null,
-          opportunity_score: row.opportunityScore !== null && row.opportunityScore !== undefined ? parseInt(row.opportunityScore) : null,
-          // Phase 1: per-engine AI citation data (google_aio + google_ai_mode)
-          ai_engines: row.ai_engines && typeof row.ai_engines === 'object' ? row.ai_engines : null,
-          updated_at: new Date().toISOString(),
-          last_refreshed_at: new Date().toISOString()
-        }));
+        const keywordRows = rankingAiData.combinedRows.map(row => {
+          const kw = String(row.keyword || '').trim();
+          let locationName = row.location_name ? String(row.location_name).trim() : null;
+          let locationUnmapped = row.location_unmapped === true;
+          if (!locationName) {
+            const loc = resolveTrackingLocation(kw);
+            locationName = loc.location_name;
+            locationUnmapped = loc.unmapped === true;
+          }
+          return {
+            audit_date: auditDate,
+            property_url: String(propertyUrl).trim(),
+            keyword: kw,
+            location_name: locationName,
+            location_unmapped: locationUnmapped,
+            best_rank_group: row.best_rank_group !== null && row.best_rank_group !== undefined ? parseInt(row.best_rank_group) : null,
+            best_rank_absolute: row.best_rank_absolute !== null && row.best_rank_absolute !== undefined ? parseInt(row.best_rank_absolute) : null,
+            best_url: row.best_url ? String(row.best_url).trim() : null,
+            best_title: row.best_title ? String(row.best_title).trim() : null,
+            search_volume: row.search_volume !== null && row.search_volume !== undefined ? parseInt(row.search_volume) : null,
+            has_ai_overview: row.has_ai_overview === true,
+            ai_total_citations: row.ai_total_citations !== null && row.ai_total_citations !== undefined ? parseInt(row.ai_total_citations) : null,
+            ai_alan_citations_count: row.ai_alan_citations_count !== null && row.ai_alan_citations_count !== undefined ? parseInt(row.ai_alan_citations_count) : null,
+            ai_alan_citations: row.ai_alan_citations ? (Array.isArray(row.ai_alan_citations) ? row.ai_alan_citations : []) : null,
+            competitor_counts: row.competitor_counts ? (typeof row.competitor_counts === 'object' ? row.competitor_counts : {}) : null,
+            serp_features: row.serp_features ? (typeof row.serp_features === 'object' ? row.serp_features : {}) : null,
+            // New boolean fields for SERP feature coverage
+            ai_overview_present_any: row.ai_overview_present_any === true || row.has_ai_overview === true,
+            local_pack_present_any: row.local_pack_present_any === true || (row.serp_features && row.serp_features.local_pack === true),
+            paa_present_any: row.paa_present_any === true || (row.serp_features && row.serp_features.people_also_ask === true),
+            featured_snippet_present_any: row.featured_snippet_present_any === true || (row.serp_features && row.serp_features.featured_snippet === true),
+            segment: row.segment ? String(row.segment).trim() : null,
+            page_type: row.pageType ? String(row.pageType).trim() : null,
+            demand_share: row.demand_share !== null && row.demand_share !== undefined ? parseFloat(row.demand_share) : null,
+            opportunity_score: row.opportunityScore !== null && row.opportunityScore !== undefined ? parseInt(row.opportunityScore) : null,
+            // Phase 1: per-engine AI citation data (google_aio + google_ai_mode)
+            ai_engines: row.ai_engines && typeof row.ai_engines === 'object' ? row.ai_engines : null,
+            updated_at: new Date().toISOString(),
+            last_refreshed_at: new Date().toISOString()
+          };
+        });
 
         // Delete existing rows for this audit_date and property_url to avoid duplicates
         const deleteResponse = await fetch(`${supabaseUrl}/rest/v1/keyword_rankings?audit_date=eq.${auditDate}&property_url=eq.${encodeURIComponent(propertyUrl)}`, {
