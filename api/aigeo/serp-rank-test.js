@@ -22,6 +22,7 @@ import { extractCitationsFromDfsResult } from '../../lib/ai-citation-extract.js'
 import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
 import { extractSerpSurfaces } from '../../lib/keyword-ranking/serp-surface-extract.js';
 import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
+import { computeKeywordSurfaceScore } from '../../lib/audit/surfaceScores.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -489,6 +490,18 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
       ai_overview_citations: aiOverviewCitations,
       serp_depth: depth,
     };
+    // Release 2: attach Surface Visibility for single-keyword verification
+    try {
+      result.surface_visibility = computeKeywordSurfaceScore({
+        ...result,
+        ai_engines: {
+          google_aio: aiOverviewCitations || { alan_citations_count: 0 },
+        },
+      });
+    } catch (_e) {
+      /* non-fatal */
+    }
+    return result;
   } catch (err) {
     console.error(`Error fetching SERP for keyword "${keyword}":`, err);
     return buildEmptySerpResult(keyword, depth, "Unexpected server error", null);

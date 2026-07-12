@@ -15,6 +15,30 @@ import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js
 
 export const config = { maxDuration: 60 };
 
+/** Release 2: prefer SERP brand kp_ours over GBP heuristic for audit_results KP flag. */
+function resolveKnowledgePanelFields(localSignals, rankingAiData) {
+  const raw = localSignals?.data?.knowledgePanelDetected;
+  const gbpFlag = raw === true ? true : (raw === false ? false : null);
+  const rows = rankingAiData?.combinedRows;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { knowledge_panel_detected: gbpFlag, knowledge_panel_source: gbpFlag == null ? null : 'gbp' };
+  }
+  const brandRows = rows.filter((row) => {
+    const kw = String(row.keyword || '').trim();
+    const cls = row.keyword_class
+      ? String(row.keyword_class).trim()
+      : resolveKeywordClass(kw).keyword_class;
+    return cls === 'brand';
+  });
+  if (brandRows.length === 0) {
+    return { knowledge_panel_detected: gbpFlag, knowledge_panel_source: gbpFlag == null ? null : 'gbp' };
+  }
+  return {
+    knowledge_panel_detected: brandRows.some((r) => r.kp_ours === true),
+    knowledge_panel_source: 'serp',
+  };
+}
+
 // ---- Schema_pages_detail merge helpers -----------------------------------
 // Added 2026-04-17: When a schema audit run transiently drops a URL (e.g. a
 // fetch timeout or an upstream cache serving a shorter URL list), the saved
@@ -893,7 +917,7 @@ export default async function handler(req, res) {
       // Business Profile Data (for historical tracking)
       local_business_schema_pages: ensureNumber(localSignalsToUse?.data?.localBusinessSchemaPages),
       nap_consistency_score: ensureNumber(localSignalsToUse?.data?.napConsistencyScore),
-      knowledge_panel_detected: localSignalsToUse?.data?.knowledgePanelDetected === true ? true : (localSignalsToUse?.data?.knowledgePanelDetected === false ? false : null),
+      ...resolveKnowledgePanelFields(localSignalsToUse, rankingAiData),
       service_areas: Array.isArray(localSignalsToUse?.data?.serviceAreas) ? localSignalsToUse.data.serviceAreas : null, // Array of service area objects
       locations: Array.isArray(localSignalsToUse?.data?.locations) ? localSignalsToUse.data.locations : null, // Array of location objects
       gbp_rating: localSignalsToUse?.data?.gbpRating !== null && localSignalsToUse?.data?.gbpRating !== undefined ? parseFloat(localSignalsToUse.data.gbpRating) : null,
