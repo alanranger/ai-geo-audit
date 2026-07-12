@@ -465,7 +465,7 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
     // Phase 1: extract Google AI Overview citations from the same response.
     const aiOverviewCitations = extractCitationsFromDfsResult(result);
 
-    return {
+    const serpResult = {
       keyword,
       location_name: locationName,
       best_rank_group: bestRankGroup,
@@ -492,8 +492,8 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
     };
     // Release 2: attach Surface Visibility for single-keyword verification
     try {
-      result.surface_visibility = computeKeywordSurfaceScore({
-        ...result,
+      serpResult.surface_visibility = computeKeywordSurfaceScore({
+        ...serpResult,
         ai_engines: {
           google_aio: aiOverviewCitations || { alan_citations_count: 0 },
         },
@@ -501,7 +501,7 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
     } catch (_e) {
       /* non-fatal */
     }
-    return result;
+    return serpResult;
   } catch (err) {
     console.error(`Error fetching SERP for keyword "${keyword}":`, err);
     return buildEmptySerpResult(keyword, depth, "Unexpected server error", null);

@@ -483,10 +483,26 @@ export default async function handler(req, res) {
               serpFeatures = truncated;
             }
 
+            let aiEngines = row.ai_engines || null;
+            if (typeof aiEngines === 'string') {
+              try {
+                aiEngines = JSON.parse(aiEngines);
+              } catch (e) {
+                aiEngines = null;
+              }
+            }
+
             return {
               keyword: row.keyword,
               location_name: row.location_name || null,
               location_unmapped: row.location_unmapped === true,
+              keyword_class: row.keyword_class ? String(row.keyword_class).trim() : null,
+              class_unmapped: row.class_unmapped === true,
+              local_pack_position: row.local_pack_position ?? null,
+              kp_present: row.kp_present === true,
+              kp_ours: row.kp_ours === true,
+              featured_snippet_ours: row.featured_snippet_ours === true,
+              paa_ours: row.paa_ours === true,
               best_rank_group: row.best_rank_group,
               best_rank_absolute: row.best_rank_absolute,
               best_url: row.best_url,
@@ -503,6 +519,7 @@ export default async function handler(req, res) {
               local_pack_present_any: row.local_pack_present_any === true,
               paa_present_any: row.paa_present_any === true,
               featured_snippet_present_any: row.featured_snippet_present_any === true,
+              ai_engines: aiEngines,
               segment: row.segment,
               pageType: row.page_type,
               demand_share: row.demand_share,
