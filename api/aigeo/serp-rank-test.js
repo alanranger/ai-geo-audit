@@ -20,6 +20,8 @@
 
 import { extractCitationsFromDfsResult } from '../../lib/ai-citation-extract.js';
 import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
+import { extractSerpSurfaces } from '../../lib/keyword-ranking/serp-surface-extract.js';
+import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -327,6 +329,7 @@ function isDfsFatalStatus(statusCode) {
 }
 
 function buildEmptySerpResult(keyword, depth, errorMessage, errorCode, locationName = null) {
+  const classInfo = resolveKeywordClass(keyword);
   return {
     keyword,
     location_name: locationName,
@@ -344,6 +347,13 @@ function buildEmptySerpResult(keyword, depth, errorMessage, errorCode, locationN
     local_pack_present_any: false,
     paa_present_any: false,
     featured_snippet_present_any: false,
+    local_pack_position: null,
+    kp_present: false,
+    kp_ours: false,
+    featured_snippet_ours: false,
+    paa_ours: false,
+    keyword_class: classInfo.keyword_class,
+    class_unmapped: classInfo.class_unmapped,
     ai_overview_citations: null,
     serp_depth: depth,
     error: errorMessage || "DataForSEO request failed",
@@ -438,12 +448,17 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
     const local_pack_present_any = itemTypes.includes("local_pack");
     const paa_present_any = itemTypes.includes("people_also_ask");
     const featured_snippet_present_any = itemTypes.includes("featured_snippet");
+
+    // Phase 1 surfaces: pack position, KP, FS/PAA ownership (parse-only, no extra DFS)
+    const surfaces = extractSerpSurfaces(items, targetRoot);
+    const classInfo = resolveKeywordClass(keyword);
     
-    // Keep serp_features object for backward compatibility
+    // Keep serp_features object for backward compatibility (+ ownership extras)
     const serpFeatures = {
       local_pack: local_pack_present_any,
       featured_snippet: featured_snippet_present_any,
       people_also_ask: paa_present_any,
+      ...(surfaces.serp_features_extra || {}),
     };
 
     // Phase 1: extract Google AI Overview citations from the same response.
@@ -463,6 +478,13 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
       local_pack_present_any,
       paa_present_any,
       featured_snippet_present_any,
+      local_pack_position: surfaces.local_pack_position,
+      kp_present: surfaces.kp_present,
+      kp_ours: surfaces.kp_ours,
+      featured_snippet_ours: surfaces.featured_snippet_ours,
+      paa_ours: surfaces.paa_ours,
+      keyword_class: classInfo.keyword_class,
+      class_unmapped: classInfo.class_unmapped,
       // Phase 1: Google AI Overview citation slot (engine = google_aio)
       ai_overview_citations: aiOverviewCitations,
       serp_depth: depth,

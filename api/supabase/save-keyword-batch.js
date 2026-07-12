@@ -4,6 +4,7 @@
  */
 
 import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
+import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
@@ -74,6 +75,12 @@ export default async function handler(req, res) {
         const loc = resolveTrackingLocation(row.keyword);
         row.location_name = loc.location_name;
         row.location_unmapped = loc.unmapped === true;
+      }
+      // Always stamp locked class (lookup-only).
+      if (!row.keyword_class) {
+        const cls = resolveKeywordClass(row.keyword);
+        row.keyword_class = cls.keyword_class;
+        row.class_unmapped = cls.class_unmapped;
       }
 
       // Try to update existing row first using PATCH

@@ -11,6 +11,7 @@ import {
   recomputeAuthorityTotal,
 } from '../../lib/audit/authorityScore.js';
 import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
+import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
 
 export const config = { maxDuration: 60 };
 
@@ -1812,12 +1813,26 @@ export default async function handler(req, res) {
             locationName = loc.location_name;
             locationUnmapped = loc.unmapped === true;
           }
+          const classInfo = resolveKeywordClass(kw);
+          const keywordClass = row.keyword_class
+            ? String(row.keyword_class).trim()
+            : classInfo.keyword_class;
+          const classUnmapped = row.keyword_class
+            ? row.class_unmapped === true
+            : classInfo.class_unmapped;
           return {
             audit_date: auditDate,
             property_url: String(propertyUrl).trim(),
             keyword: kw,
             location_name: locationName,
             location_unmapped: locationUnmapped,
+            keyword_class: keywordClass,
+            class_unmapped: classUnmapped,
+            local_pack_position: row.local_pack_position !== null && row.local_pack_position !== undefined ? parseInt(row.local_pack_position) : null,
+            kp_present: row.kp_present === true,
+            kp_ours: row.kp_ours === true,
+            featured_snippet_ours: row.featured_snippet_ours === true,
+            paa_ours: row.paa_ours === true,
             best_rank_group: row.best_rank_group !== null && row.best_rank_group !== undefined ? parseInt(row.best_rank_group) : null,
             best_rank_absolute: row.best_rank_absolute !== null && row.best_rank_absolute !== undefined ? parseInt(row.best_rank_absolute) : null,
             best_url: row.best_url ? String(row.best_url).trim() : null,
