@@ -15,13 +15,8 @@ function assert(cond, msg) {
 }
 
 const packItems = [
-  {
-    type: 'local_pack',
-    items: [
-      { title: 'Other Studio', domain: 'other.com', rank_group: 1 },
-      { title: 'Alan Ranger Photography', domain: 'alanranger.com', rank_group: 2 },
-    ],
-  },
+  { type: 'local_pack', title: 'Other Studio', domain: 'other.com', rank_group: 1 },
+  { type: 'local_pack', title: 'Alan Ranger Photography', domain: null, rank_group: 2 },
 ];
 const pack = extractLocalPackPosition(packItems);
 assert(pack.local_pack_present === true, 'pack present');

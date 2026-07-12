@@ -9,11 +9,12 @@ Probes planned (Release 1): `photographer coventry` (pack), `alan ranger` (knowl
 
 | Path | Notes |
 |------|--------|
-| `result.items[]` where `type === "local_pack"` | Pack container |
-| `local_pack.items[]` | Business rows |
-| `items[].title` | Match `/alan\s*ranger/i` or brand name |
-| `items[].domain` / `items[].url` | Match `alanranger.com` |
-| `items[].rank_group` (fallback `rank_absolute`) | Stored as integer position |
+| `result.items[]` where `type === "local_pack"` | **One item per pack business** (siblings, not nested) |
+| `items[].title` | Match `/alan\s*ranger/i` (primary — DFS often returns `domain: null`) |
+| `items[].domain` / `items[].url` | Match `alanranger.com` when present |
+| `items[].rank_group` (fallback `rank_absolute`) | Pack position within the 3-pack (1–3) |
+
+DFS Live Advanced does **not** nest businesses under a parent `local_pack.items[]` container (unlike `hotels_pack`). Each listing is its own top-level `items[]` entry with `type: "local_pack"`.
 
 If pack present but Alan absent → `local_pack_present_any=true`, `local_pack_position=NULL`.
 
