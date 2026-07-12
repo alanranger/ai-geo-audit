@@ -557,27 +557,10 @@ export default async function handler(req, res) {
   const expandAiOverview = /^(1|true|yes)$/i.test(String(body?.ai_overview ?? req.query.ai_overview ?? ''));
   console.log(`[Handler] Using SERP depth: ${depth}, expand_ai_overview: ${expandAiOverview}`);
 
-  // Optional per-keyword locations map: { [keyword]: { location_name, location_code } }
-  // Missing entries default to United Kingdom / 2826 (legacy national).
-  const locationsByKeyword =
-    body && body.locations && typeof body.locations === 'object' ? body.locations : {};
-
+  // Always resolve from the locked server-side map. Never trust client
+  // `locations` — a bad/empty client map previously forced 90/90 UK unmapped
+  // (SPA rewrite served HTML for the locked JSON, then the API honoured it).
   const resolveLoc = (keyword) => {
-    const fromBody = locationsByKeyword[keyword]
-      || locationsByKeyword[String(keyword).toLowerCase()]
-      || null;
-    if (fromBody && fromBody.location_name) {
-      const isUk = /united kingdom/i.test(fromBody.location_name);
-      return {
-        location_name: fromBody.location_name,
-        location_code: fromBody.location_code != null
-          ? fromBody.location_code
-          : (isUk ? 2826 : null),
-        location_unmapped: fromBody.unmapped === true || fromBody.location_unmapped === true,
-      };
-    }
-    // Dashboard full-audit historically omitted `locations` — always fall back
-    // to the locked per-keyword map so Coventry terms never silently go national.
     const resolved = resolveTrackingLocation(keyword);
     return {
       location_name: resolved.location_name,

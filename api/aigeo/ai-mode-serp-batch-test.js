@@ -227,16 +227,13 @@ export default async function handler(req, res) {
 
   const auth = Buffer.from(`${login}:${password}`).toString("base64");
 
-  let locationsByKeyword = {};
-  // Re-parse body for locations when POST (queries already extracted above)
-  if (req.method === "POST" && req._aiModeBody?.locations) {
-    locationsByKeyword = req._aiModeBody.locations;
-  }
-
-  const resolveLocName = (keyword) => {
-    const loc = locationsByKeyword[keyword] || locationsByKeyword[String(keyword).toLowerCase()] || null;
-    if (loc && loc.location_name) return loc.location_name;
-    return resolveTrackingLocation(keyword).location_name;
+  // Always resolve from locked server-side map — ignore client `locations`.
+  const resolveLoc = (keyword) => {
+    const resolved = resolveTrackingLocation(keyword);
+    return {
+      location_name: resolved.location_name,
+      location_unmapped: resolved.unmapped === true,
+    };
   };
 
   const perQuery = [];
@@ -248,8 +245,13 @@ export default async function handler(req, res) {
       continue;
     }
     try {
-      const result = await fetchAiModeForKeyword(keyword, auth, resolveLocName(keyword));
-      perQuery.push({ ...result, location_name: resolveLocName(keyword) });
+      const loc = resolveLoc(keyword);
+      const result = await fetchAiModeForKeyword(keyword, auth, loc.location_name);
+      perQuery.push({
+        ...result,
+        location_name: loc.location_name,
+        location_unmapped: loc.location_unmapped,
+      });
       if (result?.fatal) {
         dfsFatalHit = true;
         dfsFatalReason = `${result.error_code || ''} ${result.error || ''}`.trim() || 'DFS fatal status';
