@@ -80,10 +80,11 @@ Per-element shape stored in JSONB array:
 
 Domains stored bare (no scheme).
 
-### Write paths (both required)
+### Write paths (all required)
 
 1. **refresh-core** — `buildKeywordRows()` in `lib/keyword-ranking/refresh-core.js` (cron + ad-hoc refresh via `saveKeywordBatch`)
 2. **Dashboard incremental** — `saveRankingAiDataIncremental()` in `audit-dashboard.html` → `api/supabase/save-keyword-batch.js`
+3. **Full audit save** — `api/supabase/save-audit.js` keyword row mapper (must include `serp_surface_stack` or full saves drop the column)
 
 Stack originates in `api/aigeo/serp-rank-test.js` (`buildSerpSurfaceStack(items)` per keyword).
 
