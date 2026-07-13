@@ -478,6 +478,11 @@ export default async function handler(req, res) {
               kp_ours: row.kp_ours === true,
               featured_snippet_ours: row.featured_snippet_ours === true,
               paa_ours: row.paa_ours === true,
+              serp_surface_stack: Array.isArray(row.serp_surface_stack)
+                ? row.serp_surface_stack
+                : (typeof row.serp_surface_stack === 'string'
+                  ? (() => { try { const parsed = JSON.parse(row.serp_surface_stack); return Array.isArray(parsed) ? parsed : null; } catch { return null; } })()
+                  : null),
               best_rank_group: row.best_rank_group,
               best_rank_absolute: row.best_rank_absolute,
               best_url: row.best_url,
