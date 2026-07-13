@@ -8,6 +8,7 @@ const checks = [
   ['render', 'function renderSurfaceOwnershipCensus'],
   ['filt', 'rankingFiltersAreActive()'],
   ['bannerHide', 'total > 0 && rankingFiltersAreActive()'],
+  ['bannerActive', 'classList.add(\'is-active\')'],
   ['bannerEarly', 'Sync pills + filter banner immediately'],
   ['rank', 'Rank → surface conversion'],
   ['aio', 'AI Overview citations (one surface of five)'],
