@@ -17,6 +17,8 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  // Never serve a stale audit envelope from CDN/browser cache after a new baseline.
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
   
   // Handle preflight
   if (req.method === 'OPTIONS') {
@@ -107,9 +109,12 @@ export default async function handler(req, res) {
     try {
       // Prefer latest *complete* audit (schema_pages_detail present) to avoid
       // treating "refresh/partial" rows as a full audit run.
-      // If preferRecent is true, skip schema detail filtering and return the most recent row.
+      // If preferRecent is true, skip schema detail filtering and return the
+      // latest calendar audit_date (NOT updated_at — an older day can be
+      // touched after today's baseline and would otherwise win).
       const buildQueryUrl = (candidateUrl, includeSchemaDetailFilter) => {
-        const orderCol = preferRecentAudits ? 'updated_at.desc' : 'audit_date.desc';
+        // Primary sort is always audit_date. updated_at is a tie-breaker only.
+        const orderCol = 'audit_date.desc,updated_at.desc';
         const base = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(candidateUrl)}&order=${orderCol}&limit=1`;
         // requireGsc: latest row that actually has GSC payload (skips ranking_ai_only stubs).
         // Otherwise: complete audits only, unless includePartial=true.
@@ -354,41 +359,11 @@ export default async function handler(req, res) {
         console.log(`[get-latest-audit] Query with audit_date=${auditDate} failed: ${keywordRankingsResponse.status} - ${errorText}`);
       }
       
-      // If no rows found with the audit_date from audit_results, try to get the most recent data
+      // Do NOT fall back to another audit_date's keyword_rankings.
+      // Mixing dates caused hero/dials from day N with rows from day N-1
+      // (2026-07-13 baseline showed yesterday's pack/PAA fingerprints).
       if (!keywordRows || keywordRows.length === 0) {
-        console.log(`[get-latest-audit] No rows found for audit_date=${auditDate}, trying to fetch most recent data...`);
-        keywordRankingsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(resolvedPropertyUrl)}&select=*&order=audit_date.desc,keyword.asc&limit=1000`;
-        keywordRankingsResponse = await fetch(keywordRankingsUrl, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': supabaseKey,
-            'Authorization': `Bearer ${supabaseKey}`
-          }
-        });
-        
-        if (keywordRankingsResponse.ok) {
-          const allRows = await keywordRankingsResponse.json();
-          if (allRows && allRows.length > 0) {
-            // Group by audit_date and get the most recent
-            const rowsByDate = {};
-            allRows.forEach(row => {
-              if (!rowsByDate[row.audit_date]) {
-                rowsByDate[row.audit_date] = [];
-              }
-              rowsByDate[row.audit_date].push(row);
-            });
-            const dates = Object.keys(rowsByDate).sort().reverse();
-            if (dates.length > 0) {
-              keywordRows = rowsByDate[dates[0]];
-              rankingDataAuditDate = dates[0]; // Store the actual audit_date of the ranking data
-              console.log(`[get-latest-audit] Found ${keywordRows.length} keyword rows for most recent audit_date=${rankingDataAuditDate}`);
-              if (rankingDataAuditDate !== auditDate) {
-                console.log(`[get-latest-audit] Ranking data is from older audit (${rankingDataAuditDate}) than latest audit (${auditDate})`);
-              }
-            }
-          }
-        }
+        console.log(`[get-latest-audit] No keyword_rankings for audit_date=${auditDate}; leaving rankingAiData empty (no cross-date fallback).`);
       }
         
         if (keywordRows && keywordRows.length > 0) {
