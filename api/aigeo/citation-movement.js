@@ -31,6 +31,7 @@ const SNAPSHOT_COLS = [
   'kp_ours',
   'best_rank_group',
   'serp_surface_stack',
+  'search_volume',
   'best_url',
   'updated_at',
 ].join(', ');
