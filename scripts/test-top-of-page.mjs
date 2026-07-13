@@ -69,7 +69,7 @@ assertEq(Math.round(organicMultiplier(4) * 100), 75, 'org norm 4');
   assertEq(s.best_surface, 'knowledge_panel', 'kp surface');
 }
 
-// Best single appearance + breadth cap
+// Best single appearance + breadth cap (per owned TYPE, not appearance)
 {
   const row = {
     keyword: 'photography lessons near me',
@@ -82,9 +82,32 @@ assertEq(Math.round(organicMultiplier(4) * 100), 75, 'org norm 4');
     ],
   };
   const s = computeKeywordTopOfPageScore(row);
-  // best: pack slot2 75*1.0=75; organic 55*0.75=41.25; paa 40*0.6=24
-  assertEq(s.score, 85, 'best 75 + breadth 10 (2 extra owned)');
+  // best: pack slot2 75*1.0=75; types {local_pack, organic, people_also_ask} → +10
+  assertEq(s.score, 85, 'best 75 + breadth 10 (2 extra owned types)');
   assertEq(s.best_surface, 'local_pack', 'best is pack');
+  assertEq(s.components.breadth_bonus, 10, 'breadth 10');
+  assertEq(s.components.owned_surface_types.join(','), 'local_pack,organic,people_also_ask', 'owned types');
+}
+
+// Multiple owned blocks of same type count once for breadth
+{
+  const row = {
+    keyword: 'photography lessons near me',
+    keyword_class: 'local-money',
+    serp_surface_stack: [
+      { slot: 1, type: 'ai_overview', ours: false, our_position: null },
+      { slot: 2, type: 'images', ours: null, our_position: null },
+      { slot: 3, type: 'local_pack', ours: true, our_position: 1 },
+      { slot: 4, type: 'organic', ours: true, our_position: 3 },
+      { slot: 5, type: 'organic', ours: true, our_position: 10 },
+      { slot: 6, type: 'organic', ours: true, our_position: 25 },
+    ],
+  };
+  const s = computeKeywordTopOfPageScore(row);
+  // best: pack slot3 55*1.0=55; types {local_pack, organic} → +5 (not +10)
+  assertEq(s.score, 60, 'pack 55 + type breadth 5');
+  assertEq(s.components.breadth_bonus, 5, 'breadth 5 one extra type');
+  assertEq(s.components.owned_surface_types.join(','), 'local_pack,organic', 'deduped organic');
 }
 
 // Exclusion: unserved surfaces not penalised (score from what is served)
