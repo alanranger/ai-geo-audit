@@ -1,23 +1,39 @@
 // /api/aigeo/citation-movement.js
 //
-// Returns three AI-citation snapshots from keyword_rankings so the dashboard
-// can render "what we gained / lost since the last audit" and "vs 7 days ago":
+// Returns three keyword_rankings snapshots so the dashboard can render
+// surface-ownership movement (and AI citation URL detail) vs last audit / ~7 days:
 //
 //   1. current     — the most recent audit_date (or a caller-supplied date)
 //   2. last_audit  — the previous audit_date with real ranking data
 //   3. seven_days  — the audit_date closest to (current - 7 days) with real data
 //
-// Each snapshot is a minimal list of rows — keyword + ai_alan_citations + has_ai_overview
-// — so the client can compute keyword-level, URL-level, and money-URL-level
-// deltas using the same classifyPortfolioSegmentFromUrl() it already uses for
-// every other pillar tile. Keeping classification client-side keeps the new
-// tile perfectly consistent with the existing ones.
+// Snapshot rows include flat surface flags + serp_surface_stack so the client
+// can diff Google's AI answer / Map / PAA / Answer box / Blue links / KP
+// ownership, while still computing citation URL deltas client-side.
 
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
 
-const SNAPSHOT_COLS = 'keyword, ai_alan_citations, ai_alan_citations_count, has_ai_overview, best_url, updated_at';
+const SNAPSHOT_COLS = [
+  'keyword',
+  'ai_alan_citations',
+  'ai_alan_citations_count',
+  'has_ai_overview',
+  'ai_overview_present_any',
+  'local_pack_position',
+  'local_pack_present_any',
+  'paa_ours',
+  'paa_present_any',
+  'featured_snippet_ours',
+  'featured_snippet_present_any',
+  'kp_present',
+  'kp_ours',
+  'best_rank_group',
+  'serp_surface_stack',
+  'best_url',
+  'updated_at',
+].join(', ');
 
 function need(key) {
   const v = process.env[key];
@@ -45,16 +61,14 @@ function isoDateMinusDays(base, days) {
 }
 
 /**
- * Return the single most-recent audit_date that has at least one row with
- * AI-overview data (has_ai_overview=true OR ai_alan_citations_count IS NOT NULL).
- * Used to pick a baseline that is not an empty placeholder run.
+ * Most-recent audit_date that has real ranking rows (rank or surface presence).
  */
 async function findMostRecentAuditDate(supabase, propertyUrl, beforeDate) {
   let q = supabase
     .from('keyword_rankings')
     .select('audit_date')
     .eq('property_url', propertyUrl)
-    .eq('has_ai_overview', true)
+    .or('best_rank_group.not.is.null,has_ai_overview.eq.true,local_pack_present_any.eq.true')
     .order('audit_date', { ascending: false })
     .limit(1);
   if (beforeDate) q = q.lt('audit_date', beforeDate);
@@ -63,24 +77,19 @@ async function findMostRecentAuditDate(supabase, propertyUrl, beforeDate) {
   return data?.length ? data[0].audit_date : null;
 }
 
-/**
- * Return the audit_date closest to (currentDate - 7 days) that has real data.
- * Prefers the closest match either side (ties broken toward the older date so
- * the delta always spans at least 7 days).
- */
 async function findSevenDayBaseline(supabase, propertyUrl, currentDate) {
   const target = isoDateMinusDays(currentDate, 7);
   const { data, error } = await supabase
     .from('keyword_rankings')
     .select('audit_date')
     .eq('property_url', propertyUrl)
-    .eq('has_ai_overview', true)
+    .or('best_rank_group.not.is.null,has_ai_overview.eq.true,local_pack_present_any.eq.true')
     .lt('audit_date', currentDate)
     .order('audit_date', { ascending: false })
     .limit(50);
   if (error) throw error;
   if (!data || data.length === 0) return null;
-  const uniqueDates = [...new Set(data.map(r => r.audit_date))];
+  const uniqueDates = [...new Set(data.map((r) => r.audit_date))];
   let best = uniqueDates[0];
   let bestGap = Math.abs(daysBetween(target, best));
   for (const d of uniqueDates) {
@@ -104,17 +113,11 @@ async function loadSnapshot(supabase, propertyUrl, auditDate) {
   if (error) throw error;
   return {
     audit_date: auditDate,
-    rows: Array.isArray(data) ? data : []
+    rows: Array.isArray(data) ? data : [],
   };
 }
 
 async function resolveDates(supabase, propertyUrl, query) {
-  // 2026-04-22: always resolve the server-side most recent audit date first.
-  // If the caller passes currentDate AND it equals-or-exceeds the server's
-  // latest, honour it (explicit opt-in to a specific audit, e.g. historical
-  // comparison). Otherwise auto-bump to the latest so stale client-side
-  // localStorage can't force the comparison onto an old audit and hide the
-  // most recent gains/losses.
   const latestOnServer = await findMostRecentAuditDate(supabase, propertyUrl, null);
   const clientCurrent = query.currentDate ? String(query.currentDate).slice(0, 10) : null;
   let current = latestOnServer;
@@ -157,15 +160,15 @@ export default async function handler(req, res) {
           current: null,
           last_audit: null,
           seven_days: null,
-          note: 'No keyword_rankings rows found for this property'
-        }
+          note: 'No keyword_rankings rows found for this property',
+        },
       });
     }
 
     const [current, lastAudit, sevenDays] = await Promise.all([
       loadSnapshot(supabase, propertyUrl, dates.current),
       loadSnapshot(supabase, propertyUrl, dates.last_audit),
-      loadSnapshot(supabase, propertyUrl, dates.seven_days)
+      loadSnapshot(supabase, propertyUrl, dates.seven_days),
     ]);
 
     return sendJson(res, 200, {
@@ -177,10 +180,10 @@ export default async function handler(req, res) {
         seven_days: sevenDays,
         meta: {
           generated_at: new Date().toISOString(),
-          days_since_last_audit: lastAudit ? daysBetween(dates.current, lastAudit) : null,
-          days_since_seven_day_baseline: sevenDays ? daysBetween(dates.current, sevenDays) : null
-        }
-      }
+          days_since_last_audit: lastAudit ? daysBetween(dates.current, lastAudit.audit_date || dates.last_audit) : null,
+          days_since_seven_day_baseline: sevenDays ? daysBetween(dates.current, sevenDays.audit_date || dates.seven_days) : null,
+        },
+      },
     });
   } catch (err) {
     console.error('[citation-movement] Error:', err);
