@@ -7,6 +7,8 @@ const checks = [
   ['conv', 'function computeRankToSurfaceConversion'],
   ['render', 'function renderSurfaceOwnershipCensus'],
   ['filt', 'rankingFiltersAreActive()'],
+  ['bannerHide', 'total > 0 && rankingFiltersAreActive()'],
+  ['bannerEarly', 'Sync pills + filter banner immediately'],
   ['rank', 'Rank → surface conversion'],
   ['aio', 'AI Overview citations (one surface of five)'],
   ['hide', 'Merged into Surface ownership census'],
