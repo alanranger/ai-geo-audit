@@ -33,6 +33,8 @@ const SNAPSHOT_COLS = [
   'serp_surface_stack',
   'search_volume',
   'best_url',
+  'keyword_class',
+  'ai_engines',
   'updated_at',
 ].join(', ');
 
