@@ -30,6 +30,34 @@ function num(x) {
   return Number.isFinite(n) ? n : null;
 }
 
+async function fetchDomainStrengthDomainRows(supabaseUrl, supabaseKey, domains) {
+  const rows = [];
+  const unique = [...new Set(domains.map(normalizeDomain).filter(Boolean))];
+  if (!unique.length) return rows;
+
+  const chunkSize = 100;
+  for (let i = 0; i < unique.length; i += chunkSize) {
+    const chunk = unique.slice(i, i + chunkSize);
+    const inList = `(${chunk.map((d) => `"${d}"`).join(",")})`;
+    const url =
+      `${supabaseUrl}/rest/v1/domain_strength_domains` +
+      `?domain=in.${encodeURIComponent(inList)}` +
+      `&select=domain,label,domain_type,segment,is_competitor`;
+    const resp = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
+    });
+    if (!resp.ok) continue;
+    const chunkRows = await resp.json();
+    if (Array.isArray(chunkRows)) rows.push(...chunkRows);
+  }
+  return rows;
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -52,6 +80,66 @@ export default async function handler(req, res) {
       status: "error",
       message: "Supabase not configured. Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.",
       meta: { generatedAt: new Date().toISOString() },
+    });
+  }
+
+  const domainsParam = typeof req.query?.domains === "string" ? req.query.domains : "";
+  if (domainsParam) {
+    const requested = domainsParam.split(",").map(normalizeDomain).filter(Boolean);
+    const unique = [...new Set(requested)];
+    const primaryDomain = normalizeDomain(
+      process.env.NEXT_PUBLIC_SITE_DOMAIN || process.env.SITE_DOMAIN || "alanranger.com"
+    );
+    const metaByDomain = new Map();
+    try {
+      const dsRows = await fetchDomainStrengthDomainRows(supabaseUrl, supabaseKey, unique);
+      for (const c of dsRows) {
+        const d = normalizeDomain(c?.domain);
+        if (!d) continue;
+        const domainType = c.domain_type || c.segment || "unmapped";
+        metaByDomain.set(d, {
+          label: c.label || d,
+          domain_type: domainType,
+          segment: domainType,
+          isCompetitor: c.is_competitor === true,
+        });
+      }
+    } catch {
+      // ignore — return defaults for requested domains
+    }
+
+    const items = unique.map((domain) => {
+      const meta =
+        metaByDomain.get(domain) ??
+        (domain === primaryDomain
+          ? {
+              label: "Alan Ranger Photography",
+              domain_type: "your_site",
+              segment: "your_site",
+              isCompetitor: false,
+            }
+          : {
+              label: domain,
+              domain_type: "unmapped",
+              segment: "unmapped",
+              isCompetitor: false,
+            });
+      return {
+        domain,
+        searchEngine: "google",
+        label: meta.label,
+        domain_type: meta.domain_type || meta.segment || "unmapped",
+        segment: meta.segment || meta.domain_type || "unmapped",
+        isCompetitor: meta.isCompetitor || false,
+        latest: null,
+        trend: { points: [], deltaLatest: null },
+      };
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      items,
+      meta: { generatedAt: new Date().toISOString(), source: "domain_strength_domains" },
     });
   }
 
@@ -119,43 +207,19 @@ export default async function handler(req, res) {
   
   // Also fetch from domain_strength_domains (new mapping table)
   try {
-    const uniqueDomainsInSnapshots = [...new Set(rows.map(r => normalizeDomain(r.domain)).filter(Boolean))];
-    if (uniqueDomainsInSnapshots.length > 0) {
-      const chunkSize = 100;
-      for (let i = 0; i < uniqueDomainsInSnapshots.length; i += chunkSize) {
-        const chunk = uniqueDomainsInSnapshots.slice(i, i + chunkSize);
-        const inList = `(${chunk.map(d => `"${d}"`).join(',')})`;
-        const domainStrengthUrl =
-          `${supabaseUrl}/rest/v1/domain_strength_domains` +
-          `?domain=in.${encodeURIComponent(inList)}` +
-          `&select=domain,label,domain_type,segment,is_competitor`;
-        const dsResp = await fetch(domainStrengthUrl, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            apikey: supabaseKey,
-            Authorization: `Bearer ${supabaseKey}`,
-          },
+    const uniqueDomainsInSnapshots = [...new Set(rows.map((r) => normalizeDomain(r.domain)).filter(Boolean))];
+    const dsRows = await fetchDomainStrengthDomainRows(supabaseUrl, supabaseKey, uniqueDomainsInSnapshots);
+    for (const c of dsRows) {
+      const d = normalizeDomain(c.domain);
+      if (!d) continue;
+      if (!competitorMeta.has(d)) {
+        const domainType = c.domain_type || c.segment || "unmapped";
+        competitorMeta.set(d, {
+          label: c.label || d,
+          domain_type: domainType,
+          segment: domainType,
+          isCompetitor: c.is_competitor === true,
         });
-        if (dsResp.ok) {
-          const dsRows = await dsResp.json();
-          if (Array.isArray(dsRows)) {
-            dsRows.forEach((c) => {
-              const d = normalizeDomain(c.domain);
-              if (!d) return;
-              // Only add if not already in competitorMeta (competitor_domains takes precedence)
-              if (!competitorMeta.has(d)) {
-                const domainType = c.domain_type || c.segment || 'unmapped';
-                competitorMeta.set(d, {
-                  label: c.label || d,
-                  domain_type: domainType,
-                  segment: domainType, // Backward compatibility
-                  isCompetitor: c.is_competitor === true,
-                });
-              }
-            });
-          }
-        }
       }
     }
   } catch {
