@@ -49,3 +49,44 @@ Still derived from `result.item_types` includes: `local_pack`, `featured_snippet
 ## Cost
 
 Zero extra DFS calls — parse fields already returned in Live Advanced.
+
+## serp_surface_stack → `keyword_rankings.serp_surface_stack` (Release 0, schema_version 3)
+
+Ordered vertical SERP anatomy built by `lib/keyword-ranking/serp-surface-stack.js` from the same `result.items[]` payload. No extra DFS cost.
+
+| Path | Notes |
+|------|--------|
+| `result.items[]` sorted by `rank_absolute` ascending | Vertical served order |
+| Consecutive `type === "organic"` | Collapse to one `organic` slot; `our_position` = Alan's best `rank_group` in block |
+| Consecutive `type === "local_pack"` siblings | Collapse to one `local_pack` slot at first pack item's position |
+| `type === "knowledge_graph"` / `knowledge_panel` | **Not** in vertical slots — appended as `{ slot: null, type: "knowledge_panel", ours }` |
+| All other DFS types (`video`, `images`, `ai_overview`, etc.) | One slot each, `type` verbatim |
+
+Per-element shape stored in JSONB array:
+
+```json
+{ "slot": 1, "type": "local_pack", "ours": true, "our_position": 1, "owners": [...] }
+```
+
+### Owner capture (`owners` field, same collection pass)
+
+| Surface | `owners` shape |
+|---------|----------------|
+| `local_pack` | Top 3: `[{ name, position, ours }]` |
+| `featured_snippet` | Owner domain string in array |
+| `people_also_ask` | First 6 answer-owner domains |
+| `ai_overview` | Cited domains (from `lib/ai-citation-extract.js`) |
+| `organic` | Top 3 domains `[{ domain, position, ours }]` |
+
+Domains stored bare (no scheme).
+
+### Write paths (both required)
+
+1. **refresh-core** — `buildKeywordRows()` in `lib/keyword-ranking/refresh-core.js` (cron + ad-hoc refresh via `saveKeywordBatch`)
+2. **Dashboard incremental** — `saveRankingAiDataIncremental()` in `audit-dashboard.html` → `api/supabase/save-keyword-batch.js`
+
+Stack originates in `api/aigeo/serp-rank-test.js` (`buildSerpSurfaceStack(items)` per keyword).
+
+### Top-of-Page scoring
+
+`lib/audit/topOfPage.js` — schema_version 3. Slot decay by served order; within-surface ownership multipliers. Output nested in `ranking_ai_pillar_scores.topOfPage` at audit save. `surfaceVisibility` (v2) unchanged.

@@ -23,6 +23,8 @@ import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-loca
 import { extractSerpSurfaces } from '../../lib/keyword-ranking/serp-surface-extract.js';
 import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
 import { computeKeywordSurfaceScore } from '../../lib/audit/surfaceScores.js';
+import { computeKeywordTopOfPageScore } from '../../lib/audit/topOfPage.js';
+import { buildSerpSurfaceStack } from '../../lib/keyword-ranking/serp-surface-stack.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -356,6 +358,7 @@ function buildEmptySerpResult(keyword, depth, errorMessage, errorCode, locationN
     keyword_class: classInfo.keyword_class,
     class_unmapped: classInfo.class_unmapped,
     ai_overview_citations: null,
+    serp_surface_stack: [],
     serp_depth: depth,
     error: errorMessage || "DataForSEO request failed",
     error_code: errorCode ?? null,
@@ -465,6 +468,8 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
     // Phase 1: extract Google AI Overview citations from the same response.
     const aiOverviewCitations = extractCitationsFromDfsResult(result);
 
+    const serpSurfaceStack = buildSerpSurfaceStack(items, targetRoot);
+
     const serpResult = {
       keyword,
       location_name: locationName,
@@ -488,6 +493,7 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
       class_unmapped: classInfo.class_unmapped,
       // Phase 1: Google AI Overview citation slot (engine = google_aio)
       ai_overview_citations: aiOverviewCitations,
+      serp_surface_stack: serpSurfaceStack,
       serp_depth: depth,
     };
     // Release 2: attach Surface Visibility for single-keyword verification
@@ -498,6 +504,18 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
           google_aio: aiOverviewCitations || { alan_citations_count: 0 },
         },
       });
+    } catch (_e) {
+      /* non-fatal */
+    }
+    // Release 0 v3: Top-of-Page score for single-keyword verification
+    try {
+      const top = computeKeywordTopOfPageScore(serpResult);
+      serpResult.top_of_page = {
+        score: top.score,
+        best_surface: top.best_surface,
+        best_slot: top.best_slot,
+        components: top.components,
+      };
     } catch (_e) {
       /* non-fatal */
     }
