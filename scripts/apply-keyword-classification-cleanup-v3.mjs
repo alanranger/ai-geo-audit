@@ -61,8 +61,14 @@ async function main() {
   );
   console.log(`✓ Loaded ${rows.length} rows for ${latestDate}`);
 
-  const tracked = filterTrackedKeywords(rows.map((r) => r.keyword));
-  console.log(`✓ Tracked set: ${tracked.length} keywords (removed: ${REMOVED_FROM_TRACKING_EXACT.join(', ')})`);
+  const keywordsPath = join(root, '../alan-shared-resources/csv/Keywords.csv');
+  const targetKeywords = readFileSync(keywordsPath, 'utf8')
+    .trim()
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const tracked = filterTrackedKeywords(targetKeywords);
+  console.log(`✓ Target set from Keywords.csv: ${tracked.length} keywords (removed: ${REMOVED_FROM_TRACKING_EXACT.join(', ')})`);
 
   let segmentUpdates = 0;
   let classUpdates = 0;
