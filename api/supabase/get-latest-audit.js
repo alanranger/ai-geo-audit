@@ -6,6 +6,7 @@
  */
 
 import { filterTrackedRows, filterTrackedKeywords } from '../../lib/keyword-ranking/tracked-set-v3.js';
+import { coalesceSearchVolume } from '../../lib/keyword-ranking/ke-search-volumes.js';
 
 /** When capping query-page rows, keep highest-traffic rows so per-URL GSC totals stay representative. */
 function truncateQueryPagesByTraffic(rows, maxItems) {
@@ -489,7 +490,7 @@ export default async function handler(req, res) {
               best_rank_absolute: row.best_rank_absolute,
               best_url: row.best_url,
               best_title: row.best_title,
-              search_volume: row.search_volume,
+              search_volume: coalesceSearchVolume(row.keyword, row.search_volume),
               has_ai_overview: row.has_ai_overview || false,
               ai_total_citations: row.ai_total_citations || 0,
               ai_alan_citations_count: row.ai_alan_citations_count || 0,
