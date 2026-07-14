@@ -13,6 +13,8 @@ const outPublic = join(root, 'public/keyword-tracking-locations-LOCKED.json');
 const outPublicClass = join(root, 'public/keyword-tracking-class-LOCKED.json');
 const outPublicClassJs = join(root, 'public/keyword-tracking-class-LOCKED.js');
 const outRoot = join(root, 'keyword-tracking-locations-LOCKED.json');
+const outRootClass = join(root, 'keyword-tracking-class-LOCKED.json');
+const outRootClassJs = join(root, 'keyword-tracking-class-LOCKED.js');
 
 mkdirSync(configDir, { recursive: true });
 copyFileSync(driveCsv, configCsv);
@@ -83,6 +85,7 @@ writeFileSync(outClassJson, JSON.stringify(classPayload, null, 2) + '\n');
 writeFileSync(outPublic, JSON.stringify(locPayload, null, 2) + '\n');
 writeFileSync(outPublicClass, JSON.stringify(classPayload, null, 2) + '\n');
 writeFileSync(outRoot, JSON.stringify(locPayload, null, 2) + '\n');
+writeFileSync(outRootClass, JSON.stringify(classPayload, null, 2) + '\n');
 
 const classByKeyword = {};
 for (const [k, row] of Object.entries(byClass)) {
@@ -93,6 +96,7 @@ const classJs =
   JSON.stringify(classByKeyword) +
   ';\n';
 writeFileSync(outPublicClassJs, classJs);
+writeFileSync(outRootClassJs, classJs);
 
 const classes = {};
 for (const row of Object.values(byClass)) {
