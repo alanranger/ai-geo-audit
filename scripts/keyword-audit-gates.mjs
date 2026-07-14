@@ -220,11 +220,37 @@ async function runPostflight() {
     (census.education || 0) === 0;
   check('4 class census local57/national39/brand2/education0', censusOk, JSON.stringify(census));
 
-  check(
-    '5 tab-1 panels (hero/dials/capture) — code fixed; live UI still verify',
-    true,
-    'live-stack ToP preference + capture returns 0 not blank when rows exist'
-  );
+  // Gate 5: live get-latest-audit must return rankingAiData with sane ToP (not null/zeros).
+  // Hardcoded "code fixed" PASS is forbidden — probe production.
+  let gate5Ok = false;
+  let gate5Detail = 'UNVERIFIED — live probe failed';
+  try {
+    const url =
+      `${BASE}/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(PROPERTY)}` +
+      '&includePartial=true&preferRecent=true';
+    const live = await (await fetch(url, { cache: 'no-store' })).json();
+    const ra = live?.data?.rankingAiData;
+    const rows = Array.isArray(ra?.combinedRows) ? ra.combinedRows : [];
+    const top = ra?.summary?.pillarScores?.topOfPage;
+    const by = top?.byClass || {};
+    const localN = by['local-money']?.count ?? 0;
+    const natN = by['national-money']?.count ?? 0;
+    const brandN = by.brand?.count ?? 0;
+    const overall = Number(top?.overall) || 0;
+    gate5Ok =
+      !!ra &&
+      rows.length === 98 &&
+      overall >= 30 &&
+      localN === 57 &&
+      natN === 39 &&
+      brandN === 2;
+    gate5Detail = gate5Ok
+      ? `live rankingAiData rows=${rows.length} overall=${overall} local=${by['local-money']?.score}/${localN} national=${by['national-money']?.score}/${natN} brand=${by.brand?.score}/${brandN}`
+      : `UNVERIFIED/FAIL — rankingAiData=${ra ? 'present' : 'null'} rows=${rows.length} overall=${overall} counts=${localN}/${natN}/${brandN}`;
+  } catch (e) {
+    gate5Detail = `UNVERIFIED — ${e.message}`;
+  }
+  check('5 tab-1 panels (hero/dials via live get-latest-audit)', gate5Ok, gate5Detail);
   check('6 deltas use tracked-set intersection', true, 'TRACKED_SET_CHANGE_DATE + filterTrackedRankingRows');
 }
 
