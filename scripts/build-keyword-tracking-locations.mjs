@@ -4,9 +4,9 @@ import { fileURLToPath } from 'url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const driveCsv =
-  'C:/Users/alan/Google Drive/Claude shared resources/07 Data & Exports/keyword-tracking-locations-and-class-LOCKED-v2.csv';
+  'C:/Users/alan/Google Drive/Claude shared resources/07 Data & Exports/keyword-tracking-locations-and-class-LOCKED-v3.csv';
 const configDir = join(root, 'config');
-const configCsv = join(configDir, 'keyword-tracking-locations-and-class-LOCKED-v2.csv');
+const configCsv = join(configDir, 'keyword-tracking-locations-and-class-LOCKED-v3.csv');
 const outJson = join(root, 'lib/keyword-ranking/keyword-tracking-locations-LOCKED.json');
 const outClassJson = join(root, 'lib/keyword-ranking/keyword-tracking-class-LOCKED.json');
 const outPublic = join(root, 'public/keyword-tracking-locations-LOCKED.json');
@@ -64,14 +64,14 @@ for (const line of lines.slice(1)) {
 }
 
 const locPayload = {
-  source: 'keyword-tracking-locations-and-class-LOCKED-v2.csv',
-  locked_at: '2026-07-12',
+  source: 'keyword-tracking-locations-and-class-LOCKED-v3.csv',
+  locked_at: '2026-07-14',
   count: Object.keys(byKeyword).length,
   by_keyword: byKeyword,
 };
 const classPayload = {
-  source: 'keyword-tracking-locations-and-class-LOCKED-v2.csv',
-  locked_at: '2026-07-12',
+  source: 'keyword-tracking-locations-and-class-LOCKED-v3.csv',
+  locked_at: '2026-07-14',
   count: Object.keys(byClass).length,
   by_keyword: byClass,
 };

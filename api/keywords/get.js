@@ -11,6 +11,7 @@
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { filterTrackedKeywords, filterTrackedRows } from '../../lib/keyword-ranking/tracked-set-v3.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
@@ -33,11 +34,11 @@ function resolvePropertyUrl() {
 }
 
 function dedupeSortKeywords(keywords) {
-  return [...new Set(
+  return filterTrackedKeywords([...new Set(
     (keywords || [])
       .map((kw) => String(kw || '').trim())
       .filter((kw) => kw.length > 0)
-  )].sort((a, b) => a.localeCompare(b));
+  )]).sort((a, b) => a.localeCompare(b));
 }
 
 async function sbFetch(url, supabaseKey, timeoutMs = 8000) {

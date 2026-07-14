@@ -5,6 +5,8 @@
  * Body: { keywords: string[] }
  */
 
+import { filterTrackedKeywords } from '../../lib/keyword-ranking/tracked-set-v3.js';
+
 // Increase timeout for large keyword lists (Vercel Pro: 60s, Hobby: 10s)
 export const config = {
   maxDuration: 30, // 30 seconds should be enough for keyword updates
@@ -133,41 +135,18 @@ export default async function handler(req, res) {
       ? (await existingKeywordsResp.json()).map(r => r.keyword).filter(Boolean)
       : [];
 
-    // Normalize new keywords
-    const newKeywords = keywords
-      .map(k => String(k).trim())
-      .filter(k => k.length > 0);
+    // Normalize new keywords (apply v3 tracked-set removals)
+    const newKeywords = filterTrackedKeywords(
+      keywords.map(k => String(k).trim()).filter(k => k.length > 0)
+    );
 
     // Find keywords to add and remove
     const keywordsToAdd = newKeywords.filter(k => !existingKeywords.includes(k));
     const keywordsToRemove = existingKeywords.filter(k => !newKeywords.includes(k));
 
-    console.log(`[Save Keywords] Adding ${keywordsToAdd.length} keywords, removing ${keywordsToRemove.length} keywords`);
+    console.log(`[Save Keywords] Adding ${keywordsToAdd.length} keywords (${keywordsToRemove.length} removed from tracked set; historical rows retained)`);
 
-    // Delete removed keywords from keyword_rankings table (batch delete)
-    if (keywordsToRemove.length > 0) {
-      // Delete in batches to avoid timeout
-      const batchSize = 50;
-      for (let i = 0; i < keywordsToRemove.length; i += batchSize) {
-        const batch = keywordsToRemove.slice(i, i + batchSize);
-        const deleteUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${auditDate}&keyword=in.(${batch.map(k => `"${k.replace(/"/g, '""')}"`).join(',')})`;
-        
-        const deleteResp = await fetch(deleteUrl, {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-            apikey: supabaseKey,
-            Authorization: `Bearer ${supabaseKey}`,
-          },
-        });
-
-        if (!deleteResp.ok) {
-          console.warn(`[Save Keywords] Failed to delete batch ${i / batchSize + 1}: ${deleteResp.status}`);
-        }
-      }
-    }
-
-    // Add new keywords to keyword_rankings table (batch insert)
+    // Historical keyword_rankings rows are retained — only targetKeywords config changes.
     if (keywordsToAdd.length > 0) {
       // Get existing row data to preserve structure
       const existingRowsMap = new Map();

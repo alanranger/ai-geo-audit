@@ -5,6 +5,8 @@
  * Used to restore dashboard state after page refresh when localStorage is cleared.
  */
 
+import { filterTrackedRows, filterTrackedKeywords } from '../../lib/keyword-ranking/tracked-set-v3.js';
+
 /** When capping query-page rows, keep highest-traffic rows so per-URL GSC totals stay representative. */
 function truncateQueryPagesByTraffic(rows, maxItems) {
   if (!Array.isArray(rows) || rows.length <= maxItems) return rows;
@@ -507,22 +509,24 @@ export default async function handler(req, res) {
             };
           });
 
-          // Calculate summary from combinedRows
-          const totalKeywords = combinedRows.length;
-          const keywordsWithRank = combinedRows.filter(r => r.best_rank_group != null && r.best_rank_group > 0).length;
-          const top10 = combinedRows.filter(r => r.best_rank_group != null && r.best_rank_group <= 10).length;
-          const top3 = combinedRows.filter(r => r.best_rank_group != null && r.best_rank_group <= 3).length;
-          const keywordsWithAiOverview = combinedRows.filter(r => r.has_ai_overview === true).length;
-          const keywordsWithAiCitations = combinedRows.filter(r => r.ai_alan_citations_count > 0).length;
+          const trackedRows = filterTrackedRows(combinedRows);
+
+          // Calculate summary from trackedRows (v3 set — excludes removed keywords)
+          const totalKeywords = trackedRows.length;
+          const keywordsWithRank = trackedRows.filter(r => r.best_rank_group != null && r.best_rank_group > 0).length;
+          const top10 = trackedRows.filter(r => r.best_rank_group != null && r.best_rank_group <= 10).length;
+          const top3 = trackedRows.filter(r => r.best_rank_group != null && r.best_rank_group <= 3).length;
+          const keywordsWithAiOverview = trackedRows.filter(r => r.has_ai_overview === true).length;
+          const keywordsWithAiCitations = trackedRows.filter(r => r.ai_alan_citations_count > 0).length;
           
           // Calculate unweighted average position
-          const validRankingRows = combinedRows.filter(r => r.best_rank_group != null && r.best_rank_group > 0);
+          const validRankingRows = trackedRows.filter(r => r.best_rank_group != null && r.best_rank_group > 0);
           const avgPositionUnweighted = validRankingRows.length > 0
             ? validRankingRows.reduce((sum, r) => sum + r.best_rank_group, 0) / validRankingRows.length
             : null;
 
           // Calculate volume-weighted average position
-          const keywordsWithVolume = combinedRows.filter(r => r.search_volume != null && r.search_volume > 0);
+          const keywordsWithVolume = trackedRows.filter(r => r.search_volume != null && r.search_volume > 0);
           let avgPositionVolumeWeighted = null;
           if (keywordsWithVolume.length > 0) {
             let totalWeightedRank = 0;
@@ -541,7 +545,7 @@ export default async function handler(req, res) {
           }
 
           rankingAiData = {
-            combinedRows,
+            combinedRows: trackedRows,
             summary: {
               total_keywords: totalKeywords,
               keywords_with_rank: keywordsWithRank,
@@ -554,12 +558,13 @@ export default async function handler(req, res) {
               keywords_used_for_avg: validRankingRows.length,
               keywords_with_volume: keywordsWithVolume.length
             },
+            targetKeywords: filterTrackedKeywords(trackedRows.map((r) => r.keyword)),
             // Include the actual audit_date of the ranking data (may differ from latest audit)
             audit_date: rankingDataAuditDate || null,
             // Track the most recent timestamp from keyword_rankings rows
             timestamp: rankingDataTimestamp || null
           };
-          console.log(`[get-latest-audit] Successfully reconstructed rankingAiData with ${combinedRows.length} keywords`);
+          console.log(`[get-latest-audit] Successfully reconstructed rankingAiData with ${trackedRows.length} tracked keywords (${combinedRows.length} raw rows)`);
         } else {
           // No keyword rows found in keyword_rankings table
           console.log(`[get-latest-audit] No keyword rows found in keyword_rankings table`);
