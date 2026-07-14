@@ -413,14 +413,25 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
         console.warn(`[SERP-RANK-TEST] Fatal DFS status ${fatalStatus} on "${keyword}" — short-circuiting remaining keywords.`);
       }
       return Object.assign(
-        buildEmptySerpResult(keyword, depth, data.status_message || "DataForSEO request failed", topStatus || taskStatus || null),
+        buildEmptySerpResult(keyword, depth, data.status_message || "DataForSEO request failed", topStatus || taskStatus || null, locationName),
         fatalStatus ? { fatal: true } : {}
       );
     }
 
     const task = data.tasks?.[0];
+    const taskOk = task?.status_code == null || String(task.status_code).startsWith("200");
     const result = task?.result?.[0];
     const items = result?.items ?? [];
+
+    // DFS sometimes returns top-level 20000 with an empty/missing result payload
+    // (seen especially on Coventry name-only location calls under concurrency).
+    // Treat as a hard miss so callers can retry / refuse to persist.
+    if (!taskOk || !result || !Array.isArray(items) || items.length === 0) {
+      const msg = !taskOk
+        ? (task?.status_message || `DFS task status ${task?.status_code}`)
+        : 'DFS returned empty SERP result';
+      return buildEmptySerpResult(keyword, depth, msg, task?.status_code ?? data.status_code ?? null, locationName);
+    }
 
     // Filter organic items - exact match on type
     const ourOrganic = items.filter((item) => {
@@ -660,11 +671,22 @@ export default async function handler(req, res) {
       const batchPromises = batch.map(async (keyword) => {
         try {
           const loc = resolveLoc(keyword);
-          const result = await fetchSerpForKeyword(keyword, auth, targetRoot, depth, {
+          let result = await fetchSerpForKeyword(keyword, auth, targetRoot, depth, {
             expandAiOverview,
             location_name: loc.location_name,
             location_code: loc.location_code,
           });
+          // One retry on empty/error SERP — Coventry name-only used to flake;
+          // location_code + retry closes the remaining race under batch load.
+          const emptyMiss = result?.error || !Array.isArray(result?.serp_surface_stack) || result.serp_surface_stack.length === 0;
+          if (emptyMiss && !result?.fatal) {
+            console.warn(`[Handler] Empty SERP for "${keyword}" (${result?.error || 'no stack'}) — retrying once`);
+            result = await fetchSerpForKeyword(keyword, auth, targetRoot, depth, {
+              expandAiOverview,
+              location_name: loc.location_name,
+              location_code: loc.location_code,
+            });
+          }
           
           // Merge search volume data using normalized keyword lookup
           const normalizedKw = normalizeKeyword(keyword);
