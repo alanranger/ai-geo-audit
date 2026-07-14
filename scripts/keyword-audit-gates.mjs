@@ -42,11 +42,28 @@ function loadEnv() {
   return env;
 }
 
+/** Headerless keyword list by default. Skip line 1 only if it is an obvious column header. */
+function isObviousHeaderLine(line) {
+  const t = String(line || '').trim().replace(/^\uFEFF/, '').toLowerCase();
+  if (!t) return false;
+  if (t === 'keyword' || t === 'keywords' || t === 'query') return true;
+  // Multi-column header rows (e.g. keyword,tracking_location,class,...)
+  if (t.startsWith('keyword,') || t.startsWith('"keyword"')) return true;
+  return false;
+}
+
 function parseCsvKeywords(text) {
-  const lines = text.trim().split(/\r?\n/).slice(1);
+  const raw = String(text || '').replace(/^\uFEFF/, '');
+  const lines = raw.split(/\r?\n/);
   const out = [];
-  for (const line of lines) {
-    if (!line.trim()) continue;
+  let started = false;
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i].replace(/^\uFEFF/, '').trim();
+    if (!line) continue;
+    if (!started) {
+      started = true;
+      if (isObviousHeaderLine(line)) continue;
+    }
     const m = line.match(/^"([^"]+)"|^([^,]+)/);
     const kw = (m?.[1] || m?.[2] || '').trim();
     if (kw) out.push(kw);
