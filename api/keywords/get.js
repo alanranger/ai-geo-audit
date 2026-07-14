@@ -1,17 +1,18 @@
 /**
  * Get the canonical tracked keyword list for Ranking & AI scans.
  *
- * Source priority:
- *   1. audit_results.ranking_ai_data.targetKeywords (Edit Keywords / CSV upload)
- *   2. Largest keyword_rankings snapshot by row count (not merely latest date)
- *   3. Bundled public/tracked-keywords-fallback.json (when Supabase is down)
+ * Source priority (2026-07-14):
+ *   1. Locked config JSON (keyword-tracking-class-LOCKED / locations) — 98 keywords
+ *   2. Bundled public/tracked-keywords-fallback.json
+ *   3. audit_results.ranking_ai_data.targetKeywords (filtered)
+ *   4. Largest keyword_rankings snapshot (filtered) — last resort only
  *
  * GET /api/keywords/get
  */
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { filterTrackedKeywords, filterTrackedRows } from '../../lib/keyword-ranking/tracked-set-v3.js';
+import { filterTrackedKeywords } from '../../lib/keyword-ranking/tracked-set-v3.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
@@ -49,6 +50,42 @@ async function sbFetch(url, supabaseKey, timeoutMs = 8000) {
   });
 }
 
+function keywordsFromLockedPayload(parsed) {
+  if (Array.isArray(parsed?.keywords)) return dedupeSortKeywords(parsed.keywords);
+  const by = parsed?.by_keyword;
+  if (!by || typeof by !== 'object') return [];
+  const list = Object.entries(by).map(([key, row]) => {
+    if (row && typeof row === 'object' && row.keyword) return String(row.keyword).trim();
+    return String(key || '').trim();
+  });
+  return dedupeSortKeywords(list);
+}
+
+function loadLockedTrackedKeywords() {
+  const candidates = [
+    join(process.cwd(), 'keyword-tracking-class-LOCKED.json'),
+    join(process.cwd(), 'lib/keyword-ranking/keyword-tracking-class-LOCKED.json'),
+    join(process.cwd(), 'public/keyword-tracking-class-LOCKED.json'),
+    join(process.cwd(), 'keyword-tracking-locations-LOCKED.json'),
+    join(process.cwd(), 'lib/keyword-ranking/keyword-tracking-locations-LOCKED.json'),
+  ];
+  for (const filePath of candidates) {
+    try {
+      const parsed = JSON.parse(readFileSync(filePath, 'utf8'));
+      const keywords = keywordsFromLockedPayload(parsed);
+      if (keywords.length) {
+        return {
+          keywords,
+          auditDate: parsed.locked_at || null,
+          source: 'locked_config',
+          filePath,
+        };
+      }
+    } catch (_e) { /* try next */ }
+  }
+  return null;
+}
+
 function loadBundledKeywordsFallback() {
   try {
     const filePath = join(process.cwd(), 'public/tracked-keywords-fallback.json');
@@ -83,8 +120,7 @@ async function loadTargetKeywordsFromAudit(supabaseUrl, supabaseKey, propertyUrl
 }
 
 async function loadLargestKeywordSnapshot(supabaseUrl, supabaseKey, propertyUrl) {
-  // Single round-trip: group keywords by audit_date in memory (avoids 20 sequential queries).
-  const url = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&select=audit_date,keyword&limit=10000`;
+  const url = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&select=audit_date,keyword&order=audit_date.desc&limit=10000`;
   const resp = await sbFetch(url, supabaseKey, 8000);
   if (!resp.ok) return null;
 
@@ -103,9 +139,10 @@ async function loadLargestKeywordSnapshot(supabaseUrl, supabaseKey, propertyUrl)
   let bestDate = null;
   let bestKeywords = [];
   for (const [auditDate, keywordSet] of byDate) {
-    if (keywordSet.size > bestKeywords.length) {
+    const filtered = dedupeSortKeywords([...keywordSet]);
+    if (filtered.length > bestKeywords.length) {
       bestDate = auditDate;
-      bestKeywords = dedupeSortKeywords([...keywordSet]);
+      bestKeywords = filtered;
     }
   }
 
@@ -143,38 +180,31 @@ export default async function handler(req, res) {
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!supabaseUrl || !supabaseKey) {
-    return res.status(500).json({
-      status: 'error',
-      message: 'Supabase not configured.',
-      meta: { generatedAt: new Date().toISOString() },
-    });
-  }
-
-  // Lightweight health probe: the UI calls this on every page load purely to
-  // detect a Supabase outage (503). Doing a tiny ping here avoids pulling the
-  // full keyword set (up to 10k rows / several seconds) just for a liveness check.
   if (req.query && (req.query.probe === '1' || req.query.probe === 'true')) {
+    if (!supabaseUrl || !supabaseKey) {
+      return res.status(503).json({ status: 'error', probe: true, message: 'Supabase not configured' });
+    }
     return handleProbe(supabaseUrl, supabaseKey, res);
   }
 
   try {
     const propertyUrl = resolvePropertyUrl();
 
-    let result = await loadTargetKeywordsFromAudit(supabaseUrl, supabaseKey, propertyUrl);
-    if (!result) {
-      result = await loadLargestKeywordSnapshot(supabaseUrl, supabaseKey, propertyUrl);
-    }
+    let result = loadLockedTrackedKeywords();
+    if (!result) result = loadBundledKeywordsFallback();
 
-    if (!result) {
-      result = loadBundledKeywordsFallback();
+    if (!result && supabaseUrl && supabaseKey) {
+      result = await loadTargetKeywordsFromAudit(supabaseUrl, supabaseKey, propertyUrl);
+      if (!result) {
+        result = await loadLargestKeywordSnapshot(supabaseUrl, supabaseKey, propertyUrl);
+      }
     }
 
     if (!result) {
       return res.status(200).json({
         status: 'ok',
         keywords: [],
-        meta: { generatedAt: new Date().toISOString(), reason: 'no_audit_rows' },
+        meta: { generatedAt: new Date().toISOString(), reason: 'no_locked_or_audit_rows' },
       });
     }
 
@@ -191,9 +221,8 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error('[Get Keywords] Error:', e);
-    const isTimeout = e?.name === 'TimeoutError' || String(e?.message || '').includes('timeout');
-    const bundled = loadBundledKeywordsFallback();
-    if (isTimeout && bundled) {
+    const bundled = loadBundledKeywordsFallback() || loadLockedTrackedKeywords();
+    if (bundled) {
       return res.status(200).json({
         status: 'ok',
         keywords: bundled.keywords,
@@ -202,16 +231,8 @@ export default async function handler(req, res) {
         meta: {
           generatedAt: new Date().toISOString(),
           source: bundled.source,
-          reason: 'supabase_unavailable_bundled_fallback',
+          reason: 'error_fallback',
         },
-      });
-    }
-    if (isTimeout) {
-      return res.status(503).json({
-        status: 'error',
-        message: 'Supabase unavailable',
-        keywords: [],
-        meta: { generatedAt: new Date().toISOString(), reason: 'supabase_unavailable' },
       });
     }
     return res.status(500).json({
