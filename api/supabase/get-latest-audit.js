@@ -8,6 +8,7 @@
 import { filterTrackedRows, filterTrackedKeywords } from '../../lib/keyword-ranking/tracked-set-v3.js';
 import { coalesceSearchVolume } from '../../lib/keyword-ranking/ke-search-volumes.js';
 import { resolveRowsClassificationAtRender } from '../../lib/keyword-ranking/resolve-classification-at-render.js';
+import { computeTopOfPageRollup } from '../../lib/audit/topOfPage.js';
 
 /** When capping query-page rows, keep highest-traffic rows so per-URL GSC totals stay representative. */
 function truncateQueryPagesByTraffic(rows, maxItems) {
@@ -406,7 +407,7 @@ export default async function handler(req, res) {
           }
           
           // Convert database rows to frontend format (combinedRows)
-          const combinedRows = keywordRows.map(row => {
+          const combinedRows = resolveRowsClassificationAtRender(keywordRows.map(row => {
             // Parse JSON fields if they're strings (Supabase may return JSON as strings)
             let aiCitations = row.ai_alan_citations || [];
             if (typeof aiCitations === 'string') {
@@ -509,9 +510,7 @@ export default async function handler(req, res) {
               demand_share: row.demand_share,
               opportunityScore: row.opportunity_score ?? null
             };
-          });
-
-          combinedRows = resolveRowsClassificationAtRender(combinedRows);
+          }));
           const trackedRows = filterTrackedRows(combinedRows);
 
           // Calculate summary from trackedRows (v3 set — excludes removed keywords)
@@ -559,7 +558,18 @@ export default async function handler(req, res) {
               avg_position_unweighted: avgPositionUnweighted,
               avg_position_volume_weighted: avgPositionVolumeWeighted,
               keywords_used_for_avg: validRankingRows.length,
-              keywords_with_volume: keywordsWithVolume.length
+              keywords_with_volume: keywordsWithVolume.length,
+              // Server-canonical Top-of-Page (same lib/audit/topOfPage.js the client mirrors).
+              pillarScores: {
+                topOfPage: (() => {
+                  try {
+                    return computeTopOfPageRollup(trackedRows);
+                  } catch (topErr) {
+                    console.warn('[get-latest-audit] topOfPage rollup failed:', topErr.message);
+                    return null;
+                  }
+                })(),
+              },
             },
             targetKeywords: filterTrackedKeywords(trackedRows.map((r) => r.keyword)),
             // Include the actual audit_date of the ranking data (may differ from latest audit)
