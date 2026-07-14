@@ -7,6 +7,7 @@
 
 import { filterTrackedRows, filterTrackedKeywords } from '../../lib/keyword-ranking/tracked-set-v3.js';
 import { coalesceSearchVolume } from '../../lib/keyword-ranking/ke-search-volumes.js';
+import { resolveRowsClassificationAtRender } from '../../lib/keyword-ranking/resolve-classification-at-render.js';
 
 /** When capping query-page rows, keep highest-traffic rows so per-URL GSC totals stay representative. */
 function truncateQueryPagesByTraffic(rows, maxItems) {
@@ -510,6 +511,7 @@ export default async function handler(req, res) {
             };
           });
 
+          combinedRows = resolveRowsClassificationAtRender(combinedRows);
           const trackedRows = filterTrackedRows(combinedRows);
 
           // Calculate summary from trackedRows (v3 set — excludes removed keywords)

@@ -10,6 +10,8 @@ const configCsv = join(configDir, 'keyword-tracking-locations-and-class-LOCKED-v
 const outJson = join(root, 'lib/keyword-ranking/keyword-tracking-locations-LOCKED.json');
 const outClassJson = join(root, 'lib/keyword-ranking/keyword-tracking-class-LOCKED.json');
 const outPublic = join(root, 'public/keyword-tracking-locations-LOCKED.json');
+const outPublicClass = join(root, 'public/keyword-tracking-class-LOCKED.json');
+const outPublicClassJs = join(root, 'public/keyword-tracking-class-LOCKED.js');
 const outRoot = join(root, 'keyword-tracking-locations-LOCKED.json');
 
 mkdirSync(configDir, { recursive: true });
@@ -79,7 +81,18 @@ const classPayload = {
 writeFileSync(outJson, JSON.stringify(locPayload, null, 2) + '\n');
 writeFileSync(outClassJson, JSON.stringify(classPayload, null, 2) + '\n');
 writeFileSync(outPublic, JSON.stringify(locPayload, null, 2) + '\n');
+writeFileSync(outPublicClass, JSON.stringify(classPayload, null, 2) + '\n');
 writeFileSync(outRoot, JSON.stringify(locPayload, null, 2) + '\n');
+
+const classByKeyword = {};
+for (const [k, row] of Object.entries(byClass)) {
+  classByKeyword[k] = row.keyword_class || 'national-money';
+}
+const classJs =
+  'window.__KEYWORD_CLASS_LOCKED_BY_KEYWORD=' +
+  JSON.stringify(classByKeyword) +
+  ';\n';
+writeFileSync(outPublicClassJs, classJs);
 
 const classes = {};
 for (const row of Object.values(byClass)) {
