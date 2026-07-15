@@ -292,7 +292,13 @@ export default async function handler(req, res) {
             contentSchema: record.content_schema_score ?? null,
             authority: record.authority_score ?? null,
             localEntity: record.local_entity_score ?? null,
-            serviceArea: record.service_area_score ?? null
+            serviceArea: record.service_area_score ?? null,
+            authorityComponents: {
+              behaviour: record.authority_behaviour_score ?? null,
+              ranking: record.authority_ranking_score ?? null,
+              backlinks: record.authority_backlink_score ?? null,
+              reviews: record.authority_review_score ?? null
+            }
           },
           searchData: {
             totalClicks: gc || 0,
