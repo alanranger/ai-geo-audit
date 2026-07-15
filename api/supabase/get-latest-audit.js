@@ -775,10 +775,10 @@ export default async function handler(req, res) {
           return metrics;
         })(),
         authorityComponents: {
-          behaviour: record.authority_behaviour_score || null,
-          ranking: record.authority_ranking_score || null,
-          backlinks: record.authority_backlink_score || null,
-          reviews: record.authority_review_score || null
+          behaviour: record.authority_behaviour_score ?? null,
+          ranking: record.authority_ranking_score ?? null,
+          backlinks: record.authority_backlink_score ?? null,
+          reviews: record.authority_review_score ?? null
         }
       },
       searchData: {
