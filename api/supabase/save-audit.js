@@ -10,6 +10,11 @@ import {
   normalizeAuthorityForAuditRecord,
   recomputeAuthorityTotal,
 } from '../../lib/audit/authorityScore.js';
+import {
+  calculateSnippetReadiness,
+  computeAiSummaryLikelihood,
+} from '../../lib/audit/pillarScores.js';
+import { computeSurfaceOutcomesRollup } from '../../lib/audit/surfaceOutcomes.js';
 import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
 import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
 
@@ -97,6 +102,61 @@ function hasRealRankingAiData(rankingAiData) {
     && typeof rankingAiData === 'object'
     && Array.isArray(rankingAiData.combinedRows)
     && rankingAiData.combinedRows.length > 0;
+}
+
+function resolveVisibilityScore(scores) {
+  if (!scores) return 0;
+  if (typeof scores.visibility === 'object' && scores.visibility) {
+    return Number(scores.visibility.score ?? scores.visibility.overall) || 0;
+  }
+  return Number(scores.visibility) || 0;
+}
+
+function resolveAiCitationRate(rankingAiData) {
+  if (!hasRealRankingAiData(rankingAiData)) return 0;
+  const outcomes = computeSurfaceOutcomesRollup(rankingAiData.combinedRows);
+  const aiRow = outcomes?.rows?.find((r) => r.key === 'ai_answer');
+  return aiRow?.overall?.pct != null ? Number(aiRow.overall.pct) : 0;
+}
+
+function buildAiSummaryPayload(scores, snippetReadiness, rankingAiData) {
+  if (!scores) return { summary: null, score: null, components: null };
+  const snippetReadinessScore = calculateSnippetReadiness(scores);
+  const visibilityScore = resolveVisibilityScore(scores);
+  const brandScore = scores.brandOverlay?.score || 0;
+  const aiCitationRate = resolveAiCitationRate(rankingAiData);
+  if (snippetReadinessScore === 0 && brandScore === 0) {
+    return { summary: null, score: null, components: null };
+  }
+  const summary = computeAiSummaryLikelihood(
+    snippetReadinessScore,
+    visibilityScore,
+    brandScore,
+    aiCitationRate
+  );
+  const reasons = [];
+  if (snippetReadinessScore < 70) {
+    reasons.push('Improve FAQ/HowTo/Article blocks and schema to raise snippet readiness.');
+  }
+  if (visibilityScore < 70) {
+    reasons.push('Win more served answer surfaces on money keywords (surface visibility).');
+  }
+  if (brandScore < 70) {
+    reasons.push('Strengthen branded search and entity signals.');
+  }
+  if (aiCitationRate < 70) {
+    reasons.push('Earn citations in AI answer surfaces on money keywords.');
+  }
+  return {
+    summary: { ...summary, reasons },
+    score: summary.score,
+    components: {
+      snippetReadiness: Math.round(snippetReadinessScore),
+      visibility: Math.round(visibilityScore),
+      brand: Math.round(brandScore),
+      aiCitationRate: Math.round(aiCitationRate),
+    },
+  };
 }
 
 /** Omit ranking columns from PATCH/POST when GSC-only save did not supply rows (prevents wiping JSONB). */
@@ -666,66 +726,20 @@ export default async function handler(req, res) {
       // authoritative source for the five pillar percentages shown in the Keyword Ranking & AI tab.
       ranking_ai_pillar_scores: ensureJson(rankingAiPillarScores),
       
-      // Calculate AI Summary Likelihood (Phase 1)
-      // Uses snippetReadiness, visibility, and brand score
+      // Calculate AI Summary Likelihood (Phase 4 signed 40/30/20/10)
       ai_summary: (() => {
-        if (!snippetReadiness || !scores) return null;
-        // Handle both number and object formats for snippetReadiness
-        const snippetReadinessScore = typeof snippetReadiness === 'number' 
-          ? snippetReadiness 
-          : (snippetReadiness.overallScore || 0);
-        const visibilityScore = scores.visibility || 0;
-        const brandScore = scores.brandOverlay?.score || 0;
-        
-        if (snippetReadinessScore === 0 && brandScore === 0) return null;
-        
-        const composite = 0.5 * snippetReadinessScore + 0.3 * visibilityScore + 0.2 * brandScore;
-        let label;
-        // Use same RAG bands as AI GEO: <50 red, 50-69 amber, >=70 green
-        if (composite < 50) label = 'Low';
-        else if (composite < 70) label = 'Medium';
-        else label = 'High';
-        
-        const reasons = [];
-        if (snippetReadinessScore < 70)
-          reasons.push('Improve FAQ/HowTo/Article blocks and schema to raise snippet readiness.');
-        if (visibilityScore < 70)
-          reasons.push('Improve average position and top-10 impression share.');
-        if (brandScore < 70)
-          reasons.push('Strengthen branded search and entity signals.');
-        
-        return {
-          score: Math.round(composite),
-          label,
-          reasons
-        };
+        const built = buildAiSummaryPayload(scoresToUse, snippetReadinessToUse, rankingAiData);
+        return built.summary;
       })(),
       ai_summary_score: (() => {
-        if (!snippetReadinessToUse || !scoresToUse) return null;
-        // Handle both number and object formats for snippetReadiness
-        const snippetReadinessScore = typeof snippetReadinessToUse === 'number' 
-          ? snippetReadinessToUse 
-          : (snippetReadinessToUse?.overallScore || 0);
-        const visibilityScore = scoresToUse.visibility || 0;
-        const brandScore = scoresToUse.brandOverlay?.score || 0;
-        if (snippetReadinessScore === 0 && brandScore === 0) return null;
-        return Math.round(0.5 * snippetReadinessScore + 0.3 * visibilityScore + 0.2 * brandScore);
+        const built = buildAiSummaryPayload(scoresToUse, snippetReadinessToUse, rankingAiData);
+        return built.score;
       })(),
       
       // AI Summary Components (for AI Citations tile delta calculations)
       ai_summary_components: (() => {
-        if (!snippetReadinessToUse || !scoresToUse) return null;
-        const snippetReadinessScore = typeof snippetReadinessToUse === 'number' 
-          ? snippetReadinessToUse 
-          : (snippetReadinessToUse?.overallScore || 0);
-        const visibilityScore = scoresToUse.visibility || 0;
-        const brandScore = scoresToUse.brandOverlay?.score || 0;
-        if (snippetReadinessScore === 0 && visibilityScore === 0 && brandScore === 0) return null;
-        return {
-          snippetReadiness: Math.round(snippetReadinessScore),
-          visibility: Math.round(visibilityScore),
-          brand: Math.round(brandScore)
-        };
+        const built = buildAiSummaryPayload(scoresToUse, snippetReadinessToUse, rankingAiData);
+        return built.components;
       })(),
       
       // Authority Component Scores (for historical tracking and debugging)
