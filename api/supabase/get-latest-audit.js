@@ -370,11 +370,52 @@ export default async function handler(req, res) {
         console.log(`[get-latest-audit] Query with audit_date=${auditDate} failed: ${keywordRankingsResponse.status} - ${errorText}`);
       }
       
-      // Do NOT fall back to another audit_date's keyword_rankings.
-      // Mixing dates caused hero/dials from day N with rows from day N-1
-      // (2026-07-13 baseline showed yesterday's pack/PAA fingerprints).
+      // Do NOT prefer a different audit_date when today's keyword_rankings exist
+      // (mixing dates caused hero/dials from day N with rows from day N-1).
+      // BUT when the latest GSC audit day has ZERO keyword rows (ranking scan
+      // not run yet), fall back to the most recent audit_date that DOES have
+      // keyword_rankings — otherwise rankingAiData.combinedRows is empty and
+      // Surface/Top-of-Page dials paint misleading defaults.
       if (!keywordRows || keywordRows.length === 0) {
-        console.log(`[get-latest-audit] No keyword_rankings for audit_date=${auditDate}; leaving rankingAiData empty (no cross-date fallback).`);
+        console.log(`[get-latest-audit] No keyword_rankings for audit_date=${auditDate}; resolving latest date with rows...`);
+        try {
+          const latestKrUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(resolvedPropertyUrl)}&select=audit_date&order=audit_date.desc&limit=1`;
+          const latestKrResp = await fetch(latestKrUrl, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`
+            }
+          });
+          if (latestKrResp.ok) {
+            const latestKrRows = await latestKrResp.json();
+            const fallbackDate = latestKrRows?.[0]?.audit_date || null;
+            if (fallbackDate && fallbackDate !== auditDate) {
+              const fbUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(resolvedPropertyUrl)}&audit_date=eq.${encodeURIComponent(fallbackDate)}&select=*&order=keyword.asc&limit=2000`;
+              const fbResp = await fetch(fbUrl, {
+                method: 'GET',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'apikey': supabaseKey,
+                  'Authorization': `Bearer ${supabaseKey}`
+                }
+              });
+              if (fbResp.ok) {
+                keywordRows = await fbResp.json();
+                if (keywordRows?.length) {
+                  rankingDataAuditDate = fallbackDate;
+                  console.log(`[get-latest-audit] Fallback: loaded ${keywordRows.length} keyword rows from audit_date=${fallbackDate} (audit day ${auditDate} had none)`);
+                }
+              }
+            }
+          }
+        } catch (fbErr) {
+          console.warn(`[get-latest-audit] keyword_rankings date fallback failed: ${fbErr.message}`);
+        }
+        if (!keywordRows || keywordRows.length === 0) {
+          console.log(`[get-latest-audit] No keyword_rankings available for property; leaving rankingAiData empty.`);
+        }
       }
         
         if (keywordRows && keywordRows.length > 0) {
