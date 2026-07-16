@@ -20,6 +20,7 @@
 
 import { extractCitationsFromDfsResult } from '../../lib/ai-citation-extract.js';
 import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
+import { getBusinessDevice, getHyperlocalCoordinate } from '../../lib/keyword-ranking/business-location.js';
 import { extractSerpSurfaces } from '../../lib/keyword-ranking/serp-surface-extract.js';
 import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
 import { computeKeywordSurfaceScore } from '../../lib/audit/surfaceScores.js';
@@ -376,21 +377,25 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
   const expandAiOverview = Boolean(opts.expandAiOverview);
   const locationName = opts.location_name || "United Kingdom";
   const locationCode = opts.location_code != null ? opts.location_code : null;
+  const isLocalTier = opts.tier === 'L';
+  const device = isLocalTier ? getBusinessDevice() : 'desktop';
+  const os = device === 'desktop' ? 'windows' : 'android';
+  const locationCoordinate = isLocalTier ? getHyperlocalCoordinate() : null;
 
   try {
     const taskPayload = {
       keyword,
       language_code: "en",
-      device: "desktop",
-      os: "windows",
+      device,
+      os,
       depth,
       load_async_ai_overview: expandAiOverview,
       expand_ai_overview: expandAiOverview,
     };
-    // Prefer location_code when present (national UK = 2826); else location_name
-    // (Coventry,England,United Kingdom for local-buyer terms).
+    // Prefer location_code when present (national UK = 2826; Local = 9215523).
     if (locationCode != null) taskPayload.location_code = locationCode;
     else taskPayload.location_name = locationName;
+    if (locationCoordinate) taskPayload.location_coordinate = locationCoordinate;
 
     const dfResponse = await fetch(endpoint, {
       method: "POST",
@@ -484,6 +489,10 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
     const serpResult = {
       keyword,
       location_name: locationName,
+      location_code: locationCode,
+      location_coordinate: locationCoordinate,
+      device,
+      os,
       best_rank_group: bestRankGroup,
       best_rank_absolute: bestRankAbsolute,
       best_url: bestUrl,
@@ -629,6 +638,7 @@ export default async function handler(req, res) {
     return {
       location_name: resolved.location_name,
       location_code: resolved.location_code,
+      tier: resolved.tier,
       location_unmapped: resolved.unmapped === true,
     };
   };
@@ -675,6 +685,7 @@ export default async function handler(req, res) {
             expandAiOverview,
             location_name: loc.location_name,
             location_code: loc.location_code,
+            tier: loc.tier,
           });
           // One retry on empty/error SERP — Coventry name-only used to flake;
           // location_code + retry closes the remaining race under batch load.
@@ -685,6 +696,7 @@ export default async function handler(req, res) {
               expandAiOverview,
               location_name: loc.location_name,
               location_code: loc.location_code,
+              tier: loc.tier,
             });
           }
           
@@ -866,7 +878,9 @@ export default async function handler(req, res) {
       per_keyword: perKeyword,
     });
   } catch (err) {
-    console.error("DataForSEO error", err);
-    res.status(500).json({ error: "Unexpected server error" });
+    console.error("[SERP-RANK-TEST] Handler error:", err);
+    res.status(500).json({ error: err.message || "Unexpected server error" });
   }
 }
+
+export { fetchSerpForKeyword, DEFAULT_SERP_DEPTH };
