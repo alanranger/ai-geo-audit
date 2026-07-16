@@ -246,6 +246,19 @@ export default async function handler(req, res) {
       dateRangeDays: 28
     });
 
+    // Same Brand demand refresh as GSC & Backlink Audit button / Dashboard full refresh
+    try {
+      await fetchJson(`${baseUrl}/api/cron/gbp-brand-demand-sync`, { method: 'POST' });
+      const brandPayload = await fetchJson(
+        `${baseUrl}/api/aigeo/brand-demand?propertyUrl=${encodeURIComponent(propertyUrl)}`
+      );
+      if (brandPayload?.brandOverlay && audit?.scores) {
+        audit.scores.brandOverlay = brandPayload.brandOverlay;
+      }
+    } catch (brandErr) {
+      console.warn('[daily-gsc-backlink] GBP/Brand demand refresh skipped:', brandErr?.message || brandErr);
+    }
+
     const auditDate = new Date().toISOString().split('T')[0];
     const payload = {
       propertyUrl,

@@ -1,6 +1,6 @@
 /**
- * Nightly: refresh current-month GBP Performance + GSC branded query monthly.
- * Data layer only — does not change Brand demand scoring.
+ * Refresh current-month GBP Performance + GSC branded query monthly.
+ * Used by: nightly cron, GSC & Backlink Audit button, Dashboard full refresh.
  */
 export const config = { runtime: 'nodejs', maxDuration: 120 };
 
