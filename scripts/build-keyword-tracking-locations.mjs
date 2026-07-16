@@ -1,12 +1,27 @@
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const driveCsv =
-  'C:/Users/alan/Google Drive/Claude shared resources/07 Data & Exports/keyword-tracking-locations-and-class-LOCKED-v3.csv';
+const driveDir = 'C:/Users/alan/Google Drive/Claude shared resources/07 Data & Exports';
 const configDir = join(root, 'config');
-const configCsv = join(configDir, 'keyword-tracking-locations-and-class-LOCKED-v3.csv');
+const v4Csv = join(configDir, 'keyword-tracking-locations-and-class-LOCKED-v4.csv');
+const v3Csv = join(configDir, 'keyword-tracking-locations-and-class-LOCKED-v3.csv');
+const driveV4 = join(driveDir, 'keyword-tracking-locations-and-class-LOCKED-v4.csv');
+const driveV3 = join(driveDir, 'keyword-tracking-locations-and-class-LOCKED-v3.csv');
+const inboxV4 = 'C:/Users/alan/Google Drive/Claude shared resources/Claude Questions for Cursor/keyword-tracking-locations-and-class-LOCKED-v4.csv';
+
+function resolveSourceCsv() {
+  const candidates = [inboxV4, driveV4, v4Csv, driveV3, v3Csv];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  throw new Error('No keyword tracking CSV found (v4 or v3)');
+}
+
+const sourceCsv = resolveSourceCsv();
+const version = sourceCsv.includes('v4') ? 'v4' : 'v3';
+const configCsv = version === 'v4' ? v4Csv : v3Csv;
 const outJson = join(root, 'lib/keyword-ranking/keyword-tracking-locations-LOCKED.json');
 const outClassJson = join(root, 'lib/keyword-ranking/keyword-tracking-class-LOCKED.json');
 const outPublic = join(root, 'public/keyword-tracking-locations-LOCKED.json');
@@ -17,7 +32,7 @@ const outRootClass = join(root, 'keyword-tracking-class-LOCKED.json');
 const outRootClassJs = join(root, 'keyword-tracking-class-LOCKED.js');
 
 mkdirSync(configDir, { recursive: true });
-copyFileSync(driveCsv, configCsv);
+copyFileSync(sourceCsv, configCsv);
 
 function parseLine(line) {
   const out = [];
@@ -68,13 +83,13 @@ for (const line of lines.slice(1)) {
 }
 
 const locPayload = {
-  source: 'keyword-tracking-locations-and-class-LOCKED-v3.csv',
-  locked_at: '2026-07-14',
+  source: `keyword-tracking-locations-and-class-LOCKED-${version}.csv`,
+  locked_at: '2026-07-16',
   count: Object.keys(byKeyword).length,
   by_keyword: byKeyword,
 };
 const classPayload = {
-  source: 'keyword-tracking-locations-and-class-LOCKED-v3.csv',
+  source: `keyword-tracking-locations-and-class-LOCKED-${version}.csv`,
   locked_at: '2026-07-14',
   count: Object.keys(byClass).length,
   by_keyword: byClass,

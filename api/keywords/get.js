@@ -13,6 +13,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { filterTrackedKeywords } from '../../lib/keyword-ranking/tracked-set-v3.js';
+import { fetchSupabaseLockedOverride } from '../../lib/keyword-ranking/locked-config-persist.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
@@ -191,6 +192,19 @@ export default async function handler(req, res) {
     const propertyUrl = resolvePropertyUrl();
 
     let result = loadLockedTrackedKeywords();
+    if (!result && supabaseUrl && supabaseKey) {
+      const override = await fetchSupabaseLockedOverride(supabaseUrl, supabaseKey, propertyUrl);
+      if (override?.by_keyword) {
+        const keywords = dedupeSortKeywords(Object.values(override.by_keyword).map((r) => r.keyword));
+        if (keywords.length) {
+          result = {
+            keywords,
+            auditDate: override.updated_at || null,
+            source: 'supabase_locked_override',
+          };
+        }
+      }
+    }
     if (!result) result = loadBundledKeywordsFallback();
 
     if (!result && supabaseUrl && supabaseKey) {

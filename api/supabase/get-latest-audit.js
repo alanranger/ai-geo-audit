@@ -339,7 +339,16 @@ export default async function handler(req, res) {
     // Re-enabled: Fetching from keyword_rankings table with proper limits to prevent timeouts
     let rankingAiData = null;
     let rankingDataAuditDate = null; // Track the actual audit_date of ranking data (may differ from latest audit)
-    
+    let lockedByKeyword = null;
+    try {
+      const rankingRaw = typeof record.ranking_ai_data === 'string'
+        ? JSON.parse(record.ranking_ai_data)
+        : record.ranking_ai_data;
+      lockedByKeyword = rankingRaw?.keywordTrackingLocked?.by_keyword || null;
+    } catch (_lockedErr) {
+      lockedByKeyword = null;
+    }
+
     // Re-enabled: Keyword rankings fetch with proper limits (2000 rows max)
     try {
       const resolvedPropertyUrl = record?.property_url || propertyUrl;
@@ -557,7 +566,7 @@ export default async function handler(req, res) {
               demand_share: row.demand_share,
               opportunityScore: row.opportunity_score ?? null
             };
-          }));
+          }), lockedByKeyword);
           const trackedRows = filterTrackedRows(combinedRows);
 
           // Calculate summary from trackedRows (v3 set — excludes removed keywords)
