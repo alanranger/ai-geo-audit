@@ -173,12 +173,21 @@ export default async function handler(req, res) {
       sourceName,
     });
 
-    const auditUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=audit_date`;
-    const auditResp = await fetch(auditUrl, {
+    // Prefer the latest ranked keyword_rankings snapshot (not an empty stub date).
+    const rankedUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&best_rank_absolute=not.is.null&select=audit_date&order=audit_date.desc&limit=1`;
+    const rankedResp = await fetch(rankedUrl, {
       headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
     });
-    const auditRows = auditResp.ok ? await auditResp.json() : [];
-    const auditDate = auditRows?.[0]?.audit_date || new Date().toISOString().slice(0, 10);
+    const rankedRows = rankedResp.ok ? await rankedResp.json() : [];
+    let auditDate = rankedRows?.[0]?.audit_date || null;
+    if (!auditDate) {
+      const auditUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=audit_date`;
+      const auditResp = await fetch(auditUrl, {
+        headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
+      });
+      const auditRows = auditResp.ok ? await auditResp.json() : [];
+      auditDate = auditRows?.[0]?.audit_date || new Date().toISOString().slice(0, 10);
+    }
 
     const existingKwUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${auditDate}&select=keyword`;
     const existingKwResp = await fetch(existingKwUrl, {
@@ -187,10 +196,11 @@ export default async function handler(req, res) {
     const existingKeywords = existingKwResp.ok
       ? (await existingKwResp.json()).map((r) => r.keyword).filter(Boolean)
       : [];
+    const existingLower = new Set(existingKeywords.map((k) => String(k).toLowerCase()));
 
     const incomingKeywords = parsed.rows.map((r) => r.keyword).filter(Boolean);
-    const addedKeywords = incomingKeywords.filter((k) => !existingKeywords.includes(k));
-    const updatedKeywords = incomingKeywords.filter((k) => existingKeywords.includes(k));
+    const addedKeywords = incomingKeywords.filter((k) => !existingLower.has(String(k).toLowerCase()));
+    const updatedKeywords = incomingKeywords.filter((k) => existingLower.has(String(k).toLowerCase()));
 
     const insertResult = await upsertKeywordRankings({
       supabaseUrl,
