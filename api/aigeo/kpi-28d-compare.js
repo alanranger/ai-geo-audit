@@ -22,6 +22,13 @@ const need = (k) => {
   return v;
 };
 
+/** gsc_page_metrics_28d only stores https://www.alanranger.com (not sc-domain:). */
+function canonicalSiteUrl(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!s || s.includes('alanranger.com') || s === 'sc-domain:alanranger.com') return PROPERTY;
+  return String(raw).trim() || PROPERTY;
+}
+
 function addDaysIso(iso, days) {
   const d = new Date(`${String(iso).slice(0, 10)}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
@@ -89,7 +96,7 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return send(res, 405, { error: 'method_not_allowed' });
 
   try {
-    const siteUrl = String(req.query?.siteUrl || PROPERTY).trim() || PROPERTY;
+    const siteUrl = canonicalSiteUrl(req.query?.siteUrl || PROPERTY);
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
 
     const { data: latest, error: latestErr } = await supabase
