@@ -42,7 +42,7 @@ async function fetchDomainStrengthDomainRows(supabaseUrl, supabaseKey, domains) 
     const url =
       `${supabaseUrl}/rest/v1/domain_strength_domains` +
       `?domain=in.${encodeURIComponent(inList)}` +
-      `&select=domain,label,domain_type,segment,is_competitor`;
+      `&select=domain,label,domain_type,domain_type_source,segment,is_competitor`;
     const resp = await fetch(url, {
       method: "GET",
       headers: {
@@ -100,6 +100,7 @@ export default async function handler(req, res) {
         metaByDomain.set(d, {
           label: c.label || d,
           domain_type: domainType,
+          domain_type_source: c.domain_type_source || null,
           segment: domainType,
           isCompetitor: c.is_competitor === true,
         });
@@ -129,6 +130,7 @@ export default async function handler(req, res) {
         searchEngine: "google",
         label: meta.label,
         domain_type: meta.domain_type || meta.segment || "unmapped",
+        domain_type_source: meta.domain_type_source || null,
         segment: meta.segment || meta.domain_type || "unmapped",
         isCompetitor: meta.isCompetitor || false,
         latest: null,
@@ -217,6 +219,7 @@ export default async function handler(req, res) {
         competitorMeta.set(d, {
           label: c.label || d,
           domain_type: domainType,
+          domain_type_source: c.domain_type_source || null,
           segment: domainType,
           isCompetitor: c.is_competitor === true,
         });
@@ -307,6 +310,7 @@ export default async function handler(req, res) {
       searchEngine: engine,
       label: meta.label,
       domain_type: meta.domain_type || meta.segment || 'unmapped',
+      domain_type_source: meta.domain_type_source || null,
       segment: meta.segment || meta.domain_type || 'unmapped',
       isCompetitor: meta.isCompetitor || false,
       latest,
