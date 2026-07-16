@@ -5,6 +5,8 @@
 
 import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
 import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
+import { applyTrackedEmptySerpStubs } from '../../lib/keyword-ranking/empty-serp-stub.js';
+import { coalesceSearchVolume } from '../../lib/keyword-ranking/ke-search-volumes.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
@@ -62,11 +64,19 @@ export default async function handler(req, res) {
     // Process each row: try PATCH (update) first, then POST (insert) if it doesn't exist
     let savedCount = 0;
     let errors = [];
+    const stubbedRows = applyTrackedEmptySerpStubs(keywordRows);
 
-    for (const row of keywordRows) {
+    for (const row of stubbedRows) {
       // Ensure required fields for unique constraint are present
       if (!row.audit_date || !row.property_url || !row.keyword) {
         errors.push(`Row missing required fields: ${JSON.stringify(row)}`);
+        continue;
+      }
+
+      const stack = row.serp_surface_stack;
+      const hasStack = Array.isArray(stack) && stack.length > 0;
+      if (!hasStack && !row.error) {
+        errors.push(`Refusing empty serp_surface_stack for "${row.keyword}" (no error field)`);
         continue;
       }
 
@@ -82,6 +92,11 @@ export default async function handler(req, res) {
         row.keyword_class = cls.keyword_class;
         row.class_unmapped = cls.class_unmapped;
       }
+      row.search_volume = coalesceSearchVolume(row.keyword, row.search_volume ?? null);
+
+      // `error` is a request-body gate only — keyword_rankings has no error column.
+      const { error: _stubError, pageType, opportunityScore, ...dbRow } = row;
+      if (!hasStack) dbRow.serp_surface_stack = null;
 
       // Try to update existing row first using PATCH
       const filterParams = new URLSearchParams({
@@ -98,7 +113,7 @@ export default async function handler(req, res) {
           'Authorization': `Bearer ${supabaseKey}`,
           'Prefer': 'return=representation'
         },
-        body: JSON.stringify(row)
+        body: JSON.stringify(dbRow)
       });
 
       if (patchResponse.ok) {
@@ -119,7 +134,7 @@ export default async function handler(req, res) {
           'Authorization': `Bearer ${supabaseKey}`,
           'Prefer': 'return=representation'
         },
-        body: JSON.stringify(row)
+        body: JSON.stringify(dbRow)
       });
 
       if (postResponse.ok) {

@@ -7,7 +7,8 @@ import {
   buildCombinedRows,
   buildSummary,
   buildKeywordRows,
-  saveKeywordBatch
+  saveKeywordBatch,
+  deleteKeywordRowsForDate
 } from '../../lib/keyword-ranking/refresh-core.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
@@ -155,6 +156,19 @@ export default async function handler(req, res) {
     const auditDate = new Date().toISOString().slice(0, 10);
     const summary = buildSummary(combinedRows);
     const keywordRows = buildKeywordRows(combinedRows, auditDate, propertyUrl);
+
+    // Empty stacks on LOCKED tracked keywords are stubbed in buildKeywordRows.
+    // Still refuse untracked/ad-hoc empties with no error gate.
+    const emptyStacks = keywordRows.filter(
+      (row) => (!Array.isArray(row.serp_surface_stack) || row.serp_surface_stack.length === 0) && !row.error
+    );
+    if (emptyStacks.length > 0) {
+      const names = emptyStacks.map((r) => r.keyword).join(', ');
+      throw new Error(`Refusing to save audit: ${emptyStacks.length} keyword(s) have empty serp_surface_stack (${names})`);
+    }
+
+    const deletedCount = await deleteKeywordRowsForDate(propertyUrl, auditDate);
+    console.log(`[Keyword Ranking Cron] Deleted ${deletedCount} existing rows for ${auditDate} before write`);
 
     await saveKeywordBatch(baseUrl, { propertyUrl, auditDate, keywordRows });
     await upsertAuditResults({
