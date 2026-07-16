@@ -23,6 +23,7 @@ import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-loca
 import { getBusinessDevice, getHyperlocalCoordinate } from '../../lib/keyword-ranking/business-location.js';
 import { extractSerpSurfaces } from '../../lib/keyword-ranking/serp-surface-extract.js';
 import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
+// Grid PARKED (Alan 2026-07-16): do not import fetchLocalGridSerp into production refresh.
 import { computeKeywordSurfaceScore } from '../../lib/audit/surfaceScores.js';
 import { computeKeywordTopOfPageScore } from '../../lib/audit/topOfPage.js';
 import { buildSerpSurfaceStack } from '../../lib/keyword-ranking/serp-surface-stack.js';
@@ -380,7 +381,10 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
   const isLocalTier = opts.tier === 'L';
   const device = isLocalTier ? getBusinessDevice() : 'desktop';
   const os = device === 'desktop' ? 'windows' : 'android';
-  const locationCoordinate = isLocalTier ? getHyperlocalCoordinate() : null;
+  // Allow grid points to override the single GBP pin; Local default = GBP centroid.
+  const locationCoordinate = opts.location_coordinate != null
+    ? opts.location_coordinate
+    : (isLocalTier ? getHyperlocalCoordinate() : null);
 
   try {
     const taskPayload = {
@@ -643,6 +647,40 @@ export default async function handler(req, res) {
     };
   };
 
+  const mergeVolume = (keyword, result, loc) => {
+    const normalizedKw = normalizeKeyword(keyword);
+    const volumeData = volumeByKeyword[normalizedKw];
+    const searchVolume = volumeData !== undefined
+      ? (volumeData.search_volume !== undefined ? volumeData.search_volume : null)
+      : null;
+    return {
+      ...result,
+      location_name: result.location_name || loc.location_name,
+      location_unmapped: loc.location_unmapped === true,
+      search_volume: searchVolume,
+      search_volume_trend: volumeData?.monthly_searches || undefined,
+    };
+  };
+
+  // Single-pin hyperlocal for Local-tier (GBP coordinate). 5×5 grid PARKED.
+  const fetchOneKeyword = async (keyword, loc) => {
+    const opts = {
+      expandAiOverview,
+      location_name: loc.location_name,
+      location_code: loc.location_code,
+      tier: loc.tier,
+    };
+    let result = await fetchSerpForKeyword(keyword, auth, targetRoot, depth, opts);
+    const emptyMiss = result?.error
+      || !Array.isArray(result?.serp_surface_stack)
+      || result.serp_surface_stack.length === 0;
+    if (emptyMiss && !result?.fatal) {
+      console.warn(`[Handler] Empty SERP for "${keyword}" (${result?.error || 'no stack'}) — retrying once`);
+      result = await fetchSerpForKeyword(keyword, auth, targetRoot, depth, opts);
+    }
+    return result;
+  };
+
   try {
     // Log handler entry with keywords
     console.log(`[Handler] === START === Processing ${keywords.length} keywords`);
@@ -681,57 +719,13 @@ export default async function handler(req, res) {
       const batchPromises = batch.map(async (keyword) => {
         try {
           const loc = resolveLoc(keyword);
-          let result = await fetchSerpForKeyword(keyword, auth, targetRoot, depth, {
-            expandAiOverview,
-            location_name: loc.location_name,
-            location_code: loc.location_code,
-            tier: loc.tier,
-          });
-          // One retry on empty/error SERP — Coventry name-only used to flake;
-          // location_code + retry closes the remaining race under batch load.
-          const emptyMiss = result?.error || !Array.isArray(result?.serp_surface_stack) || result.serp_surface_stack.length === 0;
-          if (emptyMiss && !result?.fatal) {
-            console.warn(`[Handler] Empty SERP for "${keyword}" (${result?.error || 'no stack'}) — retrying once`);
-            result = await fetchSerpForKeyword(keyword, auth, targetRoot, depth, {
-              expandAiOverview,
-              location_name: loc.location_name,
-              location_code: loc.location_code,
-              tier: loc.tier,
-            });
-          }
-          
-          // Merge search volume data using normalized keyword lookup
-          const normalizedKw = normalizeKeyword(keyword);
-          const volumeData = volumeByKeyword[normalizedKw];
-          
-          // IMPORTANT: Treat 0 as a valid value, only use null if key doesn't exist in map
-          const searchVolume = volumeData !== undefined 
-            ? (volumeData.search_volume !== undefined ? volumeData.search_volume : null)
-            : null;
-          const searchVolumeTrend = volumeData?.monthly_searches || undefined;
-          
-          // Log mapping for each row
-          console.log(`[VOL MAP] For row keyword "${keyword}" (normalized "${normalizedKw}") ⇒ search_volume=${searchVolume !== null && searchVolume !== undefined ? searchVolume : 'none'}`);
-          
-          const mergedResult = {
-            ...result,
-            location_name: result.location_name || loc.location_name,
-            location_unmapped: loc.location_unmapped === true,
-            search_volume: searchVolume, // Can be 0, null, or a number
-            search_volume_trend: searchVolumeTrend,
-          };
-          
-          if (mergedResult.search_volume !== null && mergedResult.search_volume !== undefined) {
-            console.log(`[Handler] ✓ Merged "${keyword}" (normalized: "${normalizedKw}") with volume: ${mergedResult.search_volume}`);
-          } else {
-            console.log(`[Handler] ✗ No search_volume found for keyword "${keyword}" (normalized: "${normalizedKw}")`);
-            console.log(`[Handler] Available keys in volume map: ${Object.keys(volumeByKeyword).map(k => `"${k}"`).join(', ')}`);
-          }
-          
+          // Single GBP hyperlocal pin for Local-tier — grid PARKED (no fetchLocalGridSerp).
+          const result = await fetchOneKeyword(keyword, loc);
+          const mergedResult = mergeVolume(keyword, result, loc);
+          console.log(`[VOL MAP] For row keyword "${keyword}" ⇒ search_volume=${mergedResult.search_volume ?? 'none'}`);
           return mergedResult;
         } catch (err) {
           console.error(`[Handler] Error processing keyword "${keyword}":`, err);
-          // Return error result instead of throwing
           return {
             keyword,
             best_rank_group: null,
