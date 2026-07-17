@@ -647,6 +647,9 @@ export default async function handler(req, res) {
     };
   };
 
+  // Declared outside try so mergeVolume can close over it (const inside try is block-scoped).
+  let volumeByKeyword = {};
+
   const mergeVolume = (keyword, result, loc) => {
     const normalizedKw = normalizeKeyword(keyword);
     const volumeData = volumeByKeyword[normalizedKw];
@@ -688,7 +691,7 @@ export default async function handler(req, res) {
     
     // Fetch keyword search volume (best-effort, non-blocking)
     console.log(`[Handler] Calling fetchKeywordOverview...`);
-    const volumeByKeyword = await fetchKeywordOverview(keywords, auth);
+    volumeByKeyword = await fetchKeywordOverview(keywords, auth) || {};
     console.log(`[Handler] Volume map keys: ${Object.keys(volumeByKeyword).join(', ')}`);
     console.log(`[Handler] Volume map size: ${Object.keys(volumeByKeyword).length}`);
 
