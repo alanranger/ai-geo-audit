@@ -15,6 +15,7 @@ import { resolveTrackingLocation } from '../lib/keyword-ranking/tracking-locatio
 import { resolveKeywordClass } from '../lib/keyword-ranking/tracking-class.js';
 import { applyTrackedEmptySerpStubs } from '../lib/keyword-ranking/empty-serp-stub.js';
 import { coalesceSearchVolume } from '../lib/keyword-ranking/ke-search-volumes.js';
+import { getHyperlocalCoordinate, getBusinessDevice } from '../lib/keyword-ranking/business-location.js';
 
 dotenvConfig({ path: '.env.local' });
 
@@ -126,10 +127,18 @@ async function main() {
     };
   });
 
+  const pin = getHyperlocalCoordinate();
+  const device = getBusinessDevice();
   const stubbed = applyTrackedEmptySerpStubs(serpRows).map((row) => {
     const { error: _e, ...dbRow } = row;
     if (!Array.isArray(dbRow.serp_surface_stack) || dbRow.serp_surface_stack.length === 0) {
       dbRow.serp_surface_stack = null;
+    }
+    // Local-tier empties must still carry the GBP pin (gate 5), even when DFS returns nothing.
+    if (resolveTrackingLocation(dbRow.keyword).tier === 'L') {
+      if (!dbRow.location_coordinate) dbRow.location_coordinate = pin;
+      if (!dbRow.device) dbRow.device = device;
+      if (!dbRow.os && device === 'desktop') dbRow.os = 'windows';
     }
     return dbRow;
   });
