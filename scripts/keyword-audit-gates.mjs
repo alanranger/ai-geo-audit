@@ -23,11 +23,11 @@ const auditDate = dateArg ? dateArg.slice('--date='.length) : new Date().toISOSt
 const PROPERTY = 'https://www.alanranger.com';
 const BASE = process.env.AUDIT_BASE_URL || 'https://ai-geo-audit.vercel.app';
 const EXPECTED = Object.freeze({
-  total: 120,
+  total: 121,
   brand: 3,
   'local-money': 65,
   'regional-money': 5,
-  'national-money': 47,
+  'national-money': 48,
 });
 
 let failures = 0;
@@ -142,7 +142,7 @@ async function runPreflight() {
   const locked = loadLockedKeywords();
   const csv = loadKeywordsCsv();
   check(
-    '1 tracked config count == 120',
+    `1 tracked config count == ${EXPECTED.total}`,
     locked.keywords.length === EXPECTED.total && csv.keywords.length === EXPECTED.total,
     `locked=${locked.keywords.length} csv=${csv.keywords.length} source=${locked.source}`
   );
@@ -154,7 +154,7 @@ async function runPreflight() {
   );
   const c = locked.census;
   check(
-    '1b census brand3/local65/regional5/national47',
+    `1b census brand${EXPECTED.brand}/local${EXPECTED['local-money']}/regional${EXPECTED['regional-money']}/national${EXPECTED['national-money']}`,
     c.brand === EXPECTED.brand
       && c['local-money'] === EXPECTED['local-money']
       && c['regional-money'] === EXPECTED['regional-money']
@@ -164,8 +164,8 @@ async function runPreflight() {
 
   const liveCfg = await fetchLockedConfigLive();
   check(
-    '1c live locked-config has regional-money:5',
-    liveCfg?.census?.['regional-money'] === 5 && liveCfg?.count === 120,
+    `1c live locked-config count == ${EXPECTED.total} with regional-money:5`,
+    liveCfg?.census?.['regional-money'] === 5 && liveCfg?.count === EXPECTED.total,
     JSON.stringify(liveCfg?.census || {})
   );
 
@@ -173,7 +173,7 @@ async function runPreflight() {
   const colCount = (collector.keywords || []).length;
   const colDiff = setEq(collector.keywords || [], locked.keywords);
   check(
-    '2 collector list == config list (120)',
+    `2 collector list == config list (${EXPECTED.total})`,
     colDiff.ok && colCount === EXPECTED.total,
     `count=${colCount} source=${collector?.meta?.source}`
   );
@@ -221,7 +221,7 @@ async function runPostflight() {
     env,
     `keyword_rankings?audit_date=eq.${auditDate}&property_url=eq.${encodeURIComponent(PROPERTY)}&select=keyword,keyword_class,serp_surface_stack,best_rank_absolute,best_rank_group,serp_features,location_coordinate,local_grid`
   );
-  check('1 row count == 120', rows.length === EXPECTED.total, `count=${rows.length}`);
+  check(`1 row count == ${EXPECTED.total}`, rows.length === EXPECTED.total, `count=${rows.length}`);
 
   const bareEmpty = rows.filter((r) => {
     const stack = r.serp_surface_stack;

@@ -1,6 +1,7 @@
 /**
- * Weekly cron: standalone LLM visibility (ChatGPT + domain mentions).
- * Separate from Google AI Overviews keyword SERP pipeline.
+ * Ad-hoc LLM visibility collect (manual secret only).
+ * Weekly vercel.json schedule REMOVED — use Full refresh / Ranking & AI /
+ * POST /api/aigeo/llm-visibility-collect instead.
  */
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -12,7 +13,6 @@ const send = (res, status, body) => {
 };
 
 function authorise(req) {
-  if (req.method === 'GET' && String(req.headers['x-vercel-cron'] || '') === '1') return true;
   const secret = process.env.CRON_SECRET;
   return secret && (req.headers['x-cron-secret'] === secret || req.query?.secret === secret);
 }
@@ -24,7 +24,7 @@ export default async function handler(req, res) {
 
   const started = Date.now();
   try {
-    const result = await collectLlmVisibilitySnapshot({ cadence: 'weekly', persist: true });
+    const result = await collectLlmVisibilitySnapshot({ cadence: 'manual', persist: true });
     return send(res, 200, {
       ok: true,
       id: result.id,
