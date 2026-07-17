@@ -114,7 +114,7 @@ export default async function handler(req, res) {
     };
 
     resolvedPropertyUrl = await resolvePropertyUrl();
-    let queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(resolvedPropertyUrl)}&order=audit_date.asc&select=audit_date,content_schema_score,visibility_score,authority_score,authority_behaviour_score,authority_ranking_score,authority_backlink_score,authority_review_score,authority_by_segment,local_entity_score,service_area_score,brand_score,ai_summary_score,money_pages_behaviour_score,money_pages_summary,money_segment_metrics,schema_total_pages,schema_pages_with_schema,schema_coverage,is_partial`;
+    let queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(resolvedPropertyUrl)}&order=audit_date.asc&select=audit_date,content_schema_score,visibility_score,authority_score,authority_behaviour_score,authority_ranking_score,authority_backlink_score,authority_review_score,authority_by_segment,local_entity_score,service_area_score,brand_score,surface_visibility_score,top_of_page_score,ai_summary_score,money_pages_behaviour_score,money_pages_summary,money_segment_metrics,schema_total_pages,schema_pages_with_schema,schema_coverage,is_partial`;
     
     if (startDate) {
       queryUrl += `&audit_date=gte.${startDate}`;
@@ -289,6 +289,9 @@ export default async function handler(req, res) {
       authorityBySegment: record.authority_by_segment || null, // JSON object with {all, nonEducation, money}
       // Brand Overlay data (Phase 1: for trend charting)
       brandScore: record.brand_score || null,
+      // Surface Visibility + Top of page (headline dials — trend chart SoT)
+      surfaceVisibilityScore: record.surface_visibility_score != null ? record.surface_visibility_score : null,
+      topOfPageScore: record.top_of_page_score != null ? record.top_of_page_score : null,
       // Phase 3: Money Pages data (for trend tracking)
       moneyPagesBehaviourScore: record.money_pages_behaviour_score || null,
       moneyPagesSummary: record.money_pages_summary || null,

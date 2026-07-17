@@ -15,6 +15,8 @@ import {
   computeAiSummaryLikelihood,
 } from '../../lib/audit/pillarScores.js';
 import { computeSurfaceOutcomesRollup } from '../../lib/audit/surfaceOutcomes.js';
+import { computeSurfaceVisibilityRollup } from '../../lib/audit/surfaceScores.js';
+import { computeTopOfPageRollup } from '../../lib/audit/topOfPage.js';
 import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
 import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
 
@@ -168,6 +170,44 @@ function stripNullRankingFields(record) {
   if (record.ranking_ai_pillar_scores === null || record.ranking_ai_pillar_scores === undefined) {
     delete record.ranking_ai_pillar_scores;
   }
+  // Never wipe persisted Surface / Top with null on GSC-only / partial saves
+  if (record.surface_visibility_score === null || record.surface_visibility_score === undefined) {
+    delete record.surface_visibility_score;
+  }
+  if (record.top_of_page_score === null || record.top_of_page_score === undefined) {
+    delete record.top_of_page_score;
+  }
+}
+
+/** Compute Surface Visibility + Top of page from Ranking & AI rows (or explicit scores). */
+function resolveSurfaceTopScores(scores, rankingAiData) {
+  let surface = null;
+  let top = null;
+  if (scores?.surfaceVisibility != null && Number.isFinite(Number(scores.surfaceVisibility))) {
+    surface = Math.round(Number(scores.surfaceVisibility));
+  }
+  if (scores?.topOfPage != null && Number.isFinite(Number(scores.topOfPage))) {
+    top = Math.round(Number(scores.topOfPage));
+  }
+  if ((surface == null || top == null) && hasRealRankingAiData(rankingAiData)) {
+    const rows = rankingAiData.combinedRows;
+    const hasStack = rows.some((r) => Array.isArray(r.serp_surface_stack) && r.serp_surface_stack.length > 0);
+    if (hasStack) {
+      if (surface == null) {
+        surface = Math.round(Number(computeSurfaceVisibilityRollup(rows).overall) || 0);
+      }
+      if (top == null) {
+        top = Math.round(Number(computeTopOfPageRollup(rows).overall) || 0);
+      }
+    }
+  }
+  // Hero dial often stores surface under visibility when source === 'surface'
+  if (surface == null && scores?.visibility && typeof scores.visibility === 'object'
+      && scores.visibility.source === 'surface') {
+    const v = Number(scores.visibility.score ?? scores.visibility.overall);
+    if (Number.isFinite(v)) surface = Math.round(v);
+  }
+  return { surface, top };
 }
 
 function mergeSchemaPagesDetail(newPages, prevPages, prevAuditDate) {
@@ -700,6 +740,15 @@ export default async function handler(req, res) {
       // Phase 1: Brand Overlay and AI Summary (stored as JSON)
       brand_overlay: ensureJson(scoresToUse?.brandOverlay), // JSON object with score, label, metrics, notes
       brand_score: ensureNumber(scoresToUse?.brandOverlay?.score), // For trend charting
+
+      // Surface Visibility + Top of page (headline dials — persist for trend chart SoT)
+      ...(() => {
+        const st = resolveSurfaceTopScores(scoresToUse, rankingAiData);
+        return {
+          surface_visibility_score: st.surface != null ? ensureNumber(st.surface) : null,
+          top_of_page_score: st.top != null ? ensureNumber(st.top) : null,
+        };
+      })(),
       
       // Money Pages Performance (Phase 1 - stored as JSON)
       money_pages_metrics: ensureJson(scoresToUse?.moneyPagesMetrics), // JSON object: {overview: {...}, rows: [...]}
@@ -1202,8 +1251,15 @@ export default async function handler(req, res) {
         if (auditRecord.ranking_ai_pillar_scores !== null && auditRecord.ranking_ai_pillar_scores !== undefined) {
           updatePayload.ranking_ai_pillar_scores = auditRecord.ranking_ai_pillar_scores;
         }
+        if (auditRecord.surface_visibility_score != null) {
+          updatePayload.surface_visibility_score = auditRecord.surface_visibility_score;
+        }
+        if (auditRecord.top_of_page_score != null) {
+          updatePayload.top_of_page_score = auditRecord.top_of_page_score;
+        }
         console.log('[Supabase Save] ✓ Partial update: persisting ranking_ai_data (' +
-          (auditRecord.ranking_ai_data?.combinedRows?.length || 0) + ' combinedRows) + pillar scores');
+          (auditRecord.ranking_ai_data?.combinedRows?.length || 0) +
+          ' combinedRows) + pillar scores + surface/top');
       }
     }
 
