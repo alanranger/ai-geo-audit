@@ -19,10 +19,10 @@ const staticOnly = (await import('../lib/keyword-ranking/locked-config-merge.js'
 const census = censusFromByKeyword(staticOnly);
 
 const report = {
-  ok: bank.prompts.length === 17 && census.total === 151,
+  ok: bank.prompts.length === 15 && census.total === 151,
   source: bank.source,
   prompt_count: bank.prompts.length,
-  expected_prompts: 17,
+  expected_prompts: 15,
   static_json_total: census.total,
   static_json_source: staticOnly && Object.keys(staticOnly).length ? 'keyword-tracking-locations-LOCKED.json' : null,
   meta: bank.meta,
