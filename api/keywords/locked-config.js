@@ -5,8 +5,7 @@
 
 import {
   censusFromByKeyword,
-  loadByKeywordFromCsv,
-  defaultLockedCsvPath,
+  loadLockedByKeywordFromRepo,
 } from '../../lib/keyword-ranking/locked-config-merge.js';
 import {
   fetchSupabaseLockedOverride,
@@ -40,7 +39,7 @@ export default async function handler(req, res) {
 
   try {
     const root = join(dirname(fileURLToPath(import.meta.url)), '../..');
-    const staticByKeyword = loadByKeywordFromCsv(defaultLockedCsvPath(root));
+    const staticByKeyword = loadLockedByKeywordFromRepo(root);
     let override = null;
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -52,7 +51,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       status: 'ok',
-      source: override?.source || 'repo_locked_csv',
+      source: override?.source || 'repo_locked_json',
       updated_at: override?.updated_at || null,
       count: Object.keys(byKeyword).length,
       census,

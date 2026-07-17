@@ -1,16 +1,30 @@
 /**
  * Manual ChatGPT / LLM visibility collect (no cron).
  * Used by Full refresh + Ranking & AI scan progress steps.
+ * GET/POST ?dryRun=1 — load prompt bank only (no DFS spend).
  */
-export const config = { runtime: 'nodejs', maxDuration: 300 };
+export const config = {
+  runtime: 'nodejs',
+  maxDuration: 300,
+  // Ensure LOCKED CSV is traced into this lambda (NFT often misses dynamic path reads).
+  includeFiles: ['config/keyword-tracking-locations-and-class-LOCKED-v4.csv'],
+};
 
-import { collectLlmVisibilitySnapshot } from '../../lib/llm-visibility/collect-core.js';
+import { collectLlmVisibilitySnapshot, loadFlaggedPromptBank } from '../../lib/llm-visibility/collect-core.js';
 
 const send = (res, status, body) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
   res.status(status).send(JSON.stringify(body));
 };
+
+function wantsDryRun(req) {
+  const q = req.query?.dryRun ?? req.query?.dry_run;
+  if (q === '1' || q === 'true') return true;
+  const b = req.body;
+  if (b && typeof b === 'object' && (b.dryRun === true || b.dryRun === 1 || b.dry_run === true)) return true;
+  return false;
+}
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return send(res, 204, {});
@@ -20,6 +34,18 @@ export default async function handler(req, res) {
 
   const started = Date.now();
   try {
+    if (wantsDryRun(req)) {
+      const bank = await loadFlaggedPromptBank();
+      return send(res, 200, {
+        ok: true,
+        dry_run: true,
+        source: bank.source,
+        prompts_total: bank.prompts.length,
+        prompts: bank.prompts.map((p) => p.keyword),
+        meta: bank.meta || null,
+        duration_ms: Date.now() - started,
+      });
+    }
     const result = await collectLlmVisibilitySnapshot({ cadence: 'manual', persist: true });
     return send(res, 200, {
       ok: true,
