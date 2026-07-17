@@ -2,10 +2,15 @@
 
 SOURCE (only):
   alan-shared-resources/csv/Booking_Sheet_2026_-_WITH_PRODUCT_MAPPING_3.xlsm
+
+NOTE: openpyxl strips Excel x14:dataValidations (column I ProductList dropdown).
+After save, re-inject via restore-booking-column-i-validation.py in shared-resources.
 """
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -122,6 +127,16 @@ def main() -> None:
     wb.save(SOURCE)
     print(f"patched rows: {patched} {by_sheet}")
     print(f"dates repaired: {dates_repaired}")
+
+    restore = Path(
+        r"G:/Dropbox/alan ranger photography/Website Code/alan-shared-resources/scripts/"
+        r"restore-booking-column-i-validation.py"
+    )
+    if restore.is_file():
+        print("Restoring column I ProductList validation (openpyxl strips x14 DV)...")
+        subprocess.run([sys.executable, str(restore)], check=True)
+    else:
+        print("WARN: restore-booking-column-i-validation.py not found — re-run manually")
 
 
 if __name__ == "__main__":
