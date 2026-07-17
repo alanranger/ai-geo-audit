@@ -16,6 +16,8 @@ import { resolveKeywordClass } from '../lib/keyword-ranking/tracking-class.js';
 import { applyTrackedEmptySerpStubs } from '../lib/keyword-ranking/empty-serp-stub.js';
 import { coalesceSearchVolume } from '../lib/keyword-ranking/ke-search-volumes.js';
 import { getHyperlocalCoordinate, getBusinessDevice } from '../lib/keyword-ranking/business-location.js';
+import { buildCombinedRows, normalizeKeyword, buildSummary } from '../lib/keyword-ranking/refresh-core.js';
+import { fetchAiModeRowsLocal } from '../lib/keyword-ranking/fetch-ai-mode-local.js';
 
 dotenvConfig({ path: '.env.local' });
 
@@ -148,6 +150,52 @@ async function main() {
   });
   if (upErr) throw upErr;
 
+  // Production refresh also runs AI Mode; without it ai_alan_citations_* stay null.
+  console.log('AI Mode enrich (local DFS)…');
+  const aiRows = await fetchAiModeRowsLocal(stubbed.map((r) => r.keyword), { concurrency: 4 });
+  const combined = buildCombinedRows(stubbed, aiRows);
+  const byKw = new Map(combined.map((r) => [normalizeKeyword(r.keyword), r]));
+  let aioCited = 0;
+  for (const row of stubbed) {
+    const c = byKw.get(normalizeKeyword(row.keyword));
+    if (!c) continue;
+    const patch = {
+      ai_total_citations: c.ai_total_citations ?? 0,
+      ai_alan_citations_count: c.ai_alan_citations_count ?? 0,
+      ai_alan_citations: c.ai_alan_citations || [],
+      ai_engines: c.ai_engines,
+      // Keep classic SERP AIO flag; AI Mode lives in ai_engines + citation columns.
+      has_ai_overview: Boolean(row.ai_overview_present_any || row.has_ai_overview),
+    };
+    if ((patch.ai_alan_citations_count || 0) > 0) aioCited += 1;
+    const { error: aiErr } = await sb
+      .from('keyword_rankings')
+      .update(patch)
+      .eq('property_url', PROPERTY)
+      .eq('audit_date', auditDate)
+      .eq('keyword', row.keyword);
+    if (aiErr) throw aiErr;
+  }
+
+  // Stamp refresh + publish audit_results blob so all tabs pick this day (not a stale scan).
+  const nowIso = new Date().toISOString();
+  await sb.from('keyword_rankings').update({ last_refreshed_at: nowIso })
+    .eq('property_url', PROPERTY).eq('audit_date', auditDate);
+  const { data: finalRows } = await sb.from('keyword_rankings').select('*')
+    .eq('property_url', PROPERTY).eq('audit_date', auditDate);
+  await sb.from('audit_results').upsert({
+    property_url: PROPERTY,
+    audit_date: auditDate,
+    ranking_ai_data: {
+      source: 'keyword_rankings_table',
+      summary: { ...buildSummary(finalRows || stubbed), audit_date: auditDate },
+      combinedRows: finalRows || stubbed,
+      timestamp: nowIso,
+      lastRunTimestamp: nowIso,
+    },
+    updated_at: nowIso,
+  }, { onConflict: 'property_url,audit_date' });
+
   const ranked = stubbed.filter((r) => Array.isArray(r.serp_surface_stack) && r.serp_surface_stack.length > 0).length;
   const stubs = stubbed.filter((r) => r.serp_features?.stub === true).length;
   const hyperlocal = stubbed.filter((r) => String(r.location_coordinate || '').includes('52.3991769')).length;
@@ -159,6 +207,8 @@ async function main() {
     stubs,
     hyperlocal_pins: hyperlocal,
     grid_rows: grid,
+    ai_mode_cited: aioCited,
+    last_refreshed_at: nowIso,
     six_watch: [
       'beginners photography classes coventry',
       'beginners photography lessons coventry',
