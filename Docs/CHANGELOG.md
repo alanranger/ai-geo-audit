@@ -2,6 +2,18 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-07-17] - Unify Google AI answer served/owned SoT
+
+**Problem:** AI Health Surface outcomes showed AI answer ~28% (42/148) while Ranking census + scan said cited in **0**/68 — different definitions of served/owned.
+
+**Change:** One SoT everywhere (AI Health outcomes, Ranking census, scan modal, gap preset):
+- **Served** = classic SERP `serp_surface_stack` has `ai_overview` with a slot (not `has_ai_overview` / `ai_overview_present_any` flags).
+- **Owned** = that stack element has `ours === true` (not `ai_alan_citations_count` — those stay in AI Mode citation diagnostics).
+
+**Files:** `lib/audit/surfaceOutcomes.js`, `audit-dashboard.html` (`outcomeAioServed` / `outcomeAioOwned`)
+
+---
+
 ## [2026-07-12] - Locked per-keyword tracking locations (113 keywords)
 
 **Supersedes** the provisional pattern rules from earlier the same day.
