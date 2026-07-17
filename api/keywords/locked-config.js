@@ -1,16 +1,10 @@
 /**
  * GET /api/keywords/locked-config
- * Returns merged locked keyword class/location config (repo files + Supabase override).
+ * Returns merged locked keyword class/location config (bundled JSON + Supabase override).
  */
 
-import {
-  censusFromByKeyword,
-  loadLockedByKeywordFromRepo,
-} from '../../lib/keyword-ranking/locked-config-merge.js';
-import {
-  fetchSupabaseLockedOverride,
-  mergeLockedByKeyword,
-} from '../../lib/keyword-ranking/locked-config-persist.js';
+import { censusFromByKeyword } from '../../lib/keyword-ranking/locked-config-merge.js';
+import { loadRuntimeLockedByKeyword } from '../../lib/keyword-ranking/locked-config-persist.js';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -39,20 +33,14 @@ export default async function handler(req, res) {
 
   try {
     const root = join(dirname(fileURLToPath(import.meta.url)), '../..');
-    const staticByKeyword = loadLockedByKeywordFromRepo(root);
-    let override = null;
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (supabaseUrl && supabaseKey) {
-      override = await fetchSupabaseLockedOverride(supabaseUrl, supabaseKey, propertyUrlFromEnv());
-    }
-    const byKeyword = mergeLockedByKeyword(staticByKeyword, override?.by_keyword);
+    const loaded = await loadRuntimeLockedByKeyword({ root, propertyUrl: propertyUrlFromEnv() });
+    const byKeyword = loaded.byKeyword;
     const census = censusFromByKeyword(byKeyword);
 
     return res.status(200).json({
       status: 'ok',
-      source: override?.source || 'repo_locked_json',
-      updated_at: override?.updated_at || null,
+      source: loaded.source,
+      updated_at: loaded.updated_at,
       count: Object.keys(byKeyword).length,
       census,
       by_keyword: byKeyword,
