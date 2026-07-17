@@ -17,6 +17,7 @@ import { resolveTrackingLocation } from '../lib/keyword-ranking/tracking-locatio
 import { computeSurfaceVisibilityRollup } from '../lib/audit/surfaceScores.js';
 import { computeTopOfPageRollup } from '../lib/audit/topOfPage.js';
 import { resolveRowsClassificationAtRender } from '../lib/keyword-ranking/resolve-classification-at-render.js';
+import { applyTrackedEmptySerpStubs } from '../lib/keyword-ranking/empty-serp-stub.js';
 
 dotenvConfig({ path: '.env.local' });
 
@@ -151,14 +152,25 @@ async function main() {
   }
 
   if (!dryRun) {
-    for (const { keyword, serp, loc } of rescanned) {
-      const patch = rowPatchFromSerp(serp, loc);
+    // Never write bare empties — same stub gate as save-keyword-batch / cron.
+    const stubbed = applyTrackedEmptySerpStubs(
+      rescanned.map(({ keyword, serp, loc }) => ({
+        keyword,
+        ...rowPatchFromSerp(serp, loc),
+        error: serp?.error || null,
+      }))
+    );
+    for (const row of stubbed) {
+      const { error: _gate, ...patch } = row;
+      if (!Array.isArray(patch.serp_surface_stack) || patch.serp_surface_stack.length === 0) {
+        patch.serp_surface_stack = null;
+      }
       const { error } = await sb
         .from('keyword_rankings')
         .update(patch)
         .eq('property_url', PROPERTY)
         .eq('audit_date', auditDate)
-        .eq('keyword', keyword);
+        .eq('keyword', row.keyword);
       if (error) {
         const fallback = { ...patch };
         delete fallback.location_coordinate;
@@ -171,8 +183,8 @@ async function main() {
           .update(fallback)
           .eq('property_url', PROPERTY)
           .eq('audit_date', auditDate)
-          .eq('keyword', keyword);
-        if (err2) throw new Error(`Update failed for ${keyword}: ${err2.message}`);
+          .eq('keyword', row.keyword);
+        if (err2) throw new Error(`Update failed for ${row.keyword}: ${err2.message}`);
         console.error(`  metadata columns skipped (${error.message})`);
       }
     }

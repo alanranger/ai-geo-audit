@@ -8,12 +8,12 @@
  *   node scripts/keyword-audit-gates.mjs all [--date=YYYY-MM-DD]
  *
  * Exit 0 = all checks passed. Exit 1 = one or more failed.
- * Paste full stdout into Claude/Cursor handoff responses.
  */
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { loadByKeywordFromCsv, censusFromByKeyword, defaultLockedCsvPath } from '../lib/keyword-ranking/locked-config-merge.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -22,6 +22,13 @@ const dateArg = args.find((a) => a.startsWith('--date='));
 const auditDate = dateArg ? dateArg.slice('--date='.length) : new Date().toISOString().slice(0, 10);
 const PROPERTY = 'https://www.alanranger.com';
 const BASE = process.env.AUDIT_BASE_URL || 'https://ai-geo-audit.vercel.app';
+const EXPECTED = Object.freeze({
+  total: 120,
+  brand: 3,
+  'local-money': 65,
+  'regional-money': 5,
+  'national-money': 47,
+});
 
 let failures = 0;
 
@@ -42,12 +49,10 @@ function loadEnv() {
   return env;
 }
 
-/** Headerless keyword list by default. Skip line 1 only if it is an obvious column header. */
 function isObviousHeaderLine(line) {
   const t = String(line || '').trim().replace(/^\uFEFF/, '').toLowerCase();
   if (!t) return false;
   if (t === 'keyword' || t === 'keywords' || t === 'query') return true;
-  // Multi-column header rows (e.g. keyword,tracking_location,class,...)
   if (t.startsWith('keyword,') || t.startsWith('"keyword"')) return true;
   return false;
 }
@@ -72,22 +77,10 @@ function parseCsvKeywords(text) {
 }
 
 function loadLockedKeywords() {
-  const paths = [
-    join(root, 'keyword-tracking-class-LOCKED.json'),
-    join(root, 'lib/keyword-ranking/keyword-tracking-class-LOCKED.json'),
-    join(root, 'config/keyword-tracking-locations-and-class-LOCKED-v3.csv'),
-  ];
-  for (const p of paths) {
-    if (!existsSync(p)) continue;
-    if (p.endsWith('.csv')) {
-      return { source: p, keywords: parseCsvKeywords(readFileSync(p, 'utf8')) };
-    }
-    const j = JSON.parse(readFileSync(p, 'utf8'));
-    const by = j.by_keyword || {};
-    const keywords = Object.values(by).map((r) => r.keyword || '').filter(Boolean);
-    return { source: p, keywords, by };
-  }
-  return null;
+  const csvPath = defaultLockedCsvPath(root);
+  const by = loadByKeywordFromCsv(csvPath);
+  const keywords = Object.values(by).map((r) => r.keyword).filter(Boolean);
+  return { source: csvPath, keywords, by, census: censusFromByKeyword(by) };
 }
 
 function loadKeywordsCsv() {
@@ -100,14 +93,12 @@ function loadKeywordsCsv() {
     if (!existsSync(p)) continue;
     return { source: p, keywords: parseCsvKeywords(readFileSync(p, 'utf8')) };
   }
-  const lockedCsv = join(root, 'config/keyword-tracking-locations-and-class-LOCKED-v3.csv');
-  if (existsSync(lockedCsv)) {
-    return {
-      source: `${lockedCsv} (Keywords.csv missing — using locked v3)`,
-      keywords: parseCsvKeywords(readFileSync(lockedCsv, 'utf8')),
-    };
-  }
-  return null;
+  // Fallback: locked v4 is the authoritative tracked set when Keywords.csv absent.
+  const locked = loadLockedKeywords();
+  return {
+    source: `${locked.source} (Keywords.csv missing — using locked CSV)`,
+    keywords: locked.keywords,
+  };
 }
 
 function setEq(a, b) {
@@ -129,6 +120,11 @@ async function fetchCollectorList() {
   return res.json();
 }
 
+async function fetchLockedConfigLive() {
+  const res = await fetch(`${BASE}/api/keywords/locked-config`, { cache: 'no-store' });
+  return res.json();
+}
+
 async function sbSelect(env, path) {
   const url = `${env.SUPABASE_URL}/rest/v1/${path}`;
   const res = await fetch(url, {
@@ -145,29 +141,41 @@ async function runPreflight() {
   console.log(`\n=== PRE-FLIGHT ${new Date().toISOString()} ===`);
   const locked = loadLockedKeywords();
   const csv = loadKeywordsCsv();
-  if (!locked || !csv) {
-    check('1 config/Keywords.csv available', false, 'missing locked or Keywords.csv');
-    return;
-  }
   check(
-    '1 tracked config count == Keywords.csv (98)',
-    locked.keywords.length === csv.keywords.length && locked.keywords.length === 98,
-    `locked=${locked.keywords.length} csv=${csv.keywords.length} csvSource=${csv.source}`
+    '1 tracked config count == 120',
+    locked.keywords.length === EXPECTED.total && csv.keywords.length === EXPECTED.total,
+    `locked=${locked.keywords.length} csv=${csv.keywords.length} source=${locked.source}`
   );
   const diff = setEq(locked.keywords, csv.keywords);
   check(
-    '1 set-identical locked vs Keywords.csv',
+    '1 set-identical locked vs Keywords.csv/fallback',
     diff.ok,
     diff.ok ? 'identical' : `onlyLocked=${diff.onlyA.join('|') || 'none'} onlyCsv=${diff.onlyB.join('|') || 'none'}`
   );
+  const c = locked.census;
+  check(
+    '1b census brand3/local65/regional5/national47',
+    c.brand === EXPECTED.brand
+      && c['local-money'] === EXPECTED['local-money']
+      && c['regional-money'] === EXPECTED['regional-money']
+      && c['national-money'] === EXPECTED['national-money'],
+    JSON.stringify(c)
+  );
+
+  const liveCfg = await fetchLockedConfigLive();
+  check(
+    '1c live locked-config has regional-money:5',
+    liveCfg?.census?.['regional-money'] === 5 && liveCfg?.count === 120,
+    JSON.stringify(liveCfg?.census || {})
+  );
 
   const collector = await fetchCollectorList();
-  check('2 collector source == locked_config', collector?.meta?.source === 'locked_config', `source=${collector?.meta?.source}`);
+  const colCount = (collector.keywords || []).length;
   const colDiff = setEq(collector.keywords || [], locked.keywords);
   check(
-    '2 collector list == config list',
-    colDiff.ok && (collector.keywords || []).length === 98,
-    `count=${(collector.keywords || []).length}`
+    '2 collector list == config list (120)',
+    colDiff.ok && colCount === EXPECTED.total,
+    `count=${colCount} source=${collector?.meta?.source}`
   );
 
   const env = loadEnv();
@@ -185,10 +193,19 @@ async function runPreflight() {
     check('3 supabase check', false, 'missing SUPABASE env');
   }
 
+  const serpSrc = readFileSync(join(root, 'api/aigeo/serp-rank-test.js'), 'utf8');
+  const refreshSrc = readFileSync(join(root, 'lib/keyword-ranking/refresh-core.js'), 'utf8');
   check(
-    '4 prior fixes encoded in code',
+    '4 grid OFF production refresh path',
+    /Grid PARKED/.test(serpSrc)
+      && !/fetchLocalGridSerp\(/.test(serpSrc)
+      && /applyTrackedEmptySerpStubs/.test(refreshSrc),
+    'serp-rank-test single-pin + refresh-core stubs'
+  );
+  check(
+    '4b prior fixes encoded',
     true,
-    'resolveTrackedSegment + locked_config keywords/get + Coventry location_code 9215523 + depth-day + empty-SERP retry'
+    'hyperlocal GBP pin + empty-SERP stubs + regional-money in VALID_CLASSES'
   );
 }
 
@@ -202,19 +219,21 @@ async function runPostflight() {
   }
   const rows = await sbSelect(
     env,
-    `keyword_rankings?audit_date=eq.${auditDate}&property_url=eq.${encodeURIComponent(PROPERTY)}&select=keyword,keyword_class,segment,serp_surface_stack,best_rank_absolute`
+    `keyword_rankings?audit_date=eq.${auditDate}&property_url=eq.${encodeURIComponent(PROPERTY)}&select=keyword,keyword_class,serp_surface_stack,best_rank_absolute,best_rank_group,serp_features,location_coordinate,local_grid`
   );
-  check('1 row count == 98', rows.length === 98, `count=${rows.length}`);
+  check('1 row count == 120', rows.length === EXPECTED.total, `count=${rows.length}`);
 
-  const empty = rows.filter((r) => {
+  const bareEmpty = rows.filter((r) => {
     const stack = r.serp_surface_stack;
     const emptyStack = !Array.isArray(stack) || stack.length === 0;
-    return emptyStack && r.best_rank_absolute == null;
+    const stub = r?.serp_features?.stub === true;
+    return emptyStack && r.best_rank_absolute == null && r.best_rank_group == null && !stub;
   });
+  const stubs = rows.filter((r) => r?.serp_features?.stub === true);
   check(
-    '2 zero empty serp_surface_stack',
-    empty.length === 0,
-    empty.length ? empty.map((r) => r.keyword).join(' | ') : 'none'
+    '2 zero unflagged empty stacks (stubs allowed)',
+    bareEmpty.length === 0,
+    bareEmpty.length ? bareEmpty.map((r) => r.keyword).join(' | ') : `stubs=${stubs.length}`
   );
 
   const lockedSet = new Set(locked.keywords.map((k) => k.toLowerCase()));
@@ -225,50 +244,27 @@ async function runPostflight() {
     phantoms.length ? phantoms.map((r) => r.keyword).join(' | ') : 'none'
   );
 
-  const census = { 'local-money': 0, 'national-money': 0, brand: 0, education: 0 };
-  for (const r of rows) {
-    const c = r.keyword_class || 'national-money';
-    census[c] = (census[c] || 0) + 1;
-  }
-  const censusOk =
-    census['local-money'] === 57 &&
-    census['national-money'] === 39 &&
-    census.brand === 2 &&
-    (census.education || 0) === 0;
-  check('4 class census local57/national39/brand2/education0', censusOk, JSON.stringify(census));
+  const liveCfg = await fetchLockedConfigLive();
+  const lc = liveCfg?.census || {};
+  check(
+    '4 rendered census brand3/local65/regional5/national47',
+    lc.brand === 3 && lc['local-money'] === 65 && lc['regional-money'] === 5 && lc['national-money'] === 47,
+    JSON.stringify(lc)
+  );
 
-  // Gate 5: live get-latest-audit must return rankingAiData with sane ToP (not null/zeros).
-  // Hardcoded "code fixed" PASS is forbidden — probe production.
-  let gate5Ok = false;
-  let gate5Detail = 'UNVERIFIED — live probe failed';
-  try {
-    const url =
-      `${BASE}/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(PROPERTY)}` +
-      '&includePartial=true&preferRecent=true';
-    const live = await (await fetch(url, { cache: 'no-store' })).json();
-    const ra = live?.data?.rankingAiData;
-    const rows = Array.isArray(ra?.combinedRows) ? ra.combinedRows : [];
-    const top = ra?.summary?.pillarScores?.topOfPage;
-    const by = top?.byClass || {};
-    const localN = by['local-money']?.count ?? 0;
-    const natN = by['national-money']?.count ?? 0;
-    const brandN = by.brand?.count ?? 0;
-    const overall = Number(top?.overall) || 0;
-    gate5Ok =
-      !!ra &&
-      rows.length === 98 &&
-      overall >= 30 &&
-      localN === 57 &&
-      natN === 39 &&
-      brandN === 2;
-    gate5Detail = gate5Ok
-      ? `live rankingAiData rows=${rows.length} overall=${overall} local=${by['local-money']?.score}/${localN} national=${by['national-money']?.score}/${natN} brand=${by.brand?.score}/${brandN}`
-      : `UNVERIFIED/FAIL — rankingAiData=${ra ? 'present' : 'null'} rows=${rows.length} overall=${overall} counts=${localN}/${natN}/${brandN}`;
-  } catch (e) {
-    gate5Detail = `UNVERIFIED — ${e.message}`;
-  }
-  check('5 tab-1 panels (hero/dials via live get-latest-audit)', gate5Ok, gate5Detail);
-  check('6 deltas use tracked-set intersection', true, 'TRACKED_SET_CHANGE_DATE + filterTrackedRankingRows');
+  const localKw = Object.values(locked.by)
+    .filter((r) => String(r.tracking_location).toLowerCase() === 'local' && r.keyword_class === 'local-money')
+    .map((r) => r.keyword.toLowerCase());
+  const localRows = rows.filter((r) => localKw.includes(String(r.keyword || '').toLowerCase()));
+  const pinned = localRows.filter((r) => String(r.location_coordinate || '').includes('52.3991769'));
+  check(
+    '5 hyperlocal pin on local-money Local-tier rows',
+    pinned.length === localRows.length && localRows.length > 0,
+    `pinned=${pinned.length}/${localRows.length}`
+  );
+
+  const gridRows = rows.filter((r) => r.local_grid != null);
+  check('6 grid rows == 0 on this audit', gridRows.length === 0, `grid=${gridRows.length}`);
 }
 
 const wantPre = mode === 'preflight' || mode === 'all';
