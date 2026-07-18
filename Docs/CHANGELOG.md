@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-07-18] - Site AI Health Option A layout
+
+**Change:** Right column detail cards now pair 1:1 with left Monopoly metrics (Surface / Top / Brand) in matching identity colours. AI Summary Likelihood moved below as a separate teal composite section with explainer “not the dial score.” Dial centre score + label use Surface brown.
+
+**Files:** `audit-dashboard.html`
+
+---
+
 ## [2026-07-17] - Unify Google AI answer served/owned SoT
 
 **Problem:** AI Health Surface outcomes showed AI answer ~28% (42/148) while Ranking census + scan said cited in **0**/68 — different definitions of served/owned.
