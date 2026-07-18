@@ -1,23 +1,33 @@
 /**
- * Export 07-url-target-keywords-v2.csv from curated DB dump + LOCKED-151.
+ * Export 07-url-target-keywords-v2.csv from DB SoT + LOCKED-151.
  * Usage: node scripts/export-target-keywords-v2.mjs
- * (Reads scripts/output/target-keyword-master-35.json produced alongside this build.)
  */
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const masterPath = path.join(root, 'scripts/output/target-keyword-master-35.json');
+dotenv.config({ path: path.join(root, '.env.local') });
+dotenv.config({ path: path.join(root, '.env') });
+
+const PROPERTY = 'https://www.alanranger.com';
 const lockedPath = path.join(root, 'config/keyword-tracking-locations-and-class-LOCKED-v4.csv');
-const outRepo = path.join(
-  root,
-  '../alan-shared-resources/csv/07-url-target-keywords-v2.csv'
-);
+const outRepo = path.join(root, '../alan-shared-resources/csv/07-url-target-keywords-v2.csv');
 const outAudit = path.join(root, 'config/07-url-target-keywords-v2.csv');
 const outDrive = path.join(
   'C:/Users/alan/Google Drive/Claude shared resources/Cursor Outputs for Claude/07-url-target-keywords-v2.csv'
 );
+
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!supabaseUrl || !supabaseKey) {
+  console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+  process.exit(1);
+}
+
+const sb = createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } });
 
 function parseCsv(text) {
   const lines = text.trim().split(/\r?\n/);
@@ -53,7 +63,26 @@ function esc(v) {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-const master = JSON.parse(fs.readFileSync(masterPath, 'utf8'));
+async function fetchAll() {
+  const out = [];
+  let from = 0;
+  const page = 1000;
+  for (;;) {
+    const { data, error } = await sb
+      .from('traditional_seo_target_keyword_overrides')
+      .select('page_url, target_keyword, target_class, notes')
+      .eq('property_url', PROPERTY)
+      .order('page_url')
+      .range(from, from + page - 1);
+    if (error) throw error;
+    out.push(...(data || []));
+    if (!data || data.length < page) break;
+    from += page;
+  }
+  return out;
+}
+
+const master = await fetchAll();
 const locked = parseCsv(fs.readFileSync(lockedPath, 'utf8'));
 const lockedByKw = new Map();
 for (const r of locked) {
@@ -74,7 +103,7 @@ for (const row of master) {
   const hit = kw ? lockedByKw.get(kw.toLowerCase()) : null;
   lines.push(
     [
-      esc(row.url),
+      esc(row.page_url),
       esc(kw),
       esc(row.target_class || ''),
       esc(hit?.class || ''),
@@ -85,8 +114,39 @@ for (const row of master) {
 }
 const body = `${lines.join('\n')}\n`;
 
-for (const p of [outRepo, outAudit, outDrive]) {
+const byClass = master.reduce((a, r) => {
+  const c = r.target_class || 'null';
+  a[c] = (a[c] || 0) + 1;
+  return a;
+}, {});
+
+function writeRetry(p, content, attempts = 5) {
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, body, 'utf8');
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const tmp = `${p}.tmp-${process.pid}`;
+      fs.writeFileSync(tmp, content, 'utf8');
+      fs.renameSync(tmp, p);
+      return;
+    } catch (err) {
+      lastErr = err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400 * (i + 1));
+    }
+  }
+  // Last resort: write sibling if Dropbox locks the exact path
+  const alt = p.replace(/\.csv$/i, `.write-${Date.now()}.csv`);
+  try {
+    fs.writeFileSync(p, content, 'utf8');
+    return;
+  } catch {
+    fs.writeFileSync(alt, content, 'utf8');
+    console.warn('locked; wrote alternate', alt, lastErr?.code || lastErr?.message);
+  }
+}
+
+for (const p of [outRepo, outAudit, outDrive]) {
+  writeRetry(p, body);
   console.log('wrote', p, master.length, 'rows');
 }
+console.log('by target_class:', byClass);
