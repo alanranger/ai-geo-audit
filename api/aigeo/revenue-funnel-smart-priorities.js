@@ -297,102 +297,30 @@ function urlSlugKey(rawUrl) {
   }
 }
 
-// CSV 07 source of truth for URL \u2192 target keyword. This is the SAME
-// CSV the Traditional SEO Audit Results table reads from in the
-// dashboard UI (see fetchTraditionalSeoTargetKeywordLookup in
-// audit-dashboard.html). Hosted in alan-shared-resources GitHub repo;
-// covers every URL on the site (\u2248508 rows). The Supabase
-// traditional_seo_target_keyword_overrides table is layered on top
-// for in-app edits via the per-URL "Save keyword" modal \u2014 overrides
-// win where both have a row.
-const TARGET_KEYWORD_CSV_SOURCES = [
-  'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/07-url-target-keywords-seospace.csv',
-  'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/07-url-target-keywords-seospace.csv'
-];
-
-// Minimal CSV parser sufficient for the seospace CSV (no embedded
-// newlines, quote-escapes via doubled quotes). Returns array of
-// arrays of strings.
-function parseCsvLine(line) {
-  const out = [];
-  let cur = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (line[i + 1] === '"') { cur += '"'; i += 1; }
-        else { inQuotes = false; }
-      } else { cur += ch; }
-    } else if (ch === '"') { inQuotes = true; }
-    else if (ch === ',') { out.push(cur); cur = ''; }
-    else { cur += ch; }
-  }
-  out.push(cur);
-  return out;
-}
-
-// Fetch the CSV 07 baseline. Returns Map<slugKey, target_keyword>.
-// Tolerates network failure (returns empty Map) so the overrides path
-// still works on its own; never throws.
-async function fetchTargetKeywordCsvBaseline() {
-  for (const sourceUrl of TARGET_KEYWORD_CSV_SOURCES) {
-    try {
-      const sep = sourceUrl.includes('?') ? '&' : '?';
-      const res = await fetch(`${sourceUrl}${sep}cb=${Date.now()}`, { cache: 'no-store' });
-      if (!res.ok) continue;
-      const csv = await res.text();
-      if (!csv || !csv.trim()) continue;
-      const lines = csv.split(/\r?\n/).filter(l => l.trim().length > 0);
-      if (lines.length < 2) continue;
-      const headers = parseCsvLine(lines[0]).map(h => String(h || '').trim().toLowerCase());
-      const urlIdx = headers.indexOf('url');
-      const kwIdx = headers.indexOf('target_keyword');
-      if (urlIdx < 0 || kwIdx < 0) continue;
-      const map = new Map();
-      for (let i = 1; i < lines.length; i += 1) {
-        const cols = parseCsvLine(lines[i]);
-        const u = String(cols[urlIdx] || '').trim();
-        const kw = String(cols[kwIdx] || '').trim();
-        if (!u || !kw) continue;
-        const key = urlSlugKey(u);
-        if (key) map.set(key, kw);
-      }
-      return map;
-    } catch {
-      // try next source
-    }
-  }
-  return new Map();
-}
-
-// Returns the merged Map: CSV 07 baseline first, then Supabase
-// overrides layered on top so the user's in-app "Save keyword" edits
-// always win against the GitHub CSV. Same merge semantics as the UI's
-// fetchTraditionalSeoTargetKeywordLookup +
-// traditionalSeoMergeTargetKeywordOverridesIntoLookup pair, so the
-// smart-priorities API and the Traditional SEO Audit Results table
-// agree on what target keyword each URL has.
+// Stage 1 (2026-07-18): Supabase traditional_seo_target_keyword_overrides
+// is the sole runtime SoT for URL → target keyword (CSV 07 retired).
+// Empty target_keyword rows (none_utility / cannibal_candidate) are skipped.
 async function fetchTargetKeywordOverrides(supabase, propertyUrl) {
-  const baseline = await fetchTargetKeywordCsvBaseline();
+  const map = new Map();
   try {
     const { data, error } = await supabase
       .from('traditional_seo_target_keyword_overrides')
-      .select('page_url, target_keyword')
+      .select('page_url, target_keyword, target_class')
       .eq('property_url', propertyUrl);
     if (error) {
-      if (/does not exist/i.test(String(error.message || ''))) return baseline;
+      if (/does not exist/i.test(String(error.message || ''))) return map;
       throw error;
     }
     for (const row of (data || [])) {
-      if (row && row.page_url && row.target_keyword) {
-        const key = urlSlugKey(row.page_url);
-        if (key) baseline.set(key, String(row.target_keyword).trim());
-      }
+      if (!row || !row.page_url) continue;
+      const kw = String(row.target_keyword || '').trim();
+      if (!kw) continue; // cleared utility/cannibal — no assigned keyword
+      const key = urlSlugKey(row.page_url);
+      if (key) map.set(key, kw);
     }
-    return baseline;
+    return map;
   } catch {
-    return baseline;
+    return map;
   }
 }
 

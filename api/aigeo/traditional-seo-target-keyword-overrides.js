@@ -34,11 +34,14 @@ async function handlePost(req, res, supabase) {
   const propertyUrl = String(body?.propertyUrl || '').trim();
   const pageUrl = String(body?.pageUrl || '').trim();
   const targetKeyword = String(body?.targetKeyword ?? '').trim();
+  const targetClass = body?.targetClass != null ? String(body.targetClass).trim() : null;
+  const notes = body?.notes != null ? String(body.notes) : null;
   if (!pageUrl) {
     return sendJson(res, 400, { status: 'error', message: 'pageUrl is required.' });
   }
 
-  if (!targetKeyword) {
+  // Empty keyword with no class → delete (legacy clear). With class → upsert cleared row.
+  if (!targetKeyword && !targetClass) {
     const del = await supabase
       .from('traditional_seo_target_keyword_overrides')
       .delete()
@@ -47,17 +50,17 @@ async function handlePost(req, res, supabase) {
     if (del.error) throw del.error;
   } else {
     const now = new Date().toISOString();
+    const row = {
+      property_url: propertyUrl,
+      page_url: pageUrl,
+      target_keyword: targetKeyword,
+      updated_at: now
+    };
+    if (targetClass) row.target_class = targetClass;
+    if (notes != null) row.notes = notes;
     const upsert = await supabase
       .from('traditional_seo_target_keyword_overrides')
-      .upsert(
-        {
-          property_url: propertyUrl,
-          page_url: pageUrl,
-          target_keyword: targetKeyword,
-          updated_at: now
-        },
-        { onConflict: 'property_url,page_url' }
-      )
+      .upsert(row, { onConflict: 'property_url,page_url' })
       .select('*');
     if (upsert.error) throw upsert.error;
   }
