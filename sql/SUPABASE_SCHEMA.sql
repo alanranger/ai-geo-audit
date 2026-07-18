@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS audit_results (
   knowledge_panel_detected BOOLEAN,
   service_areas JSONB,
   
-  -- Backlinks (when backlink API integrated)
+  -- Backlinks (DFS summary persist-only; see lib/audit/persistDfsBacklinkScalars.js)
+  -- domain_rating = DataForSEO summary domain rank (NOT Moz/Ahrefs Domain Rating / DR)
   domain_rating INTEGER,
   backlinks_count INTEGER,
   referring_domains INTEGER,

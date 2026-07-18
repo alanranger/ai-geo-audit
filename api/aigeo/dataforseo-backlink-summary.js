@@ -3,6 +3,7 @@ export const config = { runtime: 'nodejs' };
 import { createClient } from '@supabase/supabase-js';
 import { dfsClientLimits } from '../../lib/dfs-backlink-limits.js';
 import { dfsSpamUrlFilters, DFS_SPAM_FILTERS_VERSION } from '../../lib/dfs-spam-filters.js';
+import { persistDfsBacklinkScalarsToAuditResults } from '../../lib/audit/persistDfsBacklinkScalars.js';
 
 const DFS_SUMMARY_URL = 'https://api.dataforseo.com/v3/backlinks/summary/live';
 
@@ -410,6 +411,14 @@ async function runBacklinkSummary(req) {
   await upsertRow(supabase, cacheRow);
   row = await readRow(supabase, domainHost);
 
+  // Persist-only: DFS rank → audit_results.domain_rating (label: DFS domain rank, not Moz DR).
+  let auditScalars = null;
+  try {
+    auditScalars = await persistDfsBacklinkScalarsToAuditResults(supabase, { domainHost });
+  } catch (err) {
+    console.warn('[DFS summary] audit_results scalar persist skipped:', err?.message || err);
+  }
+
   return {
     status: 200,
     body: {
@@ -421,6 +430,7 @@ async function runBacklinkSummary(req) {
         refreshed: true,
         backlinkIndexSource,
         dfsPathActive: true,
+        auditResultsScalars: auditScalars,
         ...dfsClientLimits()
       },
       meta: { generatedAt: new Date().toISOString() }

@@ -14,9 +14,11 @@ import {
   calculateSnippetReadiness,
   computeAiSummaryLikelihood,
 } from '../../lib/audit/pillarScores.js';
+import { createClient } from '@supabase/supabase-js';
 import { computeSurfaceOutcomesRollup } from '../../lib/audit/surfaceOutcomes.js';
 import { computeSurfaceVisibilityRollup } from '../../lib/audit/surfaceScores.js';
 import { computeTopOfPageRollup } from '../../lib/audit/topOfPage.js';
+import { readDfsBacklinkScalars } from '../../lib/audit/persistDfsBacklinkScalars.js';
 import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
 import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
 
@@ -1018,6 +1020,24 @@ export default async function handler(req, res) {
     const hasRankingAiDataOnly = rankingAiData && !scores && !schemaAudit && !searchData;
     
     const isPartialUpdate = hasQueryTotalsOnly || hasQueryPagesOnly || hasTopQueriesOnly || hasRankingAiDataOnly;
+
+    // Persist-only: copy DFS summary rank/RDs onto this audit row when cache has them.
+    // domain_rating column = DFS domain rank (NOT Moz/Ahrefs DR). No score formula change.
+    if (!isPartialUpdate) {
+      try {
+        const sb = createClient(supabaseUrl, supabaseKey);
+        const dfsScalars = await readDfsBacklinkScalars(sb, propertyUrl);
+        if (dfsScalars) {
+          if (dfsScalars.domain_rating != null) auditRecord.domain_rating = dfsScalars.domain_rating;
+          if (dfsScalars.referring_domains != null) auditRecord.referring_domains = dfsScalars.referring_domains;
+          console.log(
+            `[Save Audit] DFS scalars → domain_rating=${auditRecord.domain_rating} (DFS domain rank), referring_domains=${auditRecord.referring_domains}`
+          );
+        }
+      } catch (err) {
+        console.warn('[Save Audit] DFS scalar persist skipped:', err?.message || err);
+      }
+    }
 
     // ---- Merge schema_pages_detail with previous run --------------------
     // Only merge when we actually have a new schema_pages_detail payload
