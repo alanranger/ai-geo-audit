@@ -148,8 +148,13 @@ async function expandScope(page, scopeSel) {
 }
 
 async function expandAllPanels(page) {
+  // Scope to the active panel only — panels share one HTML document; expanding
+  // hidden tabs pollutes expander census / layout metrics (Claude addendum 2026-07-18).
   await page.evaluate(() => {
-    document.querySelectorAll('details').forEach((d) => d.setAttribute('open', ''));
+    const active = document.querySelector('.aigeo-panel.is-active, section.aigeo-panel[style*="block"], [data-panel].is-active')
+      || document.querySelector('.aigeo-panel:not([hidden])');
+    const root = active || document;
+    root.querySelectorAll('details').forEach((d) => d.setAttribute('open', ''));
   });
   await expandScope(page, RT_SCOPE);
 }
@@ -193,7 +198,14 @@ async function captureTab(page, tab) {
   if (tab === 'revenue-truth') await waitForRevenueTruth(page);
   else await page.waitForTimeout(3000);
   if (tab === 'revenue-truth') await expandScope(page, RT_SCOPE);
-  else await page.evaluate(() => document.querySelectorAll('details').forEach((d) => d.setAttribute('open', '')));
+  else {
+    await page.evaluate((panelKey) => {
+      const root = document.querySelector(`.aigeo-panel[data-panel="${panelKey}"], section[data-panel="${panelKey}"]`)
+        || document.querySelector('.aigeo-panel.is-active')
+        || document;
+      root.querySelectorAll('details').forEach((d) => d.setAttribute('open', ''));
+    }, tab);
+  }
   await page.waitForTimeout(IDLE_MS);
   return buildStandaloneHtml(page);
 }
