@@ -108,12 +108,24 @@ function hasRealRankingAiData(rankingAiData) {
     && rankingAiData.combinedRows.length > 0;
 }
 
-function resolveVisibilityScore(scores) {
-  if (!scores) return 0;
-  if (typeof scores.visibility === 'object' && scores.visibility) {
-    return Number(scores.visibility.score ?? scores.visibility.overall) || 0;
+/**
+ * Surface Visibility for AI Summary Likelihood (same input the AI Health UI uses).
+ * Prefer scores.surfaceVisibility / surface rollup — never the GSC Visibility pillar.
+ */
+function resolveSurfaceVisibilityForAiSummary(scores, rankingAiData) {
+  if (scores?.surfaceVisibility != null && Number.isFinite(Number(scores.surfaceVisibility))) {
+    return Math.round(Number(scores.surfaceVisibility));
   }
-  return Number(scores.visibility) || 0;
+  if (typeof scores?.visibility === 'object' && scores.visibility?.byClass) {
+    const n = Number(scores.visibility.overall ?? scores.visibility.score);
+    if (Number.isFinite(n)) return Math.round(n);
+  }
+  if (hasRealRankingAiData(rankingAiData)) {
+    const roll = computeSurfaceVisibilityRollup(rankingAiData.combinedRows);
+    const n = Number(roll?.overall);
+    if (Number.isFinite(n)) return Math.round(n);
+  }
+  return null;
 }
 
 function resolveAiCitationRate(rankingAiData) {
@@ -125,13 +137,23 @@ function resolveAiCitationRate(rankingAiData) {
 
 function buildAiSummaryPayload(scores, snippetReadiness, rankingAiData) {
   if (!scores) return { summary: null, score: null, components: null };
-  const snippetReadinessScore = calculateSnippetReadiness(scores);
-  const visibilityScore = resolveVisibilityScore(scores);
+  // Mirror AI Health UI: overwrite visibility with Surface before snippet + composite.
+  const surfaceVis = resolveSurfaceVisibilityForAiSummary(scores, rankingAiData);
+  const scoresForAi = surfaceVis != null
+    ? { ...scores, visibility: { score: surfaceVis, overall: surfaceVis, byClass: scores.visibility?.byClass } }
+    : scores;
+  const snippetReadinessScore = calculateSnippetReadiness(scoresForAi);
+  const visibilityScore = surfaceVis != null
+    ? surfaceVis
+    : (typeof scores.visibility === 'object' && scores.visibility
+      ? Number(scores.visibility.score ?? scores.visibility.overall) || 0
+      : Number(scores.visibility) || 0);
   const brandScore = scores.brandOverlay?.score || 0;
   const aiCitationRate = resolveAiCitationRate(rankingAiData);
   if (snippetReadinessScore === 0 && brandScore === 0) {
     return { summary: null, score: null, components: null };
   }
+  // Shared with UI: lib/audit/pillarScores.js → computeAiSummaryLikelihood (35/25/25/15)
   const summary = computeAiSummaryLikelihood(
     snippetReadinessScore,
     visibilityScore,
@@ -777,7 +799,7 @@ export default async function handler(req, res) {
       // authoritative source for the five pillar percentages shown in the Keyword Ranking & AI tab.
       ranking_ai_pillar_scores: ensureJson(rankingAiPillarScores),
       
-      // Calculate AI Summary Likelihood (Phase 4 signed 40/30/20/10)
+      // AI Summary Likelihood — same computeAiSummaryLikelihood as AI Health UI (35/25/25/15)
       ai_summary: (() => {
         const built = buildAiSummaryPayload(scoresToUse, snippetReadinessToUse, rankingAiData);
         return built.summary;
