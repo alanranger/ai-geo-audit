@@ -14,6 +14,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { loadByKeywordFromCsv, censusFromByKeyword, defaultLockedCsvPath } from '../lib/keyword-ranking/locked-config-merge.js';
+import { preflightLocalCapture } from '../lib/keyword-ranking/local-capture-preflight.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -206,6 +207,18 @@ async function runPreflight() {
     '4b prior fixes encoded',
     true,
     'hyperlocal GBP pin + empty-SERP stubs + regional-money in VALID_CLASSES'
+  );
+
+  const localKws = Object.values(locked.by)
+    .filter((r) => String(r.tracking_location).toLowerCase() === 'local')
+    .map((r) => r.keyword);
+  const localPf = preflightLocalCapture(localKws);
+  check(
+    '4c every Local-tier keyword resolves non-null GBP coordinate + code 9215523',
+    localPf.ok && localKws.length > 0,
+    localPf.ok
+      ? `pin=${localPf.pin} local=${localKws.length}`
+      : `missing=${localPf.missingKeywords.slice(0, 8).join('|') || 'pin'}`
   );
 }
 

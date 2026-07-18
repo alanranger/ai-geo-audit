@@ -7,6 +7,7 @@ import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-loca
 import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
 import { applyTrackedEmptySerpStubs } from '../../lib/keyword-ranking/empty-serp-stub.js';
 import { coalesceSearchVolume } from '../../lib/keyword-ranking/ke-search-volumes.js';
+import { stampLocalCaptureOnRow } from '../../lib/keyword-ranking/local-capture-preflight.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
@@ -86,6 +87,8 @@ export default async function handler(req, res) {
         row.location_name = loc.location_name;
         row.location_unmapped = loc.unmapped === true;
       }
+      // Local-tier: always persist Coventry code + GBP pin (dashboard save once omitted these).
+      stampLocalCaptureOnRow(row);
       // Always stamp locked class (lookup-only).
       if (!row.keyword_class) {
         const cls = resolveKeywordClass(row.keyword);

@@ -21,6 +21,7 @@
 import { extractCitationsFromDfsResult } from '../../lib/ai-citation-extract.js';
 import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
 import { getBusinessDevice, getHyperlocalCoordinate } from '../../lib/keyword-ranking/business-location.js';
+import { preflightLocalCapture } from '../../lib/keyword-ranking/local-capture-preflight.js';
 import { extractSerpSurfaces } from '../../lib/keyword-ranking/serp-surface-extract.js';
 import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
 // Grid PARKED (Alan 2026-07-16): do not import fetchLocalGridSerp into production refresh.
@@ -335,9 +336,15 @@ function isDfsFatalStatus(statusCode) {
 
 function buildEmptySerpResult(keyword, depth, errorMessage, errorCode, locationName = null) {
   const classInfo = resolveKeywordClass(keyword);
+  const loc = resolveTrackingLocation(keyword);
+  const isLocal = loc.tier === 'L';
   return {
     keyword,
-    location_name: locationName,
+    location_name: locationName || loc.location_name,
+    location_code: loc.location_code ?? null,
+    location_coordinate: isLocal ? getHyperlocalCoordinate() : null,
+    device: isLocal ? getBusinessDevice() : 'desktop',
+    os: 'windows',
     best_rank_group: null,
     best_rank_absolute: null,
     best_url: null,
@@ -569,16 +576,6 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed. Use GET or POST.' });
   }
 
-  const login = process.env.DATAFORSEO_LOGIN;
-  const password = process.env.DATAFORSEO_PASSWORD;
-
-  if (!login || !password) {
-    res.status(500).json({
-      error: "DATAFORSEO_LOGIN or DATAFORSEO_PASSWORD env vars are missing",
-    });
-    return;
-  }
-
   // Parse keywords from GET query or POST JSON body ({ keywords: string[], depth?: number })
   let keywords = [];
   let body = null;
@@ -606,6 +603,34 @@ export default async function handler(req, res) {
     console.log(`[SERP-RANK-TEST] ERROR: No keywords provided`);
     res.status(400).json({
       error: "keyword or keywords is required",
+    });
+    return;
+  }
+
+  // Pre-flight: every Local-tier keyword must resolve GBP pin + Coventry code
+  // before any DataForSEO spend (dashboard can also POST preflight_only: true).
+  const localPreflight = preflightLocalCapture(keywords);
+  if (body?.preflight_only === true || /^(1|true|yes)$/i.test(String(req.query.preflight_only || ''))) {
+    return res.status(localPreflight.ok ? 200 : 400).json({
+      status: localPreflight.ok ? 'ok' : 'error',
+      preflight: localPreflight,
+      meta: { generatedAt: new Date().toISOString() },
+    });
+  }
+  if (!localPreflight.ok) {
+    console.error(`[SERP-RANK-TEST] Local capture preflight failed:`, localPreflight);
+    return res.status(400).json({
+      error: 'Local-tier capture preflight failed — refusing DataForSEO spend',
+      preflight: localPreflight,
+    });
+  }
+
+  const login = process.env.DATAFORSEO_LOGIN;
+  const password = process.env.DATAFORSEO_PASSWORD;
+
+  if (!login || !password) {
+    res.status(500).json({
+      error: "DATAFORSEO_LOGIN or DATAFORSEO_PASSWORD env vars are missing",
     });
     return;
   }

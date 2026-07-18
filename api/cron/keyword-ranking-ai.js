@@ -10,6 +10,7 @@ import {
   saveKeywordBatch,
   deleteKeywordRowsForDate
 } from '../../lib/keyword-ranking/refresh-core.js';
+import { preflightLocalCapture } from '../../lib/keyword-ranking/local-capture-preflight.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -126,6 +127,18 @@ export default async function handler(req, res) {
       return sendJson(res, 200, {
         status: 'skipped',
         message: 'No keywords found.',
+        meta: { generatedAt: nowIso }
+      });
+    }
+
+    const localPf = preflightLocalCapture(keywords);
+    if (!localPf.ok) {
+      const detail = `Local capture preflight failed: ${localPf.missingKeywords.slice(0, 8).join(', ') || 'GBP pin missing'}`;
+      await updateSchedule(baseUrl, schedule, nowIso, 'error', detail);
+      return sendJson(res, 400, {
+        status: 'error',
+        message: detail,
+        preflight: localPf,
         meta: { generatedAt: nowIso }
       });
     }
