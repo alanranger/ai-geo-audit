@@ -10,6 +10,7 @@ import dotenv from 'dotenv';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 dotenv.config({ path: path.join(root, '.env.local') });
+// Historical seospace archive (frozen) vs live DB — for drift reporting only.
 const CSV07 = path.join(root, '../alan-shared-resources/csv/07-url-target-keywords-seospace.csv');
 const PROPERTY = 'https://www.alanranger.com';
 

@@ -16,10 +16,11 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 dotenv.config({ path: path.join(root, '.env.local') });
 dotenv.config({ path: path.join(root, '.env') });
 
-const CSV07 = path.join(
-  root,
-  '../alan-shared-resources/csv/07-url-target-keywords-seospace.csv'
-);
+// Prefer 09 export when present; fall back to frozen seospace archive for one-off backfill.
+const CSV09 = path.join(root, '../alan-shared-resources/csv/09-url-target-keywords.csv');
+const CSV07 = fs.existsSync(CSV09)
+  ? CSV09
+  : path.join(root, '../alan-shared-resources/csv/07-url-target-keywords-seospace.csv');
 const PROPERTY = 'https://www.alanranger.com';
 const NOTES = 'migrated from CSV07 2026-07-18; pending curation';
 const apply = process.argv.includes('--apply');

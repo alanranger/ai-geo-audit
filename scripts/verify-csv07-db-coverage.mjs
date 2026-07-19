@@ -3,8 +3,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// Coverage check: historical seospace paths vs current 09 export (DB master dump).
 const csvPath = path.join(root, '../alan-shared-resources/csv/07-url-target-keywords-seospace.csv');
-const v2Path = path.join(root, 'config/07-url-target-keywords-v2.csv');
+const v2Path = path.join(root, 'config/09-url-target-keywords.csv');
 
 function pathKey(u) {
   try {
