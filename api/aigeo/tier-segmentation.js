@@ -1,10 +1,5 @@
 import { fetchPagesMasterEntries } from '../../lib/pagesMaster.js';
 
-const DEFAULT_SEGMENTATION_SOURCES = [
-  'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/page%20segmentation%20by%20tier.csv',
-  'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/page%20segmentation%20by%20tier.csv'
-];
-
 const KNOWN_TIERS = new Set(['all', 'landing', 'product', 'event', 'blog', 'academy', 'unmapped']);
 const DEFAULT_SITE_ORIGIN = 'https://www.alanranger.com';
 const DEFAULT_TIER_CACHE_TTL_MS = 60 * 1000;
@@ -22,33 +17,6 @@ const robotsDisallowCache = new Map();
 function resolveTierCacheTtlMs(value) {
   if (!Number.isFinite(Number(value))) return DEFAULT_TIER_CACHE_TTL_MS;
   return Math.max(0, Math.floor(Number(value)));
-}
-
-function buildSegmentationSourceUrl(sourceUrl, forceRefresh, now) {
-  if (!forceRefresh) return sourceUrl;
-  try {
-    const parsed = new URL(sourceUrl);
-    parsed.searchParams.set('_ts', String(now));
-    return parsed.toString();
-  } catch {
-    const separator = String(sourceUrl).includes('?') ? '&' : '?';
-    return `${sourceUrl}${separator}_ts=${now}`;
-  }
-}
-
-async function fetchTierSegmentationCsvText(sources, forceRefresh, now) {
-  for (const sourceUrl of sources) {
-    try {
-      const requestUrl = buildSegmentationSourceUrl(sourceUrl, forceRefresh, now);
-      const response = await fetch(requestUrl, { cache: forceRefresh ? 'no-store' : 'default' });
-      if (!response.ok) continue;
-      const text = await response.text();
-      if (text?.trim()) return text;
-    } catch {
-      // Try next source.
-    }
-  }
-  return '';
 }
 
 function saveTierEntriesToCache(entries, now, snapshotKey = '') {
@@ -350,37 +318,13 @@ export async function fetchTierSegmentationEntries(options = {}) {
       if (!key || byPath.has(key)) continue;
       byPath.set(key, { url: normalizedUrl, tier: normalizeTierInput(row.tier, 'unmapped') });
     }
-  } catch {
-    // Fall through to CSV.
+  } catch (err) {
+    console.warn('[tier-segmentation] pages_master read failed:', err?.message || err);
   }
 
+  // Phase 4 (2026-07-19): page segmentation CSV is FROZEN historical only — never read at runtime.
   if (!byPath.size) {
-    const sources = Array.isArray(options.sources) && options.sources.length > 0
-      ? options.sources
-      : DEFAULT_SEGMENTATION_SOURCES;
-    const csvText = await fetchTierSegmentationCsvText(sources, forceRefresh, now);
-    if (csvText) {
-      const lines = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
-      if (lines.length >= 2) {
-        const headers = parseCsvLine(lines[0]);
-        const columnDefs = headers
-          .map((header, idx) => ({ idx, tier: tierKeyFromHeader(header) }))
-          .filter((item) => item.tier);
-        for (let i = 1; i < lines.length; i += 1) {
-          const cols = parseCsvLine(lines[i]);
-          columnDefs.forEach(({ idx, tier }) => {
-            const normalizedUrl = normalizeSegmentationSourceUrl(cols[idx]);
-            if (!normalizedUrl) return;
-            const key = toTierUrlKey(normalizedUrl);
-            if (!key || byPath.has(key)) return;
-            byPath.set(key, { url: normalizedUrl, tier });
-          });
-        }
-      }
-    }
-  }
-
-  if (!byPath.size) {
+    console.warn('[tier-segmentation] pages_master empty — no frozen CSV fallback');
     return saveTierEntriesToCache([], now, snapshotKey);
   }
 

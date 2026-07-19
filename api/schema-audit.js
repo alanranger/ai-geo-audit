@@ -1202,7 +1202,7 @@ function ensureRootUrlIncluded(urls) {
 }
 
 /**
- * Resolve crawl URLs: prefer 06-site-urls.csv; else tier segmentation CSV.
+ * Resolve crawl URLs: prefer 06-site-urls.csv; else pages_master tiers (CSV frozen).
  *
  * Always force-refreshes the canonical 06-site-urls.csv fetch so stale GitHub-raw
  * CDN caches can't silently cause dropped URLs on a given audit run (root cause
@@ -1219,11 +1219,11 @@ async function parseCsvUrls(options = {}) {
   }
   const entries = await fetchTierSegmentationEntries(options);
   if (!Array.isArray(entries) || entries.length === 0) {
-    throw new Error("Unable to load page segmentation by tier CSV from configured sources.");
+    throw new Error("Unable to load site URLs (06-site-urls.csv empty and pages_master empty).");
   }
   const urls = urlsFromTierEntries(entries);
-  console.log(`✓ Segmentation CSV loaded, URL count: ${urls.length}`);
-  return { urls, listKind: 'tier_segmentation' };
+  console.log(`✓ pages_master URL list loaded, URL count: ${urls.length}`);
+  return { urls, listKind: 'pages_master' };
 }
 
 /**

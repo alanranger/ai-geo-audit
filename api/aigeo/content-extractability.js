@@ -9,10 +9,6 @@ import {
   buildTierLookupFromEntries
 } from './tier-segmentation.js';
 
-const TIER_SEGMENTATION_SOURCES = [
-  'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/page%20segmentation%20by%20tier.csv',
-  'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/page%20segmentation%20by%20tier.csv'
-];
 const DEFAULT_SITE_ORIGIN = 'https://www.alanranger.com';
 const MEMBER_UTILITY_PATH_PATTERNS = [
   /^\/academy\/login(?:\/|$)/i,
