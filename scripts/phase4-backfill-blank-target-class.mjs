@@ -17,7 +17,7 @@ dotenv.config({ path: path.join(root, '.env.local') });
 dotenv.config({ path: path.join(root, '.env') });
 
 const PROPERTY = 'https://www.alanranger.com';
-const LOCKED = path.join(root, 'config/keyword-tracking-locations-and-class-LOCKED-v4.csv');
+const LOCKED = path.join(root, 'config/keyword-tracking-locations-and-class-LOCKED-v8.csv');
 const NOTE = 'backfilled P4 2026-07-19';
 const HYGIENE_NOTE =
   'P4 hygiene 2026-07-19: longtail_by_design — keyword not in LOCKED-151; review with portrait photography course + residential photography workshops at next keyword-set review';
