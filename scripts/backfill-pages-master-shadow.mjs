@@ -1,11 +1,12 @@
 /**
- * Backfill / re-sync pages_master + write parity report.
- * Phase 2+: live APIs read pages_master via lib/pagesMaster.js / tier-segmentation.js.
- * Prefer targeted SQL/classifications for Tier F; use --apply for full rebuild.
+ * Phase-1 build tool for pages_master + parity report.
+ * After Phase 2, classifications are source of truth — do NOT use this to "re-sync" tiers.
  *
  * Usage:
- *   node scripts/backfill-pages-master-shadow.mjs
- *   node scripts/backfill-pages-master-shadow.mjs --apply
+ *   node scripts/backfill-pages-master-shadow.mjs              # dry-run report only
+ *   node scripts/backfill-pages-master-shadow.mjs --apply       # MERGE: insert new paths only
+ *   node scripts/backfill-pages-master-shadow.mjs --apply --overwrite-classifications
+ *       # last resort: DELETE+INSERT (refused if non-F rows exist unless flag set)
  */
 import fs from 'fs';
 import path from 'path';
@@ -19,12 +20,14 @@ import {
   pathOnly,
   moneyRoleForUrl
 } from '../lib/audit/moneyPageRoles.js';
+import { logMasterMutation } from '../lib/masterTableMutations.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 dotenv.config({ path: path.join(root, '.env.local') });
 dotenv.config({ path: path.join(root, '.env') });
 
 const apply = process.argv.includes('--apply');
+const overwrite = process.argv.includes('--overwrite-classifications');
 const PROPERTY = 'https://www.alanranger.com';
 const SEG_CSV = path.join(root, '../alan-shared-resources/csv/page segmentation by tier.csv');
 const SITE_06 = path.join(root, '../alan-shared-resources/csv/06-site-urls.csv');
@@ -372,17 +375,79 @@ function buildParity(rows, segByPath) {
   };
 }
 
-async function upsertRows(rows) {
-  // Clear property then insert in chunks
-  const { error: delErr } = await sb.from('pages_master').delete().eq('property_url', PROPERTY);
-  if (delErr) throw delErr;
+async function countNonF() {
+  const { count, error } = await sb
+    .from('pages_master')
+    .select('*', { count: 'exact', head: true })
+    .eq('property_url', PROPERTY)
+    .neq('tier', 'F_unmapped');
+  if (error) throw error;
+  return count || 0;
+}
+
+async function fetchExistingPaths() {
+  const paths = new Set();
+  let from = 0;
+  for (;;) {
+    const { data, error } = await sb
+      .from('pages_master')
+      .select('path')
+      .eq('property_url', PROPERTY)
+      .range(from, from + 999);
+    if (error) throw error;
+    for (const r of data || []) paths.add(r.path);
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+  return paths;
+}
+
+async function insertBatches(rows, label) {
   const chunk = 200;
   for (let i = 0; i < rows.length; i += chunk) {
     const batch = rows.slice(i, i + chunk);
     const { error } = await sb.from('pages_master').insert(batch);
     if (error) throw error;
-    console.log(`inserted ${Math.min(i + chunk, rows.length)}/${rows.length}`);
+    console.log(`${label} ${Math.min(i + chunk, rows.length)}/${rows.length}`);
   }
+}
+
+/** MERGE: insert paths missing from pages_master; never touch existing tier/money_role. */
+async function mergeRows(rows) {
+  const existing = await fetchExistingPaths();
+  const fresh = rows.filter((r) => !existing.has(r.path));
+  console.log(`merge: existing=${existing.size} built=${rows.length} insert=${fresh.length}`);
+  if (fresh.length) await insertBatches(fresh, 'merged');
+  await logMasterMutation(sb, {
+    tableName: 'pages_master',
+    scriptName: 'backfill-pages-master-shadow.mjs',
+    args: '--apply (merge)',
+    rowCount: fresh.length,
+    notes: `Inserted ${fresh.length} new paths; preserved ${existing.size} existing classifications`
+  });
+  return fresh.length;
+}
+
+/** Full rebuild — last resort only. */
+async function overwriteRows(rows) {
+  const nonF = await countNonF();
+  if (nonF > 0 && !overwrite) {
+    console.error(
+      `REFUSED: pages_master has ${nonF} non-F classifications. ` +
+        'Default --apply uses merge mode. Pass --overwrite-classifications only as last resort.'
+    );
+    process.exit(2);
+  }
+  const { error: delErr } = await sb.from('pages_master').delete().eq('property_url', PROPERTY);
+  if (delErr) throw delErr;
+  await insertBatches(rows, 'inserted');
+  await logMasterMutation(sb, {
+    tableName: 'pages_master',
+    scriptName: 'backfill-pages-master-shadow.mjs',
+    args: '--apply --overwrite-classifications',
+    rowCount: rows.length,
+    notes: `Full rebuild after deleting property rows (prior non-F count was ${nonF})`
+  });
 }
 
 function writeMd(report, site06Count, segCount, ovCount) {
@@ -483,11 +548,16 @@ async function main() {
   console.log('wrote', OUT_MD);
 
   if (!apply) {
-    console.log('\nDry run — pass --apply to upsert pages_master');
+    console.log('\nDry run — pass --apply for merge (new paths only), or --apply --overwrite-classifications (last resort)');
     return;
   }
-  await upsertRows(rows);
-  console.log('✓ pages_master backfilled');
+  if (overwrite) {
+    await overwriteRows(rows);
+    console.log('✓ pages_master overwritten (full rebuild)');
+  } else {
+    const n = await mergeRows(rows);
+    console.log(`✓ pages_master merge complete (${n} new rows)`);
+  }
 }
 
 main().catch((e) => {

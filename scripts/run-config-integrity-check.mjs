@@ -12,6 +12,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import pg from 'pg';
 import { runIntegrityCheck } from '../lib/configIntegrity/runIntegrityCheck.mjs';
+import { logMasterMutation } from '../lib/masterTableMutations.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 dotenv.config({ path: path.join(root, '.env.local') });
@@ -60,11 +61,25 @@ async function seedProof() {
     flag_reason: 'seeded_for_phase3_proof',
     updated_at: new Date().toISOString()
   }, { onConflict: 'property_url,path' });
+  await logMasterMutation(sb, {
+    tableName: 'pages_master',
+    scriptName: 'run-config-integrity-check.mjs',
+    args: '--seed-proof upsert',
+    rowCount: 1,
+    notes: 'Temporary integrity seed row'
+  });
   const before = await runIntegrityCheck({ runSource: 'seed_proof_before', persist: true });
   console.log(JSON.stringify({ chipRag: before.chipRag, count: before.findings.length, sample: before.findings.slice(0, 5) }, null, 2));
 
   console.log('--- AFTER (remove seed) ---');
   await sb.from('pages_master').delete().eq('property_url', PROPERTY).eq('path', fakePath);
+  await logMasterMutation(sb, {
+    tableName: 'pages_master',
+    scriptName: 'run-config-integrity-check.mjs',
+    args: '--seed-proof delete',
+    rowCount: 1,
+    notes: 'Removed temporary integrity seed row'
+  });
   const after = await runIntegrityCheck({ runSource: 'seed_proof_after', persist: true });
   console.log(JSON.stringify({ chipRag: after.chipRag, count: after.findings.length }, null, 2));
 }

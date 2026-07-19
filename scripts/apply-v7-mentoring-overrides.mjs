@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { logMasterMutation } from '../lib/masterTableMutations.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 dotenv.config({ path: path.join(root, '.env.local') });
@@ -53,6 +54,14 @@ await mirrorPagesMaster('/photography-mentoring-online-assignments', 'photograph
 
 await upsertOverride(RPS_URL, 'rps courses', 'tracked', RPS_NOTE);
 await mirrorPagesMaster('/rps-courses-mentoring-distinctions', 'rps courses', 'tracked', RPS_NOTE);
+
+await logMasterMutation(sb, {
+  tableName: 'pages_master',
+  scriptName: 'apply-v7-mentoring-overrides.mjs',
+  args: 'mentor+rps mirror',
+  rowCount: 2,
+  notes: 'Mirrored mentoring/RPS target_keyword+class onto pages_master'
+});
 
 console.log(JSON.stringify({
   mentor: { url: MENTOR_URL, target_keyword: 'photography mentoring', target_class: 'tracked' },
