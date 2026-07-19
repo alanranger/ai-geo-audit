@@ -15,7 +15,7 @@ dotenv.config({ path: path.join(root, '.env.local') });
 dotenv.config({ path: path.join(root, '.env') });
 
 const PROPERTY = 'https://www.alanranger.com';
-const lockedPath = path.join(root, 'config/keyword-tracking-locations-and-class-LOCKED-v8.csv');
+const lockedPath = path.join(root, 'config/keyword-tracking-locations-and-class-LOCKED-v9.csv');
 const outRepo = path.join(root, '../alan-shared-resources/csv/09-url-target-keywords.csv');
 const outAudit = path.join(root, 'config/09-url-target-keywords.csv');
 const outDrive = path.join(
