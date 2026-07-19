@@ -2084,7 +2084,25 @@ export default async function handler(req, res) {
       data: result,
       meta: { generatedAt: new Date().toISOString() }
     });
-    
+
+    // Phase 3: config integrity check after every successful audit save (non-blocking)
+    setImmediate(() => {
+      import('../../lib/configIntegrity/runIntegrityCheck.mjs')
+        .then(({ runIntegrityCheck }) =>
+          runIntegrityCheck({
+            propertyUrl: propertyUrl || 'https://www.alanranger.com',
+            runSource: 'audit_save',
+            persist: true
+          })
+        )
+        .then((r) => {
+          console.log(`[Config Integrity] audit_save chip=${r.chipRag} findings=${r.findings?.length || 0}`);
+        })
+        .catch((err) => {
+          console.warn('[Config Integrity] audit_save check failed:', err?.message || err);
+        });
+    });
+
     // Note: Per-date calculation continues in background (setImmediate above)
     // Don't return here - let it complete in background
 
