@@ -1,6 +1,6 @@
 /**
  * POST /api/keywords/save-csv
- * Body: { csv: string, replaceAll?: boolean, writeFiles?: boolean, version?: 'v3'|'v4' }
+ * Body: { csv: string, replaceAll?: boolean, writeFiles?: boolean, version?: 'v3'|'v4'|'v5' }
  *
  * Accepts full 5-column locked CSV or bare keyword list (backward compatible).
  */
