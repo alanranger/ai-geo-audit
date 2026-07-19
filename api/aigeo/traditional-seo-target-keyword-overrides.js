@@ -49,15 +49,34 @@ async function handlePost(req, res, supabase) {
       .eq('page_url', pageUrl);
     if (del.error) throw del.error;
   } else {
+    // SAFETY: modal "Save keyword" only sends targetKeyword. Preserve curated
+    // target_class + notes on update. New rows get a safe default class.
+    const { data: existingRows, error: existingErr } = await supabase
+      .from('traditional_seo_target_keyword_overrides')
+      .select('target_class, notes')
+      .eq('property_url', propertyUrl)
+      .eq('page_url', pageUrl)
+      .limit(1);
+    if (existingErr) throw existingErr;
+    const existing = Array.isArray(existingRows) && existingRows[0] ? existingRows[0] : null;
+
+    let nextClass = targetClass || existing?.target_class || null;
+    if (!nextClass && targetKeyword) {
+      // New modal-created row: never legacy_unreviewed. Prefer tracked when body hints LOCKED.
+      const lockedHint = body?.trackedIn151 === true || body?.inLocked151 === true;
+      nextClass = lockedHint ? 'tracked' : 'longtail_by_design';
+    }
+    const nextNotes = notes != null ? notes : (existing?.notes ?? '');
+
     const now = new Date().toISOString();
     const row = {
       property_url: propertyUrl,
       page_url: pageUrl,
       target_keyword: targetKeyword,
+      target_class: nextClass,
+      notes: nextNotes,
       updated_at: now
     };
-    if (targetClass) row.target_class = targetClass;
-    if (notes != null) row.notes = notes;
     const upsert = await supabase
       .from('traditional_seo_target_keyword_overrides')
       .upsert(row, { onConflict: 'property_url,page_url' })
