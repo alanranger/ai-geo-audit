@@ -505,7 +505,7 @@ function pickIndexabilityUrls(baseUrl, canonicalUrls = [], sitemapPageUrls = [],
   if (!unique.length) return { urls: buildDefaultUrls(baseUrl), source: 'fallback-defaults', mode: 'sample' };
 
   const effectiveLimit = limit || unique.length;
-  const source = canonicalUrls.length ? 'tier-segmentation-csv' : 'sitemap-derived';
+  const source = canonicalUrls.length ? 'pages_master' : 'sitemap-derived';
   if (mode === 'full') {
     return {
       urls: unique.slice(0, effectiveLimit),

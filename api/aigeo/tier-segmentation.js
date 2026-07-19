@@ -1,3 +1,5 @@
+import { fetchPagesMasterEntries } from '../../lib/pagesMaster.js';
+
 const DEFAULT_SEGMENTATION_SOURCES = [
   'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/page%20segmentation%20by%20tier.csv',
   'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/page%20segmentation%20by%20tier.csv'
@@ -333,36 +335,53 @@ export async function fetchTierSegmentationEntries(options = {}) {
     return tierEntriesCache.entries;
   }
 
-  const sources = Array.isArray(options.sources) && options.sources.length > 0
-    ? options.sources
-    : DEFAULT_SEGMENTATION_SOURCES;
-
-  const csvText = await fetchTierSegmentationCsvText(sources, forceRefresh, now);
-
-  if (!csvText) {
-    return saveTierEntriesToCache([], now, snapshotKey);
-  }
-
-  const lines = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  if (lines.length < 2) {
-    return saveTierEntriesToCache([], now, snapshotKey);
-  }
-
-  const headers = parseCsvLine(lines[0]);
-  const columnDefs = headers
-    .map((header, idx) => ({ idx, tier: tierKeyFromHeader(header) }))
-    .filter((item) => item.tier);
   const byPath = new Map();
 
-  for (let i = 1; i < lines.length; i += 1) {
-    const cols = parseCsvLine(lines[i]);
-    columnDefs.forEach(({ idx, tier }) => {
-      const normalizedUrl = normalizeSegmentationSourceUrl(cols[idx]);
-      if (!normalizedUrl) return;
-      const key = toTierUrlKey(normalizedUrl);
-      if (!key || byPath.has(key)) return;
-      byPath.set(key, { url: normalizedUrl, tier });
+  // Phase 2: pages_master is SoT; CSV is emergency fallback only.
+  try {
+    const masterRows = await fetchPagesMasterEntries({
+      propertyUrl: options.propertyUrl || DEFAULT_SITE_ORIGIN
     });
+    for (const row of masterRows) {
+      const normalizedUrl = normalizeSegmentationSourceUrl(row.url)
+        || normalizeSegmentationSourceUrl(`${DEFAULT_SITE_ORIGIN}${row.path}`);
+      if (!normalizedUrl) continue;
+      const key = toTierUrlKey(normalizedUrl);
+      if (!key || byPath.has(key)) continue;
+      byPath.set(key, { url: normalizedUrl, tier: normalizeTierInput(row.tier, 'unmapped') });
+    }
+  } catch {
+    // Fall through to CSV.
+  }
+
+  if (!byPath.size) {
+    const sources = Array.isArray(options.sources) && options.sources.length > 0
+      ? options.sources
+      : DEFAULT_SEGMENTATION_SOURCES;
+    const csvText = await fetchTierSegmentationCsvText(sources, forceRefresh, now);
+    if (csvText) {
+      const lines = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
+      if (lines.length >= 2) {
+        const headers = parseCsvLine(lines[0]);
+        const columnDefs = headers
+          .map((header, idx) => ({ idx, tier: tierKeyFromHeader(header) }))
+          .filter((item) => item.tier);
+        for (let i = 1; i < lines.length; i += 1) {
+          const cols = parseCsvLine(lines[i]);
+          columnDefs.forEach(({ idx, tier }) => {
+            const normalizedUrl = normalizeSegmentationSourceUrl(cols[idx]);
+            if (!normalizedUrl) return;
+            const key = toTierUrlKey(normalizedUrl);
+            if (!key || byPath.has(key)) return;
+            byPath.set(key, { url: normalizedUrl, tier });
+          });
+        }
+      }
+    }
+  }
+
+  if (!byPath.size) {
+    return saveTierEntriesToCache([], now, snapshotKey);
   }
 
   const robotsFilteredEntries = await filterEntriesByRobotsDisallow(Array.from(byPath.values()), options, now);

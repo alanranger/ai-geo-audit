@@ -247,7 +247,7 @@ function selectLocalSchemaScanUrls(baseUrl, candidateUrls, mode = 'sample', limi
 
   if (mode === 'full') {
     const max = clampInt(limit, unique.length, 1, LOCAL_SCHEMA_MAX_SCAN_LIMIT);
-    return { urls: unique.slice(0, max), source: 'tier-segmentation-csv', mode: 'full' };
+    return { urls: unique.slice(0, max), source: 'pages_master', mode: 'full' };
   }
 
   const preferred = [];
@@ -263,7 +263,7 @@ function selectLocalSchemaScanUrls(baseUrl, candidateUrls, mode = 'sample', limi
   }
 
   const max = clampInt(limit, 10, 1, 50);
-  return { urls: preferred.slice(0, max), source: 'tier-segmentation-csv', mode: 'sample' };
+  return { urls: preferred.slice(0, max), source: 'pages_master', mode: 'sample' };
 }
 
 async function scanLocalBusinessSchemaPages(urlsToCheck, options = {}) {

@@ -1,6 +1,7 @@
 /**
- * Phase 1 SHADOW: backfill pages_master + write parity report.
- * NOTHING live reads pages_master yet.
+ * Backfill / re-sync pages_master + write parity report.
+ * Phase 2+: live APIs read pages_master via lib/pagesMaster.js / tier-segmentation.js.
+ * Prefer targeted SQL/classifications for Tier F; use --apply for full rebuild.
  *
  * Usage:
  *   node scripts/backfill-pages-master-shadow.mjs
@@ -86,7 +87,7 @@ function normUrl(raw) {
     const u = new URL(s.startsWith('http') ? s : `${PROPERTY}${s.startsWith('/') ? s : `/${s}`}`);
     u.hash = '';
     u.search = '';
-    let p = u.pathname || '/';
+    let p = (u.pathname || '/').replace(/\/{2,}/g, '/');
     if (p.length > 1) p = p.replace(/\/+$/, '');
     if (p === '/home') p = '/';
     return `${PROPERTY}${p || '/'}`;
