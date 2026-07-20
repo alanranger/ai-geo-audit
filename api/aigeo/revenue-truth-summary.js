@@ -46,13 +46,14 @@ import {
 } from '../../lib/revenue-truth-jlr-filter.mjs';
 import { buildHeadlineReconciliation } from '../../lib/revenue-truth-headline-reconciliation.mjs';
 import { parseIncludeJlr } from '../../lib/parse-include-jlr.mjs';
+import { DEFAULT_TIER_BANDS } from '../../lib/revenue-truth-ui-core.mjs';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
 // Three monthly revenue bands (config constants -- edit here, not inline in
 // the UI). Compared against revenue_amount (the spreadsheet number), per the
 // Phase L1 headline rule.
-const TIER_BANDS = { survival: 3000, comfortable: 5000, thrive: 8000 };
+const TIER_BANDS = DEFAULT_TIER_BANDS;
 
 // Payment fee rates verbatim from the Booking Sheet "Payment Fees" note
 // (Stripe 1.8%, PayPal 2.9% + £0.30). Bank transfers + voucher redemptions

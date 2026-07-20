@@ -14,8 +14,9 @@ import {
 } from '../lib/revenue-truth-current-month-pulse.mjs';
 import { buildExecSummary } from '../lib/revenue-truth-exec-summary.mjs';
 import { buildPulseRescueActions, RESCUE_PLAYBOOK } from '../lib/revenue-truth-current-month-pulse-ui.mjs';
+import { DEFAULT_TIER_BANDS } from '../lib/revenue-truth-ui-core.mjs';
 
-const bands = { survival: 3000, comfortable: 5000, thrive: 8000 };
+const bands = DEFAULT_TIER_BANDS;
 
 function txn(date, amount, cat = '1. Courses/masterclasses', jlr = false) {
   const y = Number(date.slice(0, 4));
@@ -131,8 +132,8 @@ describe('revenue-truth current month pulse', () => {
     assert.equal(g.worst_case.projected_month_end, 871);
   });
 
-  it('DEFCON 5 at ~29% of survival (narrowed 4–5 band)', () => {
-    const d = computeDefcon(871, 3000);
+  it('DEFCON 5 below £1,350 with pulse flag', () => {
+    const d = computeDefcon(871, bands.survival);
     assert.equal(d.level, 5);
     assert.equal(d.status, 'EXTREME');
     assert.equal(d.pips, 5);
@@ -140,24 +141,24 @@ describe('revenue-truth current month pulse', () => {
     assert.equal(d.pip_display, '●●●●●');
   });
 
-  it('DEFCON 4 between 30% and 45%', () => {
-    const d = computeDefcon(1200, 3000);
+  it('DEFCON 4 between £1,350 and £2,249', () => {
+    const d = computeDefcon(1800, bands.survival);
     assert.equal(d.level, 4);
     assert.equal(d.status, 'CRITICAL');
     assert.equal(d.pips, 4);
     assert.equal(d.colour, '#ea580c');
   });
 
-  it('DEFCON level colours follow green → red scale', () => {
-    assert.equal(computeDefcon(3500, 3000).colour, '#22c55e');
-    assert.equal(computeDefcon(2800, 3000).colour, '#a3c04a');
-    assert.equal(computeDefcon(2100, 3000).colour, '#f59e0b');
-    assert.equal(computeDefcon(1200, 3000).colour, '#ea580c');
-    assert.equal(computeDefcon(700, 3000).colour, '#dc2626');
+  it('DEFCON level colours follow green → red scale (absolute GBP bands)', () => {
+    assert.equal(computeDefcon(5000, bands.survival).colour, '#22c55e');
+    assert.equal(computeDefcon(3800, bands.survival).colour, '#a3c04a');
+    assert.equal(computeDefcon(2800, bands.survival).colour, '#f59e0b');
+    assert.equal(computeDefcon(1800, bands.survival).colour, '#ea580c');
+    assert.equal(computeDefcon(700, bands.survival).colour, '#dc2626');
   });
 
-  it('DEFCON 5 below 30% with pulse flag', () => {
-    const d = computeDefcon(700, 3000);
+  it('DEFCON 5 below £1,350 with pulse flag (low projection)', () => {
+    const d = computeDefcon(700, bands.survival);
     assert.equal(d.level, 5);
     assert.equal(d.pulse, true);
   });
@@ -211,7 +212,7 @@ describe('revenue-truth current month pulse', () => {
 
   it('classifies bands consistently', () => {
     assert.equal(classifyBand(900, bands), 'below_survival');
-    assert.equal(classifyBand(4000, bands), 'survival');
+    assert.equal(classifyBand(4500, bands), 'survival');
     assert.equal(classifyBand(6000, bands), 'comfortable');
   });
 

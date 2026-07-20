@@ -6,6 +6,7 @@ import {
   buildSeasonalityByProduct,
   attachRecurringToMonthly
 } from '../lib/revenue-truth-recurring-baseline.mjs';
+import { DEFAULT_TIER_BANDS } from '../lib/revenue-truth-ui-core.mjs';
 
 describe('revenue-truth recurring baseline', () => {
   const seasonality = buildSeasonalityByProduct([
@@ -49,7 +50,7 @@ describe('revenue-truth recurring baseline', () => {
   });
 
   it('attachRecurringToMonthly honours cfg.includeJlr', () => {
-    const cfg = { now: { iso: '2026-05-28T12:00:00.000Z', year: 2026, month: 5 }, tierBands: { survival: 3000 }, includeJlr: true };
+    const cfg = { now: { iso: '2026-05-28T12:00:00.000Z', year: 2026, month: 5 }, tierBands: { survival: DEFAULT_TIER_BANDS.survival }, includeJlr: true };
     const monthly = [{ year: 2026, month: 5, isPartial: false }];
     const txns = [
       { year: 2026, month: 5, txn_date: '2026-05-10', amount: 400, category_label: '7. 1-2-1', is_jlr: true, is_redemption: false },
@@ -67,10 +68,10 @@ describe('revenue-truth recurring baseline', () => {
   });
 
   it('attachRecurringToMonthly adds band fields', () => {
-    const cfg = { now: { iso: '2026-05-28T12:00:00.000Z', year: 2026, month: 5 }, tierBands: { survival: 3000, comfortable: 5000, thrive: 8000 } };
+    const cfg = { now: { iso: '2026-05-28T12:00:00.000Z', year: 2026, month: 5 }, tierBands: DEFAULT_TIER_BANDS };
     const monthly = [{ year: 2026, month: 5, isPartial: true, headlineRevenue: 787 }];
     const txns = [{ year: 2026, month: 5, txn_date: '2026-05-10', amount: 637, category_label: '7. 1-2-1', is_jlr: false, is_redemption: false }];
-    const out = attachRecurringToMonthly(monthly, txns, seasonality, cfg, (n) => (n >= 3000 ? 'survival' : 'below_survival'));
+    const out = attachRecurringToMonthly(monthly, txns, seasonality, cfg, (n) => (n >= DEFAULT_TIER_BANDS.survival ? 'survival' : 'below_survival'));
     assert.equal(out[0].recurringBaseline, 637);
     assert.equal(out[0].recurringBand, 'below_survival');
   });
