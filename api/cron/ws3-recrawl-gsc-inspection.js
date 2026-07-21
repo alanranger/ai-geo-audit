@@ -2,7 +2,7 @@
  * Weekly cron: refresh GSC URL Inspection cache for WS3 recrawl watch URLs only (12 paths).
  * Vercel schedule: Sunday 22:00 UTC ≈ 23:00 Europe/London in BST; 22:00 GMT in winter.
  */
-export const config = { runtime: 'nodejs', maxDuration: 60 };
+export const config = { runtime: 'nodejs', maxDuration: 120 };
 
 import fs from 'fs';
 import path from 'path';
