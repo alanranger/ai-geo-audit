@@ -4,7 +4,7 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
-import { requireAdmin } from '../../lib/api/requireAdmin.js';
+import { requireAdminOrShare } from '../../lib/api/requireAdminOrShare.js';
 
 const need = (k) => {
   const v = process.env[k];
@@ -22,9 +22,10 @@ export default async function handler(req, res) {
     return sendJSON(res, 405, { error: 'Method not allowed' });
   }
 
-  // Admin key gate
-  if (!requireAdmin(req, res, sendJSON)) {
-    return; // Response already sent
+  const auth = requireAdminOrShare(req, res, sendJSON);
+  if (!auth.authorized) return;
+  if (auth.mode === 'share') {
+    req.isShareReadOnly = true;
   }
 
   try {
