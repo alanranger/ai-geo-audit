@@ -74,12 +74,28 @@ export default async function handler(req, res) {
     }
     const rows = watch.urls.map((entry) => mergeWatchRow(entry, cacheByKey, propertyUrl));
     const cached = rows.filter((r) => r.cacheStatus === 'cached').length;
+    const { data: cronRow } = await supabase
+      .from('audit_cron_schedule')
+      .select('last_run_at,last_status,last_error')
+      .eq('job_key', 'ws3_recrawl_gsc_inspection')
+      .maybeSingle();
+    const lastAutoRefreshAt = cronRow?.last_run_at || null;
+    const staleDays = 8;
+    const staleMs = staleDays * 24 * 60 * 60 * 1000;
+    const autoRefreshStale = lastAutoRefreshAt
+      ? Date.now() - Date.parse(String(lastAutoRefreshAt)) > staleMs
+      : true;
     return sendJson(res, 200, {
       status: 'ok',
       propertyUrl,
       propertyKey,
       label: watch.label,
       indexedRequestedAt: watch.indexedRequestedAt,
+      lastAutoRefreshAt,
+      autoRefreshSchedule: 'Sun 23:00 Europe/London',
+      autoRefreshStale,
+      autoRefreshStaleDays: staleDays,
+      lastAutoRefreshStatus: cronRow?.last_status || null,
       quotaNote: 'Live inspect quota ~600/day; dashboard Refresh GSC URL Inspection batches 5/request with ~8s spacing.',
       summary: {
         total: rows.length,
