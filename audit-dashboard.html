@@ -13829,6 +13829,7 @@
                 <span class="traditional-seo-rules-toggle-text">Expand per-rule outcomes</span>
               </button>
               <div style="font-weight: 600; font-size: 0.82rem; color: var(--dark-text-muted);">Per-rule URL outcomes (click a row to filter)</div>
+              <button type="button" class="btn" id="traditional-seo-results-export-csv" title="Download every row that matches the current table filters and sort (all pages, not just this page)." style="font-size: 0.78rem; padding: 0.3rem 0.65rem; margin-left: auto;">Export CSV</button>
             </div>
             <div id="traditional-seo-rule-summary-panel" class="traditional-seo-rules-table-panel" hidden>
               <div class="traditional-seo-table-wrap">
@@ -96040,39 +96041,29 @@ Confidence: ${c}`;
       }
     }
 
-    function renderTraditionalSeoResultsTable() {
-      if (TRADITIONAL_SEO_STATE.filterDisavowedBacklinkCounts !== false && TRADITIONAL_SEO_STATE.disavowUiLoaded === null) {
-        traditionalSeoEnsureDisavowLoadedUi().then(() => renderTraditionalSeoResultsTable());
-        return;
-      }
+    function traditionalSeoCsvCell(value) {
+      const s = String(value ?? '');
+      if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    }
+
+    /** Same filter + sort as the visible Traditional SEO results table (all matching rows, not paginated). */
+    function traditionalSeoGetFilteredSortedResultRows() {
       const allRows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
       if (allRows.length && !String(TRADITIONAL_SEO_STATE.lastPropertyUrl || '').trim()) {
         const bootProp = traditionalSeoPropertyUrl();
         if (bootProp) TRADITIONAL_SEO_STATE.lastPropertyUrl = bootProp;
       }
       const propEff = traditionalSeoEffectivePropertyUrl();
-      TRADITIONAL_SEO_STATE.tierUrlCountsMap = traditionalSeoComputeTierUrlCountsMap(allRows);
-      traditionalSeoPopulateTierFilter(TRADITIONAL_SEO_STATE.tierUrlCountsMap);
-      const body = document.getElementById('traditional-seo-results-body');
-      const meta = document.getElementById('traditional-seo-results-meta');
-      const countMap = TRADITIONAL_SEO_STATE.tierUrlCountsMap || {};
+      const countMap = traditionalSeoComputeTierUrlCountsMap(allRows);
+      TRADITIONAL_SEO_STATE.tierUrlCountsMap = countMap;
       const f = TRADITIONAL_SEO_STATE.filters || {};
       const mode = String(TRADITIONAL_SEO_STATE.resultsTableMode || 'pages');
       const ruleIsAll = String(f.rule || 'all') === 'all';
       const fNoStatus = { ...f, status: 'all' };
 
-      const drillBaseRows = allRows.filter((row) => traditionalSeoRowMatchesNonStatusFilters(row, f));
-      renderTraditionalSeoDrilldownTiles(drillBaseRows, {
-        mode,
-        ruleAll: ruleIsAll,
-        allLabel: mode === 'pages' && ruleIsAll ? 'All URLs' : 'All rows'
-      });
-      renderTraditionalSeoInternalLinksCoverageTile(allRows);
-
       let working = [];
-      if (mode === 'rules') {
-        working = allRows.filter((row) => traditionalSeoRowMatchesNonStatusFilters(row, f));
-      } else if (!ruleIsAll) {
+      if (mode === 'rules' || !ruleIsAll) {
         working = allRows.filter((row) => traditionalSeoRowMatchesNonStatusFilters(row, f));
       } else {
         const scoped = allRows.filter((row) => String(row?.tier || '').toLowerCase() !== 'sitewide'
@@ -96261,6 +96252,160 @@ Confidence: ${c}`;
         if (sortDirection === 'desc' && sortKey !== 'kw_rank') diff *= -1;
         return diff;
       });
+
+      return { allRows, filtered, propEff, countMap, f, mode, ruleIsAll };
+    }
+
+    function traditionalSeoResultsRowCsvValues(row, allRows, propEff, countMap) {
+      const isSummaryRow = String(row?.rule_key || '') === '__page_summary__';
+      const isSitewide = String(row?.tier || '').toLowerCase() === 'sitewide';
+      const urlRaw = String(row.url || '');
+      const displayUrl = !isSitewide
+        ? traditionalSeoLandingRollupDisplayUrl(traditionalSeoLandingRollupGroupKey(urlRaw, propEff), propEff)
+        : urlRaw;
+      const scoreMap = TRADITIONAL_SEO_STATE.pageScoreByUrl instanceof Map ? TRADITIONAL_SEO_STATE.pageScoreByUrl : null;
+      let scoreText = '';
+      if (!isSitewide && scoreMap) {
+        if (scoreMap.has(displayUrl)) scoreText = String(traditionalSeoToNum(scoreMap.get(displayUrl), 0));
+        else if (scoreMap.has(urlRaw)) scoreText = String(traditionalSeoToNum(scoreMap.get(urlRaw), 0));
+      }
+      if (isSummaryRow) {
+        const sp = Math.max(0, traditionalSeoToNum(row.summary_pass, 0));
+        const sw = Math.max(0, traditionalSeoToNum(row.summary_warn, 0));
+        const sf = Math.max(0, traditionalSeoToNum(row.summary_fail, 0));
+        const sn = Math.max(0, traditionalSeoToNum(row.summary_na, 0));
+        const st = sp + sw + sf;
+        scoreText = String(st > 0 ? Math.round(((sp + sw * 0.5) / st) * 100) : (sn > 0 && sp > 0 ? 100 : 0));
+      }
+      let statusText = String(row.status || '');
+      if (isSummaryRow) {
+        const sp = traditionalSeoToNum(row.summary_pass, 0);
+        const sw = traditionalSeoToNum(row.summary_warn, 0);
+        const sf = traditionalSeoToNum(row.summary_fail, 0);
+        const sn = traditionalSeoToNum(row.summary_na, 0);
+        statusText = `${row.status || ''} (${sp} pass / ${sw} warn / ${sf} fail${sn > 0 ? ` / ${sn} n/a` : ''})`;
+      }
+      const ruleText = isSummaryRow
+        ? `${traditionalSeoToNum(row.summary_total, 0)} checks`
+        : traditionalSeoDisplayRuleName(row);
+      const internalBacklinksN = !isSitewide ? traditionalSeoInternalBacklinksNumberForUrl(displayUrl) : null;
+      const internalOutLinksN = !isSitewide ? traditionalSeoInternalOutLinksNumberForUrl(displayUrl) : null;
+      const externalBacklinksN = !isSitewide ? traditionalSeoExternalBacklinksNumberForUrl(displayUrl) : null;
+      const pageUpdatedCell = !isSitewide ? traditionalSeoPageUpdatedDisplayForUrl(displayUrl) : '';
+      const kd = traditionalSeoKeywordDemandCellsForRow(row, displayUrl);
+      const dfsBlN = !isSitewide ? traditionalSeoDfsPageBlDisplayNumberForUrl(displayUrl) : null;
+      const dfsBl =
+        isSitewide || !traditionalSeoBacklinkIndexShowDfs()
+          ? ''
+          : dfsBlN != null && Number.isFinite(Number(dfsBlN))
+            ? String(Math.round(Number(dfsBlN)))
+            : '';
+      const gscForRow =
+        isSitewide || isSummaryRow
+          ? { clicks: row.clicks, impressions: row.impressions }
+          : traditionalSeoRollupGscTotalsForPageRowUrl(urlRaw, allRows, propEff);
+      return [
+        scoreText,
+        traditionalSeoTierCellLabel(row.tier, countMap),
+        ruleText,
+        statusText,
+        displayUrl,
+        String(row.target_keyword || ''),
+        traditionalSeoCountCell(internalBacklinksN),
+        traditionalSeoCountCell(internalOutLinksN),
+        traditionalSeoCountCell(externalBacklinksN),
+        pageUpdatedCell === '—' ? '' : pageUpdatedCell,
+        kd.vol === '—' ? '' : kd.vol,
+        kd.est === '—' ? '' : kd.est,
+        kd.rank === '—' ? '' : kd.rank,
+        kd.urlTraf === '—' ? '' : kd.urlTraf,
+        kd.pageBl === '—' ? '' : kd.pageBl,
+        dfsBl,
+        formatTraditionalSeoSearchVolume(gscForRow.clicks),
+        formatTraditionalSeoGscCtrPercent(gscForRow.clicks, gscForRow.impressions),
+        formatTraditionalSeoSearchVolume(gscForRow.impressions)
+      ];
+    }
+
+    function exportTraditionalSeoResultsCsv() {
+      const btn = document.getElementById('traditional-seo-results-export-csv');
+      const meta = document.getElementById('traditional-seo-results-meta');
+      const prevMeta = meta ? meta.textContent : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
+      }
+      try {
+        const { allRows, filtered, propEff, countMap, mode, ruleIsAll } = traditionalSeoGetFilteredSortedResultRows();
+        if (!allRows.length) {
+          if (meta) meta.textContent = 'No Traditional SEO results to export. Run the audit first.';
+          return;
+        }
+        if (!filtered.length) {
+          if (meta) meta.textContent = 'No rows match current filters. Nothing to export.';
+          return;
+        }
+        const headers = [
+          'Score', 'Tier', 'Rule', 'Status', 'URL', 'Target kw',
+          'Int BL', 'Int out', 'Ext BL', 'Page upd',
+          'Kw vol', 'Est. traf', 'SERP', 'URL traf', 'Pg bl', 'DFS bl',
+          'Clicks', 'CTR%', 'Impr.'
+        ];
+        const lines = [headers.map(traditionalSeoCsvCell).join(',')];
+        for (let i = 0; i < filtered.length; i += 1) {
+          lines.push(traditionalSeoResultsRowCsvValues(filtered[i], allRows, propEff, countMap).map(traditionalSeoCsvCell).join(','));
+        }
+        const blob = new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' });
+        const a = document.createElement('a');
+        const href = URL.createObjectURL(blob);
+        const host = (() => {
+          try {
+            return traditionalSeoPropertyHostname() || 'site';
+          } catch (_) {
+            return 'site';
+          }
+        })().replace(/[^\w.-]+/g, '_');
+        a.href = href;
+        a.download = `traditional-seo-results-${host}-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(href);
+        const modeLbl = mode === 'pages' && ruleIsAll ? 'URL' : 'row';
+        if (meta) {
+          meta.textContent = `Exported ${filtered.length.toLocaleString()} ${modeLbl}(s) to CSV (current filters).`;
+          setTimeout(() => {
+            if (meta && meta.textContent.indexOf('Exported ') === 0) renderTraditionalSeoResultsTable();
+          }, 4000);
+        }
+      } catch (err) {
+        if (meta) meta.textContent = `CSV export failed: ${String(err?.message || err || 'unknown error')}`;
+        else if (prevMeta) { /* keep */ }
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.style.opacity = '1';
+        }
+      }
+    }
+
+    function renderTraditionalSeoResultsTable() {
+      if (TRADITIONAL_SEO_STATE.filterDisavowedBacklinkCounts !== false && TRADITIONAL_SEO_STATE.disavowUiLoaded === null) {
+        traditionalSeoEnsureDisavowLoadedUi().then(() => renderTraditionalSeoResultsTable());
+        return;
+      }
+      const { allRows, filtered, propEff, countMap, f, mode, ruleIsAll } = traditionalSeoGetFilteredSortedResultRows();
+      traditionalSeoPopulateTierFilter(countMap);
+      const body = document.getElementById('traditional-seo-results-body');
+      const meta = document.getElementById('traditional-seo-results-meta');
+
+      const drillBaseRows = allRows.filter((row) => traditionalSeoRowMatchesNonStatusFilters(row, f));
+      renderTraditionalSeoDrilldownTiles(drillBaseRows, {
+        mode,
+        ruleAll: ruleIsAll,
+        allLabel: mode === 'pages' && ruleIsAll ? 'All URLs' : 'All rows'
+      });
+      renderTraditionalSeoInternalLinksCoverageTile(allRows);
 
       const ps = traditionalSeoNormalizeResultsPageSize(TRADITIONAL_SEO_STATE.resultsPageSize);
       const totalFiltered = filtered.length;
@@ -97790,6 +97935,11 @@ Confidence: ${c}`;
           traditionalSeoResetResultsPageIndex();
           renderTraditionalSeoResultsTable();
         });
+      }
+      const resultsExportCsvBtn = document.getElementById('traditional-seo-results-export-csv');
+      if (resultsExportCsvBtn && !resultsExportCsvBtn.dataset.wired) {
+        resultsExportCsvBtn.dataset.wired = '1';
+        resultsExportCsvBtn.addEventListener('click', () => exportTraditionalSeoResultsCsv());
       }
       const resultsPagBar = document.getElementById('traditional-seo-results-pagination');
       if (resultsPagBar && !resultsPagBar.dataset.wiredPagerBtns) {
