@@ -67589,6 +67589,15 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       const r = Number(row?.best_rank_group);
       return Number.isFinite(r) && r > 0 && r <= 10;
     }
+    // Show-only: money CLASS_WEIGHTS.kp = 0 (does not redistribute into Surface Visibility).
+    function outcomeKpServed(row) {
+      if (row?.kp_present === true) return true;
+      return outcomeStack(row).some((e) => e?.type === 'knowledge_panel');
+    }
+    function outcomeKpOwned(row) {
+      if (row?.kp_ours === true) return true;
+      return outcomeStack(row).some((e) => e?.type === 'knowledge_panel' && e?.ours === true);
+    }
     const SURFACE_OUTCOME_DEFS = [
       { key: 'ai_answer', label: 'Google AI Overview', weightKey: 'aio', served: outcomeAioServed, owned: outcomeAioOwned },
       {
@@ -67601,6 +67610,14 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       },
       { key: 'map_pack', label: 'Map pack', weightKey: 'pack', served: outcomePackServed, owned: outcomePackOwned },
       { key: 'answer_boxes', label: 'Answer boxes', weightKey: 'fs_paa', served: outcomeBoxServed, owned: outcomeBoxOwned },
+      {
+        key: 'knowledge_panel',
+        label: 'Knowledge panel',
+        weightKey: 'kp',
+        served: outcomeKpServed,
+        owned: outcomeKpOwned,
+        showOnly: true,
+      },
       { key: 'organic_top10', label: 'Organic top-10', weightKey: 'organic', served: outcomeOrganicServed, owned: outcomeOrganicOwned },
     ];
     /** Base CLASS_WEIGHTS for display only — same object as scoring (SURFACE_CLASS_WEIGHTS ↔ surfaceScores.js). */
@@ -67697,15 +67714,16 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         const gapVol = localCell.gapVol + nationalCell.gapVol;
         return {
           key: def.key, label: def.label, diagnostic: !!def.diagnostic,
+          showOnly: !!def.showOnly,
           weightKey: def.weightKey ?? null,
           overall: overallCell, local: localCell, national: nationalCell, gapVol,
           gapPctOfMoney: moneyVol > 0 ? Math.round((100 * gapVol) / moneyVol) : 0,
         };
       });
       let biggest = null;
-      // Callout competes on Overview / Map / Organic only — skip Answer boxes + diagnostic AI Mode.
+      // Callout competes on Overview / Map / Organic only — skip Answer boxes, KP show-only, AI Mode.
       for (const row of tableRows) {
-        if (row.key === 'answer_boxes' || row.diagnostic || row.key === 'google_ai_mode') continue;
+        if (row.key === 'answer_boxes' || row.key === 'knowledge_panel' || row.diagnostic || row.showOnly || row.key === 'google_ai_mode') continue;
         if (!biggest || row.gapVol > biggest.gapVol) biggest = row;
       }
       let biggestGap = null;
@@ -67762,33 +67780,40 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       }
       (outcomes?.rows || []).forEach((row, idx) => {
         const isDiag = !!row.diagnostic || row.key === 'google_ai_mode';
+        const isShowOnly = !!row.showOnly || row.key === 'knowledge_panel';
         const pct = row.overall?.pct;
         const rag = scorecardRagCells(pct == null ? 0 : pct);
         const owned = row.overall?.owned ?? 0;
         const served = row.overall?.served ?? 0;
         const nat = row.national?.pct;
         const loc = row.local?.pct;
-        const bg = isDiag ? '#f8fafc' : (idx % 2 ? '#fafafa' : '#fff');
+        const bg = (isDiag || isShowOnly) ? '#f8fafc' : (idx % 2 ? '#fafafa' : '#fff');
         const nameHtml = isDiag
           ? `${row.label} <span style="color:#64748b;font-weight:500;font-size:0.85em;">(diagnostic — not scored)</span>`
-          : `${row.label} <span style="color:#999;font-size:0.85em;">(won-of-served)</span>`;
+          : isShowOnly
+            ? `${row.label} <span style="color:#64748b;font-weight:500;font-size:0.85em;">(show-only · base wt 0)</span>`
+            : `${row.label} <span style="color:#999;font-size:0.85em;">(won-of-served)</span>`;
         const scoreCell = isDiag
           ? (served ? `<span style="color:#64748b;font-weight:600;">${owned}/${served}</span>` : '—')
           : (served ? `<span style="font-weight:600;color:${rag.color};">${rag.n}%</span>` : '—');
         const badgeCell = isDiag
           ? '<span style="color:#94a3b8;font-size:0.8em;">diagnostic</span>'
-          : (served ? `<span class="rag-badge ${rag.status}">${rag.label}</span>` : '<span style="color:#94a3b8;">n/a</span>');
+          : isShowOnly
+            ? '<span style="color:#94a3b8;font-size:0.8em;">show-only</span>'
+            : (served ? `<span class="rag-badge ${rag.status}">${rag.label}</span>` : '<span style="color:#94a3b8;">n/a</span>');
         const actionCell = isDiag
           ? 'Does not feed Surface visibility, Top of page, or levers — display only.'
-          : (served && pct != null && pct < 70 ? `Win more ${row.label.toLowerCase()} placements on money keywords.` : 'Maintain surface ownership.');
+          : isShowOnly
+            ? 'Tracked for transparency; money base weight is 0 — does not move Surface visibility.'
+            : (served && pct != null && pct < 70 ? `Win more ${row.label.toLowerCase()} placements on money keywords.` : 'Maintain surface ownership.');
         const wk = row.weightKey || SURFACE_OUTCOME_DEFS.find((d) => d.key === row.key)?.weightKey;
         const lw = isDiag ? null : outcomeBaseWeight(wk, 'local-money');
         const nw = isDiag ? null : outcomeBaseWeight(wk, 'national-money');
         const locNote = loc == null ? '—' : `${loc}%${lw == null ? '' : ` (base wt ${lw})`}`;
         const natNote = nat == null ? '—' : `${nat}%${nw == null ? '' : ` (base wt ${nw})`}`;
         const currentNote = `Overall ${owned}/${served} served · Local ${locNote} · National ${natNote}`;
-        html += `<tr style="border-bottom: 1px solid #eee; background: ${bg};${isDiag ? ' opacity:0.92;' : ''}">
-          <td style="padding: 0.75rem; font-weight: 500;${isDiag ? ' color:#475569;' : ''}">${nameHtml}</td>
+        html += `<tr style="border-bottom: 1px solid #eee; background: ${bg};${(isDiag || isShowOnly) ? ' opacity:0.92;' : ''}">
+          <td style="padding: 0.75rem; font-weight: 500;${(isDiag || isShowOnly) ? ' color:#475569;' : ''}">${nameHtml}</td>
           <td style="padding: 0.75rem; text-align: center;">${scoreCell}</td>
           <td style="padding: 0.75rem; text-align: center; color: #999;">—</td>
           <td style="padding: 0.75rem; text-align: center;">${badgeCell}</td>
@@ -68033,19 +68058,24 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           </div>`;
       const body = outcomes.rows.map((r) => {
         const isDiag = !!r.diagnostic || r.key === 'google_ai_mode';
-        const name = isDiag
-          ? `${r.label} <span class="aho-diag-tag" title="Does not feed Surface visibility, Top of page, or levers">diagnostic — not scored</span>`
-          : r.label;
+        const isShowOnly = !!r.showOnly || r.key === 'knowledge_panel';
+        let name = r.label;
+        if (isDiag) {
+          name = `${r.label} <span class="aho-diag-tag" title="Does not feed Surface visibility, Top of page, or levers">diagnostic — not scored</span>`;
+        } else if (isShowOnly) {
+          name = `${r.label} <span class="aho-diag-tag" title="base wt 0 on money classes — shown for transparency only">show-only · base wt 0</span>`;
+        }
         const isOrg = r.key === 'organic_top10';
         const wk = r.weightKey;
-        // Overall has no fixed class weight — "wt varies". AI Mode: no weights.
+        // Overall has no fixed class weight — "wt varies". AI Mode: no weights. KP: base wt 0.
         const overallWt = isDiag ? [null, null] : ['varies', null];
         const localVal = isDiag ? null : outcomeBaseWeight(wk, 'local-money');
         const natVal = isDiag ? null : outcomeBaseWeight(wk, 'national-money');
+        // show-only KP still shows base wt 0; diagnostic AI Mode has no weight tags
         const localKind = isDiag ? null : 'base';
         const natKind = isDiag ? null : 'base';
         return `
-        <tr class="${isDiag ? 'aho-row-diag' : ''}">
+        <tr class="${isDiag || isShowOnly ? 'aho-row-diag' : ''}">
           <td class="aho-name">${name}</td>
           <td class="aho-overall">${formatOutcomeCell(r.overall, isOrg, overallWt[0], overallWt[1])}</td>
           <td>${formatOutcomeCell(r.local, isOrg, localKind, localVal)}</td>
