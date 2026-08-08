@@ -6186,6 +6186,45 @@
       white-space: nowrap;
       width: 18%;
     }
+    .ai-health-surface-outcomes .aho-tip {
+      cursor: help;
+      border-bottom: 1px dotted #94a3b8;
+    }
+    .ai-health-surface-outcomes tfoot td {
+      border-top: 2px solid #cbd5e1;
+      background: #f1f5f9;
+      padding-top: 0.85rem;
+      padding-bottom: 0.85rem;
+      vertical-align: middle;
+    }
+    .ai-health-surface-outcomes tfoot .aho-foot-label {
+      font-weight: 800;
+      color: #0f172a;
+      font-size: 0.9rem;
+    }
+    .ai-health-surface-outcomes tfoot .aho-foot-label small {
+      display: block;
+      font-weight: 500;
+      font-size: 0.72rem;
+      color: #64748b;
+      margin-top: 0.2rem;
+      white-space: normal;
+      line-height: 1.35;
+    }
+    .ai-health-surface-outcomes tfoot .aho-sv-foot {
+      font-size: 1.15rem;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.1;
+    }
+    .ai-health-surface-outcomes tfoot .aho-sv-foot small {
+      display: block;
+      margin-top: 0.2rem;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: #64748b;
+      letter-spacing: 0.02em;
+    }
     .ai-health-surface-outcomes tr.aho-row-diag {
       background: #f8fafc;
     }
@@ -47784,6 +47823,8 @@
       const surfaceOutcomes = heroRowsReady ? computeSurfaceOutcomesRollup(rankingRowsForHero) : null;
       const surfaceOutcomesHtml = renderSurfaceOutcomesHtml(surfaceOutcomes, {
         surfaceVisibility: heroSurfaceScore,
+        surfaceVisibilityLocal: surfaceVisibilityHero?.byClass?.['local-money']?.score,
+        surfaceVisibilityNational: surfaceVisibilityHero?.byClass?.['national-money']?.score,
         topOfPage: heroTopOfPageScore,
         surfaceRag: heroSurfaceRag,
       });
@@ -67584,7 +67625,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       if (row?.local_pack_position != null && Number(row.local_pack_position) > 0) return true;
       return outcomeStack(row).some((e) => e?.type === 'local_pack' && e?.our_position != null);
     }
-    // MC-57 Option A: "Answer boxes" = featured snippet only, stack-gated (PAA excluded; flags not trusted).
+    // MC-57 Option A: "Featured snippet" (fs_paa) = featured snippet only, stack-gated (PAA is separate row).
     function outcomeBoxServed(row) {
       return outcomeStack(row).some((e) => e?.type === 'featured_snippet' && e?.slot != null);
     }
@@ -67625,7 +67666,8 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         diagnostic: true,
       },
       { key: 'map_pack', label: 'Map pack', weightKey: 'pack', served: outcomePackServed, owned: outcomePackOwned },
-      { key: 'answer_boxes', label: 'Answer boxes', weightKey: 'fs_paa', served: outcomeBoxServed, owned: outcomeBoxOwned },
+      // Featured snippet only (MC-57) — classic SERP answer box, not AI Overview.
+      { key: 'answer_boxes', label: 'Featured snippet', weightKey: 'fs_paa', served: outcomeBoxServed, owned: outcomeBoxOwned },
       { key: 'paa', label: 'People Also Ask', weightKey: 'paa', served: outcomePaaServed, owned: outcomePaaOwned },
       {
         key: 'knowledge_panel',
@@ -68057,12 +68099,25 @@ Composite of four inputs — not the Surface Visibility dial score.`;
 
     function renderSurfaceOutcomesHtml(outcomes, dialScores) {
       const surfaceScore = dialScores?.surfaceVisibility;
+      const localSv = dialScores?.surfaceVisibilityLocal;
+      const nationalSv = dialScores?.surfaceVisibilityNational;
       const topScore = dialScores?.topOfPage;
       const surfaceRag = dialScores?.surfaceRag || 'amber';
       const scoreColor = surfaceRag === 'green' ? '#177245' : surfaceRag === 'amber' ? '#b45309' : '#a63c2a';
       if (!outcomes || !outcomes.rows || !outcomes.moneyCount) {
         return `<section class="ai-health-surface-outcomes"><h3>Surface outcomes</h3><p class="aho-sub">Needs Ranking &amp; AI rows with surface stacks.</p></section>`;
       }
+      const SURFACE_OUTCOME_TIPS = {
+        ai_answer: 'Google AI Overview — the AI summary box inside classic Google search. “Owned” when the SERP stack cites your site. Feeds Surface Visibility (aio weight).',
+        google_ai_mode: 'Google AI Mode is a separate product from classic SERP. Shown for diagnostics only — does not feed Surface Visibility, Top of page, or levers.',
+        map_pack: 'Local map pack (usually 3 businesses on map). Served when Google shows a pack; owned when you appear in it. High weight on local-money keywords.',
+        answer_boxes: 'Featured snippet — the classic SERP “answer box” above organic links (highlight paragraph / list). Not Google AI Overview. MC-57: featured snippet only; People Also Ask is a separate row.',
+        paa: 'People Also Ask — expandable question block on Google. Stack-gated ownership. Scored in Surface Visibility (paa weight). Separate from the featured snippet.',
+        knowledge_panel: 'Knowledge panel — the entity panel (often right rail). Shown for transparency on money keywords (base weight 0 — does not move Surface Visibility). Brand scoring uses KP separately.',
+        organic_top10: 'Organic blue links in the top 10 results. “Owned” if your best rank is ≤10. High weight on national-money keywords; always counted as served for the visibility model.',
+      };
+      const escapeTitle = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      const fmtSv = (n) => (n == null || !Number.isFinite(Number(n)) ? '—' : `${Math.round(Number(n))}/100`);
       const callout = outcomes.biggestGap
         ? `<div class="aho-gap"><span class="aho-gap-icon" aria-hidden="true">⚠</span><span>${outcomes.biggestGap.text}</span></div>`
         : '';
@@ -68076,19 +68131,21 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       const body = outcomes.rows.map((r) => {
         const isDiag = !!r.diagnostic || r.key === 'google_ai_mode';
         const isShowOnly = !!r.showOnly || r.key === 'knowledge_panel';
-        let name = r.label;
+        const tip = SURFACE_OUTCOME_TIPS[r.key] || '';
+        const tipAttr = tip ? ` title="${escapeTitle(tip)}"` : '';
+        let name = tip
+          ? `<span class="aho-tip"${tipAttr}>${r.label}</span>`
+          : r.label;
         if (isDiag) {
-          name = `${r.label} <span class="aho-diag-tag" title="Does not feed Surface visibility, Top of page, or levers">diagnostic — not scored</span>`;
+          name += ` <span class="aho-diag-tag" title="Does not feed Surface visibility, Top of page, or levers">diagnostic — not scored</span>`;
         } else if (isShowOnly) {
-          name = `${r.label} <span class="aho-diag-tag" title="base wt 0 on money classes — shown for transparency only">show-only · base wt 0</span>`;
+          name += ` <span class="aho-diag-tag" title="base wt 0 on money classes — shown for transparency only">show-only · base wt 0</span>`;
         }
         const isOrg = r.key === 'organic_top10';
         const wk = r.weightKey;
-        // Overall has no fixed class weight — "wt varies". AI Mode: no weights. KP: base wt 0.
         const overallWt = isDiag ? [null, null] : ['varies', null];
         const localVal = isDiag ? null : outcomeBaseWeight(wk, 'local-money');
         const natVal = isDiag ? null : outcomeBaseWeight(wk, 'national-money');
-        // show-only KP still shows base wt 0; diagnostic AI Mode has no weight tags
         const localKind = isDiag ? null : 'base';
         const natKind = isDiag ? null : 'base';
         return `
@@ -68099,12 +68156,29 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           <td>${formatOutcomeCell(r.national, isOrg, natKind, natVal)}</td>
         </tr>`;
       }).join('');
+      const footTip = 'Surface Visibility dial for this column (demand-weighted ownership quality across served surfaces) — cross-check for the won-of-served rows above. Not an average of the % cells.';
+      const foot = `
+        <tr>
+          <td class="aho-foot-label">
+            Surface visibility
+            <small>Dial score for this column (not an average of the % rows)</small>
+          </td>
+          <td class="aho-overall" title="${escapeTitle(footTip + ' Overall = local + national money keywords.')}">
+            <span class="aho-sv-foot" style="color:${scoreColor}">${fmtSv(surfaceScore)}<small>total money</small></span>
+          </td>
+          <td title="${escapeTitle(footTip + ' Local-money keywords only.')}">
+            <span class="aho-sv-foot">${fmtSv(localSv)}<small>local money</small></span>
+          </td>
+          <td title="${escapeTitle(footTip + ' National-money keywords only.')}">
+            <span class="aho-sv-foot">${fmtSv(nationalSv)}<small>national money</small></span>
+          </td>
+        </tr>`;
       return `
         <section class="ai-health-surface-outcomes" id="ai-health-surface-outcomes" aria-label="Surface outcomes">
           <div class="aho-head">
             <div class="aho-head-copy">
               <h3>Surface outcomes</h3>
-              <p class="aho-sub">Breakdown behind the dial above (<b>Surface visibility ${surfaceScore == null ? '—' : surfaceScore}</b>). Won-of-served on money keywords — if Google did not show a surface, it is not counted against you. <b>${outcomes.moneyCount}</b> money keywords. <b>Overall</b> = local + national. <b>base wt</b> = Surface Visibility class weight for that column (from CLASS_WEIGHTS); redistributed across served surfaces per keyword. <b>Google AI Overview</b> feeds the score; <b>Google AI Mode</b> is diagnostic only.</p>
+              <p class="aho-sub">Breakdown behind the dial above (<b>Surface visibility ${surfaceScore == null ? '—' : surfaceScore}</b>). Won-of-served on money keywords — if Google did not show a surface, it is not counted against you. <b>${outcomes.moneyCount}</b> money keywords. <b>Overall</b> = local + national. <b>base wt</b> = Surface Visibility class weight for that column (from CLASS_WEIGHTS); redistributed across served surfaces per keyword. Footer = Surface Visibility dial per column (cross-check). <b>Google AI Overview</b> feeds the score; <b>Google AI Mode</b> is diagnostic only.</p>
             </div>
             ${scoreBlock}
           </div>
@@ -68112,13 +68186,14 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           <table>
             <thead>
               <tr>
-                <th>Surface</th>
-                <th>Overall</th>
-                <th>Local money Pages</th>
-                <th>National money Pages</th>
+                <th title="Google surface type. Hover a row name for what it means.">Surface</th>
+                <th title="Won-of-served across all local + national money keywords">Overall</th>
+                <th title="Won-of-served on local-money keywords only">Local money Pages</th>
+                <th title="Won-of-served on national-money keywords only">National money Pages</th>
               </tr>
             </thead>
             <tbody>${body}</tbody>
+            <tfoot>${foot}</tfoot>
           </table>
         </section>`;
     }
