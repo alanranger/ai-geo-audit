@@ -14288,7 +14288,7 @@
           <ul>
             <li>Primary: demand-weighted share of <em>served</em> answer surfaces you own on money keywords (AI answer, map pack, answer boxes, organic top-10)</li>
             <li>Scored only where Google served that surface — no penalty for surfaces that were not shown</li>
-            <li>Display splits: Overall, Local money, Regional money, National money</li>
+            <li>Display splits: Overall, Local money, National money (regional tier retired)</li>
             <li>Same rollup family as the Surface visibility headline dial (not classic average-position mapping)</li>
             <li>Score range: 0–100</li>
           </ul>
@@ -47756,13 +47756,11 @@
       // Visibility lever = surface-aware rollup (not classic posScore)
       if (heroRowsReady && surfaceVisibilityHero) {
         const localMoney = surfaceVisibilityHero.byClass?.['local-money']?.score;
-        const regionalMoney = surfaceVisibilityHero.byClass?.['regional-money']?.score;
         const nationalMoney = surfaceVisibilityHero.byClass?.['national-money']?.score;
         scores.visibility = {
           score: heroSurfaceScore,
           overall: surfaceVisibilityHero.overall,
           local: localMoney,
-          regional: regionalMoney,
           national: nationalMoney,
           byClass: surfaceVisibilityHero.byClass,
           source: 'surface'
@@ -48151,7 +48149,6 @@
                       };
                       const surfClassHtml = [
                         surfClassLine('local-money', 'Local money'),
-                        surfClassLine('regional-money', 'Regional money'),
                         surfClassLine('national-money', 'National money'),
                       ].filter(Boolean).join('');
                       const surfTooltip = `Surface visibility ${heroSurfaceOutOf}: demand-weighted ownership across surfaces Google actually served (organic, map pack, AI answer, answer boxes).`;
@@ -48196,7 +48193,6 @@
                         };
                         const topClassHtml = [
                           topClassLine('local-money', 'Local money'),
-                          topClassLine('regional-money', 'Regional money'),
                           topClassLine('national-money', 'National money'),
                           topClassLine('brand', 'Brand'),
                         ].filter(Boolean).join('');
@@ -49190,14 +49186,12 @@ Composite of four inputs — not the Surface Visibility dial score.`;
             const vis = (typeof scores.visibility === 'object' && scores.visibility) ? scores.visibility : {};
             const overallVis = toAuthorityNum(vis.overall) ?? toAuthorityNum(vis.score) ?? toAuthorityNum(score) ?? 0;
             const localVis = toAuthorityNum(vis.local) ?? toAuthorityNum(vis.byClass?.['local-money']?.score);
-            const regionalVis = toAuthorityNum(vis.regional) ?? toAuthorityNum(vis.byClass?.['regional-money']?.score);
             const nationalVis = toAuthorityNum(vis.national) ?? toAuthorityNum(vis.byClass?.['national-money']?.score);
             pillarBreakdown = `
               <div id="${breakdownId}" style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e2e8f0; font-size: 0.8rem; min-height: 4.5rem;">
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
                   ${formatComponentScore('Overall', overallVis)}
                   ${formatComponentScore('Local money', localVis != null ? localVis : 0)}
-                  ${formatComponentScore('Regional money', regionalVis != null ? regionalVis : 0)}
                   ${formatComponentScore('National money', nationalVis != null ? nationalVis : 0)}
                 </div>
               </div>
@@ -49211,9 +49205,8 @@ Composite of four inputs — not the Surface Visibility dial score.`;
                   <div style="margin-bottom: 0.5rem;"><strong>Surface visibility (lever):</strong></div>
                   <div>Overall: ${Math.round(overallVis)}</div>
                   <div>Local money: ${localVis != null ? Math.round(localVis) : '—'}</div>
-                  <div>Regional money: ${regionalVis != null ? Math.round(regionalVis) : '—'}</div>
                   <div>National money: ${nationalVis != null ? Math.round(nationalVis) : '—'}</div>
-                  <div style="margin-top: 0.35rem;">Demand-weighted ownership of served answer surfaces — see Surface outcomes table above.</div>
+                  <div style="margin-top: 0.35rem;">Demand-weighted ownership of served answer surfaces (local + national money) — see Surface outcomes table above.</div>
                 </div>
               </div>
             `;
@@ -66015,11 +66008,17 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       for (const cls of Object.keys(byClass)) {
         dials[cls] = { score: demandWeightedMeanSurface(byClass[cls]), count: byClass[cls].length };
       }
-      const overall = demandWeightedMeanSurface(perKeyword);
+      // Headline overall = local + national money only (regional retired 2026-08).
+      const overallMoney = perKeyword.filter((e) => {
+        const c = e.surface.keyword_class;
+        return c === 'local-money' || c === 'national-money';
+      });
+      const overall = demandWeightedMeanSurface(overallMoney);
       let weakestClass = null;
       let weakestScore = Infinity;
-      for (const [cls, d] of Object.entries(dials)) {
-        if (d.count === 0) continue;
+      for (const cls of ['local-money', 'national-money']) {
+        const d = dials[cls];
+        if (!d || d.count === 0) continue;
         if (d.score < weakestScore) {
           weakestScore = d.score;
           weakestClass = cls;
@@ -67519,7 +67518,10 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       return {
         schema_version: TOP_OF_PAGE_SCHEMA_VERSION,
         baseline_date: TOP_OF_PAGE_BASELINE_DATE,
-        overall: topDemandWeightedMean(perKeyword),
+        overall: topDemandWeightedMean(perKeyword.filter((e) => {
+          const c = e.top.keyword_class;
+          return c === 'local-money' || c === 'national-money';
+        })),
         byClass: dials,
         perKeyword: perKeyword.map((p) => ({
           keyword: p.keyword, score: p.score, best_surface: p.top.best_surface,
@@ -67631,22 +67633,21 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       const money = (Array.isArray(rows) ? rows : []).filter(
         (r) => {
           const cls = r?.keyword_class;
-          return cls === 'local-money' || cls === 'regional-money' || cls === 'national-money';
+          // regional-money retired 2026-08: local + national only
+          return cls === 'local-money' || cls === 'national-money';
         }
       );
       const local = money.filter((r) => r.keyword_class === 'local-money');
-      const regional = money.filter((r) => r.keyword_class === 'regional-money');
       const national = money.filter((r) => r.keyword_class === 'national-money');
       const moneyVol = money.reduce((s, r) => s + outcomeDemandVol(r), 0);
       const tableRows = SURFACE_OUTCOME_DEFS.map((def) => {
         const localCell = rollSurfaceOutcomeCell(local, def);
-        const regionalCell = rollSurfaceOutcomeCell(regional, def);
         const nationalCell = rollSurfaceOutcomeCell(national, def);
         const overallCell = rollSurfaceOutcomeCell(money, def);
-        const gapVol = localCell.gapVol + regionalCell.gapVol + nationalCell.gapVol;
+        const gapVol = localCell.gapVol + nationalCell.gapVol;
         return {
           key: def.key, label: def.label, diagnostic: !!def.diagnostic,
-          overall: overallCell, local: localCell, regional: regionalCell, national: nationalCell, gapVol,
+          overall: overallCell, local: localCell, national: nationalCell, gapVol,
           gapPctOfMoney: moneyVol > 0 ? Math.round((100 * gapVol) / moneyVol) : 0,
         };
       });
@@ -67661,7 +67662,6 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         // Attribute by uncited/unowned DEMAND volume share — never "all X" unless 100% of gapVol.
         const classGaps = [
           { label: 'local', gap: biggest.local?.gapVol || 0 },
-          { label: 'regional', gap: biggest.regional?.gapVol || 0 },
           { label: 'national', gap: biggest.national?.gapVol || 0 },
         ].filter((c) => c.gap > 0).sort((a, b) => b.gap - a.gap);
         const gapTotal = classGaps.reduce((s, c) => s + c.gap, 0) || 1;
@@ -67711,7 +67711,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           <td style="padding: 0.75rem; text-align: center; font-weight: 600; color: ${rag.color};">${rag.n}</td>
           <td style="padding: 0.75rem; text-align: center; color: #999;">—</td>
           <td style="padding: 0.75rem; text-align: center;"><span class="rag-badge ${rag.status}">${rag.label}</span></td>
-          <td style="padding: 0.75rem; color: #666; font-size: 0.85rem;">Demand-weighted share of served answer surfaces you own on money keywords (local + regional + national).</td>
+          <td style="padding: 0.75rem; color: #666; font-size: 0.85rem;">Demand-weighted share of served answer surfaces you own on money keywords (local + national).</td>
           <td style="padding: 0.75rem; color: #555; font-size: 0.85rem;">${outcomes?.biggestGap?.text || 'Close the largest surface gap on money searches.'}</td>
           <td style="padding: 0.75rem; text-align: center; color: #999;">Ranking &amp; AI</td>
         </tr>`;
@@ -68003,7 +68003,6 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           <td class="aho-name">${name}</td>
           <td class="aho-overall">${formatOutcomeCell(r.overall, r.key === 'organic_top10')}</td>
           <td>${formatOutcomeCell(r.local, r.key === 'organic_top10')}</td>
-          <td>${formatOutcomeCell(r.regional || { served: 0, owned: 0, gapVol: 0, pct: null }, r.key === 'organic_top10')}</td>
           <td>${formatOutcomeCell(r.national, r.key === 'organic_top10')}</td>
         </tr>`;
       }).join('');
@@ -68012,7 +68011,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           <div class="aho-head">
             <div class="aho-head-copy">
               <h3>Surface outcomes</h3>
-              <p class="aho-sub">Breakdown behind the dial above (<b>Surface visibility ${surfaceScore == null ? '—' : surfaceScore}</b>). Won-of-served on money keywords — if Google did not show a surface, it is not counted against you. <b>${outcomes.moneyCount}</b> money keywords. <b>Overall</b> = local + regional + national. <b>Google AI Overview</b> feeds the score; <b>Google AI Mode</b> is diagnostic only.</p>
+              <p class="aho-sub">Breakdown behind the dial above (<b>Surface visibility ${surfaceScore == null ? '—' : surfaceScore}</b>). Won-of-served on money keywords — if Google did not show a surface, it is not counted against you. <b>${outcomes.moneyCount}</b> money keywords. <b>Overall</b> = local + national. <b>Google AI Overview</b> feeds the score; <b>Google AI Mode</b> is diagnostic only.</p>
             </div>
             ${scoreBlock}
           </div>
@@ -68023,7 +68022,6 @@ Composite of four inputs — not the Surface Visibility dial score.`;
                 <th>Surface</th>
                 <th>Overall</th>
                 <th>Local money</th>
-                <th>Regional money</th>
                 <th>National money</th>
               </tr>
             </thead>
