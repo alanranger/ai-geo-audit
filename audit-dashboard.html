@@ -67794,9 +67794,15 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         ].filter((c) => c.gap > 0).sort((a, b) => b.gap - a.gap);
         const gapTotal = classGaps.reduce((s, c) => s + c.gap, 0) || 1;
         const suffix = buildClassGapSuffix(classGaps, gapTotal);
-        const text = biggest.key === 'ai_answer'
-          ? `${biggest.gapPctOfMoney}% of money-search demand is in Google AI Overviews you're not cited in${suffix}.`
-          : `${biggest.gapPctOfMoney}% of money-search demand sits on ${biggest.label.toLowerCase()} gaps${suffix}.`;
+        let text;
+        if (biggest.key === 'ai_answer') {
+          text = `${biggest.gapPctOfMoney}% of money-search demand is in Google AI Overviews you're not cited in${suffix}.`;
+        } else if (biggest.key === 'paa') {
+          // Soft claim: PAA presence is single-scrape DFS context; live SERP can differ.
+          text = `On this scrape, ~${biggest.gapPctOfMoney}% of money-search demand was where People Also Ask showed and you were unowned${suffix}. PAA presence is volatile across location/login — verify high-volume terms live before treating the figure as settled.`;
+        } else {
+          text = `${biggest.gapPctOfMoney}% of money-search demand sits on ${biggest.label.toLowerCase()} gaps${suffix}.`;
+        }
         biggestGap = { surfaceKey: biggest.key, surfaceLabel: biggest.label, gapPct: biggest.gapPctOfMoney, text };
       }
       return { rows: tableRows, biggestGap, moneyVol, moneyCount: money.length };
