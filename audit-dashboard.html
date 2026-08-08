@@ -65715,13 +65715,13 @@ Composite of four inputs — not the Surface Visibility dial score.`;
     const HERO_28D_COMPARISON_WINDOW_DAYS = 28;
     // Mirror of lib/audit/surfaceScores.js CLASS_WEIGHTS — Surface Outcomes "base wt" tags read this.
     const SURFACE_CLASS_WEIGHTS = Object.freeze({
-      'local-money': Object.freeze({ pack: 35, organic: 30, aio: 25, fs_paa: 10, kp: 0 }),
-      'regional-money': Object.freeze({ pack: 25, organic: 38, aio: 28, fs_paa: 12, kp: 0 }),
-      'national-money': Object.freeze({ pack: 10, organic: 45, aio: 30, fs_paa: 15, kp: 0 }),
-      brand: Object.freeze({ pack: 15, organic: 35, aio: 10, fs_paa: 0, kp: 40 }),
-      education: Object.freeze({ pack: 0, organic: 40, aio: 35, fs_paa: 25, kp: 0 })
+      'local-money': Object.freeze({ pack: 35, organic: 25, aio: 25, fs_paa: 10, paa: 5, kp: 0 }),
+      'regional-money': Object.freeze({ pack: 25, organic: 38, aio: 28, fs_paa: 12, paa: 0, kp: 0 }),
+      'national-money': Object.freeze({ pack: 10, organic: 40, aio: 27, fs_paa: 15, paa: 8, kp: 0 }),
+      brand: Object.freeze({ pack: 15, organic: 35, aio: 10, fs_paa: 0, paa: 0, kp: 40 }),
+      education: Object.freeze({ pack: 0, organic: 40, aio: 35, fs_paa: 25, paa: 0, kp: 0 })
     });
-    const SURFACE_SURFACES = ['pack', 'organic', 'aio', 'fs_paa', 'kp'];
+    const SURFACE_SURFACES = ['pack', 'organic', 'aio', 'fs_paa', 'paa', 'kp'];
     const SURFACE_CLASS_LABELS = Object.freeze({
       'local-money': 'Local',
       'regional-money': 'Regional',
@@ -65925,6 +65925,9 @@ Composite of four inputs — not the Surface Visibility dial score.`;
     function scoreKpSurface(kpOurs) {
       return kpOurs ? 100 : 0;
     }
+    function scorePaaSurface(paaOurs) {
+      return paaOurs ? 100 : 0;
+    }
     function redistributeSurfaceWeights(classWeights, served) {
       const base = classWeights || SURFACE_CLASS_WEIGHTS['national-money'];
       let servedSum = 0;
@@ -65949,16 +65952,21 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       const packPresent = row?.local_pack_present_any === true;
       const stackForAio = Array.isArray(row?.serp_surface_stack) ? row.serp_surface_stack : [];
       const aioPresent = stackForAio.some((e) => e.type === 'ai_overview' && e.slot != null);
-      // MC-57 Option A: fs_paa surface = featured snippet only, stack-gated (PAA dropped, flags not trusted).
+      // MC-57 Option A: fs_paa surface = featured snippet only, stack-gated.
       const fsStack = stackForAio.filter((e) => e.type === 'featured_snippet' && e.slot != null);
       const fsPresent = fsStack.length > 0;
       const fsOurs = fsStack.some((e) => e.ours === true);
+      // PAA separate scored surface — stack-gated only (never paa_present_any / paa_ours alone).
+      const paaStack = stackForAio.filter((e) => e.type === 'people_also_ask' && e.slot != null);
+      const paaPresent = paaStack.length > 0;
+      const paaOurs = paaStack.some((e) => e.ours === true);
       const kpPresent = row?.kp_present === true;
       const served = {
         organic: true,
         pack: packPresent,
         aio: aioPresent,
         fs_paa: fsPresent,
+        paa: paaPresent,
         kp: kpPresent
       };
       const subscores = {
@@ -65966,6 +65974,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         pack: packPresent ? scorePackSurface(row?.local_pack_position) : null,
         aio: aioPresent ? scoreAioSurface(googleAioCitationCountSurface(row)) : null,
         fs_paa: fsPresent ? scoreFsPaaSurface(fsOurs, false) : null,
+        paa: paaPresent ? scorePaaSurface(paaOurs) : null,
         kp: kpPresent ? scoreKpSurface(row?.kp_ours === true) : null
       };
       const weightsUsed = redistributeSurfaceWeights(weights, served);
@@ -67598,6 +67607,13 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       if (row?.kp_ours === true) return true;
       return outcomeStack(row).some((e) => e?.type === 'knowledge_panel' && e?.ours === true);
     }
+    // PAA — stack-gated only (never paa_present_any / paa_ours flags alone).
+    function outcomePaaServed(row) {
+      return outcomeStack(row).some((e) => e?.type === 'people_also_ask' && e?.slot != null);
+    }
+    function outcomePaaOwned(row) {
+      return outcomeStack(row).some((e) => e?.type === 'people_also_ask' && e?.slot != null && e?.ours === true);
+    }
     const SURFACE_OUTCOME_DEFS = [
       { key: 'ai_answer', label: 'Google AI Overview', weightKey: 'aio', served: outcomeAioServed, owned: outcomeAioOwned },
       {
@@ -67610,6 +67626,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       },
       { key: 'map_pack', label: 'Map pack', weightKey: 'pack', served: outcomePackServed, owned: outcomePackOwned },
       { key: 'answer_boxes', label: 'Answer boxes', weightKey: 'fs_paa', served: outcomeBoxServed, owned: outcomeBoxOwned },
+      { key: 'paa', label: 'People Also Ask', weightKey: 'paa', served: outcomePaaServed, owned: outcomePaaOwned },
       {
         key: 'knowledge_panel',
         label: 'Knowledge panel',
@@ -67721,7 +67738,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         };
       });
       let biggest = null;
-      // Callout competes on Overview / Map / Organic only — skip Answer boxes, KP show-only, AI Mode.
+      // Leverage surfaces including PAA (scored 2026-08-10). Skip Answer boxes FS-only, KP show-only, AI Mode.
       for (const row of tableRows) {
         if (row.key === 'answer_boxes' || row.key === 'knowledge_panel' || row.diagnostic || row.showOnly || row.key === 'google_ai_mode') continue;
         if (!biggest || row.gapVol > biggest.gapVol) biggest = row;
