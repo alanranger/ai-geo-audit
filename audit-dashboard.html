@@ -13487,8 +13487,8 @@
           <div class="card dashboard-dial-card">
             <div class="dashboard-dial-header">
               <div class="dashboard-delta-indicator" id="dashboard-delta-gaio" style="display: none;"></div>
-              <div class="dashboard-dial-title">Surface visibility</div>
-              <div class="dashboard-dial-subtitle">Money searches · demand-weighted (0–100)</div>
+              <div class="dashboard-dial-title">Search visibility</div>
+              <div class="dashboard-dial-subtitle">Headline dial = Surface Visibility (money · demand-weighted 0–100)</div>
             </div>
             <div class="dashboard-dial-ring" id="dashboard-dial-gaio" data-pct="0">
               <div class="dashboard-dial-inner">
@@ -13497,7 +13497,13 @@
               </div>
             </div>
             <div id="dashboard-gaio-breakdown" style="margin-top: 0.5rem;"></div>
-            <div id="dashboard-gaio-pillars" style="margin-top: 0.75rem;"></div>
+            <div class="dashboard-lever-heading" style="margin: 0.85rem 0 0.35rem; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #475569;">
+              Search visibility levers
+              <span style="display:block; font-weight: 500; text-transform: none; letter-spacing: 0; color: #64748b; margin-top: 0.2rem; font-size: 0.72rem; line-height: 1.35;">
+                Five independent 0–100 levers — not slices of the dial above. CTR speaks use money-page % of 2.5% target (capped 100). Not the AI Health radar (that one uses Brand demand).
+              </span>
+            </div>
+            <div id="dashboard-gaio-pillars" style="margin-top: 0.35rem;"></div>
             <div style="margin-top: 0.75rem;">
               <canvas id="dashboard-gaio-radar" width="460" height="340" style="width: 100%; height: 340px;"></canvas>
             </div>
@@ -82172,10 +82178,17 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       function computePillarScoresFromAudit(audit) {
         const scores = audit?.scores || null;
         if (!scores) return null;
+        // Visibility: never treat object form as Number (NaN → null). Prefer explicit .score;
+        // still may be legacy GSC number for other card paths — Search levers ignore it.
+        let visibilityNum = null;
+        if (typeof scores.visibility === 'number') visibilityNum = scores.visibility;
+        else if (scores.visibility && typeof scores.visibility === 'object') {
+          visibilityNum = toNum(scores.visibility.score ?? scores.visibility.overall);
+        }
         return {
           authority: toNum(scores.authority?.score ?? scores.authority) ?? null,
           contentSchema: toNum(scores.contentSchema) ?? null,
-          visibility: toNum(scores.visibility) ?? null,
+          visibility: visibilityNum,
           localEntity: toNum(scores.localEntity) ?? null,
           serviceArea: toNum(scores.serviceArea) ?? null,
         };
@@ -82519,11 +82532,17 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         const moneyShareSplit = computeMoneyCitationsSplitFromRankingRows(rankingRows);
         const rankingKpis = computeRankingKpisFromRows(rankingRows);
         let surfaceVisibility = null;
+        let topOfPage = null;
         try {
           if (rankingRows.length > 0 && typeof computeSurfaceVisibilityRollup === 'function') {
             surfaceVisibility = computeSurfaceVisibilityRollup(rankingRows);
           }
         } catch (_svErr) { surfaceVisibility = null; }
+        try {
+          if (rankingRows.length > 0 && typeof computeTopOfPageRollup === 'function') {
+            topOfPage = computeTopOfPageRollup(rankingRows);
+          }
+        } catch (_topErr) { topOfPage = null; }
 
         const pillars = computePillarScoresFromAudit(audit);
         if (pillars && audit?.scores) {
@@ -82533,7 +82552,8 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           } else if (typeof authorityOverride === 'number') {
             pillars.authority = authorityOverride;
           }
-          if (typeof audit.scores.visibility === 'number') pillars.visibility = audit.scores.visibility;
+          // Do not promote legacy GSC visibility number onto Search visibility levers.
+          // Surface Visibility + Top of Page come from rollups, not audit.scores.visibility.
           if (typeof audit.scores.contentSchema === 'number') pillars.contentSchema = audit.scores.contentSchema;
           if (typeof audit.scores.localEntity === 'number') pillars.localEntity = audit.scores.localEntity;
           if (typeof audit.scores.serviceArea === 'number') pillars.serviceArea = audit.scores.serviceArea;
@@ -82852,6 +82872,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           moneySharePct: moneyShare.pct,
           moneyShareSplit,
           surfaceVisibility,
+          topOfPage,
           moneyAgg,
           execActive: exec.active,
           execUpdated28d: exec.updated28d,
@@ -85431,30 +85452,84 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         return uniqueTotalsForTop;
       }
 
-      function renderDashboardGaioPillarsAndRadar(pillars, prevPillars) {
+      /** Money-page CTR as % of 2.5% target, capped 100 — same progress math as Money Pages tile. */
+      function moneyCtrVsTargetScore(moneyAgg) {
+        const target = toNum(moneyAgg?.targets?.ctrAbsPct) ?? 2.5;
+        const ctr = toNum(moneyAgg?.ctrPct);
+        if (ctr == null || !(target > 0)) return null;
+        return Math.min(100, Math.round((ctr / target) * 100));
+      }
+
+      function scoreFromRollupOverall(rollup) {
+        if (rollup == null) return null;
+        if (typeof rollup === 'number' && Number.isFinite(rollup)) return Math.round(rollup);
+        if (typeof rollup.overall === 'number' && Number.isFinite(rollup.overall)) return Math.round(rollup.overall);
+        return null;
+      }
+
+      /** Five levers for Main Dashboard Search visibility card (not GAIO pillars; not AI Health Brand spoke). */
+      function buildSearchVisibilityLevers(metrics) {
+        const pillars = metrics?.pillars || {};
+        const ctr = moneyCtrVsTargetScore(metrics?.moneyAgg);
+        const ctrRaw = toNum(metrics?.moneyAgg?.ctrPct);
+        const ctrTarget = toNum(metrics?.moneyAgg?.targets?.ctrAbsPct) ?? 2.5;
+        const ctrTip = (ctrRaw != null)
+          ? `Money CTR ${ctrRaw.toFixed(2)}% of target ${ctrTarget}% → ${ctr == null ? '—' : ctr}/100 (capped)`
+          : 'Money-page CTR vs 2.5% target (URL Money Pages aggregate)';
+        return [
+          {
+            key: 'surfaceVisibility',
+            label: 'Surface Visibility',
+            score: scoreFromRollupOverall(metrics?.surfaceVisibility),
+            title: 'Same overall as the dial — demand-weighted surface ownership on money searches',
+          },
+          {
+            key: 'topOfPage',
+            label: 'Top of Page',
+            score: scoreFromRollupOverall(metrics?.topOfPage),
+            title: 'Top-of-Page rollup (slot quality), not won-of-served share',
+          },
+          {
+            key: 'authority',
+            label: 'Authority',
+            score: toNum(pillars.authority) != null ? Math.round(toNum(pillars.authority)) : null,
+            title: 'GAIO Authority pillar (E-E-A-T / behaviour / backlinks / reviews)',
+          },
+          {
+            key: 'contentSchema',
+            label: 'Content / Schema',
+            score: toNum(pillars.contentSchema) != null ? Math.round(toNum(pillars.contentSchema)) : null,
+            title: 'GAIO Content/Schema pillar from schema audit',
+          },
+          {
+            key: 'moneyCtrVsTarget',
+            label: 'CTR vs target',
+            score: ctr,
+            title: ctrTip,
+          },
+        ];
+      }
+
+      function renderDashboardGaioPillarsAndRadar(metrics, prevMetrics) {
         const host = document.getElementById('dashboard-gaio-pillars');
         if (!host) return;
 
-        const p = pillars || {};
-        const prev = prevPillars || {};
-        const items = [
-          { key: 'authority', label: 'Authority', score: (typeof p.authority === 'number') ? Math.round(p.authority) : p.authority, prevScore: prev.authority },
-          { key: 'contentSchema', label: 'Content / Schema', score: (typeof p.contentSchema === 'number') ? Math.round(p.contentSchema) : p.contentSchema, prevScore: prev.contentSchema },
-          { key: 'visibility', label: 'Visibility', score: (typeof p.visibility === 'number') ? Math.round(p.visibility) : p.visibility, prevScore: prev.visibility },
-          { key: 'localEntity', label: 'Local Entity', score: (typeof p.localEntity === 'number') ? Math.round(p.localEntity) : p.localEntity, prevScore: prev.localEntity },
-          { key: 'serviceArea', label: 'Service Area', score: (typeof p.serviceArea === 'number') ? Math.round(p.serviceArea) : p.serviceArea, prevScore: prev.serviceArea },
-        ];
+        const items = buildSearchVisibilityLevers(metrics || {});
+        const prevItems = buildSearchVisibilityLevers(prevMetrics || {});
+        const prevByKey = {};
+        for (const p of prevItems) prevByKey[p.key] = p.score;
 
-        const rowsHtml = items.map(it => {
+        const rowsHtml = items.map((it) => {
           const s = toNum(it.score);
+          const prevScore = prevByKey[it.key];
           const pct = s == null ? 0 : Math.max(0, Math.min(100, s));
           const rag = scoreToRag(s, { greenAt: 70, amberAt: 50 });
-          const delta = formatDeltaNumber(it.score, it.prevScore, { decimals: 0 });
-          const dir = deltaDir(it.score, it.prevScore, { betterLower: false });
+          const delta = formatDeltaNumber(it.score, prevScore, { decimals: 0 });
+          const tip = (it.title || it.label) + `: ${s == null ? '—' : `${Math.round(s)}/100`} (Δ ${delta})`;
           return `
             <div class="dashboard-pillar-row" data-key="${it.key}">
-              <div class="dashboard-pillar-label">${it.label}</div>
-              <div class="dashboard-pillar-bar" title="${it.label}: ${s == null ? '—' : `${Math.round(s)}/100`} (Δ ${delta})">
+              <div class="dashboard-pillar-label" title="${tip}">${it.label}</div>
+              <div class="dashboard-pillar-bar" title="${tip}">
                 <span style="width:${pct}%; background:${ragToAccent(rag)};"></span>
               </div>
               <div class="dashboard-pillar-score">${s == null ? '—' : Math.round(s)}</div>
@@ -85463,21 +85538,19 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         }).join('');
 
         host.innerHTML = `<div class="dashboard-pillar-strip">${rowsHtml}</div>`;
+        window.__dashboardSearchVisibilityLevers = items;
 
-        // Radar / web diagram
+        // Radar — same 5 levers (deliberately not Local Entity / Service Area / legacy Visibility)
         const canvas = document.getElementById('dashboard-gaio-radar');
         if (!canvas || typeof Chart === 'undefined') return;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        const radarOrder = ['serviceArea', 'authority', 'contentSchema', 'visibility', 'localEntity'];
-        const radarItems = radarOrder
-          .map(key => items.find(i => i.key === key))
-          .filter(Boolean);
-        const labels = radarItems.map(i => i.label);
-        const values = radarItems.map(i => (toNum(i.score) ?? 0));
-        const labelDeltas = radarItems.map(i => formatDeltaNumber(i.score, i.prevScore, { decimals: 0 }));
-        const labelColors = radarItems.map(i => deltaLabelColor(i.score, i.prevScore));
+        const radarItems = items;
+        const labels = radarItems.map((i) => i.label);
+        const values = radarItems.map((i) => (toNum(i.score) ?? 0));
+        const labelDeltas = radarItems.map((i) => formatDeltaNumber(i.score, prevByKey[i.key], { decimals: 0 }));
+        const labelColors = radarItems.map((i) => deltaLabelColor(i.score, prevByKey[i.key]));
 
         try {
           if (window.__dashboardGaioRadarChart) {
@@ -85494,7 +85567,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
             data: {
               labels,
               datasets: [{
-                label: 'Pillars',
+                label: 'Search levers',
                 data: values,
                 borderColor: 'rgba(59, 130, 246, 0.85)',
                 backgroundColor: 'rgba(59, 130, 246, 0.18)',
@@ -85518,7 +85591,8 @@ Composite of four inputs — not the Surface Visibility dial score.`;
                       if (!item) return '';
                       const score = toNum(item.score);
                       const display = score == null ? '—' : Math.round(score);
-                      return `${item.label}: ${display}`;
+                      const extra = item.key === 'moneyCtrVsTarget' && item.title ? ` (${item.title})` : '';
+                      return `${item.label}: ${display}${extra}`;
                     }
                   }
                 },
@@ -86429,11 +86503,17 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           ? computeMoneyCitationsSplitFromRankingRows(rankingRows)
           : null;
         let surfaceVisibility = null;
+        let topOfPage = null;
         try {
           if (rankingRows.length > 0 && typeof computeSurfaceVisibilityRollup === 'function') {
             surfaceVisibility = computeSurfaceVisibilityRollup(rankingRows);
           }
         } catch (_e) { surfaceVisibility = null; }
+        try {
+          if (rankingRows.length > 0 && typeof computeTopOfPageRollup === 'function') {
+            topOfPage = computeTopOfPageRollup(rankingRows);
+          }
+        } catch (_e) { topOfPage = null; }
         
         // Extract AI Summary components (needed for AI Summary radar chart deltas)
         let aiSummaryComponents = auditData.aiSummaryComponents || null;
@@ -86502,6 +86582,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           moneySharePct: moneySharePct, // Calculated from ranking data (money citations / total citations)
           moneyShareSplit, // Added for Money Share radar deltas
           surfaceVisibility,
+          topOfPage,
           moneyAgg: moneyAgg, // Add moneyAgg for Money Pages tile deltas
           rankingKpis, // Added for Ranking tile deltas
           domainStrength, // Added for Domain Strength tile deltas
@@ -86934,7 +87015,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           clearDeltaBreakdown('dashboard-gaio-breakdown');
           const radar = document.getElementById('dashboard-gaio-radar');
           if (radar) radar.style.display = '';
-          renderDashboardGaioPillarsAndRadar(metrics?.pillars || null, prevMetrics?.pillars || null);
+          renderDashboardGaioPillarsAndRadar(metrics || null, prevMetrics || null);
         }
 
         // Dial: AI Summary
