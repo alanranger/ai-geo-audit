@@ -14846,7 +14846,8 @@
           <h3>Surface ownership census</h3>
           <p class="soc-sub">
             Per Google surface: <strong>Served</strong> (Google showed it) vs <strong>Owned</strong> (you hold it).
-            Typical served position = median stack slot where that surface appears. AI answer is one surface of five.
+            PAA, featured snippet and AI Overview use the SERP stack (same gate as Surface Outcomes).
+            Typical served position = median stack slot where that surface appears.
           </p>
           <div class="soc-controls">
             <label for="soc-class-filter">Class:
@@ -65598,18 +65599,23 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           served: list.filter((r) => r.kp_present === true).length,
           owned: list.filter((r) => r.kp_ours === true).length
         },
+        // PAA / featured snippet — stack-gated only (same SoT as Surface Outcomes).
         paa: {
-          served: list.filter((r) => r.paa_present_any === true).length,
-          owned: list.filter((r) => r.paa_ours === true).length
+          served: list.filter((r) => stackHasSurface(r, 'people_also_ask')).length,
+          owned: list.filter((r) => stackOwnsSurface(r, 'people_also_ask')).length
         },
         fs: {
-          served: list.filter((r) => r.featured_snippet_present_any === true).length,
-          owned: list.filter((r) => r.featured_snippet_ours === true).length
+          served: list.filter((r) => stackHasSurface(r, 'featured_snippet')).length,
+          owned: list.filter((r) => stackOwnsSurface(r, 'featured_snippet')).length
         },
-        aiModeCited: list.filter((r) => {
-          const mode = Number(r?.ai_engines?.google_ai_mode?.alan_citations_count) || 0;
-          return mode > 0 || (Number(r.ai_alan_citations_count) || 0) > 0;
-        }).length
+        // Google AI Mode product (ai_engines only — not serp_surface_stack).
+        aimode: {
+          served: list.filter((r) => !!(r?.ai_engines?.google_ai_mode?.present)).length,
+          owned: list.filter((r) => {
+            const slot = r?.ai_engines?.google_ai_mode;
+            return !!(slot?.present && (Number(slot.alan_citations_count) || 0) > 0);
+          }).length
+        }
       };
     }
 
@@ -65698,16 +65704,17 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       const packNote = c.pack.avgPosition != null ? ('avg pack pos ' + c.pack.avgPosition) : typ('local_pack');
       body.innerHTML =
         '<table><thead><tr><th>Surface</th><th>Served</th><th>Owned</th><th>Note</th></tr></thead><tbody>' +
-        rowHtml('Blue links (top-10)', c.organic.served, c.organic.owned, typ('organic')) +
-        rowHtml("Google's AI answer", c.aio.served, c.aio.owned, typ('ai_overview')) +
+        rowHtml('Organic top-10', c.organic.served, c.organic.owned, typ('organic')) +
+        rowHtml('Google AI Overview', c.aio.served, c.aio.owned, typ('ai_overview')) +
         rowHtml('Map results', c.pack.served, c.pack.owned, packNote) +
         rowHtml('Knowledge Panel', c.kp.served, c.kp.owned, 'rail-side (no slot)') +
         rowHtml('People Also Ask', c.paa.served, c.paa.owned, typ('people_also_ask')) +
-        rowHtml('Answer box (featured snippet)', c.fs.served, c.fs.owned, typ('featured_snippet')) +
+        rowHtml('Featured snippet', c.fs.served, c.fs.owned, typ('featured_snippet')) +
+        rowHtml('Google AI Mode', c.aimode.served, c.aimode.owned, 'diagnostic product') +
         '</tbody></table>' +
-        '<p class="soc-footnote">Typical served position = median stack slot across filtered keywords. ' +
-        'Google AI Mode (separate product) cites Alan on ' + c.aiModeCited +
-        ' keywords in this set — not counted in Google AI Overviews above.</p>';
+        '<p class="soc-footnote">Served/owned for PAA, featured snippet and AI Overview are stack-gated ' +
+        '(same definition as Surface Outcomes). Google AI Mode uses the separate ai_engines product slot. ' +
+        'Typical position = median stack slot. Scope = class filter above (not money-only unless filtered).</p>';
       try { updateGoogleAioCaptionFromRows(allRows); } catch (_e) { /* optional */ }
     }
 
@@ -67458,17 +67465,13 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       'paa-none-owned': {
         label: 'PAA served, none owned',
         predicate: (r) => {
-          const served = stackHasSurface(r, 'people_also_ask') || r.paa_present_any === true;
-          const owned = stackOwnsSurface(r, 'people_also_ask') || r.paa_ours === true;
-          return served && !owned;
+          return stackHasSurface(r, 'people_also_ask') && !stackOwnsSurface(r, 'people_also_ask');
         },
       },
       'fs-not-owned': {
-        label: 'Answer box served, not owned',
+        label: 'Featured snippet served, not owned',
         predicate: (r) => {
-          const served = stackHasSurface(r, 'featured_snippet') || r.featured_snippet_present_any === true;
-          const owned = stackOwnsSurface(r, 'featured_snippet') || r.featured_snippet_ours === true;
-          return served && !owned;
+          return stackHasSurface(r, 'featured_snippet') && !stackOwnsSurface(r, 'featured_snippet');
         },
       },
       'map-not-in-pack': {
@@ -69411,9 +69414,9 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         if (rollup?.weakestClass && rollup.byClass?.[rollup.weakestClass]) {
           const w = rollup.byClass[rollup.weakestClass];
           const label = SURFACE_CLASS_LABELS[rollup.weakestClass] || rollup.weakestClass;
-          weakEl.textContent = `Weakest class: ${label} (${w.score}/100)`;
+          weakEl.textContent = `Weakest class (Top-of-Page): ${label} (${w.score}/100)`;
         } else {
-          weakEl.textContent = 'Weakest class: –';
+          weakEl.textContent = 'Weakest class (Top-of-Page): –';
         }
       }
     }
@@ -73709,19 +73712,20 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         }
         if (r.best_rank_group != null && Number(r.best_rank_group) <= 3) blueOwned++;
         else blueUnownedVol += vol;
-        if (movementRowServesSurface(r, 'ai_overview')) {
+        if (stackHasSurface(r, 'ai_overview')) {
           aioServed++;
-          if (movementRowOwnsSurface(r, 'ai_overview')) aioOwned++;
+          if (stackOwnsSurface(r, 'ai_overview')) aioOwned++;
           else aioUnownedVol += vol;
         }
-        if (movementRowServesSurface(r, 'people_also_ask') || r.paa_present_any === true) {
+        // PAA / featured snippet — stack-gated only (same SoT as Surface Outcomes).
+        if (stackHasSurface(r, 'people_also_ask')) {
           paaServed++;
-          if (movementRowOwnsSurface(r, 'people_also_ask') || r.paa_ours === true) paaOwned++;
+          if (stackOwnsSurface(r, 'people_also_ask')) paaOwned++;
           else paaUnownedVol += vol;
         }
-        if (movementRowServesSurface(r, 'featured_snippet') || r.featured_snippet_present_any === true) {
+        if (stackHasSurface(r, 'featured_snippet')) {
           fsServed++;
-          if (movementRowOwnsSurface(r, 'featured_snippet') || r.featured_snippet_ours === true) fsOwned++;
+          if (stackOwnsSurface(r, 'featured_snippet')) fsOwned++;
           else fsUnownedVol += vol;
         }
         if (r.kp_present === true) {
@@ -73734,10 +73738,10 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         : null;
       const rowsDef = [
         { key: 'map', name: 'Map results', owned: mapOwned, served: mapServed, avgPos: packAvg, unownedVol: mapUnownedVol, workingEligible: true },
-        { key: 'blue_top3', name: 'Blue links (top 3)', owned: blueOwned, served: n, avgPos: null, unownedVol: blueUnownedVol, workingEligible: true },
+        { key: 'blue_top3', name: 'Organic (top 3)', owned: blueOwned, served: n, avgPos: null, unownedVol: blueUnownedVol, workingEligible: true },
         { key: 'ai', name: 'Google AI Overview', owned: aioOwned, served: aioServed, avgPos: null, unownedVol: aioUnownedVol, workingEligible: true },
         { key: 'paa', name: 'People Also Ask', owned: paaOwned, served: paaServed, avgPos: null, unownedVol: paaUnownedVol, workingEligible: true },
-        { key: 'fs', name: 'Answer box', owned: fsOwned, served: fsServed, avgPos: null, unownedVol: fsUnownedVol, workingEligible: true },
+        { key: 'fs', name: 'Featured snippet', owned: fsOwned, served: fsServed, avgPos: null, unownedVol: fsUnownedVol, workingEligible: true },
         { key: 'kp', name: 'Knowledge panel', owned: kpOwned, served: kpServed, avgPos: null, unownedVol: 0, workingEligible: false },
       ];
       let strongestKey = null;
@@ -73818,14 +73822,10 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         return movementRowServesSurface(row, 'ai_overview') && !movementRowOwnsSurface(row, 'ai_overview');
       }
       if (key === 'paa') {
-        const served = movementRowServesSurface(row, 'people_also_ask') || row.paa_present_any === true;
-        const owned = movementRowOwnsSurface(row, 'people_also_ask') || row.paa_ours === true;
-        return served && !owned;
+        return stackHasSurface(row, 'people_also_ask') && !stackOwnsSurface(row, 'people_also_ask');
       }
       if (key === 'fs') {
-        const served = movementRowServesSurface(row, 'featured_snippet') || row.featured_snippet_present_any === true;
-        const owned = movementRowOwnsSurface(row, 'featured_snippet') || row.featured_snippet_ours === true;
-        return served && !owned;
+        return stackHasSurface(row, 'featured_snippet') && !stackOwnsSurface(row, 'featured_snippet');
       }
       return false;
     }
@@ -74015,7 +74015,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         });
       });
       if (detailsEl) {
-        detailsEl.innerHTML = `<p class="tile-details-footnote">Surface capture score = your share of every served ownable surface, weighted by slot value × search volume (same D3 table as Top-of-Page). Knowledge panel shown for completeness but excluded from the score. Google AI Mode is a separate product (not classic SERP stack) and is not on this tile — see Surface outcomes diagnostic. A surface is "working" when you own ≥25% of its served set. Row click filters to that surface's gap keywords.</p>`;
+        detailsEl.innerHTML = `<p class="tile-details-footnote">Surface capture score = your share of every served ownable surface, weighted by slot value × search volume (same D3 table as Top-of-Page). PAA and featured snippet rows are stack-gated (same serve/own as Surface Outcomes). Organic here is top-3 only (capture instrument ≠ Outcomes top-10). Knowledge panel shown but excluded from the score. Google AI Mode is not on this tile — see Surface Outcomes / census. A surface is "working" when you own ≥25% of its served set. Row click filters gap keywords.</p>`;
         if (!detailsEl.classList.contains('expanded')) {
           const toggleEl = card.querySelector('.metric-pill-toggle');
           if (toggleEl) toggleEl.textContent = 'Show details';
@@ -83129,7 +83129,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
             </div>
             <div class="dashboard-kpi-grid">
               ${tile('Surface Visibility', ranking?.kpis?.surfaceOverall ?? ranking?.kpis?.top3Share ?? '—', ranking?.deltas?.surfaceOverall ?? '', ranking?.dirs?.surfaceOverall ?? 'flat', 'Overall Surface Visibility (demand-weighted) across tracked keywords.')}
-              ${tile('Weakest class', ranking?.kpis?.weakestClass ?? '—', '', 'flat', 'Lowest class dial among Local / National / Brand / Education.')}
+              ${tile('Weakest class (Surface Visibility)', ranking?.kpis?.weakestClass ?? '—', '', 'flat', 'Lowest Surface Visibility class dial among Local / National / Brand / Education (not Top-of-Page).')}
               ${tile('Top 10 share', ranking?.kpis?.top10Share ?? '—', ranking?.deltas?.top10Share ?? '', ranking?.dirs?.top10Share ?? 'flat', 'Share of ranked tracked keywords currently in positions 1–10.')}
               ${tile('Money share', ranking?.kpis?.moneyShare ?? '—', ranking?.deltas?.moneyShare ?? '', ranking?.dirs?.moneyShare ?? 'flat', 'Percent of AI citations that land on Money Pages.')}
             </div>
