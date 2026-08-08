@@ -6186,6 +6186,29 @@
       white-space: nowrap;
       width: 18%;
     }
+    .ai-health-surface-outcomes tr.aho-row-diag {
+      background: #f8fafc;
+    }
+    .ai-health-surface-outcomes tr.aho-row-diag .aho-name {
+      color: #64748b;
+      font-weight: 600;
+    }
+    .ai-health-surface-outcomes tr.aho-row-diag .aho-pct {
+      color: #64748b !important;
+    }
+    .ai-health-surface-outcomes .aho-diag-tag {
+      display: inline-block;
+      margin-left: 0.35rem;
+      padding: 0.12rem 0.4rem;
+      border-radius: 999px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: #64748b;
+      background: #e2e8f0;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
     .ai-health-surface-outcomes .aho-cell { display: grid; gap: 0.28rem; min-width: 0; }
     .ai-health-surface-outcomes .aho-top {
       display: flex;
@@ -67522,6 +67545,15 @@ Composite of four inputs — not the Surface Visibility dial score.`;
     function outcomeAioOwned(row) {
       return outcomeStack(row).some((e) => e?.type === 'ai_overview' && e?.slot != null && e?.ours === true);
     }
+    /** Google AI Mode product — ai_engines slot only (not serp_surface_stack; not blended ai_alan_citations_count). */
+    function outcomeAimodeServed(row) {
+      return !!(row?.ai_engines?.google_ai_mode?.present);
+    }
+    function outcomeAimodeOwned(row) {
+      const slot = row?.ai_engines?.google_ai_mode;
+      if (!slot?.present) return false;
+      return (Number(slot.alan_citations_count) || 0) > 0;
+    }
     function outcomePackServed(row) {
       if (row?.local_pack_present_any === true) return true;
       return outcomeStack(row).some((e) => e?.type === 'local_pack' && e?.slot != null);
@@ -67545,7 +67577,14 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       return Number.isFinite(r) && r > 0 && r <= 10;
     }
     const SURFACE_OUTCOME_DEFS = [
-      { key: 'ai_answer', label: 'AI answer', served: outcomeAioServed, owned: outcomeAioOwned },
+      { key: 'ai_answer', label: 'Google AI Overview', served: outcomeAioServed, owned: outcomeAioOwned },
+      {
+        key: 'google_ai_mode',
+        label: 'Google AI Mode',
+        served: outcomeAimodeServed,
+        owned: outcomeAimodeOwned,
+        diagnostic: true,
+      },
       { key: 'map_pack', label: 'Map pack', served: outcomePackServed, owned: outcomePackOwned },
       { key: 'answer_boxes', label: 'Answer boxes', served: outcomeBoxServed, owned: outcomeBoxOwned },
       { key: 'organic_top10', label: 'Organic top-10', served: outcomeOrganicServed, owned: outcomeOrganicOwned },
@@ -67606,15 +67645,15 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         const overallCell = rollSurfaceOutcomeCell(money, def);
         const gapVol = localCell.gapVol + regionalCell.gapVol + nationalCell.gapVol;
         return {
-          key: def.key, label: def.label,
+          key: def.key, label: def.label, diagnostic: !!def.diagnostic,
           overall: overallCell, local: localCell, regional: regionalCell, national: nationalCell, gapVol,
           gapPctOfMoney: moneyVol > 0 ? Math.round((100 * gapVol) / moneyVol) : 0,
         };
       });
       let biggest = null;
-      // Callout competes on AI / Map / Organic only — Answer boxes (PAA-heavy) inflate gap volume and are table-only.
+      // Callout competes on Overview / Map / Organic only — skip Answer boxes + diagnostic AI Mode.
       for (const row of tableRows) {
-        if (row.key === 'answer_boxes') continue;
+        if (row.key === 'answer_boxes' || row.diagnostic || row.key === 'google_ai_mode') continue;
         if (!biggest || row.gapVol > biggest.gapVol) biggest = row;
       }
       let biggestGap = null;
@@ -67628,7 +67667,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         const gapTotal = classGaps.reduce((s, c) => s + c.gap, 0) || 1;
         const suffix = buildClassGapSuffix(classGaps, gapTotal);
         const text = biggest.key === 'ai_answer'
-          ? `${biggest.gapPctOfMoney}% of money-search demand is in AI answers you're not cited in${suffix}.`
+          ? `${biggest.gapPctOfMoney}% of money-search demand is in Google AI Overviews you're not cited in${suffix}.`
           : `${biggest.gapPctOfMoney}% of money-search demand sits on ${biggest.label.toLowerCase()} gaps${suffix}.`;
         biggestGap = { surfaceKey: biggest.key, surfaceLabel: biggest.label, gapPct: biggest.gapPctOfMoney, text };
       }
@@ -67690,19 +67729,33 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         </tr>`;
       }
       (outcomes?.rows || []).forEach((row, idx) => {
+        const isDiag = !!row.diagnostic || row.key === 'google_ai_mode';
         const pct = row.overall?.pct;
         const rag = scorecardRagCells(pct == null ? 0 : pct);
         const owned = row.overall?.owned ?? 0;
         const served = row.overall?.served ?? 0;
         const nat = row.national?.pct;
         const loc = row.local?.pct;
-        html += `<tr style="border-bottom: 1px solid #eee; background: ${idx % 2 ? '#fafafa' : '#fff'};">
-          <td style="padding: 0.75rem; font-weight: 500;">${row.label} <span style="color:#999;font-size:0.85em;">(won-of-served)</span></td>
-          <td style="padding: 0.75rem; text-align: center; font-weight: 600; color: ${served ? rag.color : '#94a3b8'};">${served ? `${rag.n}%` : '—'}</td>
+        const bg = isDiag ? '#f8fafc' : (idx % 2 ? '#fafafa' : '#fff');
+        const nameHtml = isDiag
+          ? `${row.label} <span style="color:#64748b;font-weight:500;font-size:0.85em;">(diagnostic — not scored)</span>`
+          : `${row.label} <span style="color:#999;font-size:0.85em;">(won-of-served)</span>`;
+        const scoreCell = isDiag
+          ? (served ? `<span style="color:#64748b;font-weight:600;">${owned}/${served}</span>` : '—')
+          : (served ? `<span style="font-weight:600;color:${rag.color};">${rag.n}%</span>` : '—');
+        const badgeCell = isDiag
+          ? '<span style="color:#94a3b8;font-size:0.8em;">diagnostic</span>'
+          : (served ? `<span class="rag-badge ${rag.status}">${rag.label}</span>` : '<span style="color:#94a3b8;">n/a</span>');
+        const actionCell = isDiag
+          ? 'Does not feed Surface visibility, Top of page, or levers — display only.'
+          : (served && pct != null && pct < 70 ? `Win more ${row.label.toLowerCase()} placements on money keywords.` : 'Maintain surface ownership.');
+        html += `<tr style="border-bottom: 1px solid #eee; background: ${bg};${isDiag ? ' opacity:0.92;' : ''}">
+          <td style="padding: 0.75rem; font-weight: 500;${isDiag ? ' color:#475569;' : ''}">${nameHtml}</td>
+          <td style="padding: 0.75rem; text-align: center;">${scoreCell}</td>
           <td style="padding: 0.75rem; text-align: center; color: #999;">—</td>
-          <td style="padding: 0.75rem; text-align: center;">${served ? `<span class="rag-badge ${rag.status}">${rag.label}</span>` : '<span style="color:#94a3b8;">n/a</span>'}</td>
+          <td style="padding: 0.75rem; text-align: center;">${badgeCell}</td>
           <td style="padding: 0.75rem; color: #666; font-size: 0.85rem;">Overall ${owned}/${served} served · Local ${loc == null ? '—' : loc + '%'} · National ${nat == null ? '—' : nat + '%'}</td>
-          <td style="padding: 0.75rem; color: #555; font-size: 0.85rem;">${served && pct != null && pct < 70 ? `Win more ${row.label.toLowerCase()} placements on money keywords.` : 'Maintain surface ownership.'}</td>
+          <td style="padding: 0.75rem; color: #555; font-size: 0.85rem;">${actionCell}</td>
           <td style="padding: 0.75rem; text-align: center; color: #999;">Ranking &amp; AI</td>
         </tr>`;
       });
@@ -67899,6 +67952,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       const actions = [];
       if (!outcomes?.rows?.length) return actions;
       outcomes.rows.forEach((row) => {
+        if (row.diagnostic || row.key === 'google_ai_mode') return;
         const nat = row.national;
         const loc = row.local;
         const overall = row.overall;
@@ -67939,20 +67993,26 @@ Composite of four inputs — not the Surface Visibility dial score.`;
             <div class="aho-dial-label">Surface visibility</div>
             ${topScore == null ? '' : `<div class="aho-dial-sub">Top of page ${topScore}/100</div>`}
           </div>`;
-      const body = outcomes.rows.map((r) => `
-        <tr>
-          <td class="aho-name">${r.label}</td>
+      const body = outcomes.rows.map((r) => {
+        const isDiag = !!r.diagnostic || r.key === 'google_ai_mode';
+        const name = isDiag
+          ? `${r.label} <span class="aho-diag-tag" title="Does not feed Surface visibility, Top of page, or levers">diagnostic — not scored</span>`
+          : r.label;
+        return `
+        <tr class="${isDiag ? 'aho-row-diag' : ''}">
+          <td class="aho-name">${name}</td>
           <td class="aho-overall">${formatOutcomeCell(r.overall, r.key === 'organic_top10')}</td>
           <td>${formatOutcomeCell(r.local, r.key === 'organic_top10')}</td>
           <td>${formatOutcomeCell(r.regional || { served: 0, owned: 0, gapVol: 0, pct: null }, r.key === 'organic_top10')}</td>
           <td>${formatOutcomeCell(r.national, r.key === 'organic_top10')}</td>
-        </tr>`).join('');
+        </tr>`;
+      }).join('');
       return `
         <section class="ai-health-surface-outcomes" id="ai-health-surface-outcomes" aria-label="Surface outcomes">
           <div class="aho-head">
             <div class="aho-head-copy">
               <h3>Surface outcomes</h3>
-              <p class="aho-sub">Breakdown behind the dial above (<b>Surface visibility ${surfaceScore == null ? '—' : surfaceScore}</b>). Won-of-served on money keywords — if Google did not show a surface, it is not counted against you. <b>${outcomes.moneyCount}</b> money keywords. <b>Overall</b> = local + regional + national.</p>
+              <p class="aho-sub">Breakdown behind the dial above (<b>Surface visibility ${surfaceScore == null ? '—' : surfaceScore}</b>). Won-of-served on money keywords — if Google did not show a surface, it is not counted against you. <b>${outcomes.moneyCount}</b> money keywords. <b>Overall</b> = local + regional + national. <b>Google AI Overview</b> feeds the score; <b>Google AI Mode</b> is diagnostic only.</p>
             </div>
             ${scoreBlock}
           </div>
