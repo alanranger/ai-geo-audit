@@ -14096,7 +14096,7 @@
             <button type="button" class="btn" id="dfs-backlinks-baseline-save" style="font-size:0.74rem;padding:0.28rem 0.6rem;">Save baseline (audit)</button>
             <button type="button" class="btn" id="dfs-backlinks-baseline-reset" style="font-size:0.74rem;padding:0.28rem 0.6rem;background:rgba(30,41,59,0.9)!important;color:#e2e8f0!important;border:1px solid rgba(148,163,184,0.35);">Clear DB baseline</button>
           </div>
-          <div id="dfs-backlinks-delta-footnote" class="traditional-seo-strip-sub" style="margin-top:0.55rem;">Δ compares each metric to the <strong>saved DB baseline</strong> when present; otherwise to the last successful tile load on this device.</div>
+          <div id="dfs-backlinks-delta-footnote" class="traditional-seo-strip-sub" style="margin-top:0.55rem;">Change vs the <strong>saved DB baseline</strong> when present; otherwise vs the last successful tile load on this device. <strong>▲</strong> up, <strong>▼</strong> down.</div>
         </div>
         <div class="card">
           <div style="display:flex;flex-wrap:wrap;gap:0.65rem;align-items:flex-end;margin-bottom:0.75rem;">
@@ -98576,18 +98576,20 @@ Confidence: ${c}`;
       const phrase = comparePhrase || 'prior snapshot';
       const phEsc = dfsBacklinksEsc(phrase);
       if (typeof currVal !== 'number' || !Number.isFinite(currVal)) {
-        return '<span style="color:var(--dark-text-muted);">Δ —</span>';
+        return '<span style="color:var(--dark-text-muted);">—</span>';
       }
       if (prevVal == null || typeof prevVal !== 'number' || !Number.isFinite(prevVal)) {
         return `<span style="color:var(--dark-text-muted);">First load — no ${phEsc}</span>`;
       }
       const d = Math.round(currVal - prevVal);
       if (d === 0) {
-        return `<span style="color:rgba(148,163,184,0.95);">Δ 0 vs ${phEsc}</span>`;
+        return `<span style="color:rgba(148,163,184,0.95);">— 0 vs ${phEsc}</span>`;
       }
+      // Use filled triangles for direction — do not use Greek Δ (reads as always-up ▲).
+      const arrow = d > 0 ? '▲' : '▼';
       const col = d > 0 ? '#34d399' : '#f87171';
       const sign = d > 0 ? '+' : '';
-      return `<span style="color:${col};font-weight:700;">Δ ${sign}${d.toLocaleString()} vs ${phEsc}</span>`;
+      return `<span style="color:${col};font-weight:700;">${arrow} ${sign}${d.toLocaleString()} vs ${phEsc}</span>`;
     }
 
     function dfsBacklinksCopyBandShape(src) {
@@ -99023,7 +99025,7 @@ Confidence: ${c}`;
       const el = document.getElementById('dfs-backlinks-delta-footnote');
       if (!el) return;
       const ph = dfsBacklinksEsc(comparePhrase || 'prior snapshot');
-      el.innerHTML = `Δ compares each metric to <strong>${ph}</strong>.`;
+      el.innerHTML = `Change vs <strong>${ph}</strong>. <strong>▲</strong> up · <strong>▼</strong> down.`;
     }
 
     function dfsBacklinksApplyTilePaint(state) {
@@ -99479,7 +99481,7 @@ Confidence: ${c}`;
           if (rdEl) rdEl.textContent = st?.referringDomains != null ? Number(st.referringDomains).toLocaleString() : '—';
           const rDel = document.getElementById('dfs-backlinks-tile-rows-delta');
           const rdDel = document.getElementById('dfs-backlinks-tile-rd-delta');
-          if (rDel) rDel.innerHTML = '<span style="color:var(--dark-text-muted);">Δ — (tile API unavailable)</span>';
+          if (rDel) rDel.innerHTML = '<span style="color:var(--dark-text-muted);">— (tile API unavailable)</span>';
           if (rdDel) rdDel.innerHTML = '<span style="color:var(--dark-text-muted);">Δ —</span>';
         } catch {
           dfsBacklinksClearTileBoard();
