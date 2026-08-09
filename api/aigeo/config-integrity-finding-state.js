@@ -45,7 +45,8 @@ function rowOut(r) {
     worked_at: r.worked_at || null,
     updated_at: r.updated_at || null,
     cleared_at: r.cleared_at || null,
-    last_seen_at: r.last_seen_at || null
+    last_seen_at: r.last_seen_at || null,
+    index_requested_at: r.index_requested_at || null
   };
 }
 
@@ -87,6 +88,58 @@ export default async function handler(req, res) {
 
     await ensureTable(sb);
     const body = req.body || {};
+
+    // Stamp GSC indexing request time on many findings (after bulk URL Inspection / Sheet tool)
+    if (body.action === 'stamp_index_requested') {
+      const keys = Array.isArray(body.findingKeys || body.keys)
+        ? (body.findingKeys || body.keys).map((k) => String(k || '').trim()).filter(Boolean).slice(0, 200)
+        : [];
+      if (!keys.length) {
+        return sendJson(res, 400, { status: 'error', message: 'findingKeys required.' });
+      }
+      const stamp = body.at ? new Date(String(body.at)) : new Date();
+      if (Number.isNaN(stamp.getTime())) {
+        return sendJson(res, 400, { status: 'error', message: 'Invalid at timestamp.' });
+      }
+      const now = new Date().toISOString();
+      const index_requested_at = stamp.toISOString();
+      const { data: existing, error: exErr } = await sb
+        .from('config_integrity_finding_state')
+        .select('*')
+        .eq('property_url', propertyUrl)
+        .in('finding_key', keys);
+      if (exErr) throw exErr;
+      const byKey = new Map((existing || []).map((r) => [r.finding_key, r]));
+      const rows = keys.map((finding_key) => {
+        const prev = byKey.get(finding_key) || {};
+        return {
+          finding_key,
+          property_url: propertyUrl,
+          progress: prev.progress || 'in_progress',
+          note: prev.note || '',
+          decision_type: prev.decision_type || null,
+          worked_at: prev.worked_at || now,
+          updated_at: now,
+          last_seen_at: now,
+          cleared_at: prev.cleared_at || null,
+          index_requested_at
+        };
+      });
+      const { error } = await sb.from('config_integrity_finding_state').upsert(rows, {
+        onConflict: 'finding_key'
+      });
+      if (error) throw error;
+      const { data, error: rErr } = await sb
+        .from('config_integrity_finding_state')
+        .select('*')
+        .in('finding_key', keys);
+      if (rErr) throw rErr;
+      return sendJson(res, 200, {
+        status: 'ok',
+        results: (data || []).map(rowOut),
+        meta: { action: 'stamp_index_requested', stamped: (data || []).length, index_requested_at }
+      });
+    }
 
     // Sync which findings are currently active: set last_seen / clear flags
     if (body.action === 'sync_active') {
@@ -144,7 +197,7 @@ export default async function handler(req, res) {
         .toLowerCase();
       if (progress === 'parked') decisionRaw = 'parked';
       const decision_type = DECISION_TYPES.has(decisionRaw) ? decisionRaw : 'none';
-      rows.push({
+      const row = {
         finding_key: findingKey,
         property_url: propertyUrl,
         progress,
@@ -154,7 +207,12 @@ export default async function handler(req, res) {
         updated_at: now,
         last_seen_at: now,
         cleared_at: null
-      });
+      };
+      if (it.index_requested_at || it.indexRequestedAt) {
+        const d = new Date(String(it.index_requested_at || it.indexRequestedAt));
+        if (!Number.isNaN(d.getTime())) row.index_requested_at = d.toISOString();
+      }
+      rows.push(row);
     }
 
     if (!rows.length) {

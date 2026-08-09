@@ -8049,6 +8049,7 @@
           <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
             <span id="config-integrity-panel-meta" style="font-size:0.82rem; color:#666;">—</span>
             <button type="button" id="config-integrity-page-audit-btn" class="btn" style="padding:0.2rem 0.55rem; font-size:0.78rem;" title="Fetch live from-pages and prove whether the cross-link + keyword anchor exists">Re-check pages</button>
+            <button type="button" id="config-integrity-stamp-index-btn" class="btn" style="padding:0.2rem 0.55rem; font-size:0.78rem;" title="Record that you submitted these URLs for indexing in GSC (sheet/plugin or URL Inspection). Does not call Google for you.">Mark index requested</button>
             <button type="button" id="config-integrity-export-btn" class="btn" style="padding:0.2rem 0.55rem; font-size:0.78rem;" title="Download findings as CSV worklist">Export CSV</button>
           </div>
         </div>
@@ -33577,6 +33578,7 @@
         const progress = st?.progress || 'none';
         const note = st?.note || '';
         const workedAt = st?.worked_at || null;
+        const indexRequestedAt = st?.index_requested_at || null;
         const clearedAt = st?.cleared_at || null;
         const decisionType = inferIntegrityDecisionType(st);
         const autoStatusKey = r.statusKey;
@@ -33593,6 +33595,7 @@
           workProgress: progress,
           workNote: note,
           workedAt,
+          indexRequestedAt,
           decisionType,
           autoStatusKey,
           autoStatusLabel,
@@ -33687,6 +33690,69 @@
         if (btn) {
           btn.disabled = false;
           btn.textContent = 'Save';
+        }
+      }
+    }
+
+    /** Record GSC indexing request time (log only — does not call Google). */
+    async function stampConfigIntegrityIndexRequested() {
+      const payload = window.__configIntegrityLatest;
+      const findings = Array.isArray(payload?.data?.findings) ? payload.data.findings : [];
+      if (!findings.length) {
+        alert('No findings loaded.');
+        return;
+      }
+      const rows = filterAndSortIntegrityFindings(
+        mergeWorkStateOntoFindings(
+          mergePageAuditOntoFindings(assignIntegrityFindingIds(findings.map(normalizeIntegrityFinding)))
+        )
+      );
+      const keys = rows
+        .filter((r) => r.statusKey === 'awaiting' || r.statusKey === 'awaiting_accept')
+        .map((r) => r.findingId)
+        .filter(Boolean);
+      if (!keys.length) {
+        alert('No “awaiting recrawl / link in place” rows in the current filter.');
+        return;
+      }
+      const when = window.prompt(
+        'Index request time (ISO or leave for now). Stamps ' + keys.length + ' finding(s).\nDoes NOT call Google — logs only.',
+        new Date().toISOString().slice(0, 16)
+      );
+      if (when === null) return;
+      const btn = document.getElementById('config-integrity-stamp-index-btn');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Stamping…';
+      }
+      try {
+        const resp = await fetch(integrityWorkStateBaseUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            propertyUrl: integrityPropertyUrl(),
+            action: 'stamp_index_requested',
+            findingKeys: keys,
+            at: when ? new Date(when).toISOString() : new Date().toISOString()
+          })
+        });
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || String(json?.status || '').toLowerCase() !== 'ok') {
+          throw new Error(json?.message || ('HTTP ' + resp.status));
+        }
+        const map = { ...(window.__configIntegrityWorkState || {}) };
+        for (const row of (json.results || [])) {
+          if (row.finding_key) map[row.finding_key] = row;
+        }
+        window.__configIntegrityWorkState = map;
+        if (window.__configIntegrityLatest) renderConfigIntegrityPanel(window.__configIntegrityLatest);
+        alert('Recorded index requested on ' + (json.meta?.stamped || keys.length) + ' row(s).');
+      } catch (err) {
+        alert('Stamp failed: ' + (err?.message || err));
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Mark index requested';
         }
       }
     }
@@ -33792,7 +33858,7 @@
       };
       const header = [
         'id', 'status', 'stream', 'check', 'keyword', 'search_volume', 'clicks', 'impressions',
-        'ranks_now_url', 'should_be_url', 'anchor_text', 'link_to_url', 'target_ok', 'checked_at', 'first_link_detected_at', 'awaiting_recrawl_days', 'progress', 'note', 'worked_at', 'action'
+        'ranks_now_url', 'should_be_url', 'anchor_text', 'link_to_url', 'target_ok', 'checked_at', 'first_link_detected_at', 'index_requested_at', 'awaiting_recrawl_days', 'progress', 'note', 'worked_at', 'action'
       ];
       const lines = [header.join(',')];
       for (const r of rows) {
@@ -33812,6 +33878,7 @@
           esc(r.targetOk == null ? '' : (r.targetOk ? 'yes' : 'no')),
           esc(r.checkedAt || ''),
           esc(r.firstLinkDetectedAt || ''),
+          esc(r.indexRequestedAt || ''),
           esc(r.awaitingDays == null ? '' : r.awaitingDays),
           esc(r.workProgress || 'none'),
           esc(r.workNote || ''),
@@ -33866,8 +33933,9 @@
         '<ul>' +
         '<li><strong>Check 1–6</strong> — integrity suite (1/4/6 structural red; 2/3/5 advisory amber). Check 3 = Google ranks a different URL than locked target.</li>' +
         '<li><strong>Status</strong> — Auto from action text + page audit. Once you record progress (keep / accept / parking), Decision needed is overridden: Strengthen, Awaiting recrawl, or Parked. Wins only when ranking best_url matches locked target (Confirmed wins panel).</li>' +
+        '<li><strong>Sort</strong> — Within each status band, rows are grouped by <em>Ranks now (from)</em> so one page’s fixes sit together. Secondary sort is volume/keyword inside that pack.</li>' +
         '<li><strong>Stream</strong> — Hub / Swap / Blog / Config work grouping (not a dashboard panel).</li>' +
-        '<li><strong>ID</strong> — stable short id (CANN-xxxx check 3; CFG-xxxx other) from keyword+assigned path so the issue keeps the same code across runs.</li><li><strong>Lifecycle</strong> — rows recompute each run. Page-audit is auto; Progress / Decision type / Note is your work layer (never creates a win by itself).</li>' +
+        '<li><strong>ID</strong> — stable short id (CANN-xxxx check 3; CFG-xxxx other) from keyword+assigned path so the issue keeps the same code across runs.</li><li><strong>Index requested</strong> — when you last asked Google to re-crawl (GSC bulk tool / URL Inspection). Separate from page-audit Checked.</li><li><strong>Lifecycle</strong> — rows recompute each run. Page-audit is auto; Progress / Decision type / Note is your work layer (never creates a win by itself).</li>' +
         '</ul></details>';
 
       const streamOpts = streams.map((st) => '<option value="' + escapeHtml(st) + '">' + escapeHtml(st) + '</option>').join('');
@@ -33913,6 +33981,10 @@
             : '—');
         const checkedCell = r.checkedAt
           ? '<span class="ci-checked-at">' + escapeHtml(String(r.checkedAt).replace('T', ' ').slice(0, 16)) + 'Z</span>'
+          : '—';
+        const indexReqCell = r.indexRequestedAt
+          ? '<span class="ci-index-req" title="GSC indexing request recorded">' +
+            escapeHtml(String(r.indexRequestedAt).replace('T', ' ').slice(0, 16)) + 'Z</span>'
           : '—';
         const anchorCell = escapeHtml(String(r.anchorText || r.subject || '—'));
         const linkToCell = integrityLinkCell(r.linkToUrl || r.shouldBeUrl);
@@ -33969,6 +34041,7 @@
           '<td><code style="font-size:0.75rem;">' + anchorCell + '</code></td>' +
           '<td class="ci-url">' + linkToCell + '</td>' +
           '<td>' + checkedCell + '</td>' +
+          '<td>' + indexReqCell + '</td>' +
           '<td class="ci-work-cell">' + workCell + '</td>' +
           '<td class="ci-action" title="' + meaningTitle + '">' + escapeHtml(integrityActionDisplay(r)) + '</td>' +
           '</tr>'
@@ -33978,12 +34051,12 @@
       const groupsHtml = groups.length
         ? groups.map((g) => (
           '<tbody class="ci-group ci-group-' + String(g.key || 'other') + '">' +
-          '<tr class="ci-group-head"><td colspan="15">' + escapeHtml(g.label) +
+          '<tr class="ci-group-head"><td colspan="16">' + escapeHtml(g.label) +
           ' <span class="ci-group-count">(' + g.rows.length + ')</span></td></tr>' +
           g.rows.map(renderRow).join('') +
           '</tbody>'
         )).join('')
-        : '<tbody><tr><td colspan="15" class="ci-muted">No rows match filters.</td></tr></tbody>';
+        : '<tbody><tr><td colspan="16" class="ci-muted">No rows match filters.</td></tr></tbody>';
 
       const clearsHtml = renderIntegrityClearsHtml();
       panel.innerHTML =
@@ -34004,7 +34077,8 @@
         '<th style="width:4.5rem;" title="Money page returns 200 and final path matches LOCKED target">Target OK?</th>' +
         '<th title="Exact text to hyperlink on the from-page">Anchor text</th>' +
         '<th title="Destination URL for that anchor">Link to</th>' +
-        '<th style="width:6rem;">Checked</th>' +
+        '<th style="width:6rem;" title="Last page-audit link scan">Checked</th>' +
+        '<th style="width:6.5rem;" title="When GSC indexing was requested (bulk tool / URL Inspection)">Index req.</th>' +
         '<th style="width:12rem;" title="Your manual progress (independent of page-audit status)">Work / note</th>' +
         '<th>Action</th>' +
         '</tr></thead>' +
@@ -34404,6 +34478,10 @@
       const auditBtn = document.getElementById('config-integrity-page-audit-btn');
       if (auditBtn) {
         auditBtn.addEventListener('click', () => void runConfigIntegrityPageAudit());
+      }
+      const stampIdxBtn = document.getElementById('config-integrity-stamp-index-btn');
+      if (stampIdxBtn) {
+        stampIdxBtn.addEventListener('click', () => void stampConfigIntegrityIndexRequested());
       }
       void loadConfigIntegrityPageAuditCache();
       void loadConfigIntegrityWorkState();
