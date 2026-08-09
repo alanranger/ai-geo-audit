@@ -33509,6 +33509,8 @@
      * After auto deriveIntegrityStatus, apply working-state so a recorded
      * decision leaves "Decision needed". Never creates a win.
      * Requires progress done|in_progress plus explicit decision_type.
+     * keep_specialist keeps "Strengthen" only until page-audit proves a strong
+     * anchor (auto awaiting/present) — then show Link in place / awaiting recrawl.
      */
     function statusFromWorkDecision(autoKey, progress, decisionType) {
       if (progress === 'parked' || decisionType === 'parked') {
@@ -33519,6 +33521,10 @@
         return { key: 'awaiting_accept', label: 'Awaiting recrawl', sort: 1 };
       }
       if (decisionType === 'keep_specialist') {
+        // Page audit already proved exact-path + keyword anchor (derive → awaiting).
+        if (autoKey === 'awaiting') {
+          return { key: 'awaiting', label: 'Link in place — awaiting recrawl', sort: 1 };
+        }
         return { key: 'strengthen', label: 'Strengthen — on-page/anchor', sort: 1 };
       }
       return null;
