@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-08-10] - Keyword & config: polish recently cleared wins UI
+
+**Change:** Wins panel **collapsed by default** (`details`), check-3 only (no noisy config rows), **volume + stream + age colour**, sticky black headers, sort by volume. Summary pills show win count + volume freed.
+
+**Files:** `api/aigeo/config-integrity-clears.js`, `audit-dashboard.html`
+
+---
+
 ## [2026-08-10] - Keyword & config: recently cleared wins + awaiting-recrawl days
 
 **Change:** **Recently cleared** section shows genuine data-driven wins (present in prior `config_integrity_runs`, absent now; 30-day window). **Awaiting recrawl N days** from `first_link_detected_at` (set once on first present page-audit; not overwritten). Escalation badge after 21 days. CSV: `first_link_detected_at`, `awaiting_recrawl_days`. No scoring/chip change.

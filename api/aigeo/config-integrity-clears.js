@@ -1,6 +1,6 @@
 /**
- * Recently cleared (wins) — findings present in prior integrity runs
- * but absent from the latest run (true data-driven clears only).
+ * Recently cleared cannibalisation wins (check 3 only).
+ * Present in prior integrity runs, absent from latest — genuine re-rank wins.
  */
 export const config = { runtime: 'nodejs', maxDuration: 30 };
 
@@ -23,63 +23,96 @@ const need = (k) => {
   return v;
 };
 
+export function parseAtStake(atStake) {
+  const t = String(atStake || '');
+  const vol = t.match(/([\d,]+)\s*\/?\s*mo(?:nth)?\s*search volume/i);
+  const traffic = t.match(/([\d,]+|—|-)\s*clicks\s*\/\s*([\d,]+|—|-)\s*imps/i);
+  const n = (x) => {
+    if (x == null || x === '—' || x === '-') return null;
+    const v = Number(String(x).replace(/,/g, ''));
+    return Number.isFinite(v) ? v : null;
+  };
+  return {
+    volume: vol ? n(vol[1]) : null,
+    clicks: traffic ? n(traffic[1]) : null,
+    impressions: traffic ? n(traffic[2]) : null
+  };
+}
+
+function mapStream(ws) {
+  const raw = String(ws || '').trim();
+  if (!raw) return '';
+  const k = raw.toLowerCase();
+  if (k.includes('hub')) return 'Hub';
+  if (k.includes('swap')) return 'Swap';
+  if (k.includes('blog')) return 'Blog';
+  if (k.includes('config')) return 'Config';
+  return raw;
+}
+
 function summarizeFinding(f) {
+  const metrics = parseAtStake(f.at_stake);
   return {
     findingId: f.findingId,
     check: Number(f.check || 0),
     keyword: String(f.subject || '').trim(),
     from_path: String(f.preferred_path || '').trim(),
     to_path: String(f.assigned_path || '').trim(),
-    stream: f.workstream || null
+    stream: mapStream(f.workstream),
+    volume: metrics.volume,
+    clicks: metrics.clicks,
+    impressions: metrics.impressions
   };
 }
 
 /**
- * Walk runs oldest→newest. When a finding disappears after being present,
- * record first clear date. If it reappears, drop until it clears again.
- * Final wins = currently absent + last clear within window.
+ * Check-3 only. Walk runs oldest→newest; record first clear of each id still absent.
  */
 export function computeClears(runs) {
-  // runs: [{ run_at, findings[] }] ascending by run_at
-  /** @type {Map<string, object>} */
-  const live = new Map(); // id -> summary
-  /** @type {Map<string, { cleared_at: string, last: object }>} */
+  const live = new Map();
   const openClears = new Map();
-  /** @type {Map<string, object>} */
-  const finalClears = new Map();
 
   for (const run of runs) {
     const runAt = run.run_at;
-    const withIds = assignIntegrityFindingIds(run.findings || []);
+    const withIds = assignIntegrityFindingIds(run.findings || []).filter(
+      (f) => Number(f.check) === 3
+    );
     const nowIds = new Set(withIds.map((f) => f.findingId));
-    // drops
+
     for (const [id, summary] of live.entries()) {
       if (!nowIds.has(id)) {
         openClears.set(id, { ...summary, cleared_at: runAt });
         live.delete(id);
       }
     }
-    // presents / reappearances
     for (const f of withIds) {
       const id = f.findingId;
       const summary = summarizeFinding(f);
-      if (openClears.has(id)) openClears.delete(id); // reappeared — not a current win
+      if (openClears.has(id)) openClears.delete(id);
       live.set(id, summary);
     }
   }
 
-  // Only wins that remain clear (not in final live set)
-  for (const [id, row] of openClears.entries()) {
-    if (!live.has(id)) finalClears.set(id, row);
-  }
-
   const cutoff = Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000;
-  return [...finalClears.values()]
+  return [...openClears.values()]
+    .filter((r) => !live.has(r.findingId))
     .filter((r) => {
       const t = Date.parse(String(r.cleared_at || ''));
       return Number.isFinite(t) && t >= cutoff;
     })
-    .sort((a, b) => String(b.cleared_at).localeCompare(String(a.cleared_at)));
+    .map((r) => {
+      const clearedMs = Date.parse(String(r.cleared_at || ''));
+      const daysAgo = Number.isFinite(clearedMs)
+        ? Math.floor((Date.now() - clearedMs) / 86400000)
+        : null;
+      return { ...r, days_ago: daysAgo };
+    })
+    .sort((a, b) => {
+      const va = a.volume == null ? -1 : a.volume;
+      const vb = b.volume == null ? -1 : b.volume;
+      if (vb !== va) return vb - va;
+      return String(b.cleared_at || '').localeCompare(String(a.cleared_at || ''));
+    });
 }
 
 export default async function handler(req, res) {
@@ -108,16 +141,15 @@ export default async function handler(req, res) {
       findings: Array.isArray(r.findings) ? r.findings : []
     }));
 
-    // Also fetch oldest/newest overall for honesty meta
     const { data: bounds } = await sb
       .from('config_integrity_runs')
       .select('run_at')
       .eq('property_url', propertyUrl)
       .order('run_at', { ascending: true })
       .limit(1);
-    const oldestEver = bounds?.[0]?.run_at || null;
 
     const clears = computeClears(runs);
+    const volSum = clears.reduce((s, r) => s + (Number(r.volume) || 0), 0);
 
     return sendJson(res, 200, {
       status: 'ok',
@@ -128,11 +160,12 @@ export default async function handler(req, res) {
         runsInWindow: runs.length,
         oldestRunInWindow: runs[0]?.run_at || null,
         newestRunInWindow: runs[runs.length - 1]?.run_at || null,
-        oldestRunEver: oldestEver,
+        oldestRunEver: bounds?.[0]?.run_at || null,
+        winCount: clears.length,
+        volumeSum: volSum,
+        checkFilter: 3,
         mechanism:
-          'Diff config_integrity_runs over the last 30 days: finding id present in an older run, absent from later runs and still absent in the latest. First disappearance date = cleared_at. Reappearance cancels the win until it clears again. Independent of Option B progress (mark-done does not remove findings from runs).',
-        note:
-          'Mark-done alone never creates a clear — wins are only data-driven re-ranks/integrity drops.'
+          'Check-3 only. Diff config_integrity_runs (30d): keyword present, then absent from later runs and still absent latest. Volume from at_stake on last seen run. Mark-done is not a win.'
       }
     });
   } catch (err) {

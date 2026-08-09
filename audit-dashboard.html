@@ -16193,6 +16193,132 @@
     #config-integrity-panel .ci-toggle-label {
       font-size: 0.78rem; display: inline-flex; align-items: center; gap: 0.25rem; margin-left: 0.35rem;
     }
+        #config-integrity-panel .ci-clears-box {
+          margin: 0.75rem 0 1rem;
+          border: 1px solid #86efac;
+          border-radius: 8px;
+          background: linear-gradient(180deg, #f0fdf4 0%, #ecfdf5 100%);
+          overflow: hidden;
+          width: 100%;
+          box-sizing: border-box;
+        }
+        #config-integrity-panel .ci-clears-box > summary {
+          cursor: pointer;
+          list-style: none;
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 0.5rem 0.85rem;
+          padding: 0.7rem 1rem;
+          background: #14532d;
+          color: #fff;
+          font-weight: 800;
+          font-size: 0.95rem;
+          user-select: none;
+        }
+        #config-integrity-panel .ci-clears-box > summary::-webkit-details-marker { display: none; }
+        #config-integrity-panel .ci-clears-box > summary::before {
+          content: '▶';
+          font-size: 0.7rem;
+          opacity: 0.9;
+        }
+        #config-integrity-panel .ci-clears-box[open] > summary::before { content: '▼'; }
+        #config-integrity-panel .ci-clears-pill {
+          display: inline-block;
+          font-size: 0.72rem;
+          font-weight: 700;
+          padding: 0.12rem 0.45rem;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.18);
+          color: #ecfdf5;
+        }
+        #config-integrity-panel .ci-clears-body {
+          padding: 0.65rem 0.85rem 0.85rem;
+        }
+        #config-integrity-panel .ci-clears-hint {
+          margin: 0 0 0.55rem;
+          font-size: 0.78rem;
+          color: #166534;
+          line-height: 1.4;
+        }
+        #config-integrity-panel .ci-clears-table-wrap {
+          width: 100%;
+          max-height: min(42vh, 420px);
+          overflow: auto;
+          border: 1px solid #bbf7d0;
+          border-radius: 6px;
+          background: #fff;
+        }
+        #config-integrity-panel .ci-clears-table {
+          width: 100%;
+          border-collapse: separate;
+          border-spacing: 0;
+          font-size: 0.82rem;
+        }
+        #config-integrity-panel .ci-clears-table thead th {
+          position: sticky;
+          top: 0;
+          z-index: 2;
+          background: #0f172a !important;
+          color: #ffffff !important;
+          font-size: 0.88rem;
+          font-weight: 800;
+          letter-spacing: 0.02em;
+          padding: 0.55rem 0.5rem;
+          text-align: left;
+          border-bottom: 2px solid #000;
+        }
+        #config-integrity-panel .ci-clears-table td {
+          padding: 0.45rem 0.5rem;
+          border-bottom: 1px solid #e2e8f0;
+          vertical-align: top;
+        }
+        #config-integrity-panel .ci-clears-table tbody tr:nth-child(even) td {
+          background: #f8fafc;
+        }
+        #config-integrity-panel .ci-clears-table tbody tr:hover td {
+          background: #ecfdf5;
+        }
+        #config-integrity-panel .ci-clears-stream {
+          display: inline-block;
+          font-size: 0.68rem;
+          font-weight: 700;
+          padding: 0.1rem 0.35rem;
+          border-radius: 3px;
+          background: #dcfce7;
+          color: #14532d;
+        }
+        #config-integrity-panel .ci-clears-stream.is-hub { background: #dbeafe; color: #1e3a8a; }
+        #config-integrity-panel .ci-clears-stream.is-swap { background: #ffedd5; color: #9a3412; }
+        #config-integrity-panel .ci-clears-stream.is-blog { background: #f3e8ff; color: #6b21a8; }
+        #config-integrity-panel .ci-clears-vol {
+          font-variant-numeric: tabular-nums;
+          font-weight: 700;
+          color: #0f766e;
+        }
+        #config-integrity-panel .ci-clears-vol.is-high { color: #047857; }
+        #config-integrity-panel .ci-clears-age {
+          font-size: 0.72rem;
+          font-weight: 700;
+          white-space: nowrap;
+        }
+        #config-integrity-panel .ci-clears-age.is-fresh { color: #15803d; }
+        #config-integrity-panel .ci-clears-age.is-mid { color: #a16207; }
+        #config-integrity-panel .ci-clears-age.is-old { color: #64748b; }
+        #config-integrity-panel .ci-clears-empty {
+          margin: 0.35rem 0 0;
+          font-size: 0.82rem;
+          color: #166534;
+        }
+        #config-integrity-panel .ci-clears-paths {
+          font-size: 0.75rem;
+          line-height: 1.35;
+          word-break: break-all;
+        }
+        #config-integrity-panel .ci-clears-paths .ci-from { color: #b45309; }
+        #config-integrity-panel .ci-clears-paths .ci-to { color: #047857; font-weight: 600; }
+        #config-integrity-panel .ci-clears-paths .ci-arrow { color: #94a3b8; margin: 0 0.25rem; }
+
     /* Status section bands */
     #config-integrity-panel tbody.ci-group-decision tr:not(.ci-group-head) td { background: #fffbeb !important; }
     #config-integrity-panel tbody.ci-group-awaiting tr:not(.ci-group-head) td { background: #eff6ff !important; }
@@ -33813,42 +33939,86 @@
       const pack = window.__configIntegrityClears;
       const rows = Array.isArray(pack?.results) ? pack.results : [];
       const meta = pack?.meta || {};
+      const n = rows.length;
+      const volSum = Number(meta.volumeSum != null
+        ? meta.volumeSum
+        : rows.reduce((s, r) => s + (Number(r.volume) || 0), 0));
+      const volLabel = volSum > 0
+        ? (volSum.toLocaleString() + '/mo volume freed')
+        : 'check-3 cannibalisation only';
+
+      const streamClass = (st) => {
+        const t = String(st || '').toLowerCase();
+        if (t === 'hub') return 'is-hub';
+        if (t === 'swap') return 'is-swap';
+        if (t === 'blog') return 'is-blog';
+        return '';
+      };
+
       let body;
-      if (!rows.length) {
-        body = '<p class="ci-clears-empty">No genuine wins in the last ' +
-          (meta.windowDays || 30) + ' days (finding self-cleared from integrity data — not mark-done).</p>';
+      if (!n) {
+        body = '<p class="ci-clears-empty">No cannibalisation wins in the last ' +
+          (meta.windowDays || 30) +
+          ' days — when Google re-ranks onto the locked money page, they land here.</p>';
       } else {
+        const trs = rows.map((r) => {
+          const days = r.days_ago == null ? null : Number(r.days_ago);
+          const ageCls = days == null ? ''
+            : (days <= 7 ? 'is-fresh' : (days <= 21 ? 'is-mid' : 'is-old'));
+          const ageLabel = days == null ? '—'
+            : (days === 0 ? 'today' : (days === 1 ? '1 day ago' : (days + ' days ago')));
+          const vol = r.volume == null ? '—' : Number(r.volume).toLocaleString();
+          const volCls = (Number(r.volume) || 0) >= 100 ? 'is-high' : '';
+          const clk = r.clicks == null ? '' : (' · ' + Number(r.clicks).toLocaleString() + ' clicks');
+          const cleared = String(r.cleared_at || '').replace('T', ' ').slice(0, 16);
+          const stream = String(r.stream || '');
+          const from = escapeHtml(String(r.from_path || '—'));
+          const to = escapeHtml(String(r.to_path || '—'));
+          return (
+            '<tr>' +
+            '<td class="ci-finding-id">' + escapeHtml(String(r.findingId || '—')) + '</td>' +
+            '<td><strong>' + escapeHtml(String(r.keyword || '—')) + '</strong></td>' +
+            '<td class="ci-clears-vol ' + volCls + '" title="Search volume before clear">' + vol + clk + '</td>' +
+            '<td>' + (stream
+              ? ('<span class="ci-clears-stream ' + streamClass(stream) + '">' + escapeHtml(stream) + '</span>')
+              : '—') + '</td>' +
+            '<td class="ci-clears-paths">' +
+            '<span class="ci-from" title="Google ranked here">' + from + '</span>' +
+            '<span class="ci-arrow">→</span>' +
+            '<span class="ci-to" title="Locked money page now ranking">' + to + '</span>' +
+            '</td>' +
+            '<td><span class="ci-clears-age ' + ageCls + '">' + escapeHtml(ageLabel) + '</span>' +
+            '<div style="font-size:0.68rem;color:#64748b;">' + escapeHtml(cleared) + 'Z</div></td>' +
+            '</tr>'
+          );
+        }).join('');
         body =
-          '<table><thead><tr>' +
-          '<th>ID</th><th>Keyword</th><th>From → To</th><th>Cleared</th>' +
-          '</tr></thead><tbody>' +
-          rows.map((r) => {
-            const cleared = String(r.cleared_at || '').replace('T', ' ').slice(0, 16);
-            const from = escapeHtml(String(r.from_path || '—'));
-            const to = escapeHtml(String(r.to_path || '—'));
-            return (
-              '<tr>' +
-              '<td class="ci-finding-id">' + escapeHtml(String(r.findingId || '—')) + '</td>' +
-              '<td>' + escapeHtml(String(r.keyword || '—')) + '</td>' +
-              '<td class="ci-url"><span style="font-size:0.75rem;">' + from + ' → ' + to + '</span></td>' +
-              '<td>' + escapeHtml(cleared || '—') + 'Z</td>' +
-              '</tr>'
-            );
-          }).join('') +
-          '</tbody></table>';
+          '<div class="ci-clears-table-wrap"><table class="ci-clears-table">' +
+          '<thead><tr>' +
+          '<th>ID</th><th>Keyword</th><th>Vol</th><th>Stream</th><th>From → To (money page won)</th><th>Cleared</th>' +
+          '</tr></thead><tbody>' + trs + '</tbody></table></div>';
       }
+
       return (
-        '<div class="ci-clears-box">' +
-        '<h4>Recently cleared (wins) — ' + rows.length + '</h4>' +
-        '<p style="margin:0 0 0.4rem; font-size:0.75rem; color:#166534;">' +
-        'Data-driven only: present in a prior integrity run, absent now. Mark-done does not create a win. Window: ' +
-        (meta.windowDays || 30) + ' days.' +
+        '<details class="ci-clears-box">' +
+        '<summary>' +
+        '<span>Recently cleared wins</span>' +
+        '<span class="ci-clears-pill">' + n + ' win' + (n === 1 ? '' : 's') + '</span>' +
+        '<span class="ci-clears-pill">' + escapeHtml(volLabel) + '</span>' +
+        '<span class="ci-clears-pill">last ' + (meta.windowDays || 30) + ' days</span>' +
+        '<span style="margin-left:auto;font-size:0.75rem;font-weight:600;opacity:0.9;">click to expand</span>' +
+        '</summary>' +
+        '<div class="ci-clears-body">' +
+        '<p class="ci-clears-hint">' +
+        'Cannibalisation only (check 3). A win = Google left the wrong page for the locked money URL. ' +
+        'Marking progress “done” does <em>not</em> create a win. Sorted by volume.' +
         '</p>' +
         body +
-        '</div>'
+        '</div></details>'
       );
     }
 
+    
     async function loadConfigIntegrityPageAuditCache() {
       try {
         const propertyUrl = document.getElementById('propertyUrl')?.value
