@@ -79,7 +79,24 @@ export default async function handler(req, res) {
       .select('last_run_at,last_status,last_error')
       .eq('job_key', 'ws3_recrawl_gsc_inspection')
       .maybeSingle();
-    const lastAutoRefreshAt = cronRow?.last_run_at || null;
+    const lastCronAt = cronRow?.last_run_at || null;
+    // Fallback: max inspected_at on the 12 watch URLs (manual Refresh still writes cache).
+    // Prefer cron last_run when present so "Last auto-refresh" tracks the Sunday job.
+    let lastInspectCacheAt = null;
+    for (const r of rows) {
+      if (!r.inspectedAt) continue;
+      const t = Date.parse(String(r.inspectedAt));
+      if (!Number.isFinite(t)) continue;
+      if (!lastInspectCacheAt || t > Date.parse(String(lastInspectCacheAt))) {
+        lastInspectCacheAt = r.inspectedAt;
+      }
+    }
+    const lastAutoRefreshAt = lastCronAt || lastInspectCacheAt || null;
+    const lastAutoRefreshSource = lastCronAt
+      ? 'cron'
+      : lastInspectCacheAt
+        ? 'inspection_cache'
+        : null;
     const staleDays = 8;
     const staleMs = staleDays * 24 * 60 * 60 * 1000;
     const autoRefreshStale = lastAutoRefreshAt
@@ -92,6 +109,8 @@ export default async function handler(req, res) {
       label: watch.label,
       indexedRequestedAt: watch.indexedRequestedAt,
       lastAutoRefreshAt,
+      lastAutoRefreshSource,
+      lastCronRunAt: lastCronAt,
       autoRefreshSchedule: 'Sun 23:00 Europe/London',
       autoRefreshStale,
       autoRefreshStaleDays: staleDays,

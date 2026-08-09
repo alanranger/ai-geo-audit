@@ -120,7 +120,12 @@ export default async function handler(req, res) {
   const baseUrl = resolveBaseUrl(req);
   const nowIso = new Date().toISOString();
   const startedAt = Date.now();
-  const forceRun = req.query.force === '1' || req.query.force === 'true';
+  // Vercel Sunday schedule is the source of truth. DB shouldRunNow fails forever for
+  // weeklies with no lastRunAt (computeNextRunAt jumps +7d when candidate <= now).
+  const forceRun =
+    req.query.force === '1' ||
+    req.query.force === 'true' ||
+    isVercelCron;
   const propertyUrl = String(
     req.query.propertyUrl || process.env.CRON_PROPERTY_URL || 'https://www.alanranger.com'
   ).trim();
