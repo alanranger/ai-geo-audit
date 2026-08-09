@@ -1,11 +1,16 @@
 /**
- * Recently cleared cannibalisation wins (check 3 only).
- * Present in prior integrity runs, absent from latest — genuine re-rank wins.
+ * Confirmed cannibalisation wins (check 3).
+ * WIN only when latest keyword_rankings.best_url path == locked target path.
+ * Run-disappearance alone is never a win. Mark-done never creates a win.
  */
 export const config = { runtime: 'nodejs', maxDuration: 30 };
 
 import { createClient } from '@supabase/supabase-js';
-import { assignIntegrityFindingIds } from '../../lib/configIntegrity/findingIds.mjs';
+import { normalizePagePath } from '../../lib/pagesMaster.js';
+import {
+  assignIntegrityFindingIds,
+  integrityNormKw
+} from '../../lib/configIntegrity/findingIds.mjs';
 
 const WINDOW_DAYS = 30;
 
@@ -50,6 +55,12 @@ function mapStream(ws) {
   return raw;
 }
 
+export function rankingPathsMatch(bestUrl, lockedTarget) {
+  const a = normalizePagePath(bestUrl);
+  const b = normalizePagePath(lockedTarget);
+  return Boolean(a && b && a === b);
+}
+
 function summarizeFinding(f) {
   const metrics = parseAtStake(f.at_stake);
   return {
@@ -66,53 +77,109 @@ function summarizeFinding(f) {
 }
 
 /**
- * Check-3 only. Walk runs oldest→newest; record first clear of each id still absent.
+ * Collect check-3 rows seen across integrity runs (last state per findingId).
  */
-export function computeClears(runs) {
-  const live = new Map();
-  const openClears = new Map();
-
-  for (const run of runs) {
-    const runAt = run.run_at;
+export function collectCheck3History(runs) {
+  const byId = new Map();
+  let liveIds = new Set();
+  for (const run of runs || []) {
     const withIds = assignIntegrityFindingIds(run.findings || []).filter(
       (f) => Number(f.check) === 3
     );
-    const nowIds = new Set(withIds.map((f) => f.findingId));
-
-    for (const [id, summary] of live.entries()) {
-      if (!nowIds.has(id)) {
-        openClears.set(id, { ...summary, cleared_at: runAt });
-        live.delete(id);
-      }
-    }
+    liveIds = new Set(withIds.map((f) => f.findingId));
     for (const f of withIds) {
-      const id = f.findingId;
-      const summary = summarizeFinding(f);
-      if (openClears.has(id)) openClears.delete(id);
-      live.set(id, summary);
+      byId.set(f.findingId, {
+        ...summarizeFinding(f),
+        last_seen_run_at: run.run_at
+      });
     }
   }
+  return { byId, liveIds };
+}
 
-  const cutoff = Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000;
-  return [...openClears.values()]
-    .filter((r) => !live.has(r.findingId))
-    .filter((r) => {
-      const t = Date.parse(String(r.cleared_at || ''));
-      return Number.isFinite(t) && t >= cutoff;
-    })
-    .map((r) => {
-      const clearedMs = Date.parse(String(r.cleared_at || ''));
-      const daysAgo = Number.isFinite(clearedMs)
-        ? Math.floor((Date.now() - clearedMs) / 86400000)
-        : null;
-      return { ...r, days_ago: daysAgo };
-    })
-    .sort((a, b) => {
-      const va = a.volume == null ? -1 : a.volume;
-      const vb = b.volume == null ? -1 : b.volume;
-      if (vb !== va) return vb - va;
-      return String(b.cleared_at || '').localeCompare(String(a.cleared_at || ''));
+/**
+ * Wins = history candidates where latest ranking best_url path == locked target.
+ * Awaiting = progress=done CANN rows without that positive match.
+ */
+export function classifyConfirmedWins({ historyById, rankByKw, scanDate, doneStates }) {
+  const wins = [];
+  const awaiting = [];
+  const wonIds = new Set();
+
+  for (const summary of historyById.values()) {
+    const kw = integrityNormKw(summary.keyword);
+    const target = summary.to_path;
+    if (!kw || !target) continue;
+    const rk = rankByKw.get(kw);
+    if (!rankingPathsMatch(rk?.best_url, target)) continue;
+    // Ranking is source of truth (integrity lag may still list the row briefly).
+    wonIds.add(summary.findingId);
+    wins.push({
+      ...summary,
+      status: 'won',
+      best_url_now: rk?.best_url || null,
+      ranking_scan_date: scanDate || rk?.audit_date || null,
+      volume: summary.volume != null ? summary.volume : (rk?.search_volume ?? null)
     });
+  }
+
+  for (const st of doneStates || []) {
+    const id = String(st.finding_key || st.findingId || '').trim();
+    if (!id.startsWith('CANN-')) continue;
+    if (wonIds.has(id)) continue;
+    const summary = historyById.get(id) || {
+      findingId: id,
+      keyword: String(st.keyword || '').trim(),
+      from_path: '',
+      to_path: String(st.assigned_path || st.to_path || '').trim(),
+      stream: '',
+      volume: null,
+      clicks: null,
+      impressions: null
+    };
+    const kw = integrityNormKw(summary.keyword);
+    const target = summary.to_path;
+    const rk = kw ? rankByKw.get(kw) : null;
+    if (target && rankingPathsMatch(rk?.best_url, target)) continue;
+    awaiting.push({
+      ...summary,
+      findingId: id,
+      status: 'awaiting',
+      progress: 'done',
+      best_url_now: rk?.best_url || null,
+      ranking_scan_date: scanDate || rk?.audit_date || null,
+      note: st.note || ''
+    });
+  }
+
+  const byVol = (a, b) => {
+    const va = a.volume == null ? -1 : a.volume;
+    const vb = b.volume == null ? -1 : b.volume;
+    if (vb !== va) return vb - va;
+    return String(a.keyword || '').localeCompare(String(b.keyword || ''));
+  };
+  wins.sort(byVol);
+  awaiting.sort(byVol);
+  return { wins, awaiting };
+}
+
+async function fetchLatestRankings(sb, propertyUrl) {
+  const { data, error } = await sb
+    .from('keyword_rankings')
+    .select('keyword, best_url, audit_date, search_volume')
+    .eq('property_url', propertyUrl)
+    .order('audit_date', { ascending: false })
+    .limit(5000);
+  if (error) throw error;
+  const scanDate = data?.[0]?.audit_date || null;
+  if (!scanDate) return { scanDate: null, rankByKw: new Map() };
+  const rankByKw = new Map();
+  for (const row of data || []) {
+    if (row.audit_date !== scanDate) continue;
+    const k = integrityNormKw(row.keyword);
+    if (k && !rankByKw.has(k)) rankByKw.set(k, row);
+  }
+  return { scanDate, rankByKw };
 }
 
 export default async function handler(req, res) {
@@ -141,31 +208,57 @@ export default async function handler(req, res) {
       findings: Array.isArray(r.findings) ? r.findings : []
     }));
 
-    const { data: bounds } = await sb
-      .from('config_integrity_runs')
-      .select('run_at')
-      .eq('property_url', propertyUrl)
-      .order('run_at', { ascending: true })
-      .limit(1);
+    const { scanDate, rankByKw } = await fetchLatestRankings(sb, propertyUrl);
+    const { byId } = collectCheck3History(runs);
 
-    const clears = computeClears(runs);
-    const volSum = clears.reduce((s, r) => s + (Number(r.volume) || 0), 0);
+    let doneStates = [];
+    try {
+      const { data: stRows } = await sb
+        .from('config_integrity_finding_state')
+        .select('finding_key, progress, note')
+        .eq('property_url', propertyUrl)
+        .eq('progress', 'done')
+        .limit(500);
+      doneStates = stRows || [];
+    } catch {
+      doneStates = [];
+    }
+
+    // Enrich done rows that are still live in latest integrity open set
+    const latestFindings = assignIntegrityFindingIds(
+      runs.length ? runs[runs.length - 1].findings || [] : []
+    );
+    for (const f of latestFindings) {
+      if (Number(f.check) !== 3) continue;
+      if (!byId.has(f.findingId)) byId.set(f.findingId, summarizeFinding(f));
+    }
+
+    const { wins, awaiting } = classifyConfirmedWins({
+      historyById: byId,
+      rankByKw,
+      scanDate,
+      doneStates
+    });
+
+    const volSum = wins.reduce((s, r) => s + (Number(r.volume) || 0), 0);
 
     return sendJson(res, 200, {
       status: 'ok',
-      results: clears,
+      results: wins,
+      awaiting,
       meta: {
         generatedAt: new Date().toISOString(),
         windowDays: WINDOW_DAYS,
         runsInWindow: runs.length,
         oldestRunInWindow: runs[0]?.run_at || null,
         newestRunInWindow: runs[runs.length - 1]?.run_at || null,
-        oldestRunEver: bounds?.[0]?.run_at || null,
-        winCount: clears.length,
+        rankingScanDate: scanDate,
+        winCount: wins.length,
+        awaitingCount: awaiting.length,
         volumeSum: volSum,
         checkFilter: 3,
         mechanism:
-          'Check-3 only. Diff config_integrity_runs (30d): keyword present, then absent from later runs and still absent latest. Volume from at_stake on last seen run. Mark-done is not a win.'
+          'WIN only if latest keyword_rankings.best_url path equals locked target (normalize path, strip params). History candidates from check-3 integrity runs (30d). Mark-done never creates a win; done+unconfirmed = awaiting. Disappeared-without-match is not a win.'
       }
     });
   } catch (err) {

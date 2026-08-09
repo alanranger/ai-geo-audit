@@ -33925,6 +33925,7 @@
         if (!resp.ok || String(json?.status || '').toLowerCase() !== 'ok') return null;
         window.__configIntegrityClears = {
           results: json.results || [],
+          awaiting: json.awaiting || [],
           meta: json.meta || {}
         };
         if (window.__configIntegrityLatest) renderConfigIntegrityPanel(window.__configIntegrityLatest);
@@ -33938,14 +33939,19 @@
     function renderIntegrityClearsHtml() {
       const pack = window.__configIntegrityClears;
       const rows = Array.isArray(pack?.results) ? pack.results : [];
+      const awaiting = Array.isArray(pack?.awaiting) ? pack.awaiting : [];
       const meta = pack?.meta || {};
       const n = rows.length;
+      const na = awaiting.length;
       const volSum = Number(meta.volumeSum != null
         ? meta.volumeSum
         : rows.reduce((s, r) => s + (Number(r.volume) || 0), 0));
       const volLabel = volSum > 0
-        ? (volSum.toLocaleString() + '/mo volume freed')
-        : 'check-3 cannibalisation only';
+        ? (volSum.toLocaleString() + '/mo confirmed on target')
+        : 'ranking-confirmed only';
+      const scanLabel = meta.rankingScanDate
+        ? ('scan ' + String(meta.rankingScanDate))
+        : 'no ranking scan';
 
       const streamClass = (st) => {
         const t = String(st || '').toLowerCase();
@@ -33955,63 +33961,91 @@
         return '';
       };
 
+      const rowHtml = (r, mode) => {
+        const vol = r.volume == null ? '—' : Number(r.volume).toLocaleString();
+        const volCls = (Number(r.volume) || 0) >= 100 ? 'is-high' : '';
+        const clk = r.clicks == null ? '' : (' · ' + Number(r.clicks).toLocaleString() + ' clicks');
+        const stream = String(r.stream || '');
+        const from = escapeHtml(String(r.from_path || '—'));
+        const to = escapeHtml(String(r.to_path || '—'));
+        const scan = escapeHtml(String(r.ranking_scan_date || meta.rankingScanDate || '—'));
+        const nowPath = r.best_url_now
+          ? escapeHtml(String(r.best_url_now).split(/[?#]/)[0].replace(/^https?:\/\/[^/]+/i, '') || '—')
+          : '—';
+        return (
+          '<tr>' +
+          '<td class="ci-finding-id">' + escapeHtml(String(r.findingId || '—')) + '</td>' +
+          '<td><strong>' + escapeHtml(String(r.keyword || '—')) + '</strong></td>' +
+          '<td class="ci-clears-vol ' + volCls + '">' + vol + clk + '</td>' +
+          '<td>' + (stream
+            ? ('<span class="ci-clears-stream ' + streamClass(stream) + '">' + escapeHtml(stream) + '</span>')
+            : '—') + '</td>' +
+          '<td class="ci-clears-paths">' +
+          '<span class="ci-from" title="Previous wrong preferred URL">' + from + '</span>' +
+          '<span class="ci-arrow">→</span>' +
+          '<span class="ci-to" title="Locked money page">' + to + '</span>' +
+          (mode === 'awaiting'
+            ? ('<div style="font-size:0.68rem;color:#92400e;margin-top:2px;">now ranks: ' + nowPath + '</div>')
+            : '') +
+          '</td>' +
+          '<td><span class="ci-clears-age ' + (mode === 'won' ? 'is-fresh' : 'is-mid') + '">' +
+          escapeHtml(mode === 'won' ? 'Won' : 'Awaiting recrawl — not yet won') +
+          '</span>' +
+          '<div style="font-size:0.68rem;color:#64748b;">scan ' + scan + '</div></td>' +
+          '</tr>'
+        );
+      };
+
       let body;
-      if (!n) {
-        body = '<p class="ci-clears-empty">No cannibalisation wins in the last ' +
-          (meta.windowDays || 30) +
-          ' days — when Google re-ranks onto the locked money page, they land here.</p>';
+      if (!n && !na) {
+        body = '<p class="ci-clears-empty">No ranking-confirmed wins (and no done rows awaiting scan). ' +
+          'A win requires latest Ranking &amp; AI scan best_url = locked money page.</p>';
       } else {
-        const trs = rows.map((r) => {
-          const days = r.days_ago == null ? null : Number(r.days_ago);
-          const ageCls = days == null ? ''
-            : (days <= 7 ? 'is-fresh' : (days <= 21 ? 'is-mid' : 'is-old'));
-          const ageLabel = days == null ? '—'
-            : (days === 0 ? 'today' : (days === 1 ? '1 day ago' : (days + ' days ago')));
-          const vol = r.volume == null ? '—' : Number(r.volume).toLocaleString();
-          const volCls = (Number(r.volume) || 0) >= 100 ? 'is-high' : '';
-          const clk = r.clicks == null ? '' : (' · ' + Number(r.clicks).toLocaleString() + ' clicks');
-          const cleared = String(r.cleared_at || '').replace('T', ' ').slice(0, 16);
-          const stream = String(r.stream || '');
-          const from = escapeHtml(String(r.from_path || '—'));
-          const to = escapeHtml(String(r.to_path || '—'));
-          return (
-            '<tr>' +
-            '<td class="ci-finding-id">' + escapeHtml(String(r.findingId || '—')) + '</td>' +
-            '<td><strong>' + escapeHtml(String(r.keyword || '—')) + '</strong></td>' +
-            '<td class="ci-clears-vol ' + volCls + '" title="Search volume before clear">' + vol + clk + '</td>' +
-            '<td>' + (stream
-              ? ('<span class="ci-clears-stream ' + streamClass(stream) + '">' + escapeHtml(stream) + '</span>')
-              : '—') + '</td>' +
-            '<td class="ci-clears-paths">' +
-            '<span class="ci-from" title="Google ranked here">' + from + '</span>' +
-            '<span class="ci-arrow">→</span>' +
-            '<span class="ci-to" title="Locked money page now ranking">' + to + '</span>' +
-            '</td>' +
-            '<td><span class="ci-clears-age ' + ageCls + '">' + escapeHtml(ageLabel) + '</span>' +
-            '<div style="font-size:0.68rem;color:#64748b;">' + escapeHtml(cleared) + 'Z</div></td>' +
-            '</tr>'
-          );
-        }).join('');
-        body =
-          '<div class="ci-clears-table-wrap"><table class="ci-clears-table">' +
-          '<thead><tr>' +
-          '<th>ID</th><th>Keyword</th><th>Vol</th><th>Stream</th><th>From → To (money page won)</th><th>Cleared</th>' +
-          '</tr></thead><tbody>' + trs + '</tbody></table></div>';
+        let wonTable = '';
+        if (n) {
+          wonTable =
+            '<div class="ci-clears-table-wrap"><table class="ci-clears-table">' +
+            '<thead><tr>' +
+            '<th>ID</th><th>Keyword</th><th>Vol</th><th>Stream</th>' +
+            '<th>From → To (money page won)</th><th>Confirmed</th>' +
+            '</tr></thead><tbody>' +
+            rows.map((r) => rowHtml(r, 'won')).join('') +
+            '</tbody></table></div>';
+        } else {
+          wonTable = '<p class="ci-clears-empty">No confirmed wins yet against scan ' +
+            escapeHtml(String(meta.rankingScanDate || '—')) + '.</p>';
+        }
+        let awaitTable = '';
+        if (na) {
+          awaitTable =
+            '<p class="ci-clears-hint" style="margin-top:0.85rem;"><strong>Awaiting recrawl — not yet won</strong> ' +
+            '(progress done, but ranking scan has not confirmed best_url = target)</p>' +
+            '<div class="ci-clears-table-wrap"><table class="ci-clears-table">' +
+            '<thead><tr>' +
+            '<th>ID</th><th>Keyword</th><th>Vol</th><th>Stream</th>' +
+            '<th>From → To (intended)</th><th>Status</th>' +
+            '</tr></thead><tbody>' +
+            awaiting.map((r) => rowHtml(r, 'awaiting')).join('') +
+            '</tbody></table></div>';
+        }
+        body = wonTable + awaitTable;
       }
 
       return (
         '<details class="ci-clears-box">' +
         '<summary>' +
-        '<span>Recently cleared wins</span>' +
-        '<span class="ci-clears-pill">' + n + ' win' + (n === 1 ? '' : 's') + '</span>' +
+        '<span>Confirmed wins</span>' +
+        '<span class="ci-clears-pill">' + n + ' won</span>' +
+        (na ? ('<span class="ci-clears-pill">' + na + ' awaiting</span>') : '') +
         '<span class="ci-clears-pill">' + escapeHtml(volLabel) + '</span>' +
-        '<span class="ci-clears-pill">last ' + (meta.windowDays || 30) + ' days</span>' +
+        '<span class="ci-clears-pill">' + escapeHtml(scanLabel) + '</span>' +
         '<span style="margin-left:auto;font-size:0.75rem;font-weight:600;opacity:0.9;">click to expand</span>' +
         '</summary>' +
         '<div class="ci-clears-body">' +
         '<p class="ci-clears-hint">' +
-        'Cannibalisation only (check 3). A win = Google left the wrong page for the locked money URL. ' +
-        'Marking progress “done” does <em>not</em> create a win. Sorted by volume.' +
+        'Cannibalisation (check 3). A <strong>win</strong> only when latest Ranking &amp; AI ' +
+        '<code>keyword_rankings.best_url</code> path equals the locked money URL (params stripped). ' +
+        'Row disappearance from integrity alone is <em>not</em> a win. Marking progress done never creates a win. Sorted by volume.' +
         '</p>' +
         body +
         '</div></details>'
