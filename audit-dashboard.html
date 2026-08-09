@@ -33543,7 +33543,11 @@
         const decisionType = inferIntegrityDecisionType(st);
         const autoStatusKey = r.statusKey;
         const autoStatusLabel = r.statusLabel;
-        const conflictDone = progress === 'done' && integrityAutoStillOpen(autoStatusKey);
+        // Conflict only when marked done but *page-audit* still shows missing/weak link.
+        const linkSt = String(r.pageAudit?.link_status || r.linkStatus || '');
+        const conflictDone = progress === 'done' && (
+          linkSt === 'absent' || linkSt === 'weak' || autoStatusKey === 'fix'
+        );
         const reappeared = !!clearedAt && progress !== 'none';
         const ov = statusFromWorkDecision(autoStatusKey, progress, decisionType);
         return {
