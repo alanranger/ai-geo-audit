@@ -37,7 +37,7 @@ const resolveBaseUrl = (req) => {
 };
 
 function loadWatchUrls() {
-  const raw = JSON.parse(fs.readFileSync(WATCH_PATH, 'utf8'));
+  const raw = JSON.parse(fs.readFileSync(WATCH_PATH, 'utf8').replace(/^\uFEFF/, ''));
   return Array.isArray(raw.urls) ? raw.urls : [];
 }
 

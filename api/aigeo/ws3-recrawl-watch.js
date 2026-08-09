@@ -24,7 +24,9 @@ const sendJson = (res, status, body) => {
 };
 
 function loadWatchConfig() {
-  const raw = JSON.parse(fs.readFileSync(WATCH_PATH, 'utf8'));
+  // Strip UTF-8 BOM (PowerShell/editor writes sometimes include U+FEFF and break JSON.parse).
+  const text = fs.readFileSync(WATCH_PATH, 'utf8').replace(/^\uFEFF/, '');
+  const raw = JSON.parse(text);
   return {
     label: String(raw.label || 'Index arming watch (12 URLs)'),
     indexedRequestedAt: String(raw.indexedRequestedAt || ''),
