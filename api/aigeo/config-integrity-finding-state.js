@@ -7,6 +7,7 @@ export const config = { runtime: 'nodejs', maxDuration: 30 };
 import { createClient } from '@supabase/supabase-js';
 
 const PROGRESS = new Set(['none', 'in_progress', 'done', 'parked']);
+const DECISION_TYPES = new Set(['none', 'accept', 'keep_specialist', 'parked']);
 
 const sendJson = (res, status, body) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -34,11 +35,13 @@ async function ensureTable(sb) {
 
 function rowOut(r) {
   if (!r) return null;
+  const dt = String(r.decision_type || 'none').toLowerCase();
   return {
     finding_key: r.finding_key,
     property_url: r.property_url,
     progress: r.progress || 'none',
     note: r.note || '',
+    decision_type: DECISION_TYPES.has(dt) ? dt : 'none',
     worked_at: r.worked_at || null,
     updated_at: r.updated_at || null,
     cleared_at: r.cleared_at || null,
@@ -136,11 +139,17 @@ export default async function handler(req, res) {
       const progressRaw = String(it.progress ?? 'none').trim().toLowerCase();
       const progress = PROGRESS.has(progressRaw) ? progressRaw : 'none';
       const note = String(it.note ?? '').slice(0, 500);
+      let decisionRaw = String(it.decision_type ?? it.decisionType ?? 'none')
+        .trim()
+        .toLowerCase();
+      if (progress === 'parked') decisionRaw = 'parked';
+      const decision_type = DECISION_TYPES.has(decisionRaw) ? decisionRaw : 'none';
       rows.push({
         finding_key: findingKey,
         property_url: propertyUrl,
         progress,
         note,
+        decision_type: decision_type === 'none' ? null : decision_type,
         worked_at: now,
         updated_at: now,
         last_seen_at: now,

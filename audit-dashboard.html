@@ -16158,10 +16158,16 @@
     }
     #config-integrity-panel .ci-status-decision { background: #fef3c7; color: #92400e; }
     #config-integrity-panel .ci-status-awaiting { background: #dbeafe; color: #1e40af; }
+    #config-integrity-panel .ci-status-awaiting-accept { background: #e0e7ff; color: #3730a3; }
+    #config-integrity-panel .ci-status-strengthen { background: #d1fae5; color: #065f46; }
+    #config-integrity-panel .ci-status-parked { background: #e2e8f0; color: #475569; }
     #config-integrity-panel .ci-status-fix { background: #ffedd5; color: #9a3412; }
     #config-integrity-panel .ci-status-other { background: #e2e8f0; color: #334155; }
     #config-integrity-panel .ci-status-weak { background: #fce7f3; color: #9d174d; }
     #config-integrity-panel .ci-status-unchecked { background: #f1f5f9; color: #475569; }
+    #config-integrity-panel tbody.ci-group-strengthen .ci-group-head td { background: #6ee7b7 !important; color: #064e3b !important; }
+    #config-integrity-panel tbody.ci-group-awaiting_accept .ci-group-head td { background: #a5b4fc !important; color: #312e81 !important; }
+    #config-integrity-panel tbody.ci-group-parked .ci-group-head td { background: #cbd5e1 !important; color: #334155 !important; }
     #config-integrity-panel tbody.ci-group-weak tr:not(.ci-group-head) td { background: #fdf2f8 !important; }
     #config-integrity-panel tbody.ci-group-unchecked tr:not(.ci-group-head) td { background: #f8fafc !important; }
     #config-integrity-panel tbody.ci-group-weak .ci-group-head td { background: #f9a8d4 !important; color: #831843 !important; }
@@ -33454,10 +33460,13 @@
     function integrityStatusPill(statusKey, label) {
       const cls = statusKey === 'decision' ? 'ci-status-decision'
         : statusKey === 'awaiting' ? 'ci-status-awaiting'
-          : statusKey === 'weak' ? 'ci-status-weak'
-            : statusKey === 'fix' ? 'ci-status-fix'
-              : statusKey === 'unchecked' ? 'ci-status-unchecked'
-                : 'ci-status-other';
+          : statusKey === 'awaiting_accept' ? 'ci-status-awaiting-accept'
+            : statusKey === 'strengthen' ? 'ci-status-strengthen'
+              : statusKey === 'parked' ? 'ci-status-parked'
+                : statusKey === 'weak' ? 'ci-status-weak'
+                  : statusKey === 'fix' ? 'ci-status-fix'
+                    : statusKey === 'unchecked' ? 'ci-status-unchecked'
+                      : 'ci-status-other';
       return '<span class="ci-status-pill ' + cls + '">' + escapeHtml(label) + '</span>';
     }
 
@@ -33478,10 +33487,48 @@
         : {};
     }
 
-    /** Auto status still needs Alan's attention (conflict if he marked done). */
+    /** Auto (page/action) status still needs attention — used for conflict badge only. */
     function integrityAutoStillOpen(statusKey) {
       return statusKey === 'fix' || statusKey === 'weak' || statusKey === 'decision'
         || statusKey === 'unchecked' || statusKey === 'other';
+    }
+
+    /**
+     * Explicit decision_type preferred; note heuristics as fallback.
+     * Values: accept | keep_specialist | parked | none
+     */
+    function inferIntegrityDecisionType(st) {
+      const raw = String(st?.decision_type || st?.decisionType || '').toLowerCase().trim();
+      if (raw === 'accept' || raw === 'keep_specialist' || raw === 'parked') return raw;
+      const progress = String(st?.progress || 'none').toLowerCase();
+      if (progress === 'parked') return 'parked';
+      const note = String(st?.note || '');
+      if (/keep specialist|keep the specialist|not accepting|strengthen it|keep private|shouldn'?t own|target already correct|keep real masterclasses|keep vouchers|target remains|strengthen vs|strengthen specialist/i.test(note)) {
+        return 'keep_specialist';
+      }
+      if (/reassigned|accept ranked|accept google|deduped|pointed at hub|accept the hub|accept google'?s/i.test(note)) {
+        return 'accept';
+      }
+      if (progress === 'done' || progress === 'in_progress') return 'keep_specialist';
+      return 'none';
+    }
+
+    /**
+     * After auto deriveIntegrityStatus, apply working-state so a recorded
+     * decision leaves "Decision needed". Never creates a win.
+     */
+    function statusFromWorkDecision(autoKey, progress, decisionType) {
+      if (progress === 'parked' || decisionType === 'parked') {
+        return { key: 'parked', label: 'Parked', sort: 6 };
+      }
+      if (progress !== 'done' && progress !== 'in_progress') return null;
+      if (decisionType === 'accept') {
+        return { key: 'awaiting_accept', label: 'Awaiting recrawl', sort: 1 };
+      }
+      if (decisionType === 'keep_specialist' || autoKey === 'decision') {
+        return { key: 'strengthen', label: 'Strengthen — on-page/anchor', sort: 1 };
+      }
+      return null;
     }
 
     function mergeWorkStateOntoFindings(rows) {
@@ -33493,16 +33540,25 @@
         const note = st?.note || '';
         const workedAt = st?.worked_at || null;
         const clearedAt = st?.cleared_at || null;
-        const conflictDone = progress === 'done' && integrityAutoStillOpen(r.statusKey);
-        // Reappeared: had been cleared (finding gone) or had state while returning under open work
+        const decisionType = inferIntegrityDecisionType(st);
+        const autoStatusKey = r.statusKey;
+        const autoStatusLabel = r.statusLabel;
+        const conflictDone = progress === 'done' && integrityAutoStillOpen(autoStatusKey);
         const reappeared = !!clearedAt && progress !== 'none';
+        const ov = statusFromWorkDecision(autoStatusKey, progress, decisionType);
         return {
           ...r,
           workProgress: progress,
           workNote: note,
           workedAt,
+          decisionType,
+          autoStatusKey,
+          autoStatusLabel,
           conflictDone,
-          reappeared: !!reappeared && progress !== 'none'
+          reappeared: !!reappeared && progress !== 'none',
+          statusKey: ov ? ov.key : r.statusKey,
+          statusLabel: ov ? ov.label : r.statusLabel,
+          statusSort: ov ? ov.sort : r.statusSort
         };
       });
     }
@@ -33556,7 +33612,7 @@
       }
     }
 
-    async function saveConfigIntegrityWorkState(findingKey, progress, note, btn) {
+    async function saveConfigIntegrityWorkState(findingKey, progress, note, decisionType, btn) {
       if (btn) {
         btn.disabled = true;
         btn.textContent = '…';
@@ -33569,7 +33625,8 @@
             propertyUrl: integrityPropertyUrl(),
             findingKey,
             progress,
-            note
+            note,
+            decision_type: decisionType || 'none'
           })
         });
         const json = await resp.json().catch(() => ({}));
@@ -33633,10 +33690,13 @@
     function groupIntegrityByStatus(rows) {
       const order = [
         { key: 'decision', label: 'Decision needed' },
+        { key: 'strengthen', label: 'Strengthen — on-page/anchor' },
+        { key: 'awaiting_accept', label: 'Awaiting recrawl' },
         { key: 'awaiting', label: 'Link in place — awaiting recrawl' },
         { key: 'weak', label: 'Link present, weak anchor' },
         { key: 'fix', label: 'Fix needed' },
         { key: 'unchecked', label: 'Not page-checked' },
+        { key: 'parked', label: 'Parked' },
         { key: 'other', label: 'Other/config' }
       ];
       return order.map((g) => ({
@@ -33721,7 +33781,10 @@
       const groups = groupIntegrityByStatus(filtered);
       const streams = [...new Set(normalized.map((r) => r.stream).filter(Boolean))].sort();
       const checks = [...new Set(normalized.map((r) => String(r.check)))].sort((a, b) => Number(a) - Number(b));
-      const statusCounts = { decision: 0, awaiting: 0, weak: 0, fix: 0, unchecked: 0, other: 0 };
+      const statusCounts = {
+        decision: 0, strengthen: 0, awaiting_accept: 0, awaiting: 0,
+        weak: 0, fix: 0, unchecked: 0, parked: 0, other: 0
+      };
       for (const r of normalized) statusCounts[r.statusKey] = (statusCounts[r.statusKey] || 0) + 1;
 
       const legendHtml =
@@ -33729,9 +33792,9 @@
         '<summary>Key — Check / Severity / Stream / Status</summary>' +
         '<ul>' +
         '<li><strong>Check 1–6</strong> — integrity suite (1/4/6 structural red; 2/3/5 advisory amber). Check 3 = Google ranks a different URL than locked target.</li>' +
-        '<li><strong>Status</strong> — Decision needed from action text; link Fix / weak / awaiting from <em>live page audit</em> (Re-check pages). Until audited: Not page-checked (no shipped guess).</li>' +
+        '<li><strong>Status</strong> — Auto from action text + page audit. Once you record progress (keep / accept / parking), Decision needed is overridden: Strengthen, Awaiting recrawl, or Parked. Wins only when ranking best_url matches locked target (Confirmed wins panel).</li>' +
         '<li><strong>Stream</strong> — Hub / Swap / Blog / Config work grouping (not a dashboard panel).</li>' +
-        '<li><strong>ID</strong> — stable short id (CANN-xxxx check 3; CFG-xxxx other) from keyword+assigned path so the issue keeps the same code across runs.</li><li><strong>Lifecycle</strong> — rows recompute each run and clear when data changes. Page-audit status is auto; Progress/Note is your manual work layer (never overwrites auto status).</li>' +
+        '<li><strong>ID</strong> — stable short id (CANN-xxxx check 3; CFG-xxxx other) from keyword+assigned path so the issue keeps the same code across runs.</li><li><strong>Lifecycle</strong> — rows recompute each run. Page-audit is auto; Progress / Decision type / Note is your work layer (never creates a win by itself).</li>' +
         '</ul></details>';
 
       const streamOpts = streams.map((st) => '<option value="' + escapeHtml(st) + '">' + escapeHtml(st) + '</option>').join('');
@@ -33742,10 +33805,13 @@
         '<label>Status <select id="ci-filter-status">' +
         '<option value="all">All (' + normalized.length + ')</option>' +
         '<option value="decision">Decision needed (' + (statusCounts.decision || 0) + ')</option>' +
+        '<option value="strengthen">Strengthen — on-page/anchor (' + (statusCounts.strengthen || 0) + ')</option>' +
+        '<option value="awaiting_accept">Awaiting recrawl (' + (statusCounts.awaiting_accept || 0) + ')</option>' +
         '<option value="awaiting">Link in place — awaiting recrawl (' + (statusCounts.awaiting || 0) + ')</option>' +
         '<option value="weak">Link present, weak anchor (' + (statusCounts.weak || 0) + ')</option>' +
         '<option value="fix">Fix needed (' + (statusCounts.fix || 0) + ')</option>' +
         '<option value="unchecked">Not page-checked (' + (statusCounts.unchecked || 0) + ')</option>' +
+        '<option value="parked">Parked (' + (statusCounts.parked || 0) + ')</option>' +
         '<option value="other">Other/config (' + (statusCounts.other || 0) + ')</option>' +
         '</select></label>' +
         '<label>Stream <select id="ci-filter-stream"><option value="all">All</option>' + streamOpts + '</select></label>' +
@@ -33778,11 +33844,12 @@
         const linkToCell = integrityLinkCell(r.linkToUrl || r.shouldBeUrl);
         const fid = String(r.findingId || '');
         const prog = r.workProgress || 'none';
+        const dt = r.decisionType || 'none';
         const noteVal = String(r.workNote || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
         let workFlags = '';
         if (r.conflictDone) {
           workFlags += '<span class="ci-work-conflict" title="Manual done does not override page evidence">marked done — but page still shows ' +
-            escapeHtml(String(r.statusLabel || r.statusKey)) + '</span>';
+            escapeHtml(String(r.autoStatusLabel || r.statusLabel || r.statusKey)) + '</span>';
         }
         if (r.reappeared && !r.conflictDone) {
           workFlags += '<span class="ci-work-reappeared">reappeared since you last worked this</span>';
@@ -33800,6 +33867,12 @@
           '<option value="in_progress"' + (prog === 'in_progress' ? ' selected' : '') + '>in progress</option>' +
           '<option value="done"' + (prog === 'done' ? ' selected' : '') + '>done</option>' +
           '<option value="parked"' + (prog === 'parked' ? ' selected' : '') + '>parked</option>' +
+          '</select>' +
+          '<select class="ci-work-decision" aria-label="Decision type" title="Record decision so Status leaves Decision needed">' +
+          '<option value="none"' + (dt === 'none' ? ' selected' : '') + '>decision…</option>' +
+          '<option value="keep_specialist"' + (dt === 'keep_specialist' ? ' selected' : '') + '>keep specialist</option>' +
+          '<option value="accept"' + (dt === 'accept' ? ' selected' : '') + '>accept / reassign</option>' +
+          '<option value="parked"' + (dt === 'parked' ? ' selected' : '') + '>parked</option>' +
           '</select>' +
           '<button type="button" class="ci-work-save">Save</button>' +
           '</div>' +
@@ -33899,7 +33972,9 @@
           const id = wrap.getAttribute('data-finding-id');
           const progress = wrap.querySelector('.ci-work-progress')?.value || 'none';
           const note = wrap.querySelector('.ci-work-note')?.value || '';
-          void saveConfigIntegrityWorkState(id, progress, note, btn);
+          let decisionType = wrap.querySelector('.ci-work-decision')?.value || 'none';
+          if (progress === 'parked') decisionType = 'parked';
+          void saveConfigIntegrityWorkState(id, progress, note, decisionType, btn);
         };
       });
 
