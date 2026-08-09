@@ -33494,28 +33494,21 @@
     }
 
     /**
-     * Explicit decision_type preferred; note heuristics as fallback.
-     * Values: accept | keep_specialist | parked | none
+     * Explicit decision_type only (accept | keep_specialist | parked).
+     * No note-text inference — fragile and denied after 0830fda reconcile.
      */
     function inferIntegrityDecisionType(st) {
       const raw = String(st?.decision_type || st?.decisionType || '').toLowerCase().trim();
       if (raw === 'accept' || raw === 'keep_specialist' || raw === 'parked') return raw;
       const progress = String(st?.progress || 'none').toLowerCase();
       if (progress === 'parked') return 'parked';
-      const note = String(st?.note || '');
-      if (/keep specialist|keep the specialist|not accepting|strengthen it|keep private|shouldn'?t own|target already correct|keep real masterclasses|keep vouchers|target remains|strengthen vs|strengthen specialist/i.test(note)) {
-        return 'keep_specialist';
-      }
-      if (/reassigned|accept ranked|accept google|deduped|pointed at hub|accept the hub|accept google'?s/i.test(note)) {
-        return 'accept';
-      }
-      if (progress === 'done' || progress === 'in_progress') return 'keep_specialist';
       return 'none';
     }
 
     /**
      * After auto deriveIntegrityStatus, apply working-state so a recorded
      * decision leaves "Decision needed". Never creates a win.
+     * Requires progress done|in_progress plus explicit decision_type.
      */
     function statusFromWorkDecision(autoKey, progress, decisionType) {
       if (progress === 'parked' || decisionType === 'parked') {
@@ -33525,7 +33518,7 @@
       if (decisionType === 'accept') {
         return { key: 'awaiting_accept', label: 'Awaiting recrawl', sort: 1 };
       }
-      if (decisionType === 'keep_specialist' || autoKey === 'decision') {
+      if (decisionType === 'keep_specialist') {
         return { key: 'strengthen', label: 'Strengthen — on-page/anchor', sort: 1 };
       }
       return null;
