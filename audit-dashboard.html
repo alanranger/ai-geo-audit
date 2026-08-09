@@ -15530,7 +15530,7 @@
                   </tr>
                 </thead>
                 <tbody id="ranking-ai-table-body">
-                  <tr><td colspan="14" class="ranking-table-empty">Click "Run ranking &amp; AI check" to load data.</td></tr>
+                  <tr><td colspan="15" class="ranking-table-empty">Click "Run ranking &amp; AI check" to load data.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -16138,6 +16138,30 @@
     #config-integrity-panel .ci-target-ok { color: #047857; font-weight: 700; font-size: 0.75rem; }
     #config-integrity-panel .ci-target-bad { color: #b91c1c; font-weight: 700; font-size: 0.75rem; }
     #config-integrity-panel .ci-checked-at { font-size: 0.7rem; color: #64748b; }
+    #config-integrity-panel .ci-work-cell { min-width: 12rem; }
+    #config-integrity-panel .ci-work-controls { display: flex; flex-direction: column; gap: 0.25rem; }
+    #config-integrity-panel .ci-work-controls select,
+    #config-integrity-panel .ci-work-controls input[type="text"] {
+      font-size: 0.72rem; padding: 0.15rem 0.25rem; max-width: 11rem;
+    }
+    #config-integrity-panel .ci-work-controls .ci-work-row {
+      display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center;
+    }
+    #config-integrity-panel .ci-work-controls button {
+      font-size: 0.7rem; padding: 0.15rem 0.4rem; cursor: pointer;
+    }
+    #config-integrity-panel .ci-work-meta { font-size: 0.68rem; color: #64748b; }
+    #config-integrity-panel .ci-work-conflict {
+      display: inline-block; margin-top: 0.2rem; font-size: 0.68rem; font-weight: 700;
+      color: #9a3412; background: #ffedd5; padding: 0.1rem 0.35rem; border-radius: 3px;
+    }
+    #config-integrity-panel .ci-work-reappeared {
+      display: inline-block; margin-top: 0.15rem; font-size: 0.68rem;
+      color: #1e40af; background: #dbeafe; padding: 0.1rem 0.35rem; border-radius: 3px;
+    }
+    #config-integrity-panel .ci-toggle-label {
+      font-size: 0.78rem; display: inline-flex; align-items: center; gap: 0.25rem; margin-left: 0.35rem;
+    }
     /* Status section bands */
     #config-integrity-panel tbody.ci-group-decision tr:not(.ci-group-head) td { background: #fffbeb !important; }
     #config-integrity-panel tbody.ci-group-awaiting tr:not(.ci-group-head) td { background: #eff6ff !important; }
@@ -33265,8 +33289,130 @@
         status: document.getElementById('ci-filter-status')?.value || 'all',
         stream: document.getElementById('ci-filter-stream')?.value || 'all',
         check: document.getElementById('ci-filter-check')?.value || 'all',
-        sort: document.getElementById('ci-sort')?.value || 'volume_desc'
+        sort: document.getElementById('ci-sort')?.value || 'volume_desc',
+        showDone: !!document.getElementById('ci-filter-show-done')?.checked,
+        showParked: !!document.getElementById('ci-filter-show-parked')?.checked
       };
+    }
+
+    function getWorkStateMap() {
+      return window.__configIntegrityWorkState && typeof window.__configIntegrityWorkState === 'object'
+        ? window.__configIntegrityWorkState
+        : {};
+    }
+
+    /** Auto status still needs Alan's attention (conflict if he marked done). */
+    function integrityAutoStillOpen(statusKey) {
+      return statusKey === 'fix' || statusKey === 'weak' || statusKey === 'decision'
+        || statusKey === 'unchecked' || statusKey === 'other';
+    }
+
+    function mergeWorkStateOntoFindings(rows) {
+      const map = getWorkStateMap();
+      return rows.map((r) => {
+        const id = r.findingId || '';
+        const st = (id && map[id]) || null;
+        const progress = st?.progress || 'none';
+        const note = st?.note || '';
+        const workedAt = st?.worked_at || null;
+        const clearedAt = st?.cleared_at || null;
+        const conflictDone = progress === 'done' && integrityAutoStillOpen(r.statusKey);
+        // Reappeared: had been cleared (finding gone) or had state while returning under open work
+        const reappeared = !!clearedAt && progress !== 'none';
+        return {
+          ...r,
+          workProgress: progress,
+          workNote: note,
+          workedAt,
+          conflictDone,
+          reappeared: !!reappeared && progress !== 'none'
+        };
+      });
+    }
+
+    function integrityWorkStateBaseUrl() {
+      return typeof window.apiUrl === 'function'
+        ? window.apiUrl('/api/aigeo/config-integrity-finding-state')
+        : '/api/aigeo/config-integrity-finding-state';
+    }
+
+    function integrityPropertyUrl() {
+      return document.getElementById('propertyUrl')?.value
+        || localStorage.getItem('gsc_property_url')
+        || 'https://www.alanranger.com';
+    }
+
+    async function loadConfigIntegrityWorkState() {
+      try {
+        const base = integrityWorkStateBaseUrl();
+        const propertyUrl = integrityPropertyUrl();
+        const resp = await fetch(base + '?propertyUrl=' + encodeURIComponent(propertyUrl) + '&_=' + Date.now());
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || String(json?.status || '').toLowerCase() !== 'ok') return null;
+        const map = {};
+        for (const row of (json.results || [])) {
+          if (row.finding_key) map[row.finding_key] = row;
+        }
+        window.__configIntegrityWorkState = map;
+        if (window.__configIntegrityLatest) renderConfigIntegrityPanel(window.__configIntegrityLatest);
+        return map;
+      } catch (e) {
+        console.warn('[config-integrity] work state load failed', e);
+        return null;
+      }
+    }
+
+    async function syncConfigIntegrityWorkActive(ids) {
+      try {
+        const resp = await fetch(integrityWorkStateBaseUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            propertyUrl: integrityPropertyUrl(),
+            action: 'sync_active',
+            activeKeys: ids
+          })
+        });
+        await resp.json().catch(() => ({}));
+      } catch (e) {
+        console.warn('[config-integrity] sync_active failed', e);
+      }
+    }
+
+    async function saveConfigIntegrityWorkState(findingKey, progress, note, btn) {
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '…';
+      }
+      try {
+        const resp = await fetch(integrityWorkStateBaseUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            propertyUrl: integrityPropertyUrl(),
+            findingKey,
+            progress,
+            note
+          })
+        });
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || String(json?.status || '').toLowerCase() !== 'ok') {
+          throw new Error(json?.message || ('HTTP ' + resp.status));
+        }
+        const map = { ...(window.__configIntegrityWorkState || {}) };
+        for (const row of (json.results || [])) {
+          if (row.finding_key) map[row.finding_key] = row;
+        }
+        window.__configIntegrityWorkState = map;
+        if (window.__configIntegrityLatest) renderConfigIntegrityPanel(window.__configIntegrityLatest);
+      } catch (err) {
+        alert('Save failed: ' + (err?.message || err));
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Save';
+        }
+      }
     }
 
     function compareIntegrityRows(a, b, sortKey) {
@@ -33293,6 +33439,13 @@
       if (f.status !== 'all') list = list.filter((r) => r.statusKey === f.status);
       if (f.stream !== 'all') list = list.filter((r) => r.stream === f.stream);
       if (f.check !== 'all') list = list.filter((r) => String(r.check) === String(f.check));
+      // Default: hide done (unless contradicted by open auto status) and hide parked
+      list = list.filter((r) => {
+        const prog = r.workProgress || 'none';
+        if (prog === 'parked' && !f.showParked) return false;
+        if (prog === 'done' && !r.conflictDone && !f.showDone) return false;
+        return true;
+      });
       list.sort((a, b) => {
         if (a.statusSort !== b.statusSort) return a.statusSort - b.statusSort;
         return compareIntegrityRows(a, b, f.sort);
@@ -33322,14 +33475,14 @@
         alert('No findings to export yet. Run the check first.');
         return;
       }
-      const rows = filterAndSortIntegrityFindings(mergePageAuditOntoFindings(assignIntegrityFindingIds(findings.map(normalizeIntegrityFinding))));
+      const rows = filterAndSortIntegrityFindings(mergeWorkStateOntoFindings(mergePageAuditOntoFindings(assignIntegrityFindingIds(findings.map(normalizeIntegrityFinding)))));
       const esc = (v) => {
         const t = String(v ?? '');
         return /["\n,]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
       };
       const header = [
         'id', 'status', 'stream', 'check', 'keyword', 'search_volume', 'clicks', 'impressions',
-        'ranks_now_url', 'should_be_url', 'anchor_text', 'link_to_url', 'target_ok', 'checked_at', 'action'
+        'ranks_now_url', 'should_be_url', 'anchor_text', 'link_to_url', 'target_ok', 'checked_at', 'progress', 'note', 'worked_at', 'action'
       ];
       const lines = [header.join(',')];
       for (const r of rows) {
@@ -33348,6 +33501,9 @@
           esc(r.linkToUrl || pathToSiteUrl(r.shouldBeUrl) || ''),
           esc(r.targetOk == null ? '' : (r.targetOk ? 'yes' : 'no')),
           esc(r.checkedAt || ''),
+          esc(r.workProgress || 'none'),
+          esc(r.workNote || ''),
+          esc(r.workedAt || ''),
           esc(r.suggested_action ?? '')
         ].join(','));
       }
@@ -33380,7 +33536,7 @@
         return;
       }
 
-      const normalized = mergePageAuditOntoFindings(assignIntegrityFindingIds(findings.map(normalizeIntegrityFinding)));
+      const normalized = mergeWorkStateOntoFindings(mergePageAuditOntoFindings(assignIntegrityFindingIds(findings.map(normalizeIntegrityFinding))));
       const filters = getIntegrityFilterState();
       const filtered = filterAndSortIntegrityFindings(normalized);
       const groups = groupIntegrityByStatus(filtered);
@@ -33396,7 +33552,7 @@
         '<li><strong>Check 1–6</strong> — integrity suite (1/4/6 structural red; 2/3/5 advisory amber). Check 3 = Google ranks a different URL than locked target.</li>' +
         '<li><strong>Status</strong> — Decision needed from action text; link Fix / weak / awaiting from <em>live page audit</em> (Re-check pages). Until audited: Not page-checked (no shipped guess).</li>' +
         '<li><strong>Stream</strong> — Hub / Swap / Blog / Config work grouping (not a dashboard panel).</li>' +
-        '<li><strong>ID</strong> — stable short id (CANN-xxxx check 3; CFG-xxxx other) from keyword+assigned path so the issue keeps the same code across runs.</li><li><strong>Lifecycle</strong> — rows recompute each run and clear when data changes. No mark-done.</li>' +
+        '<li><strong>ID</strong> — stable short id (CANN-xxxx check 3; CFG-xxxx other) from keyword+assigned path so the issue keeps the same code across runs.</li><li><strong>Lifecycle</strong> — rows recompute each run and clear when data changes. Page-audit status is auto; Progress/Note is your manual work layer (never overwrites auto status).</li>' +
         '</ul></details>';
 
       const streamOpts = streams.map((st) => '<option value="' + escapeHtml(st) + '">' + escapeHtml(st) + '</option>').join('');
@@ -33441,6 +33597,37 @@
           : '—';
         const anchorCell = escapeHtml(String(r.anchorText || r.subject || '—'));
         const linkToCell = integrityLinkCell(r.linkToUrl || r.shouldBeUrl);
+        const fid = String(r.findingId || '');
+        const prog = r.workProgress || 'none';
+        const noteVal = String(r.workNote || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        let workFlags = '';
+        if (r.conflictDone) {
+          workFlags += '<span class="ci-work-conflict" title="Manual done does not override page evidence">marked done — but page still shows ' +
+            escapeHtml(String(r.statusLabel || r.statusKey)) + '</span>';
+        }
+        if (r.reappeared && !r.conflictDone) {
+          workFlags += '<span class="ci-work-reappeared">reappeared since you last worked this</span>';
+        } else if (r.reappeared && r.conflictDone) {
+          workFlags += '<span class="ci-work-reappeared">reappeared / still open on page</span>';
+        }
+        const workedLabel = r.workedAt
+          ? ('worked ' + escapeHtml(String(r.workedAt).replace('T', ' ').slice(0, 16)) + 'Z')
+          : '';
+        const workCell =
+          '<div class="ci-work-controls" data-finding-id="' + escapeHtml(fid) + '">' +
+          '<div class="ci-work-row">' +
+          '<select class="ci-work-progress" aria-label="Progress">' +
+          '<option value="none"' + (prog === 'none' ? ' selected' : '') + '>none</option>' +
+          '<option value="in_progress"' + (prog === 'in_progress' ? ' selected' : '') + '>in progress</option>' +
+          '<option value="done"' + (prog === 'done' ? ' selected' : '') + '>done</option>' +
+          '<option value="parked"' + (prog === 'parked' ? ' selected' : '') + '>parked</option>' +
+          '</select>' +
+          '<button type="button" class="ci-work-save">Save</button>' +
+          '</div>' +
+          '<input type="text" class="ci-work-note" maxlength="500" placeholder="Note" value="' + noteVal + '">' +
+          (workedLabel ? '<div class="ci-work-meta">' + workedLabel + '</div>' : '') +
+          workFlags +
+          '</div>';
         return (
           '<tr>' +
           '<td class="ci-finding-id">' + escapeHtml(String(r.findingId || '—')) + '</td>' +
@@ -33456,6 +33643,7 @@
           '<td><code style="font-size:0.75rem;">' + anchorCell + '</code></td>' +
           '<td class="ci-url">' + linkToCell + '</td>' +
           '<td>' + checkedCell + '</td>' +
+          '<td class="ci-work-cell">' + workCell + '</td>' +
           '<td class="ci-action" title="' + meaningTitle + '">' + escapeHtml(String(r.suggested_action || '—')) + '</td>' +
           '</tr>'
         );
@@ -33464,12 +33652,12 @@
       const groupsHtml = groups.length
         ? groups.map((g) => (
           '<tbody class="ci-group ci-group-' + String(g.key || 'other') + '">' +
-          '<tr class="ci-group-head"><td colspan="14">' + escapeHtml(g.label) +
+          '<tr class="ci-group-head"><td colspan="15">' + escapeHtml(g.label) +
           ' <span class="ci-group-count">(' + g.rows.length + ')</span></td></tr>' +
           g.rows.map(renderRow).join('') +
           '</tbody>'
         )).join('')
-        : '<tbody><tr><td colspan="14" class="ci-muted">No rows match filters.</td></tr></tbody>';
+        : '<tbody><tr><td colspan="15" class="ci-muted">No rows match filters.</td></tr></tbody>';
 
       panel.innerHTML =
         legendHtml +
@@ -33489,6 +33677,7 @@
         '<th title="Exact text to hyperlink on the from-page">Anchor text</th>' +
         '<th title="Destination URL for that anchor">Link to</th>' +
         '<th style="width:6rem;">Checked</th>' +
+        '<th style="width:12rem;" title="Your manual progress (independent of page-audit status)">Work / note</th>' +
         '<th>Action</th>' +
         '</tr></thead>' +
         groupsHtml +
@@ -33507,6 +33696,10 @@
       apply('ci-filter-stream', filters.stream);
       apply('ci-filter-check', filters.check);
       apply('ci-sort', filters.sort);
+      const sd = document.getElementById('ci-filter-show-done');
+      const sp = document.getElementById('ci-filter-show-parked');
+      if (sd) sd.checked = !!filters.showDone;
+      if (sp) sp.checked = !!filters.showParked;
 
       const rebind = () => {
         if (window.__configIntegrityLatest) renderConfigIntegrityPanel(window.__configIntegrityLatest);
@@ -33515,6 +33708,23 @@
         const el = document.getElementById(id);
         if (el) el.onchange = rebind;
       });
+      if (sd) sd.onchange = rebind;
+      if (sp) sp.onchange = rebind;
+
+      panel.querySelectorAll('.ci-work-save').forEach((btn) => {
+        btn.onclick = () => {
+          const wrap = btn.closest('.ci-work-controls');
+          if (!wrap) return;
+          const id = wrap.getAttribute('data-finding-id');
+          const progress = wrap.querySelector('.ci-work-progress')?.value || 'none';
+          const note = wrap.querySelector('.ci-work-note')?.value || '';
+          void saveConfigIntegrityWorkState(id, progress, note, btn);
+        };
+      });
+
+      // Sync active finding ids so reappear/cleared_at tracks correctly (fire-and-forget)
+      const activeIds = normalized.map((r) => r.findingId).filter(Boolean);
+      void syncConfigIntegrityWorkActive(activeIds);
     }
 
 
@@ -34258,7 +34468,7 @@
         info.textContent = `${rows.length}/${implExtractabilityTableState.rows.length} rows shown`;
       }
       if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="14" class="ranking-table-empty">No rows match current filters.</td></tr>';
+        body.innerHTML = '<tr><td colspan="15" class="ranking-table-empty">No rows match current filters.</td></tr>';
         return;
       }
       body.innerHTML = rows.map((row) => `
@@ -34425,7 +34635,7 @@
                 </tr>
               </thead>
               <tbody id="impl-extract-table-body">
-                <tr><td colspan="14" class="ranking-table-empty">Loading rows...</td></tr>
+                <tr><td colspan="15" class="ranking-table-empty">Loading rows...</td></tr>
               </tbody>
             </table>
             <div id="impl-extract-table-info" style="margin-top: 0.5rem; font-size: 0.85rem; opacity: 0.85;">0 rows shown</div>
@@ -76344,7 +76554,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       if (!summary || !Array.isArray(combinedRows) || combinedRows.length === 0) {
         debugLog(`⚠ renderRankingAiTab: No data - summary=${!!summary}, combinedRows is array=${Array.isArray(combinedRows)}, length=${combinedRows?.length || 0}`, 'warn');
         // Show empty state message
-        tbody.innerHTML = '<tr><td colspan="14" class="ranking-table-empty">Click "Run ranking &amp; AI check" to load data.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="15" class="ranking-table-empty">Click "Run ranking &amp; AI check" to load data.</td></tr>';
         const paginationControls = document.getElementById("ranking-pagination-controls");
         if (paginationControls) paginationControls.style.display = "none";
         if (typeof updateMetricPills === 'function') updateMetricPills([], []);

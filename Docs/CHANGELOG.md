@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-08-10] - Keyword & config: Option B per-row working state
+
+**Change:** Manual **progress / note / worked_at** layer keyed by stable CANN-/CFG- ids (`config_integrity_finding_state`). Independent of page-audit status. Default view hides **done** (unless auto status still open → conflict badge) and hides **parked** unless toggled. CSV adds `progress, note, worked_at`. No chip/score change.
+
+**Files:** `api/aigeo/config-integrity-finding-state.js`, `audit-dashboard.html`
+
+---
+
 ## [2026-08-10] - Keyword & config: prove fix by page audit
 
 **Change:** On-demand **Re-check pages** audits each check-3 from-page for an exact-path link + keyword-in-anchor to the locked to-page. Status becomes evidence-based (`Link in place — awaiting recrawl` / `Link present, weak anchor` / `Fix needed` / `Not page-checked`). Adds Target OK?, Anchor text, Link to, Checked columns + CSV fields. Cache table `config_integrity_page_audit`. No integrity scoring changes.
