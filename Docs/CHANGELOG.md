@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-08-10] - Keyword & config: prove fix by page audit
+
+**Change:** On-demand **Re-check pages** audits each check-3 from-page for an exact-path link + keyword-in-anchor to the locked to-page. Status becomes evidence-based (`Link in place — awaiting recrawl` / `Link present, weak anchor` / `Fix needed` / `Not page-checked`). Adds Target OK?, Anchor text, Link to, Checked columns + CSV fields. Cache table `config_integrity_page_audit`. No integrity scoring changes.
+
+**Files:** `lib/configIntegrity/pageLinkAudit.mjs`, `api/aigeo/config-integrity-page-audit.js`, `audit-dashboard.html`
+
+---
+
 ## [2026-07-18] - Site AI Health Option A layout
 
 **Change:** Right column detail cards now pair 1:1 with left Monopoly metrics (Surface / Top / Brand) in matching identity colours. AI Summary Likelihood moved below as a separate teal composite section with explainer “not the dial score.” Dial centre score + label use Surface brown.
