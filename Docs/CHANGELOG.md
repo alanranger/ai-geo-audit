@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-08-10] - Keyword & config: recently cleared wins + awaiting-recrawl days
+
+**Change:** **Recently cleared** section shows genuine data-driven wins (present in prior `config_integrity_runs`, absent now; 30-day window). **Awaiting recrawl N days** from `first_link_detected_at` (set once on first present page-audit; not overwritten). Escalation badge after 21 days. CSV: `first_link_detected_at`, `awaiting_recrawl_days`. No scoring/chip change.
+
+**Files:** `lib/configIntegrity/findingIds.mjs`, `api/aigeo/config-integrity-clears.js`, `api/aigeo/config-integrity-page-audit.js`, `audit-dashboard.html`
+
+---
+
 ## [2026-08-10] - Keyword & config: Option B per-row working state
 
 **Change:** Manual **progress / note / worked_at** layer keyed by stable CANN-/CFG- ids (`config_integrity_finding_state`). Independent of page-audit status. Default view hides **done** (unless auto status still open → conflict badge) and hides **parked** unless toggled. CSV adds `progress, note, worked_at`. No chip/score change.

@@ -159,7 +159,7 @@ export default async function handler(req, res) {
     });
 
     const checkedAt = new Date().toISOString();
-    const rows = [];
+    const prepared = [];
     for (const it of items) {
       const findingKey = String(it.findingKey || it.finding_key || '').trim();
       const keyword = String(it.keyword || it.subject || '').trim();
@@ -180,7 +180,7 @@ export default async function handler(req, res) {
         error: 'not_fetched'
       };
 
-      const row = {
+      prepared.push({
         finding_key: findingKey,
         property_url: propertyUrl,
         keyword,
@@ -203,9 +203,35 @@ export default async function handler(req, res) {
           strongAnchor: scan.strongAnchor,
           targetError: target.error || null
         }
-      };
-      rows.push(row);
+      });
     }
+
+    // Preserve first_link_detected_at: set once when first observed present; never overwrite.
+    const keys = prepared.map((r) => r.finding_key);
+    const priorFirst = new Map();
+    if (keys.length) {
+      const { data: prior, error: pErr } = await sb
+        .from('config_integrity_page_audit')
+        .select('finding_key, first_link_detected_at, link_status')
+        .in('finding_key', keys);
+      if (pErr) throw pErr;
+      for (const p of prior || []) {
+        priorFirst.set(p.finding_key, p);
+      }
+    }
+
+    const rows = prepared.map((row) => {
+      const prev = priorFirst.get(row.finding_key);
+      const prevFirst = prev?.first_link_detected_at || null;
+      let firstLink = prevFirst;
+      if (row.link_status === 'present' && !firstLink) {
+        firstLink = checkedAt;
+      }
+      return {
+        ...row,
+        first_link_detected_at: firstLink
+      };
+    });
 
     if (rows.length) {
       const { error } = await sb.from('config_integrity_page_audit').upsert(rows, {

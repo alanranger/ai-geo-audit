@@ -33222,6 +33222,18 @@
       return { key: 'unchecked', label: 'Not page-checked', sort: 4 };
     }
 
+    function awaitingDaysHtml(r) {
+      if (r.awaitingDays == null || r.statusKey !== 'awaiting') return '';
+      const n = Number(r.awaitingDays);
+      const stale = n > 21;
+      const cls = 'ci-awaiting-days' + (stale ? ' is-stale' : '');
+      let html = '<div class="' + cls + '">awaiting recrawl ' + n + ' day' + (n === 1 ? '' : 's') + '</div>';
+      if (stale) {
+        html += '<div class="ci-awaiting-days is-stale" title="Link proven on page but Google has not re-ranked yet">taking a while — consider requesting indexing in GSC</div>';
+      }
+      return html;
+    }
+
     function getPageAuditMap() {
       return window.__configIntegrityPageAudit && typeof window.__configIntegrityPageAudit === 'object'
         ? window.__configIntegrityPageAudit
@@ -33275,6 +33287,12 @@
         }
         const withAudit = { ...r, pageAudit: audit };
         const st = deriveIntegrityStatus(withAudit);
+        const firstLink = audit.first_link_detected_at || null;
+        let awaitingDays = null;
+        if (firstLink && st.key === 'awaiting') {
+          const ms = Date.now() - Date.parse(String(firstLink));
+          if (Number.isFinite(ms) && ms >= 0) awaitingDays = Math.floor(ms / 86400000);
+        }
         return {
           ...withAudit,
           statusKey: st.key,
@@ -33285,7 +33303,9 @@
           targetFinalPath: audit.target_final_path,
           checkedAt: audit.checked_at,
           sampleAnchor: audit.sample_anchor,
-          linkStatus: audit.link_status
+          linkStatus: audit.link_status,
+          firstLinkDetectedAt: firstLink,
+          awaitingDays
         };
       });
     }
@@ -33513,7 +33533,7 @@
       };
       const header = [
         'id', 'status', 'stream', 'check', 'keyword', 'search_volume', 'clicks', 'impressions',
-        'ranks_now_url', 'should_be_url', 'anchor_text', 'link_to_url', 'target_ok', 'checked_at', 'progress', 'note', 'worked_at', 'action'
+        'ranks_now_url', 'should_be_url', 'anchor_text', 'link_to_url', 'target_ok', 'checked_at', 'first_link_detected_at', 'awaiting_recrawl_days', 'progress', 'note', 'worked_at', 'action'
       ];
       const lines = [header.join(',')];
       for (const r of rows) {
@@ -33532,6 +33552,8 @@
           esc(r.linkToUrl || pathToSiteUrl(r.shouldBeUrl) || ''),
           esc(r.targetOk == null ? '' : (r.targetOk ? 'yes' : 'no')),
           esc(r.checkedAt || ''),
+          esc(r.firstLinkDetectedAt || ''),
+          esc(r.awaitingDays == null ? '' : r.awaitingDays),
           esc(r.workProgress || 'none'),
           esc(r.workNote || ''),
           esc(r.workedAt || ''),
@@ -33662,7 +33684,7 @@
         return (
           '<tr>' +
           '<td class="ci-finding-id">' + escapeHtml(String(r.findingId || '—')) + '</td>' +
-          '<td>' + integrityStatusPill(r.statusKey, r.statusLabel) + '</td>' +
+          '<td>' + integrityStatusPill(r.statusKey, r.statusLabel) + awaitingDaysHtml(r) + '</td>' +
           '<td>' + streamCell + '</td>' +
           '<td>' + Number(r.check || 0) + '</td>' +
           '<td>' + escapeHtml(String(r.subject || '—')) + '</td>' +
@@ -33690,9 +33712,11 @@
         )).join('')
         : '<tbody><tr><td colspan="15" class="ci-muted">No rows match filters.</td></tr></tbody>';
 
+      const clearsHtml = renderIntegrityClearsHtml();
       panel.innerHTML =
         legendHtml +
         controlsHtml +
+        clearsHtml +
         '<div class="ci-table-wrap"><table class="config-integrity-findings-table">' +
         '<thead><tr>' +
         '<th style="width:5.5rem;" title="Stable finding id (CANN-/CFG-)">ID</th>' +
@@ -33761,6 +33785,70 @@
 
 
                 
+    
+    async function loadConfigIntegrityClears() {
+      try {
+        const propertyUrl = document.getElementById('propertyUrl')?.value
+          || localStorage.getItem('gsc_property_url')
+          || 'https://www.alanranger.com';
+        const base = typeof window.apiUrl === 'function'
+          ? window.apiUrl('/api/aigeo/config-integrity-clears')
+          : '/api/aigeo/config-integrity-clears';
+        const resp = await fetch(base + '?propertyUrl=' + encodeURIComponent(propertyUrl) + '&_=' + Date.now());
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || String(json?.status || '').toLowerCase() !== 'ok') return null;
+        window.__configIntegrityClears = {
+          results: json.results || [],
+          meta: json.meta || {}
+        };
+        if (window.__configIntegrityLatest) renderConfigIntegrityPanel(window.__configIntegrityLatest);
+        return window.__configIntegrityClears;
+      } catch (e) {
+        console.warn('[config-integrity] clears load failed', e);
+        return null;
+      }
+    }
+
+    function renderIntegrityClearsHtml() {
+      const pack = window.__configIntegrityClears;
+      const rows = Array.isArray(pack?.results) ? pack.results : [];
+      const meta = pack?.meta || {};
+      let body;
+      if (!rows.length) {
+        body = '<p class="ci-clears-empty">No genuine wins in the last ' +
+          (meta.windowDays || 30) + ' days (finding self-cleared from integrity data — not mark-done).</p>';
+      } else {
+        body =
+          '<table><thead><tr>' +
+          '<th>ID</th><th>Keyword</th><th>From → To</th><th>Cleared</th>' +
+          '</tr></thead><tbody>' +
+          rows.map((r) => {
+            const cleared = String(r.cleared_at || '').replace('T', ' ').slice(0, 16);
+            const from = escapeHtml(String(r.from_path || '—'));
+            const to = escapeHtml(String(r.to_path || '—'));
+            return (
+              '<tr>' +
+              '<td class="ci-finding-id">' + escapeHtml(String(r.findingId || '—')) + '</td>' +
+              '<td>' + escapeHtml(String(r.keyword || '—')) + '</td>' +
+              '<td class="ci-url"><span style="font-size:0.75rem;">' + from + ' → ' + to + '</span></td>' +
+              '<td>' + escapeHtml(cleared || '—') + 'Z</td>' +
+              '</tr>'
+            );
+          }).join('') +
+          '</tbody></table>';
+      }
+      return (
+        '<div class="ci-clears-box">' +
+        '<h4>Recently cleared (wins) — ' + rows.length + '</h4>' +
+        '<p style="margin:0 0 0.4rem; font-size:0.75rem; color:#166534;">' +
+        'Data-driven only: present in a prior integrity run, absent now. Mark-done does not create a win. Window: ' +
+        (meta.windowDays || 30) + ' days.' +
+        '</p>' +
+        body +
+        '</div>'
+      );
+    }
+
     async function loadConfigIntegrityPageAuditCache() {
       try {
         const propertyUrl = document.getElementById('propertyUrl')?.value
@@ -33965,6 +34053,8 @@
         auditBtn.addEventListener('click', () => void runConfigIntegrityPageAudit());
       }
       void loadConfigIntegrityPageAuditCache();
+      void loadConfigIntegrityWorkState();
+      void loadConfigIntegrityClears();
       void refreshConfigIntegrityUI();
     })();
     async function fetchAndRenderMentionsSummary(cachedPayload = null) {
