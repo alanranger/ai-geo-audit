@@ -33333,10 +33333,8 @@
       if (check && check !== 3) {
         return { key: 'other', label: 'Other/config', sort: 5 };
       }
-      if (/decision needed/i.test(action)) {
-        return { key: 'decision', label: 'Decision needed', sort: 0 };
-      }
-      // Prefer live page-audit evidence (from Re-check pages) over action-text guesses.
+      // Page-audit evidence wins over stale suggested_action templates
+      // (template often still says "Decision needed" after a recorded decision).
       const linkStatus = String(finding?.pageAudit?.link_status || finding?.linkStatus || '');
       if (linkStatus === 'present') {
         return { key: 'awaiting', label: 'Link in place — awaiting recrawl', sort: 1 };
@@ -33349,6 +33347,9 @@
       }
       if (linkStatus === 'error') {
         return { key: 'unchecked', label: 'Page fetch error', sort: 4 };
+      }
+      if (/decision needed/i.test(action)) {
+        return { key: 'decision', label: 'Decision needed', sort: 0 };
       }
       // Not yet audited → do not guess shipped vs not.
       return { key: 'unchecked', label: 'Not page-checked', sort: 4 };
@@ -33512,7 +33513,7 @@
      * keep_specialist keeps "Strengthen" only until page-audit proves a strong
      * anchor (auto awaiting/present) — then show Link in place / awaiting recrawl.
      */
-    function statusFromWorkDecision(autoKey, progress, decisionType) {
+    function statusFromWorkDecision(autoKey, progress, decisionType, linkStatus) {
       if (progress === 'parked' || decisionType === 'parked') {
         return { key: 'parked', label: 'Parked', sort: 6 };
       }
@@ -33521,8 +33522,9 @@
         return { key: 'awaiting_accept', label: 'Awaiting recrawl', sort: 1 };
       }
       if (decisionType === 'keep_specialist') {
-        // Page audit already proved exact-path + keyword anchor (derive → awaiting).
-        if (autoKey === 'awaiting') {
+        // Proven strong link on preferred→assigned page → awaiting recrawl (not still Strengthen).
+        const linkOk = linkStatus === 'present' || autoKey === 'awaiting';
+        if (linkOk) {
           return { key: 'awaiting', label: 'Link in place — awaiting recrawl', sort: 1 };
         }
         return { key: 'strengthen', label: 'Strengthen — on-page/anchor', sort: 1 };
@@ -33548,7 +33550,7 @@
           linkSt === 'absent' || linkSt === 'weak' || autoStatusKey === 'fix'
         );
         const reappeared = !!clearedAt && progress !== 'none';
-        const ov = statusFromWorkDecision(autoStatusKey, progress, decisionType);
+        const ov = statusFromWorkDecision(autoStatusKey, progress, decisionType, linkSt);
         return {
           ...r,
           workProgress: progress,
