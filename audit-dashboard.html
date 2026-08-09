@@ -33476,7 +33476,7 @@
         status: document.getElementById('ci-filter-status')?.value || 'all',
         stream: document.getElementById('ci-filter-stream')?.value || 'all',
         check: document.getElementById('ci-filter-check')?.value || 'all',
-        sort: document.getElementById('ci-sort')?.value || 'volume_desc',
+        sort: document.getElementById('ci-sort')?.value || 'from_page',
         showDone: !!document.getElementById('ci-filter-show-done')?.checked,
         showParked: !!document.getElementById('ci-filter-show-parked')?.checked
       };
@@ -33691,9 +33691,15 @@
       }
     }
 
-    function compareIntegrityRows(a, b, sortKey) {
-      const vol = (r) => (r.volume == null ? -1 : r.volume);
-      const clk = (r) => (r.clicks == null ? -1 : r.clicks);
+    function integrityFromPath(r) {
+      return String(r?.ranksNowUrl || r?.preferred_path || r?.from_path || '')
+        .trim()
+        .toLowerCase();
+    }
+
+    function compareIntegrityRowsWithinPage(a, b, sortKey) {
+      const vol = (r) => (r.volume == null ? -1 : Number(r.volume) || 0);
+      const clk = (r) => (r.clicks == null ? -1 : Number(r.clicks) || 0);
       if (sortKey === 'volume_asc') return vol(a) - vol(b);
       if (sortKey === 'clicks_desc') return clk(b) - clk(a);
       if (sortKey === 'clicks_asc') return clk(a) - clk(b);
@@ -33703,10 +33709,28 @@
       if (sortKey === 'keyword') {
         return String(a.subject || '').localeCompare(String(b.subject || ''));
       }
-      if (a.volume == null && b.volume == null) return 0;
+      // volume_desc + from_page secondary
+      if (a.volume == null && b.volume == null) {
+        return String(a.subject || '').localeCompare(String(b.subject || ''));
+      }
       if (a.volume == null) return 1;
       if (b.volume == null) return -1;
-      return b.volume - a.volume;
+      if (b.volume !== a.volume) return b.volume - a.volume;
+      return String(a.subject || '').localeCompare(String(b.subject || ''));
+    }
+
+    /** Within a status bucket: same "Ranks now (from)" page stuck together; secondary sort applies inside the pack. */
+    function compareIntegrityRows(a, b, sortKey, groupVolMap) {
+      const fa = integrityFromPath(a);
+      const fb = integrityFromPath(b);
+      if (fa !== fb) {
+        // Prefer higher-volume from-pages first (pack work order), then path A–Z
+        const va = groupVolMap ? (groupVolMap.get(fa) || 0) : 0;
+        const vb = groupVolMap ? (groupVolMap.get(fb) || 0) : 0;
+        if (va !== vb) return vb - va;
+        return fa.localeCompare(fb);
+      }
+      return compareIntegrityRowsWithinPage(a, b, sortKey);
     }
 
     function filterAndSortIntegrityFindings(rows) {
@@ -33722,9 +33746,15 @@
         if (prog === 'done' && !r.conflictDone && !f.showDone) return false;
         return true;
       });
+      const groupVol = new Map();
+      for (const r of list) {
+        const k = integrityFromPath(r);
+        const v = r.volume == null ? 0 : Number(r.volume) || 0;
+        if (!groupVol.has(k) || v > groupVol.get(k)) groupVol.set(k, v);
+      }
       list.sort((a, b) => {
         if (a.statusSort !== b.statusSort) return a.statusSort - b.statusSort;
-        return compareIntegrityRows(a, b, f.sort);
+        return compareIntegrityRows(a, b, f.sort, groupVol);
       });
       return list;
     }
@@ -33859,13 +33889,14 @@
         '</select></label>' +
         '<label>Stream <select id="ci-filter-stream"><option value="all">All</option>' + streamOpts + '</select></label>' +
         '<label>Check <select id="ci-filter-check"><option value="all">All</option>' + checkOpts + '</select></label>' +
-        '<label>Sort <select id="ci-sort">' +
-        '<option value="volume_desc">Volume ↓</option>' +
-        '<option value="volume_asc">Volume ↑</option>' +
-        '<option value="clicks_desc">Clicks ↓</option>' +
-        '<option value="clicks_asc">Clicks ↑</option>' +
-        '<option value="stream">Stream A–Z</option>' +
-        '<option value="keyword">Keyword A–Z</option>' +
+        '<label>Sort <select id="ci-sort" title="Rows with the same Ranks now (from) page stay together so you can fix one page once">' +
+        '<option value="from_page">From-page pack (default)</option>' +
+        '<option value="volume_desc">Volume ↓ (within page)</option>' +
+        '<option value="volume_asc">Volume ↑ (within page)</option>' +
+        '<option value="clicks_desc">Clicks ↓ (within page)</option>' +
+        '<option value="clicks_asc">Clicks ↑ (within page)</option>' +
+        '<option value="stream">Stream A–Z (within page)</option>' +
+        '<option value="keyword">Keyword A–Z (within page)</option>' +
         '</select></label>' +
         '<span class="ci-filter-count">Showing ' + filtered.length + ' of ' + normalized.length + '</span>' +
         '</div>';
