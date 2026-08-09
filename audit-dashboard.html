@@ -8039,21 +8039,21 @@
         <div><strong>Schema audit:</strong> <span id="revSyncSchema" title="Latest audit_results row with schema_pages_detail populated">Not yet run</span></div>
         <div><strong>CSV / tiers:</strong> <span id="revSyncCsvTier" title="Last csv_metadata import_session (product tier segmentation map)">Not yet run</span></div>
         <div style="border-left:1px solid #cbd5e1; padding-left:1rem; display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
-          <button type="button" id="config-integrity-chip" class="config-integrity-chip" data-rag="green" title="Config integrity — click for findings">Config integrity: loading…</button>
-          <button type="button" id="config-integrity-run-btn" class="btn" style="padding:0.2rem 0.55rem; font-size:0.78rem;">Run integrity check</button>
+          <button type="button" id="config-integrity-chip" class="config-integrity-chip" data-rag="green" title="Keyword & config integrity — click for findings">Config integrity: loading…</button>
+          <button type="button" id="config-integrity-run-btn" class="btn" style="padding:0.2rem 0.55rem; font-size:0.78rem;">Run keyword & config check</button>
         </div>
       </div>
-      <div id="config-integrity-panel" role="region" aria-label="Config integrity findings">
+      <div id="config-integrity-panel" role="region" aria-label="Keyword and config integrity findings">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; flex-wrap:wrap;">
-          <strong>Config integrity findings</strong>
+          <strong>Keyword &amp; config findings</strong>
           <span id="config-integrity-panel-meta" style="font-size:0.82rem; color:#666;">—</span>
         </div>
         <div id="config-integrity-panel-body"><p style="margin:0.5rem 0 0; color:#666;">No run yet.</p></div>
       </div>
-      <details id="ws3-recrawl-watch-panel" role="region" aria-label="WS3 recrawl watch">
+      <details id="ws3-recrawl-watch-panel" role="region" aria-label="Index arming watch (12 URLs)">
         <summary class="ws3-recrawl-watch-summary">
-          <strong>WS3 recrawl watch</strong>
-          <span id="ws3-recrawl-watch-meta" style="font-size:0.82rem; color:#666;">Alan bulk indexing 2026-07-19 · 12 URLs</span>
+          <strong>Index arming watch (12 URLs)</strong>
+          <span id="ws3-recrawl-watch-meta" style="font-size:0.82rem; color:#666;">GSC URL Inspection · fixed 12-path arming list (19 Jul 2026) · not auto-fed from findings table</span>
         </summary>
         <div id="ws3-recrawl-watch-body"><p style="margin:0.5rem 0 0; color:#666;">Loading GSC inspection cache…</p></div>
       </details>
@@ -32990,8 +32990,8 @@
         : 'green';
       chip.dataset.rag = rag;
       const label = findingCount > 0
-        ? `Config integrity: ${rag.toUpperCase()} (${findingCount})`
-        : `Config integrity: GREEN (0)`;
+        ? `Keyword & config: ${rag.toUpperCase()} (${findingCount})`
+        : `Keyword & config: GREEN (0)`;
       chip.textContent = label;
     }
 
@@ -33009,7 +33009,7 @@
           : 'No persisted run yet';
       }
       if (!findings.length) {
-        panel.innerHTML = '<p style="margin:0.5rem 0 0; color:#059669;">No findings — config integrity GREEN.</p>';
+        panel.innerHTML = '<p style="margin:0.5rem 0 0; color:#059669;">No findings — keyword & config GREEN.</p>';
         return;
       }
       const renderRow = (f) => {
@@ -33098,7 +33098,7 @@
         renderConfigIntegrityChip('amber', 0);
         const panel = document.getElementById('config-integrity-panel-body');
         if (panel) {
-          panel.innerHTML = `<p style="margin:0.5rem 0 0; color:#b45309;">Could not load config integrity: ${escapeHtml(err?.message || 'Unknown error')}</p>`;
+          panel.innerHTML = `<p style="margin:0.5rem 0 0; color:#b45309;">Could not load keyword & config checks: ${escapeHtml(err?.message || 'Unknown error')}</p>`;
         }
         return null;
       }
@@ -33130,7 +33130,7 @@
           void refreshConfigIntegrityUI({ triggerRun: true, runSource: 'dashboard_manual' })
             .finally(() => {
               runBtn.disabled = false;
-              runBtn.textContent = 'Run integrity check';
+              runBtn.textContent = 'Run keyword & config check';
               if (panel) panel.classList.add('is-open');
             });
         });
@@ -33154,10 +33154,10 @@
       if (meta) {
         const autoStamp = formatWs3InspectStamp(payload?.lastAutoRefreshAt);
         const schedule = payload?.autoRefreshSchedule || 'Sun 23:00';
-        meta.textContent = `${payload?.label || 'WS3 recrawl watch'} · cached ${Number(summary.cached || 0)}/${Number(summary.total || rows.length)} · indexed ${Number(summary.indexedYes || 0)} · Last auto-refresh: ${autoStamp} (scheduled ${schedule})`;
+        meta.textContent = `${payload?.label || 'Index arming watch (12 URLs)'} · cached ${Number(summary.cached || 0)}/${Number(summary.total || rows.length)} · indexed ${Number(summary.indexedYes || 0)} · Last auto-refresh: ${autoStamp} (scheduled ${schedule})`;
       }
       if (!rows.length) {
-        panel.innerHTML = '<p style="margin:0.5rem 0 0; color:#666;">No watch URLs configured.</p>';
+        panel.innerHTML = '<p style="margin:0.5rem 0 0; color:#666;">No arming-watch URLs configured.</p>';
         return;
       }
       const renderStatus = (row) => {
@@ -33168,7 +33168,7 @@
       };
       const autoStale = payload?.autoRefreshStale === true;
       const staleNote = autoStale
-        ? `<p style="margin:0.35rem 0 0; font-size:0.78rem; color:#b45309;">Last auto-refresh is older than ${Number(payload?.autoRefreshStaleDays || 8)} days — check cron logs before Monday review.</p>`
+        ? `<p style="margin:0.35rem 0 0; font-size:0.78rem; color:#b45309;">Last auto-refresh is older than ${Number(payload?.autoRefreshStaleDays || 8)} days — check weekly GSC inspect cron before Monday review. This list is a fixed arming batch (config JSON), not the findings table.</p>`
         : '';
       panel.innerHTML = `
         <p style="margin:0.35rem 0 0; font-size:0.78rem; color:#666;">${escapeHtml(String(payload?.quotaNote || ''))}</p>
@@ -33223,7 +33223,7 @@
       void refreshWs3RecrawlWatchUI().catch((err) => {
         const panel = document.getElementById('ws3-recrawl-watch-body');
         if (panel) {
-          panel.innerHTML = `<p style="margin:0.5rem 0 0; color:#b45309;">Could not load WS3 recrawl watch: ${escapeHtml(err?.message || 'Unknown error')}</p>`;
+          panel.innerHTML = `<p style="margin:0.5rem 0 0; color:#b45309;">Could not load index arming watch: ${escapeHtml(err?.message || 'Unknown error')}</p>`;
         }
       });
     })();

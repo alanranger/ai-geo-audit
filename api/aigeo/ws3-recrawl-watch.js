@@ -26,7 +26,7 @@ const sendJson = (res, status, body) => {
 function loadWatchConfig() {
   const raw = JSON.parse(fs.readFileSync(WATCH_PATH, 'utf8'));
   return {
-    label: String(raw.label || 'WS3 recrawl watch'),
+    label: String(raw.label || 'Index arming watch (12 URLs)'),
     indexedRequestedAt: String(raw.indexedRequestedAt || ''),
     urls: Array.isArray(raw.urls) ? raw.urls : []
   };
