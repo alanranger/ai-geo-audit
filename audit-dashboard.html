@@ -16097,6 +16097,13 @@
     }
     #config-integrity-panel .ci-filter-count { color: #64748b; font-weight: 500; }
     #config-integrity-panel .ci-table-wrap { overflow-x: auto; margin-top: 0.25rem; }
+    #config-integrity-panel .ci-finding-id {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.72rem;
+      color: #64748b;
+      white-space: nowrap;
+      letter-spacing: 0.02em;
+    }
     #config-integrity-panel .ci-status-pill {
       display: inline-block;
       padding: 0.12rem 0.45rem;
@@ -33015,6 +33022,59 @@
       return map[key] || key;
     }
 
+    
+    function integrityNormKw(kw) {
+      return String(kw || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    }
+
+    function integrityHashHex(str) {
+      let h = 5381;
+      const t = String(str || '');
+      for (let i = 0; i < t.length; i++) {
+        h = ((h << 5) + h) + t.charCodeAt(i);
+        h |= 0;
+      }
+      return (h >>> 0).toString(16).padStart(8, '0');
+    }
+
+    function integrityFindingKey(f) {
+      const check = Number(f?.check || 0);
+      if (check === 3) {
+        const kw = integrityNormKw(f.subject);
+        const assigned = String(f.assigned_path || f.shouldBeUrl || '').trim().toLowerCase();
+        return '3|' + kw + '|' + assigned;
+      }
+      return [check, integrityNormKw(f.subject), String(f.detail || '').slice(0, 160)].join('|');
+    }
+
+    function assignIntegrityFindingIds(findings) {
+      const rows = findings.map((f) => {
+        const key = integrityFindingKey(f);
+        const hex = integrityHashHex(key);
+        const prefix = Number(f.check) === 3 ? 'CANN' : 'CFG';
+        return { f, key, hex, prefix };
+      });
+      let len = 4;
+      for (;;) {
+        const seen = new Map();
+        let collision = false;
+        for (const r of rows) {
+          const id = r.prefix + '-' + r.hex.slice(0, len);
+          if (seen.has(id) && seen.get(id) !== r.key) {
+            collision = true;
+            break;
+          }
+          seen.set(id, r.key);
+        }
+        if (!collision || len >= 8) {
+          return rows.map((r) => Object.assign({}, r.f, {
+            findingId: r.prefix + '-' + r.hex.slice(0, len)
+          }));
+        }
+        len += 1;
+      }
+    }
+
     function parseIntegrityAtStake(atStake) {
       const t = String(atStake || '');
       const vol = t.match(/([\d,]+)\s*\/?\s*mo(?:nth)?\s*search volume/i);
@@ -33163,18 +33223,19 @@
         alert('No findings to export yet. Run the check first.');
         return;
       }
-      const rows = filterAndSortIntegrityFindings(findings.map(normalizeIntegrityFinding));
+      const rows = filterAndSortIntegrityFindings(assignIntegrityFindingIds(findings.map(normalizeIntegrityFinding)));
       const esc = (v) => {
         const t = String(v ?? '');
         return /["\n,]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
       };
       const header = [
-        'status', 'stream', 'check', 'keyword', 'search_volume', 'clicks', 'impressions',
+        'id', 'status', 'stream', 'check', 'keyword', 'search_volume', 'clicks', 'impressions',
         'ranks_now_url', 'should_be_url', 'action'
       ];
       const lines = [header.join(',')];
       for (const r of rows) {
         lines.push([
+          esc(r.findingId || ''),
           esc(r.statusLabel),
           esc(r.stream),
           esc(r.check ?? ''),
@@ -33216,7 +33277,7 @@
         return;
       }
 
-      const normalized = findings.map(normalizeIntegrityFinding);
+      const normalized = assignIntegrityFindingIds(findings.map(normalizeIntegrityFinding));
       const filters = getIntegrityFilterState();
       const filtered = filterAndSortIntegrityFindings(normalized);
       const groups = groupIntegrityByStatus(filtered);
@@ -33232,7 +33293,7 @@
         '<li><strong>Check 1–6</strong> — integrity suite (1/4/6 structural red; 2/3/5 advisory amber). Check 3 = Google ranks a different URL than locked target.</li>' +
         '<li><strong>Status</strong> — derived from action text (no stored worklist): Decision needed · Awaiting recrawl · Fix needed · Other/config.</li>' +
         '<li><strong>Stream</strong> — Hub / Swap / Blog / Config work grouping (not a dashboard panel).</li>' +
-        '<li><strong>Lifecycle</strong> — rows recompute each run and clear when data changes. No mark-done.</li>' +
+        '<li><strong>ID</strong> — stable short id (CANN-xxxx check 3; CFG-xxxx other) from keyword+assigned path so the issue keeps the same code across runs.</li><li><strong>Lifecycle</strong> — rows recompute each run and clear when data changes. No mark-done.</li>' +
         '</ul></details>';
 
       const streamOpts = streams.map((st) => '<option value="' + escapeHtml(st) + '">' + escapeHtml(st) + '</option>').join('');
@@ -33267,6 +33328,7 @@
         const streamCell = r.stream ? ('<span class="ci-ws-tag">' + escapeHtml(r.stream) + '</span>') : '—';
         return (
           '<tr>' +
+          '<td class="ci-finding-id">' + escapeHtml(String(r.findingId || '—')) + '</td>' +
           '<td>' + integrityStatusPill(r.statusKey, r.statusLabel) + '</td>' +
           '<td>' + streamCell + '</td>' +
           '<td>' + Number(r.check || 0) + '</td>' +
@@ -33283,18 +33345,19 @@
       const groupsHtml = groups.length
         ? groups.map((g) => (
           '<tbody class="ci-group">' +
-          '<tr class="ci-group-head"><td colspan="9">' + escapeHtml(g.label) +
+          '<tr class="ci-group-head"><td colspan="10">' + escapeHtml(g.label) +
           ' <span class="ci-group-count">(' + g.rows.length + ')</span></td></tr>' +
           g.rows.map(renderRow).join('') +
           '</tbody>'
         )).join('')
-        : '<tbody><tr><td colspan="9" class="ci-muted">No rows match filters.</td></tr></tbody>';
+        : '<tbody><tr><td colspan="10" class="ci-muted">No rows match filters.</td></tr></tbody>';
 
       panel.innerHTML =
         legendHtml +
         controlsHtml +
         '<div class="ci-table-wrap"><table class="config-integrity-findings-table">' +
         '<thead><tr>' +
+        '<th style="width:5.5rem;" title="Stable finding id (CANN-/CFG-)">ID</th>' +
         '<th style="width:8rem;">Status</th>' +
         '<th style="width:4.5rem;">Stream</th>' +
         '<th style="width:3rem;">Check</th>' +
