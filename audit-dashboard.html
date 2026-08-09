@@ -8046,7 +8046,10 @@
       <div id="config-integrity-panel" role="region" aria-label="Keyword and config integrity findings">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; flex-wrap:wrap;">
           <strong>Keyword &amp; config findings</strong>
-          <span id="config-integrity-panel-meta" style="font-size:0.82rem; color:#666;">—</span>
+          <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+            <span id="config-integrity-panel-meta" style="font-size:0.82rem; color:#666;">—</span>
+            <button type="button" id="config-integrity-export-btn" class="btn" style="padding:0.2rem 0.55rem; font-size:0.78rem;" title="Download findings as CSV worklist">Export CSV</button>
+          </div>
         </div>
         <div id="config-integrity-panel-body"><p style="margin:0.5rem 0 0; color:#666;">No run yet.</p></div>
       </div>
@@ -16048,7 +16051,29 @@
           color: #6b7280;
           line-height: 1.35;
         }
-        #config-integrity-panel .ci-action {
+        #config-integrity-panel .config-integrity-key {
+      margin: 0.55rem 0 0.35rem;
+      padding: 0.5rem 0.65rem;
+      font-size: 0.78rem;
+      line-height: 1.45;
+      color: #475569;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+    }
+    #config-integrity-panel .config-integrity-key summary {
+      cursor: pointer;
+      font-weight: 700;
+      color: #0f172a;
+      list-style: none;
+    }
+    #config-integrity-panel .config-integrity-key summary::-webkit-details-marker { display: none; }
+    #config-integrity-panel .config-integrity-key ul {
+      margin: 0.4rem 0 0;
+      padding-left: 1.1rem;
+    }
+    #config-integrity-panel .config-integrity-key li { margin: 0.15rem 0; }
+    #config-integrity-panel .ci-action {
           font-size: 0.78rem;
           color: #111827;
           line-height: 1.35;
@@ -32933,6 +32958,54 @@
       chip.textContent = label;
     }
 
+    function mapIntegrityStreamLabel(raw) {
+      const s = String(raw || '').trim();
+      if (!s) return '';
+      // Legacy WS* tags (pre Hub/Swap/Blog/Config) + current labels
+      const map = {
+        WS1: 'Hub', Hub: 'Hub',
+        WS2: 'Swap', Swap: 'Swap',
+        WS3: 'Blog', Blog: 'Blog',
+        WS6: 'Config', Config: 'Config'
+      };
+      return map[s] || s;
+    }
+
+    function exportConfigIntegrityCsv() {
+      const payload = window.__configIntegrityLatest;
+      const findings = Array.isArray(payload?.data?.findings) ? payload.data.findings : [];
+      if (!findings.length) {
+        alert('No findings to export yet. Run the check first.');
+        return;
+      }
+      const esc = (v) => {
+        const t = String(v ?? '');
+        return /["\n,]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+      };
+      const header = ['check', 'severity', 'stream', 'keyword_or_url', 'meaning', 'at_stake', 'suggested_action'];
+      const lines = [header.join(',')];
+      for (const f of findings) {
+        lines.push([
+          esc(f.check ?? ''),
+          esc(f.severity ?? ''),
+          esc(mapIntegrityStreamLabel(f.workstream)),
+          esc(f.subject ?? ''),
+          esc(f.meaning || f.detail || ''),
+          esc(f.at_stake ?? ''),
+          esc(f.suggested_action ?? '')
+        ].join(','));
+      }
+      const blob = new Blob([`\uFEFF${lines.join('\n')}\n`], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = URL.createObjectURL(blob);
+      a.download = `keyword-config-findings-${stamp}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }
+
     function renderConfigIntegrityPanel(payload) {
       const panel = document.getElementById('config-integrity-panel-body');
       const meta = document.getElementById('config-integrity-panel-meta');
@@ -32943,17 +33016,33 @@
       const runAt = data.latestRun?.run_at;
       if (meta) {
         meta.textContent = runAt
-          ? `Last run: ${escapeHtml(formatImplPriorityMatrixStamp(Date.parse(String(runAt))))} · ${findings.length} finding(s)`
+          ? `Last run: ${formatImplPriorityMatrixStamp(Date.parse(String(runAt)))} · ${findings.length} finding(s)`
           : 'No persisted run yet';
       }
       if (!findings.length) {
         panel.innerHTML = '<p style="margin:0.5rem 0 0; color:#059669;">No findings — keyword & config GREEN.</p>';
         return;
       }
+      const legendHtml = `
+        <details class="config-integrity-key">
+          <summary>Key — what Check / Severity / Stream mean</summary>
+          <ul>
+            <li><strong>Check 1</strong> — LOCKED target page missing from pages_master or not commercial-compatible (structural · red)</li>
+            <li><strong>Check 2</strong> — Page tracks a keyword that is not the LOCKED target (advisory · amber)</li>
+            <li><strong>Check 3</strong> — Google ranks a different URL than your assigned money page = cannibalisation / routing conflict (advisory · amber; most rows)</li>
+            <li><strong>Check 4</strong> — Structural tier/money-headline wiring problems (structural · red)</li>
+            <li><strong>Check 5</strong> — Tier F unmapped page count (advisory · amber)</li>
+            <li><strong>Check 6</strong> — Repo CSV export out of sync with DB overrides (structural · red)</li>
+            <li><strong>Severity</strong> — red findings (checks 1/4/6) set chip RED; amber only → chip AMBER; zero findings → GREEN. No manual dismiss.</li>
+            <li><strong>Stream</strong> — worklist grouping only (not a dashboard panel): <em>Hub</em> courses-hub routing; <em>Swap</em> money-page swap; <em>Blog</em> blog/free-course/tuition intercept; <em>Config</em> structural/export. (Was WS1–WS6 — renamed so it never means “recrawl watch”.)</li>
+            <li><strong>Lifecycle</strong> — Findings recompute on each run from live data (esp. check 3: latest keyword_rankings.best_url vs LOCKED page). Fix the ranking conflict and the row drops automatically on the next check — nothing to mark done.</li>
+          </ul>
+        </details>`;
       const renderRow = (f) => {
         const enriched = f.meaning || f.at_stake || f.suggested_action;
-        const ws = f.workstream
-          ? `<span class="ci-ws-tag">${escapeHtml(String(f.workstream))}</span>`
+        const streamLabel = mapIntegrityStreamLabel(f.workstream);
+        const ws = streamLabel
+          ? `<span class="ci-ws-tag">${escapeHtml(streamLabel)}</span>`
           : '—';
         if (enriched) {
           return `
@@ -32977,12 +33066,13 @@
           </tr>`;
       };
       panel.innerHTML = `
+        ${legendHtml}
         <table class="config-integrity-findings-table">
           <thead>
             <tr>
-              <th style="width:3.5rem;">Check</th>
-              <th style="width:4.5rem;">Severity</th>
-              <th style="width:3.5rem;">WS</th>
+              <th style="width:3.5rem;" title="See key below">Check</th>
+              <th style="width:4.5rem;" title="amber = advisory; red = structural (drives RED chip)">Severity</th>
+              <th style="width:4.5rem;" title="Hub / Swap / Blog / Config worklist stream — not a panel name">Stream</th>
               <th style="width:14%;">Keyword / URL</th>
               <th style="width:26%;">Meaning</th>
               <th style="width:16%;">At stake</th>
@@ -32999,7 +33089,7 @@
       `;
     }
 
-    async function fetchConfigIntegritySummary({ triggerRun = false, runSource = 'dashboard' } = {}) {
+        async function fetchConfigIntegritySummary({ triggerRun = false, runSource = 'dashboard' } = {}) {
       const propertyUrl = document.getElementById('propertyUrl')?.value
         || localStorage.getItem('gsc_property_url')
         || localStorage.getItem('last_property_url')
@@ -33072,6 +33162,10 @@
               if (panel) panel.classList.add('is-open');
             });
         });
+      }
+      const exportBtn = document.getElementById('config-integrity-export-btn');
+      if (exportBtn) {
+        exportBtn.addEventListener('click', () => exportConfigIntegrityCsv());
       }
       void refreshConfigIntegrityUI();
     })();
