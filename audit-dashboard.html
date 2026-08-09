@@ -33331,28 +33331,28 @@
       const check = Number(finding?.check || 0);
       const action = String(finding?.suggested_action || '');
       if (check && check !== 3) {
-        return { key: 'other', label: 'Other/config', sort: 5 };
+        return { key: 'other', label: 'Other/config', sort: 4 };
       }
       // Page-audit evidence wins over stale suggested_action templates
       // (template often still says "Decision needed" after a recorded decision).
       const linkStatus = String(finding?.pageAudit?.link_status || finding?.linkStatus || '');
       if (linkStatus === 'present') {
-        return { key: 'awaiting', label: 'Link in place — awaiting recrawl', sort: 1 };
+        return { key: 'awaiting', label: 'Link in place — awaiting recrawl', sort: 7 };
       }
       if (linkStatus === 'weak') {
-        return { key: 'weak', label: 'Link present, weak anchor', sort: 2 };
+        return { key: 'weak', label: 'Link present, weak anchor', sort: 3 };
       }
       if (linkStatus === 'absent') {
-        return { key: 'fix', label: 'Fix needed', sort: 3 };
+        return { key: 'fix', label: 'Fix needed', sort: 1 };
       }
       if (linkStatus === 'error') {
-        return { key: 'unchecked', label: 'Page fetch error', sort: 4 };
+        return { key: 'unchecked', label: 'Page fetch error', sort: 5 };
       }
       if (/decision needed/i.test(action)) {
         return { key: 'decision', label: 'Decision needed', sort: 0 };
       }
       // Not yet audited → do not guess shipped vs not.
-      return { key: 'unchecked', label: 'Not page-checked', sort: 4 };
+      return { key: 'unchecked', label: 'Not page-checked', sort: 5 };
     }
 
     function awaitingDaysHtml(r) {
@@ -33515,19 +33515,19 @@
      */
     function statusFromWorkDecision(autoKey, progress, decisionType, linkStatus) {
       if (progress === 'parked' || decisionType === 'parked') {
-        return { key: 'parked', label: 'Parked', sort: 6 };
+        return { key: 'parked', label: 'Parked', sort: 8 };
       }
       if (progress !== 'done' && progress !== 'in_progress') return null;
       if (decisionType === 'accept') {
-        return { key: 'awaiting_accept', label: 'Awaiting recrawl', sort: 1 };
+        return { key: 'awaiting_accept', label: 'Awaiting recrawl', sort: 6 };
       }
       if (decisionType === 'keep_specialist') {
         // Proven strong link on preferred→assigned page → awaiting recrawl (not still Strengthen).
         const linkOk = linkStatus === 'present' || autoKey === 'awaiting';
         if (linkOk) {
-          return { key: 'awaiting', label: 'Link in place — awaiting recrawl', sort: 1 };
+          return { key: 'awaiting', label: 'Link in place — awaiting recrawl', sort: 7 };
         }
-        return { key: 'strengthen', label: 'Strengthen — on-page/anchor', sort: 1 };
+        return { key: 'strengthen', label: 'Strengthen — on-page/anchor', sort: 2 };
       }
       return null;
     }
@@ -33730,16 +33730,17 @@
     }
 
     function groupIntegrityByStatus(rows) {
+      // Top → bottom: Alan action first, wait-for-Google last, parked bottom.
       const order = [
         { key: 'decision', label: 'Decision needed' },
+        { key: 'fix', label: 'Fix needed' },
         { key: 'strengthen', label: 'Strengthen — on-page/anchor' },
+        { key: 'weak', label: 'Link present, weak anchor' },
+        { key: 'other', label: 'Other/config' },
+        { key: 'unchecked', label: 'Not page-checked' },
         { key: 'awaiting_accept', label: 'Awaiting recrawl' },
         { key: 'awaiting', label: 'Link in place — awaiting recrawl' },
-        { key: 'weak', label: 'Link present, weak anchor' },
-        { key: 'fix', label: 'Fix needed' },
-        { key: 'unchecked', label: 'Not page-checked' },
-        { key: 'parked', label: 'Parked' },
-        { key: 'other', label: 'Other/config' }
+        { key: 'parked', label: 'Parked' }
       ];
       return order.map((g) => ({
         ...g,
@@ -33847,14 +33848,14 @@
         '<label>Status <select id="ci-filter-status">' +
         '<option value="all">All (' + normalized.length + ')</option>' +
         '<option value="decision">Decision needed (' + (statusCounts.decision || 0) + ')</option>' +
+        '<option value="fix">Fix needed (' + (statusCounts.fix || 0) + ')</option>' +
         '<option value="strengthen">Strengthen — on-page/anchor (' + (statusCounts.strengthen || 0) + ')</option>' +
+        '<option value="weak">Link present, weak anchor (' + (statusCounts.weak || 0) + ')</option>' +
+        '<option value="other">Other/config (' + (statusCounts.other || 0) + ')</option>' +
+        '<option value="unchecked">Not page-checked (' + (statusCounts.unchecked || 0) + ')</option>' +
         '<option value="awaiting_accept">Awaiting recrawl (' + (statusCounts.awaiting_accept || 0) + ')</option>' +
         '<option value="awaiting">Link in place — awaiting recrawl (' + (statusCounts.awaiting || 0) + ')</option>' +
-        '<option value="weak">Link present, weak anchor (' + (statusCounts.weak || 0) + ')</option>' +
-        '<option value="fix">Fix needed (' + (statusCounts.fix || 0) + ')</option>' +
-        '<option value="unchecked">Not page-checked (' + (statusCounts.unchecked || 0) + ')</option>' +
         '<option value="parked">Parked (' + (statusCounts.parked || 0) + ')</option>' +
-        '<option value="other">Other/config (' + (statusCounts.other || 0) + ')</option>' +
         '</select></label>' +
         '<label>Stream <select id="ci-filter-stream"><option value="all">All</option>' + streamOpts + '</select></label>' +
         '<label>Check <select id="ci-filter-check"><option value="all">All</option>' + checkOpts + '</select></label>' +
