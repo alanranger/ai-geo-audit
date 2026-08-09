@@ -16073,6 +16073,51 @@
       padding-left: 1.1rem;
     }
     #config-integrity-panel .config-integrity-key li { margin: 0.15rem 0; }
+    #config-integrity-panel .ci-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem 0.85rem;
+      align-items: center;
+      margin: 0.45rem 0 0.55rem;
+      font-size: 0.78rem;
+    }
+    #config-integrity-panel .ci-controls label {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      color: #334155;
+      font-weight: 600;
+    }
+    #config-integrity-panel .ci-controls select {
+      font-size: 0.78rem;
+      padding: 0.15rem 0.35rem;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      background: #fff;
+    }
+    #config-integrity-panel .ci-filter-count { color: #64748b; font-weight: 500; }
+    #config-integrity-panel .ci-table-wrap { overflow-x: auto; margin-top: 0.25rem; }
+    #config-integrity-panel .ci-status-pill {
+      display: inline-block;
+      padding: 0.12rem 0.45rem;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    #config-integrity-panel .ci-status-decision { background: #fef3c7; color: #92400e; }
+    #config-integrity-panel .ci-status-awaiting { background: #dbeafe; color: #1e40af; }
+    #config-integrity-panel .ci-status-fix { background: #ffedd5; color: #9a3412; }
+    #config-integrity-panel .ci-status-other { background: #e2e8f0; color: #334155; }
+    #config-integrity-panel .ci-group-head td {
+      background: #f1f5f9 !important;
+      font-weight: 700;
+      color: #0f172a;
+      padding-top: 0.55rem !important;
+    }
+    #config-integrity-panel .ci-group-count { color: #64748b; font-weight: 600; }
+    #config-integrity-panel .ci-num { text-align: right; font-variant-numeric: tabular-nums; }
+    #config-integrity-panel .ci-url a { color: #0369a1; text-decoration: underline; word-break: break-all; }
     #config-integrity-panel .ci-action {
           font-size: 0.78rem;
           color: #111827;
@@ -32959,16 +33004,156 @@
     }
 
     function mapIntegrityStreamLabel(raw) {
-      const s = String(raw || '').trim();
-      if (!s) return '';
-      // Legacy WS* tags (pre Hub/Swap/Blog/Config) + current labels
+      const key = String(raw || '').trim();
+      if (!key) return '';
       const map = {
         WS1: 'Hub', Hub: 'Hub',
         WS2: 'Swap', Swap: 'Swap',
         WS3: 'Blog', Blog: 'Blog',
         WS6: 'Config', Config: 'Config'
       };
-      return map[s] || s;
+      return map[key] || key;
+    }
+
+    function parseIntegrityAtStake(atStake) {
+      const t = String(atStake || '');
+      const vol = t.match(/([\d,]+)\s*\/?\s*mo(?:nth)?\s*search volume/i);
+      const traffic = t.match(/([\d,]+|—|-)\s*clicks\s*\/\s*([\d,]+|—|-)\s*imps/i);
+      const n = (x) => {
+        if (x == null || x === '—' || x === '-') return null;
+        const v = Number(String(x).replace(/,/g, ''));
+        return Number.isFinite(v) ? v : null;
+      };
+      return {
+        volume: vol ? n(vol[1]) : null,
+        clicks: traffic ? n(traffic[1]) : null,
+        impressions: traffic ? n(traffic[2]) : null
+      };
+    }
+
+    function deriveIntegrityStatus(finding) {
+      const check = Number(finding?.check || 0);
+      const action = String(finding?.suggested_action || '');
+      if (check && check !== 3) {
+        return { key: 'other', label: 'Other/config', sort: 3 };
+      }
+      if (/decision needed/i.test(action)) {
+        return { key: 'decision', label: 'Decision needed', sort: 0 };
+      }
+      if (
+        /fight in progress/i.test(action)
+        || /support links shipped/i.test(action)
+        || /recrawl watch/i.test(action)
+        || /shipped \d{1,2}\s/i.test(action)
+        || (/awaiting recrawl/i.test(action) && !/if shipped/i.test(action))
+      ) {
+        return { key: 'awaiting', label: 'Awaiting recrawl', sort: 1 };
+      }
+      if (
+        /fix shipped\/needed/i.test(action)
+        || /cross-link/i.test(action)
+        || /exact-anchor/i.test(action)
+      ) {
+        return { key: 'fix', label: 'Fix needed', sort: 2 };
+      }
+      if (check === 3) {
+        return { key: 'fix', label: 'Fix needed', sort: 2 };
+      }
+      return { key: 'other', label: 'Other/config', sort: 3 };
+    }
+
+    function normalizeIntegrityFinding(f) {
+      const stream = mapIntegrityStreamLabel(f.workstream);
+      const status = deriveIntegrityStatus(f);
+      const metrics = parseIntegrityAtStake(f.at_stake);
+      return {
+        ...f,
+        stream,
+        statusKey: status.key,
+        statusLabel: status.label,
+        statusSort: status.sort,
+        volume: metrics.volume,
+        clicks: metrics.clicks,
+        impressions: metrics.impressions,
+        ranksNowUrl: String(f.preferred_path || '').trim(),
+        shouldBeUrl: String(f.assigned_path || '').trim()
+      };
+    }
+
+    function pathToSiteUrl(pathOrUrl) {
+      const raw = String(pathOrUrl || '').trim();
+      if (!raw || raw === '—') return '';
+      if (/^https?:\/\//i.test(raw)) return raw;
+      const p = raw.startsWith('/') ? raw : ('/' + raw);
+      return 'https://www.alanranger.com' + p;
+    }
+
+    function integrityLinkCell(pathOrUrl) {
+      const href = pathToSiteUrl(pathOrUrl);
+      if (!href) return '—';
+      const label = escapeHtml(String(pathOrUrl || href));
+      return '<a href="' + escapeHtml(href) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>';
+    }
+
+    function integrityStatusPill(statusKey, label) {
+      const cls = statusKey === 'decision' ? 'ci-status-decision'
+        : statusKey === 'awaiting' ? 'ci-status-awaiting'
+          : statusKey === 'fix' ? 'ci-status-fix'
+            : 'ci-status-other';
+      return '<span class="ci-status-pill ' + cls + '">' + escapeHtml(label) + '</span>';
+    }
+
+    function getIntegrityFilterState() {
+      return {
+        status: document.getElementById('ci-filter-status')?.value || 'all',
+        stream: document.getElementById('ci-filter-stream')?.value || 'all',
+        check: document.getElementById('ci-filter-check')?.value || 'all',
+        sort: document.getElementById('ci-sort')?.value || 'volume_desc'
+      };
+    }
+
+    function compareIntegrityRows(a, b, sortKey) {
+      const vol = (r) => (r.volume == null ? -1 : r.volume);
+      const clk = (r) => (r.clicks == null ? -1 : r.clicks);
+      if (sortKey === 'volume_asc') return vol(a) - vol(b);
+      if (sortKey === 'clicks_desc') return clk(b) - clk(a);
+      if (sortKey === 'clicks_asc') return clk(a) - clk(b);
+      if (sortKey === 'stream') {
+        return String(a.stream || '').localeCompare(String(b.stream || '')) || (vol(b) - vol(a));
+      }
+      if (sortKey === 'keyword') {
+        return String(a.subject || '').localeCompare(String(b.subject || ''));
+      }
+      if (a.volume == null && b.volume == null) return 0;
+      if (a.volume == null) return 1;
+      if (b.volume == null) return -1;
+      return b.volume - a.volume;
+    }
+
+    function filterAndSortIntegrityFindings(rows) {
+      const f = getIntegrityFilterState();
+      let list = rows.slice();
+      if (f.status !== 'all') list = list.filter((r) => r.statusKey === f.status);
+      if (f.stream !== 'all') list = list.filter((r) => r.stream === f.stream);
+      if (f.check !== 'all') list = list.filter((r) => String(r.check) === String(f.check));
+      list.sort((a, b) => {
+        if (a.statusSort !== b.statusSort) return a.statusSort - b.statusSort;
+        return compareIntegrityRows(a, b, f.sort);
+      });
+      return list;
+    }
+
+    function groupIntegrityByStatus(rows) {
+      const order = [
+        { key: 'decision', label: 'Decision needed' },
+        { key: 'awaiting', label: 'Awaiting recrawl' },
+        { key: 'fix', label: 'Fix needed' },
+        { key: 'other', label: 'Other/config' }
+      ];
+      return order.map((g) => ({
+        ...g,
+        rows: rows.filter((r) => r.statusKey === g.key)
+      })).filter((g) => g.rows.length);
     }
 
     function exportConfigIntegrityCsv() {
@@ -32978,28 +33163,35 @@
         alert('No findings to export yet. Run the check first.');
         return;
       }
+      const rows = filterAndSortIntegrityFindings(findings.map(normalizeIntegrityFinding));
       const esc = (v) => {
         const t = String(v ?? '');
-        return /["\n,]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+        return /["\n,]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
       };
-      const header = ['check', 'severity', 'stream', 'keyword_or_url', 'meaning', 'at_stake', 'suggested_action'];
+      const header = [
+        'status', 'stream', 'check', 'keyword', 'search_volume', 'clicks', 'impressions',
+        'ranks_now_url', 'should_be_url', 'action'
+      ];
       const lines = [header.join(',')];
-      for (const f of findings) {
+      for (const r of rows) {
         lines.push([
-          esc(f.check ?? ''),
-          esc(f.severity ?? ''),
-          esc(mapIntegrityStreamLabel(f.workstream)),
-          esc(f.subject ?? ''),
-          esc(f.meaning || f.detail || ''),
-          esc(f.at_stake ?? ''),
-          esc(f.suggested_action ?? '')
+          esc(r.statusLabel),
+          esc(r.stream),
+          esc(r.check ?? ''),
+          esc(r.subject ?? ''),
+          esc(r.volume == null ? '' : r.volume),
+          esc(r.clicks == null ? '' : r.clicks),
+          esc(r.impressions == null ? '' : r.impressions),
+          esc(pathToSiteUrl(r.ranksNowUrl) || r.ranksNowUrl || ''),
+          esc(pathToSiteUrl(r.shouldBeUrl) || r.shouldBeUrl || ''),
+          esc(r.suggested_action ?? '')
         ].join(','));
       }
-      const blob = new Blob([`\uFEFF${lines.join('\n')}\n`], { type: 'text/csv;charset=utf-8' });
+      const blob = new Blob(['\uFEFF' + lines.join('\n') + '\n'], { type: 'text/csv;charset=utf-8' });
       const a = document.createElement('a');
       const stamp = new Date().toISOString().slice(0, 10);
       a.href = URL.createObjectURL(blob);
-      a.download = `keyword-config-findings-${stamp}.csv`;
+      a.download = 'keyword-config-findings-' + stamp + '.csv';
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -33016,80 +33208,131 @@
       const runAt = data.latestRun?.run_at;
       if (meta) {
         meta.textContent = runAt
-          ? `Last run: ${formatImplPriorityMatrixStamp(Date.parse(String(runAt)))} · ${findings.length} finding(s)`
+          ? ('Last run: ' + formatImplPriorityMatrixStamp(Date.parse(String(runAt))) + ' · ' + findings.length + ' finding(s)')
           : 'No persisted run yet';
       }
       if (!findings.length) {
         panel.innerHTML = '<p style="margin:0.5rem 0 0; color:#059669;">No findings — keyword & config GREEN.</p>';
         return;
       }
-      const legendHtml = `
-        <details class="config-integrity-key">
-          <summary>Key — what Check / Severity / Stream mean</summary>
-          <ul>
-            <li><strong>Check 1</strong> — LOCKED target page missing from pages_master or not commercial-compatible (structural · red)</li>
-            <li><strong>Check 2</strong> — Page tracks a keyword that is not the LOCKED target (advisory · amber)</li>
-            <li><strong>Check 3</strong> — Google ranks a different URL than your assigned money page = cannibalisation / routing conflict (advisory · amber; most rows)</li>
-            <li><strong>Check 4</strong> — Structural tier/money-headline wiring problems (structural · red)</li>
-            <li><strong>Check 5</strong> — Tier F unmapped page count (advisory · amber)</li>
-            <li><strong>Check 6</strong> — Repo CSV export out of sync with DB overrides (structural · red)</li>
-            <li><strong>Severity</strong> — red findings (checks 1/4/6) set chip RED; amber only → chip AMBER; zero findings → GREEN. No manual dismiss.</li>
-            <li><strong>Stream</strong> — worklist grouping only (not a dashboard panel): <em>Hub</em> courses-hub routing; <em>Swap</em> money-page swap; <em>Blog</em> blog/free-course/tuition intercept; <em>Config</em> structural/export. (Was WS1–WS6 — renamed so it never means “recrawl watch”.)</li>
-            <li><strong>Lifecycle</strong> — Findings recompute on each run from live data (esp. check 3: latest keyword_rankings.best_url vs LOCKED page). Fix the ranking conflict and the row drops automatically on the next check — nothing to mark done.</li>
-          </ul>
-        </details>`;
-      const renderRow = (f) => {
-        const enriched = f.meaning || f.at_stake || f.suggested_action;
-        const streamLabel = mapIntegrityStreamLabel(f.workstream);
-        const ws = streamLabel
-          ? `<span class="ci-ws-tag">${escapeHtml(streamLabel)}</span>`
-          : '—';
-        if (enriched) {
-          return `
-            <tr>
-              <td>${Number(f.check || 0)}</td>
-              <td>${escapeHtml(String(f.severity || '—'))}</td>
-              <td>${ws}</td>
-              <td>${escapeHtml(String(f.subject || '—'))}</td>
-              <td>${escapeHtml(String(f.meaning || f.detail || ''))}</td>
-              <td class="ci-muted">${escapeHtml(String(f.at_stake || '—'))}</td>
-              <td class="ci-action">${escapeHtml(String(f.suggested_action || '—'))}</td>
-            </tr>`;
-        }
-        return `
-          <tr>
-            <td>${Number(f.check || 0)}</td>
-            <td>${escapeHtml(String(f.severity || '—'))}</td>
-            <td>—</td>
-            <td>${escapeHtml(String(f.subject || '—'))}</td>
-            <td colspan="3">${escapeHtml(String(f.detail || ''))}</td>
-          </tr>`;
+
+      const normalized = findings.map(normalizeIntegrityFinding);
+      const filters = getIntegrityFilterState();
+      const filtered = filterAndSortIntegrityFindings(normalized);
+      const groups = groupIntegrityByStatus(filtered);
+      const streams = [...new Set(normalized.map((r) => r.stream).filter(Boolean))].sort();
+      const checks = [...new Set(normalized.map((r) => String(r.check)))].sort((a, b) => Number(a) - Number(b));
+      const statusCounts = { decision: 0, awaiting: 0, fix: 0, other: 0 };
+      for (const r of normalized) statusCounts[r.statusKey] = (statusCounts[r.statusKey] || 0) + 1;
+
+      const legendHtml =
+        '<details class="config-integrity-key">' +
+        '<summary>Key — Check / Severity / Stream / Status</summary>' +
+        '<ul>' +
+        '<li><strong>Check 1–6</strong> — integrity suite (1/4/6 structural red; 2/3/5 advisory amber). Check 3 = Google ranks a different URL than locked target.</li>' +
+        '<li><strong>Status</strong> — derived from action text (no stored worklist): Decision needed · Awaiting recrawl · Fix needed · Other/config.</li>' +
+        '<li><strong>Stream</strong> — Hub / Swap / Blog / Config work grouping (not a dashboard panel).</li>' +
+        '<li><strong>Lifecycle</strong> — rows recompute each run and clear when data changes. No mark-done.</li>' +
+        '</ul></details>';
+
+      const streamOpts = streams.map((st) => '<option value="' + escapeHtml(st) + '">' + escapeHtml(st) + '</option>').join('');
+      const checkOpts = checks.map((c) => '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>').join('');
+
+      const controlsHtml =
+        '<div class="ci-controls">' +
+        '<label>Status <select id="ci-filter-status">' +
+        '<option value="all">All (' + normalized.length + ')</option>' +
+        '<option value="decision">Decision needed (' + (statusCounts.decision || 0) + ')</option>' +
+        '<option value="awaiting">Awaiting recrawl (' + (statusCounts.awaiting || 0) + ')</option>' +
+        '<option value="fix">Fix needed (' + (statusCounts.fix || 0) + ')</option>' +
+        '<option value="other">Other/config (' + (statusCounts.other || 0) + ')</option>' +
+        '</select></label>' +
+        '<label>Stream <select id="ci-filter-stream"><option value="all">All</option>' + streamOpts + '</select></label>' +
+        '<label>Check <select id="ci-filter-check"><option value="all">All</option>' + checkOpts + '</select></label>' +
+        '<label>Sort <select id="ci-sort">' +
+        '<option value="volume_desc">Volume ↓</option>' +
+        '<option value="volume_asc">Volume ↑</option>' +
+        '<option value="clicks_desc">Clicks ↓</option>' +
+        '<option value="clicks_asc">Clicks ↑</option>' +
+        '<option value="stream">Stream A–Z</option>' +
+        '<option value="keyword">Keyword A–Z</option>' +
+        '</select></label>' +
+        '<span class="ci-filter-count">Showing ' + filtered.length + ' of ' + normalized.length + '</span>' +
+        '</div>';
+
+      const renderRow = (r) => {
+        const meaningTitle = escapeHtml(String(r.meaning || r.detail || ''));
+        const vol = r.volume == null ? '—' : Number(r.volume).toLocaleString();
+        const clk = r.clicks == null ? '—' : Number(r.clicks).toLocaleString();
+        const streamCell = r.stream ? ('<span class="ci-ws-tag">' + escapeHtml(r.stream) + '</span>') : '—';
+        return (
+          '<tr>' +
+          '<td>' + integrityStatusPill(r.statusKey, r.statusLabel) + '</td>' +
+          '<td>' + streamCell + '</td>' +
+          '<td>' + Number(r.check || 0) + '</td>' +
+          '<td>' + escapeHtml(String(r.subject || '—')) + '</td>' +
+          '<td class="ci-num">' + vol + '</td>' +
+          '<td class="ci-num">' + clk + '</td>' +
+          '<td class="ci-url">' + integrityLinkCell(r.ranksNowUrl) + '</td>' +
+          '<td class="ci-url">' + integrityLinkCell(r.shouldBeUrl) + '</td>' +
+          '<td class="ci-action" title="' + meaningTitle + '">' + escapeHtml(String(r.suggested_action || '—')) + '</td>' +
+          '</tr>'
+        );
       };
-      panel.innerHTML = `
-        ${legendHtml}
-        <table class="config-integrity-findings-table">
-          <thead>
-            <tr>
-              <th style="width:3.5rem;" title="See key below">Check</th>
-              <th style="width:4.5rem;" title="amber = advisory; red = structural (drives RED chip)">Severity</th>
-              <th style="width:4.5rem;" title="Hub / Swap / Blog / Config worklist stream — not a panel name">Stream</th>
-              <th style="width:14%;">Keyword / URL</th>
-              <th style="width:26%;">Meaning</th>
-              <th style="width:16%;">At stake</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${findings.map(renderRow).join('')}
-          </tbody>
-        </table>
-        <div style="margin-top:0.5rem; font-size:0.78rem; color:#666;">
-          Structural (checks 1,4,6): ${Number(stats.structuralCount || 0)} · Advisory: ${Number(stats.advisoryCount || 0)}
-        </div>
-      `;
+
+      const groupsHtml = groups.length
+        ? groups.map((g) => (
+          '<tbody class="ci-group">' +
+          '<tr class="ci-group-head"><td colspan="9">' + escapeHtml(g.label) +
+          ' <span class="ci-group-count">(' + g.rows.length + ')</span></td></tr>' +
+          g.rows.map(renderRow).join('') +
+          '</tbody>'
+        )).join('')
+        : '<tbody><tr><td colspan="9" class="ci-muted">No rows match filters.</td></tr></tbody>';
+
+      panel.innerHTML =
+        legendHtml +
+        controlsHtml +
+        '<div class="ci-table-wrap"><table class="config-integrity-findings-table">' +
+        '<thead><tr>' +
+        '<th style="width:8rem;">Status</th>' +
+        '<th style="width:4.5rem;">Stream</th>' +
+        '<th style="width:3rem;">Check</th>' +
+        '<th>Keyword</th>' +
+        '<th style="width:4.5rem;" title="Search volume">Vol</th>' +
+        '<th style="width:4rem;" title="28d clicks on assigned page">Clicks</th>' +
+        '<th>Ranks now (from)</th>' +
+        '<th>Should be (to)</th>' +
+        '<th>Action</th>' +
+        '</tr></thead>' +
+        groupsHtml +
+        '</table></div>' +
+        '<div style="margin-top:0.5rem; font-size:0.78rem; color:#666;">' +
+        'Structural (checks 1,4,6): ' + Number(stats.structuralCount || 0) +
+        ' · Advisory: ' + Number(stats.advisoryCount || 0) +
+        ' · full meaning is on each Action cell tooltip' +
+        '</div>';
+
+      const apply = (id, val) => {
+        const el = document.getElementById(id);
+        if (el && val != null) el.value = val;
+      };
+      apply('ci-filter-status', filters.status);
+      apply('ci-filter-stream', filters.stream);
+      apply('ci-filter-check', filters.check);
+      apply('ci-sort', filters.sort);
+
+      const rebind = () => {
+        if (window.__configIntegrityLatest) renderConfigIntegrityPanel(window.__configIntegrityLatest);
+      };
+      ['ci-filter-status', 'ci-filter-stream', 'ci-filter-check', 'ci-sort'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.onchange = rebind;
+      });
     }
 
-        async function fetchConfigIntegritySummary({ triggerRun = false, runSource = 'dashboard' } = {}) {
+
+                async function fetchConfigIntegritySummary({ triggerRun = false, runSource = 'dashboard' } = {}) {
       const propertyUrl = document.getElementById('propertyUrl')?.value
         || localStorage.getItem('gsc_property_url')
         || localStorage.getItem('last_property_url')
