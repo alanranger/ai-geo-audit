@@ -8050,14 +8050,6 @@
         </div>
         <div id="config-integrity-panel-body"><p style="margin:0.5rem 0 0; color:#666;">No run yet.</p></div>
       </div>
-      <details id="ws3-recrawl-watch-panel" role="region" aria-label="Index arming watch (12 URLs)">
-        <summary class="ws3-recrawl-watch-summary">
-          <strong>Index arming watch (12 URLs)</strong>
-          <span id="ws3-recrawl-watch-meta" style="font-size:0.82rem; color:#666;">GSC URL Inspection · fixed 12-path arming list (19 Jul 2026) · not auto-fed from findings table</span>
-        </summary>
-        <div id="ws3-recrawl-watch-body"><p style="margin:0.5rem 0 0; color:#666;">Loading GSC inspection cache…</p></div>
-      </details>
-
       <!-- Revenue Funnel Panel — exec view: impressions -> clicks -> revenue -->
       <section class="aigeo-panel" data-panel="revenue-funnel">
         <style>
@@ -16061,60 +16053,6 @@
           color: #111827;
           line-height: 1.35;
         }
-        #ws3-recrawl-watch-panel {
-          margin-bottom: 1rem;
-          padding: 0.85rem 1rem;
-          border-radius: 6px;
-          border: 1px solid #cbd5e1;
-          background: #fff;
-          overflow-x: hidden;
-          max-width: 100%;
-        }
-        #ws3-recrawl-watch-panel > summary.ws3-recrawl-watch-summary {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 0.75rem;
-          flex-wrap: wrap;
-          cursor: pointer;
-          list-style: none;
-          font-size: 0.95rem;
-        }
-        #ws3-recrawl-watch-panel > summary.ws3-recrawl-watch-summary::-webkit-details-marker {
-          display: none;
-        }
-        #ws3-recrawl-watch-panel > summary.ws3-recrawl-watch-summary::before {
-          content: '▶';
-          font-size: 0.7rem;
-          color: #64748b;
-          margin-right: 0.15rem;
-        }
-        #ws3-recrawl-watch-panel[open] > summary.ws3-recrawl-watch-summary::before {
-          content: '▼';
-        }
-        #ws3-recrawl-watch-panel .ws3-watch-table {
-          width: 100%;
-          table-layout: fixed;
-          border-collapse: collapse;
-          margin-top: 0.75rem;
-        }
-        #ws3-recrawl-watch-panel .ws3-watch-table th,
-        #ws3-recrawl-watch-panel .ws3-watch-table td {
-          padding: 0.45rem 0.5rem;
-          border-bottom: 1px solid #e5e7eb;
-          font-size: 0.82rem;
-          text-align: left;
-          vertical-align: top;
-          word-break: break-word;
-          overflow-wrap: anywhere;
-        }
-        #ws3-recrawl-watch-panel .ws3-watch-table th {
-          font-weight: 700;
-          color: #374151;
-        }
-        #ws3-recrawl-watch-panel .ws3-status-yes { color: #059669; font-weight: 700; }
-        #ws3-recrawl-watch-panel .ws3-status-no { color: #b45309; font-weight: 700; }
-        #ws3-recrawl-watch-panel .ws3-status-missing { color: #6b7280; font-style: italic; }
         .impl-progress-track {
           width: 100%;
           height: 10px;
@@ -31902,7 +31840,7 @@
       },
       {
         priority: "P1",
-        title: "WS3 recrawl-watch panel (12/12 indexing requested 19 Jul)",
+        title: "WS3 recrawl-watch panel (RETIRED 2026-08-10)",
         status: "done",
         lane: "now",
         impact: "Medium-High",
@@ -33137,97 +33075,6 @@
       }
       void refreshConfigIntegrityUI();
     })();
-
-    function formatWs3InspectStamp(iso) {
-      if (!iso) return '—';
-      const t = Date.parse(String(iso));
-      if (!Number.isFinite(t)) return '—';
-      return formatImplPriorityMatrixStamp(t);
-    }
-
-    function renderWs3RecrawlWatchPanel(payload) {
-      const panel = document.getElementById('ws3-recrawl-watch-body');
-      const meta = document.getElementById('ws3-recrawl-watch-meta');
-      if (!panel) return;
-      const rows = Array.isArray(payload?.rows) ? payload.rows : [];
-      const summary = payload?.summary || {};
-      if (meta) {
-        const autoStamp = formatWs3InspectStamp(payload?.lastAutoRefreshAt);
-        const schedule = payload?.autoRefreshSchedule || 'Sun 23:00';
-        meta.textContent = `${payload?.label || 'Index arming watch (12 URLs)'} · cached ${Number(summary.cached || 0)}/${Number(summary.total || rows.length)} · indexed ${Number(summary.indexedYes || 0)} · Last auto-refresh: ${autoStamp} (scheduled ${schedule})`;
-      }
-      if (!rows.length) {
-        panel.innerHTML = '<p style="margin:0.5rem 0 0; color:#666;">No arming-watch URLs configured.</p>';
-        return;
-      }
-      const renderStatus = (row) => {
-        if (row.cacheStatus === 'missing') return '<span class="ws3-status-missing">no cache — run Refresh GSC URL Inspection</span>';
-        if (row.indexed === true) return '<span class="ws3-status-yes">indexed</span>';
-        if (row.indexed === false) return `<span class="ws3-status-no">${escapeHtml(String(row.coverageState || row.verdict || 'not indexed'))}</span>`;
-        return '—';
-      };
-      const autoStale = payload?.autoRefreshStale === true;
-      const staleNote = autoStale
-        ? `<p style="margin:0.35rem 0 0; font-size:0.78rem; color:#b45309;">Last auto-refresh is older than ${Number(payload?.autoRefreshStaleDays || 8)} days — check weekly GSC inspect cron before Monday review. This list is a fixed arming batch (config JSON), not the findings table.</p>`
-        : '';
-      panel.innerHTML = `
-        <p style="margin:0.35rem 0 0; font-size:0.78rem; color:#666;">${escapeHtml(String(payload?.quotaNote || ''))}</p>
-        ${staleNote}
-        <table class="ws3-watch-table">
-          <thead>
-            <tr>
-              <th style="width:28%;">URL</th>
-              <th style="width:10%;">Group</th>
-              <th style="width:18%;">Coverage / verdict</th>
-              <th style="width:14%;">Last inspected</th>
-              <th style="width:12%;">Fetch</th>
-              <th style="width:18%;">Canonical</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows.map((row) => `
-              <tr>
-                <td>${escapeHtml(String(row.path || '—'))}</td>
-                <td>${escapeHtml(String(row.group || '—'))}</td>
-                <td>${renderStatus(row)}</td>
-                <td>${escapeHtml(formatWs3InspectStamp(row.inspectedAt))}</td>
-                <td>${escapeHtml(String(row.pageFetchState || '—'))}</td>
-                <td>${escapeHtml(String(row.googleCanonical || '—'))}</td>
-              </tr>`).join('')}
-          </tbody>
-        </table>`;
-    }
-
-    async function refreshWs3RecrawlWatchUI() {
-      const propertyUrl = document.getElementById('propertyUrl')?.value
-        || localStorage.getItem('gsc_property_url')
-        || localStorage.getItem('last_property_url')
-        || 'https://www.alanranger.com';
-      const base = typeof window.apiUrl === 'function'
-        ? window.apiUrl('/api/aigeo/ws3-recrawl-watch')
-        : '/api/aigeo/ws3-recrawl-watch';
-      const url = `${base}?propertyUrl=${encodeURIComponent(propertyUrl)}&_=${Date.now()}`;
-      const resp = await fetch(url);
-      const json = await resp.json().catch(() => ({}));
-      if (!resp.ok || String(json?.status || '').toLowerCase() !== 'ok') {
-        throw new Error(json?.message || `HTTP ${resp.status}`);
-      }
-      renderWs3RecrawlWatchPanel(json);
-      window.__ws3RecrawlWatchLatest = json;
-      return json;
-    }
-
-    window.refreshWs3RecrawlWatchUI = refreshWs3RecrawlWatchUI;
-
-    (function initWs3RecrawlWatchPanel() {
-      void refreshWs3RecrawlWatchUI().catch((err) => {
-        const panel = document.getElementById('ws3-recrawl-watch-body');
-        if (panel) {
-          panel.innerHTML = `<p style="margin:0.5rem 0 0; color:#b45309;">Could not load index arming watch: ${escapeHtml(err?.message || 'Unknown error')}</p>`;
-        }
-      });
-    })();
-
     async function fetchAndRenderMentionsSummary(cachedPayload = null) {
       const target = document.getElementById('impl-mentions-status');
       if (!target) return;

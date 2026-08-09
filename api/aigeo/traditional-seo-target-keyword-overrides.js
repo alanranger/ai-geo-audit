@@ -91,7 +91,11 @@ async function handlePost(req, res, supabase) {
   return sendJson(res, 200, {
     status: 'ok',
     overrides: Array.isArray(data) ? data : [],
-    meta: { generatedAt: new Date().toISOString() }
+    meta: {
+      generatedAt: new Date().toISOString(),
+      csvExportReminder:
+        'Overrides SoT is traditional_seo_target_keyword_overrides. Run: node scripts/export-09-url-target-keywords.mjs then commit config/09-url-target-keywords.csv (clears integrity check 6).'
+    }
   });
 }
 
