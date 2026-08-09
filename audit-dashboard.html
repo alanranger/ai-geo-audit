@@ -8048,6 +8048,7 @@
           <strong>Keyword &amp; config findings</strong>
           <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
             <span id="config-integrity-panel-meta" style="font-size:0.82rem; color:#666;">—</span>
+            <button type="button" id="config-integrity-page-audit-btn" class="btn" style="padding:0.2rem 0.55rem; font-size:0.78rem;" title="Fetch live from-pages and prove whether the cross-link + keyword anchor exists">Re-check pages</button>
             <button type="button" id="config-integrity-export-btn" class="btn" style="padding:0.2rem 0.55rem; font-size:0.78rem;" title="Download findings as CSV worklist">Export CSV</button>
           </div>
         </div>
@@ -16128,6 +16129,15 @@
     #config-integrity-panel .ci-status-awaiting { background: #dbeafe; color: #1e40af; }
     #config-integrity-panel .ci-status-fix { background: #ffedd5; color: #9a3412; }
     #config-integrity-panel .ci-status-other { background: #e2e8f0; color: #334155; }
+    #config-integrity-panel .ci-status-weak { background: #fce7f3; color: #9d174d; }
+    #config-integrity-panel .ci-status-unchecked { background: #f1f5f9; color: #475569; }
+    #config-integrity-panel tbody.ci-group-weak tr:not(.ci-group-head) td { background: #fdf2f8 !important; }
+    #config-integrity-panel tbody.ci-group-unchecked tr:not(.ci-group-head) td { background: #f8fafc !important; }
+    #config-integrity-panel tbody.ci-group-weak .ci-group-head td { background: #f9a8d4 !important; color: #831843 !important; }
+    #config-integrity-panel tbody.ci-group-unchecked .ci-group-head td { background: #e2e8f0 !important; color: #334155 !important; }
+    #config-integrity-panel .ci-target-ok { color: #047857; font-weight: 700; font-size: 0.75rem; }
+    #config-integrity-panel .ci-target-bad { color: #b91c1c; font-weight: 700; font-size: 0.75rem; }
+    #config-integrity-panel .ci-checked-at { font-size: 0.7rem; color: #64748b; }
     /* Status section bands */
     #config-integrity-panel tbody.ci-group-decision tr:not(.ci-group-head) td { background: #fffbeb !important; }
     #config-integrity-panel tbody.ci-group-awaiting tr:not(.ci-group-head) td { background: #eff6ff !important; }
@@ -33134,49 +33144,95 @@
       const check = Number(finding?.check || 0);
       const action = String(finding?.suggested_action || '');
       if (check && check !== 3) {
-        return { key: 'other', label: 'Other/config', sort: 3 };
+        return { key: 'other', label: 'Other/config', sort: 5 };
       }
       if (/decision needed/i.test(action)) {
         return { key: 'decision', label: 'Decision needed', sort: 0 };
       }
-      if (
-        /fight in progress/i.test(action)
-        || /support links shipped/i.test(action)
-        || /recrawl watch/i.test(action)
-        || /shipped \d{1,2}\s/i.test(action)
-        || (/awaiting recrawl/i.test(action) && !/if shipped/i.test(action))
-      ) {
-        return { key: 'awaiting', label: 'Awaiting recrawl', sort: 1 };
+      // Prefer live page-audit evidence (from Re-check pages) over action-text guesses.
+      const linkStatus = String(finding?.pageAudit?.link_status || finding?.linkStatus || '');
+      if (linkStatus === 'present') {
+        return { key: 'awaiting', label: 'Link in place — awaiting recrawl', sort: 1 };
       }
-      if (
-        /fix shipped\/needed/i.test(action)
-        || /cross-link/i.test(action)
-        || /exact-anchor/i.test(action)
-      ) {
-        return { key: 'fix', label: 'Fix needed', sort: 2 };
+      if (linkStatus === 'weak') {
+        return { key: 'weak', label: 'Link present, weak anchor', sort: 2 };
       }
-      if (check === 3) {
-        return { key: 'fix', label: 'Fix needed', sort: 2 };
+      if (linkStatus === 'absent') {
+        return { key: 'fix', label: 'Fix needed', sort: 3 };
       }
-      return { key: 'other', label: 'Other/config', sort: 3 };
+      if (linkStatus === 'error') {
+        return { key: 'unchecked', label: 'Page fetch error', sort: 4 };
+      }
+      // Not yet audited → do not guess shipped vs not.
+      return { key: 'unchecked', label: 'Not page-checked', sort: 4 };
+    }
+
+    function getPageAuditMap() {
+      return window.__configIntegrityPageAudit && typeof window.__configIntegrityPageAudit === 'object'
+        ? window.__configIntegrityPageAudit
+        : {};
+    }
+
+    function pageAuditForFinding(f) {
+      const map = getPageAuditMap();
+      const id = f.findingId || f.finding_key;
+      if (id && map[id]) return map[id];
+      // key by identity path used for IDs
+      const key = typeof integrityFindingKey === 'function' ? integrityFindingKey(f) : '';
+      if (key && map[key]) return map[key];
+      return null;
     }
 
     function normalizeIntegrityFinding(f) {
       const stream = mapIntegrityStreamLabel(f.workstream);
-      const status = deriveIntegrityStatus(f);
+      const ranksNowUrl = String(f.preferred_path || '').trim();
+      const shouldBeUrl = String(f.assigned_path || '').trim();
+      const keyword = String(f.subject || '').trim();
+      const preAudit = {
+        ...f,
+        ranksNowUrl,
+        shouldBeUrl,
+        stream
+      };
+      // Attach findingId early if present later after assign IDs; pageAudit applied in assign step
+      const status = deriveIntegrityStatus(preAudit);
       const metrics = parseIntegrityAtStake(f.at_stake);
       return {
-        ...f,
-        stream,
+        ...preAudit,
         statusKey: status.key,
         statusLabel: status.label,
         statusSort: status.sort,
         volume: metrics.volume,
         clicks: metrics.clicks,
         impressions: metrics.impressions,
-        ranksNowUrl: String(f.preferred_path || '').trim(),
-        shouldBeUrl: String(f.assigned_path || '').trim()
+        anchorText: keyword,
+        linkToUrl: pathToSiteUrl(shouldBeUrl)
       };
+    }
+
+    function mergePageAuditOntoFindings(rows) {
+      return rows.map((r) => {
+        const audit = pageAuditForFinding(r);
+        if (!audit) {
+          // re-derive status without audit
+          const st = deriveIntegrityStatus(r);
+          return { ...r, pageAudit: null, statusKey: st.key, statusLabel: st.label, statusSort: st.sort };
+        }
+        const withAudit = { ...r, pageAudit: audit };
+        const st = deriveIntegrityStatus(withAudit);
+        return {
+          ...withAudit,
+          statusKey: st.key,
+          statusLabel: st.label,
+          statusSort: st.sort,
+          targetOk: audit.target_ok,
+          targetHttpStatus: audit.target_http_status,
+          targetFinalPath: audit.target_final_path,
+          checkedAt: audit.checked_at,
+          sampleAnchor: audit.sample_anchor,
+          linkStatus: audit.link_status
+        };
+      });
     }
 
     function pathToSiteUrl(pathOrUrl) {
@@ -33197,8 +33253,10 @@
     function integrityStatusPill(statusKey, label) {
       const cls = statusKey === 'decision' ? 'ci-status-decision'
         : statusKey === 'awaiting' ? 'ci-status-awaiting'
-          : statusKey === 'fix' ? 'ci-status-fix'
-            : 'ci-status-other';
+          : statusKey === 'weak' ? 'ci-status-weak'
+            : statusKey === 'fix' ? 'ci-status-fix'
+              : statusKey === 'unchecked' ? 'ci-status-unchecked'
+                : 'ci-status-other';
       return '<span class="ci-status-pill ' + cls + '">' + escapeHtml(label) + '</span>';
     }
 
@@ -33245,8 +33303,10 @@
     function groupIntegrityByStatus(rows) {
       const order = [
         { key: 'decision', label: 'Decision needed' },
-        { key: 'awaiting', label: 'Awaiting recrawl' },
+        { key: 'awaiting', label: 'Link in place — awaiting recrawl' },
+        { key: 'weak', label: 'Link present, weak anchor' },
         { key: 'fix', label: 'Fix needed' },
+        { key: 'unchecked', label: 'Not page-checked' },
         { key: 'other', label: 'Other/config' }
       ];
       return order.map((g) => ({
@@ -33262,14 +33322,14 @@
         alert('No findings to export yet. Run the check first.');
         return;
       }
-      const rows = filterAndSortIntegrityFindings(assignIntegrityFindingIds(findings.map(normalizeIntegrityFinding)));
+      const rows = filterAndSortIntegrityFindings(mergePageAuditOntoFindings(assignIntegrityFindingIds(findings.map(normalizeIntegrityFinding))));
       const esc = (v) => {
         const t = String(v ?? '');
         return /["\n,]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
       };
       const header = [
         'id', 'status', 'stream', 'check', 'keyword', 'search_volume', 'clicks', 'impressions',
-        'ranks_now_url', 'should_be_url', 'action'
+        'ranks_now_url', 'should_be_url', 'anchor_text', 'link_to_url', 'target_ok', 'checked_at', 'action'
       ];
       const lines = [header.join(',')];
       for (const r of rows) {
@@ -33284,6 +33344,10 @@
           esc(r.impressions == null ? '' : r.impressions),
           esc(pathToSiteUrl(r.ranksNowUrl) || r.ranksNowUrl || ''),
           esc(pathToSiteUrl(r.shouldBeUrl) || r.shouldBeUrl || ''),
+          esc(r.anchorText || r.subject || ''),
+          esc(r.linkToUrl || pathToSiteUrl(r.shouldBeUrl) || ''),
+          esc(r.targetOk == null ? '' : (r.targetOk ? 'yes' : 'no')),
+          esc(r.checkedAt || ''),
           esc(r.suggested_action ?? '')
         ].join(','));
       }
@@ -33316,13 +33380,13 @@
         return;
       }
 
-      const normalized = assignIntegrityFindingIds(findings.map(normalizeIntegrityFinding));
+      const normalized = mergePageAuditOntoFindings(assignIntegrityFindingIds(findings.map(normalizeIntegrityFinding)));
       const filters = getIntegrityFilterState();
       const filtered = filterAndSortIntegrityFindings(normalized);
       const groups = groupIntegrityByStatus(filtered);
       const streams = [...new Set(normalized.map((r) => r.stream).filter(Boolean))].sort();
       const checks = [...new Set(normalized.map((r) => String(r.check)))].sort((a, b) => Number(a) - Number(b));
-      const statusCounts = { decision: 0, awaiting: 0, fix: 0, other: 0 };
+      const statusCounts = { decision: 0, awaiting: 0, weak: 0, fix: 0, unchecked: 0, other: 0 };
       for (const r of normalized) statusCounts[r.statusKey] = (statusCounts[r.statusKey] || 0) + 1;
 
       const legendHtml =
@@ -33330,7 +33394,7 @@
         '<summary>Key — Check / Severity / Stream / Status</summary>' +
         '<ul>' +
         '<li><strong>Check 1–6</strong> — integrity suite (1/4/6 structural red; 2/3/5 advisory amber). Check 3 = Google ranks a different URL than locked target.</li>' +
-        '<li><strong>Status</strong> — derived from action text (no stored worklist): Decision needed · Awaiting recrawl · Fix needed · Other/config.</li>' +
+        '<li><strong>Status</strong> — Decision needed from action text; link Fix / weak / awaiting from <em>live page audit</em> (Re-check pages). Until audited: Not page-checked (no shipped guess).</li>' +
         '<li><strong>Stream</strong> — Hub / Swap / Blog / Config work grouping (not a dashboard panel).</li>' +
         '<li><strong>ID</strong> — stable short id (CANN-xxxx check 3; CFG-xxxx other) from keyword+assigned path so the issue keeps the same code across runs.</li><li><strong>Lifecycle</strong> — rows recompute each run and clear when data changes. No mark-done.</li>' +
         '</ul></details>';
@@ -33343,8 +33407,10 @@
         '<label>Status <select id="ci-filter-status">' +
         '<option value="all">All (' + normalized.length + ')</option>' +
         '<option value="decision">Decision needed (' + (statusCounts.decision || 0) + ')</option>' +
-        '<option value="awaiting">Awaiting recrawl (' + (statusCounts.awaiting || 0) + ')</option>' +
+        '<option value="awaiting">Link in place — awaiting recrawl (' + (statusCounts.awaiting || 0) + ')</option>' +
+        '<option value="weak">Link present, weak anchor (' + (statusCounts.weak || 0) + ')</option>' +
         '<option value="fix">Fix needed (' + (statusCounts.fix || 0) + ')</option>' +
+        '<option value="unchecked">Not page-checked (' + (statusCounts.unchecked || 0) + ')</option>' +
         '<option value="other">Other/config (' + (statusCounts.other || 0) + ')</option>' +
         '</select></label>' +
         '<label>Stream <select id="ci-filter-stream"><option value="all">All</option>' + streamOpts + '</select></label>' +
@@ -33365,6 +33431,16 @@
         const vol = r.volume == null ? '—' : Number(r.volume).toLocaleString();
         const clk = r.clicks == null ? '—' : Number(r.clicks).toLocaleString();
         const streamCell = r.stream ? ('<span class="ci-ws-tag">' + escapeHtml(r.stream) + '</span>') : '—';
+        const targetCell = r.targetOk === true
+          ? '<span class="ci-target-ok">OK</span>'
+          : (r.targetOk === false
+            ? '<span class="ci-target-bad" title="HTTP ' + escapeHtml(String(r.targetHttpStatus || '')) + ' final ' + escapeHtml(String(r.targetFinalPath || '')) + '">Issue</span>'
+            : '—');
+        const checkedCell = r.checkedAt
+          ? '<span class="ci-checked-at">' + escapeHtml(String(r.checkedAt).replace('T', ' ').slice(0, 16)) + 'Z</span>'
+          : '—';
+        const anchorCell = escapeHtml(String(r.anchorText || r.subject || '—'));
+        const linkToCell = integrityLinkCell(r.linkToUrl || r.shouldBeUrl);
         return (
           '<tr>' +
           '<td class="ci-finding-id">' + escapeHtml(String(r.findingId || '—')) + '</td>' +
@@ -33376,6 +33452,10 @@
           '<td class="ci-num">' + clk + '</td>' +
           '<td class="ci-url">' + integrityLinkCell(r.ranksNowUrl) + '</td>' +
           '<td class="ci-url">' + integrityLinkCell(r.shouldBeUrl) + '</td>' +
+          '<td>' + targetCell + '</td>' +
+          '<td><code style="font-size:0.75rem;">' + anchorCell + '</code></td>' +
+          '<td class="ci-url">' + linkToCell + '</td>' +
+          '<td>' + checkedCell + '</td>' +
           '<td class="ci-action" title="' + meaningTitle + '">' + escapeHtml(String(r.suggested_action || '—')) + '</td>' +
           '</tr>'
         );
@@ -33384,12 +33464,12 @@
       const groupsHtml = groups.length
         ? groups.map((g) => (
           '<tbody class="ci-group ci-group-' + String(g.key || 'other') + '">' +
-          '<tr class="ci-group-head"><td colspan="10">' + escapeHtml(g.label) +
+          '<tr class="ci-group-head"><td colspan="14">' + escapeHtml(g.label) +
           ' <span class="ci-group-count">(' + g.rows.length + ')</span></td></tr>' +
           g.rows.map(renderRow).join('') +
           '</tbody>'
         )).join('')
-        : '<tbody><tr><td colspan="10" class="ci-muted">No rows match filters.</td></tr></tbody>';
+        : '<tbody><tr><td colspan="14" class="ci-muted">No rows match filters.</td></tr></tbody>';
 
       panel.innerHTML =
         legendHtml +
@@ -33405,6 +33485,10 @@
         '<th style="width:4rem;" title="28d clicks on assigned page">Clicks</th>' +
         '<th>Ranks now (from)</th>' +
         '<th>Should be (to)</th>' +
+        '<th style="width:4.5rem;" title="Money page returns 200 and final path matches LOCKED target">Target OK?</th>' +
+        '<th title="Exact text to hyperlink on the from-page">Anchor text</th>' +
+        '<th title="Destination URL for that anchor">Link to</th>' +
+        '<th style="width:6rem;">Checked</th>' +
         '<th>Action</th>' +
         '</tr></thead>' +
         groupsHtml +
@@ -33434,7 +33518,94 @@
     }
 
 
-                async function fetchConfigIntegritySummary({ triggerRun = false, runSource = 'dashboard' } = {}) {
+                
+    async function loadConfigIntegrityPageAuditCache() {
+      try {
+        const propertyUrl = document.getElementById('propertyUrl')?.value
+          || localStorage.getItem('gsc_property_url')
+          || 'https://www.alanranger.com';
+        const base = typeof window.apiUrl === 'function'
+          ? window.apiUrl('/api/aigeo/config-integrity-page-audit')
+          : '/api/aigeo/config-integrity-page-audit';
+        const resp = await fetch(base + '?propertyUrl=' + encodeURIComponent(propertyUrl) + '&_=' + Date.now());
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || String(json?.status || '').toLowerCase() !== 'ok') return null;
+        const map = {};
+        for (const row of (json.results || [])) {
+          if (row.finding_key) map[row.finding_key] = row;
+        }
+        window.__configIntegrityPageAudit = map;
+        if (window.__configIntegrityLatest) renderConfigIntegrityPanel(window.__configIntegrityLatest);
+        return map;
+      } catch (e) {
+        console.warn('[config-integrity] page audit cache load failed', e);
+        return null;
+      }
+    }
+
+    async function runConfigIntegrityPageAudit() {
+      const btn = document.getElementById('config-integrity-page-audit-btn');
+      const payload = window.__configIntegrityLatest;
+      const findings = Array.isArray(payload?.data?.findings) ? payload.data.findings : [];
+      if (!findings.length) {
+        alert('No findings to audit. Run the integrity check first.');
+        return;
+      }
+      const rows = assignIntegrityFindingIds(findings.map(normalizeIntegrityFinding));
+      const items = rows
+        .filter((r) => Number(r.check) === 3 && r.ranksNowUrl && r.shouldBeUrl)
+        .map((r) => ({
+          findingKey: r.findingId,
+          keyword: r.subject,
+          fromPath: r.ranksNowUrl,
+          toPath: r.shouldBeUrl
+        }));
+      if (!items.length) {
+        alert('No check-3 rows with from/to URLs.');
+        return;
+      }
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Checking ' + items.length + '…';
+      }
+      try {
+        const propertyUrl = document.getElementById('propertyUrl')?.value
+          || localStorage.getItem('gsc_property_url')
+          || 'https://www.alanranger.com';
+        const base = typeof window.apiUrl === 'function'
+          ? window.apiUrl('/api/aigeo/config-integrity-page-audit')
+          : '/api/aigeo/config-integrity-page-audit';
+        const resp = await fetch(base, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ propertyUrl, items })
+        });
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || String(json?.status || '').toLowerCase() !== 'ok') {
+          throw new Error(json?.message || ('HTTP ' + resp.status));
+        }
+        const map = { ...(window.__configIntegrityPageAudit || {}) };
+        for (const row of (json.results || [])) {
+          if (row.finding_key) map[row.finding_key] = row;
+        }
+        window.__configIntegrityPageAudit = map;
+        if (window.__configIntegrityLatest) renderConfigIntegrityPanel(window.__configIntegrityLatest);
+        const n = (json.results || []).length;
+        const present = (json.results || []).filter((r) => r.link_status === 'present').length;
+        const absent = (json.results || []).filter((r) => r.link_status === 'absent').length;
+        const weak = (json.results || []).filter((r) => r.link_status === 'weak').length;
+        alert('Page audit done for ' + n + ' findings.\nLink in place: ' + present + '\nWeak anchor: ' + weak + '\nFix needed: ' + absent + '\n~' + Math.round((json.meta?.durationMs || 0) / 1000) + 's · ' + (json.meta?.uniqueFromPages || '?') + ' unique from-pages fetched.');
+      } catch (err) {
+        alert('Page audit failed: ' + (err?.message || err));
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Re-check pages';
+        }
+      }
+    }
+
+    async function fetchConfigIntegritySummary({ triggerRun = false, runSource = 'dashboard' } = {}) {
       const propertyUrl = document.getElementById('propertyUrl')?.value
         || localStorage.getItem('gsc_property_url')
         || localStorage.getItem('last_property_url')
@@ -33512,6 +33683,11 @@
       if (exportBtn) {
         exportBtn.addEventListener('click', () => exportConfigIntegrityCsv());
       }
+      const auditBtn = document.getElementById('config-integrity-page-audit-btn');
+      if (auditBtn) {
+        auditBtn.addEventListener('click', () => void runConfigIntegrityPageAudit());
+      }
+      void loadConfigIntegrityPageAuditCache();
       void refreshConfigIntegrityUI();
     })();
     async function fetchAndRenderMentionsSummary(cachedPayload = null) {
@@ -34082,7 +34258,7 @@
         info.textContent = `${rows.length}/${implExtractabilityTableState.rows.length} rows shown`;
       }
       if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="10" class="ranking-table-empty">No rows match current filters.</td></tr>';
+        body.innerHTML = '<tr><td colspan="14" class="ranking-table-empty">No rows match current filters.</td></tr>';
         return;
       }
       body.innerHTML = rows.map((row) => `
@@ -34249,7 +34425,7 @@
                 </tr>
               </thead>
               <tbody id="impl-extract-table-body">
-                <tr><td colspan="10" class="ranking-table-empty">Loading rows...</td></tr>
+                <tr><td colspan="14" class="ranking-table-empty">Loading rows...</td></tr>
               </tbody>
             </table>
             <div id="impl-extract-table-info" style="margin-top: 0.5rem; font-size: 0.85rem; opacity: 0.85;">0 rows shown</div>
