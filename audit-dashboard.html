@@ -16010,21 +16010,27 @@
         #config-integrity-panel {
           display: none;
           margin-bottom: 1rem;
-          padding: 0.85rem 1rem;
-          border-radius: 6px;
+          padding: 0.85rem 1.25rem;
+          border-radius: 0;
           border: 1px solid #cbd5e1;
           background: #fff;
           overflow-x: auto;
-          max-width: 100%;
           box-sizing: border-box;
         }
-        /* Break out of .container like Traditional SEO / Dashboard panels */
+        /* Full main-column width (parent .container max-width does not constrain when open) */
         #config-integrity-panel.is-open {
-          display: block;
-          width: calc(100vw - 260px);
-          max-width: none;
-          margin-left: calc(-50vw + 50% + 130px);
-          margin-right: calc(-50vw + 50% - 130px);
+          display: block !important;
+          max-width: none !important;
+          box-sizing: border-box !important;
+          position: relative;
+          z-index: 6;
+        }
+        /* Unclip ancestors so the panel can extend to .aigeo-main edges */
+        #dashboard:has(#config-integrity-panel.is-open),
+        .container:has(#config-integrity-panel.is-open) {
+          max-width: none !important;
+          width: 100% !important;
+          overflow: visible !important;
         }
         #config-integrity-panel .ci-table-wrap {
           width: 100%;
@@ -16035,7 +16041,7 @@
           max-height: min(70vh, 720px);
         }
         #config-integrity-panel .config-integrity-findings-table {
-          width: 100%;
+          width: 100% !important;
           min-width: 100%;
           table-layout: auto;
           border-collapse: separate;
@@ -33737,6 +33743,7 @@
 
       // Sync active finding ids so reappear/cleared_at tracks correctly (fire-and-forget)
       const activeIds = normalized.map((r) => r.findingId).filter(Boolean);
+      layoutConfigIntegrityPanelFullWidth();
       void syncConfigIntegrityWorkActive(activeIds);
     }
 
@@ -33878,17 +33885,52 @@
     }
     window.triggerConfigIntegrityCheckFireAndForget = triggerConfigIntegrityCheckFireAndForget;
 
-    (function initConfigIntegrityControls() {
+    
+    function layoutConfigIntegrityPanelFullWidth() {
+      const panel = document.getElementById('config-integrity-panel');
+      if (!panel) return;
+      if (!panel.classList.contains('is-open')) {
+        panel.style.marginLeft = '';
+        panel.style.marginRight = '';
+        panel.style.width = '';
+        panel.style.maxWidth = '';
+        panel.style.left = '';
+        return;
+      }
+      const main = document.querySelector('.aigeo-main');
+      if (!main) return;
+      const apply = () => {
+        panel.style.marginLeft = '0px';
+        panel.style.marginRight = '0px';
+        panel.style.width = 'auto';
+        panel.style.maxWidth = 'none';
+        panel.style.boxSizing = 'border-box';
+        const mainRect = main.getBoundingClientRect();
+        const panelRect = panel.getBoundingClientRect();
+        panel.style.marginLeft = Math.round(mainRect.left - panelRect.left) + 'px';
+        panel.style.width = Math.round(mainRect.width) + 'px';
+        panel.style.maxWidth = 'none';
+      };
+      // Two frames: :has() container expand first, then align to .aigeo-main edges.
+      requestAnimationFrame(() => {
+        apply();
+        requestAnimationFrame(apply);
+      });
+    }
+
+(function initConfigIntegrityControls() {
       const chip = document.getElementById('config-integrity-chip');
       const panel = document.getElementById('config-integrity-panel');
       const runBtn = document.getElementById('config-integrity-run-btn');
       if (chip && panel) {
         chip.addEventListener('click', () => {
           panel.classList.toggle('is-open');
+          layoutConfigIntegrityPanelFullWidth();
           if (panel.classList.contains('is-open') && !window.__configIntegrityLatest) {
             void refreshConfigIntegrityUI();
           }
         });
+        window.addEventListener('resize', () => layoutConfigIntegrityPanelFullWidth());
       }
       if (runBtn) {
         runBtn.addEventListener('click', () => {
