@@ -13791,7 +13791,7 @@
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
             <button id="traditional-seo-run-audit-btn" class="btn traditional-seo-run-step2-btn" type="button" style="padding: 0.45rem 0.9rem;"
               aria-describedby="traditional-seo-run-sequence-hint"
-              title="Refetches extractability for every URL (batches of 25), updates the cache, then rescores Traditional SEO. Uses saved main audit and GSC URL Inspection cache — does not call live Search Console inspect (use Refresh GSC URL Inspection for that).">
+              title="Refetches extractability for every URL (batches of 25), then rescores Traditional SEO. Live GSC URL Inspection only for URLs that currently fail Indexed in Google (smarter/slower). Passes and warns use cache.">
               ② Score Traditional SEO only
             </button>
             <button id="traditional-seo-run-full-audit-btn" class="btn traditional-seo-run-step1-btn" type="button" style="padding: 0.45rem 0.9rem;"
@@ -83435,6 +83435,28 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         `;
       }
 
+      /**
+       * Surface Visibility for AI Summary radar — same meaning as Search performance SV.
+       * Prefer live surface rollup; then scores.surfaceVisibility; then object/number visibility.
+       */
+      function resolveAiSummaryVisibilityScore(scores, surfaceRollup) {
+        const fromRollup = toNum(surfaceRollup?.overall ?? surfaceRollup?.score);
+        if (fromRollup != null) return Math.round(fromRollup);
+        const sv = scores?.surfaceVisibility;
+        const fromSv = toNum(
+          (typeof sv === 'object' && sv) ? (sv.overall ?? sv.score) : sv
+        );
+        if (fromSv != null) return Math.round(fromSv);
+        if (typeof scores?.visibility === 'number' && Number.isFinite(scores.visibility)) {
+          return Math.round(scores.visibility);
+        }
+        if (scores?.visibility && typeof scores.visibility === 'object') {
+          const n = toNum(scores.visibility.score ?? scores.visibility.overall);
+          if (n != null) return Math.round(n);
+        }
+        return null;
+      }
+
       function computePillarScoresFromAudit(audit) {
         const scores = audit?.scores || null;
         if (!scores) return null;
@@ -83775,8 +83797,8 @@ Composite of four inputs — not the Surface Visibility dial score.`;
             console.log('[Dashboard] Recalculated snippetReadiness from scores:', snippetReadinessScore);
           }
           
-          // Get visibility score directly from audit (pillars computed later)
-          const visibilityScore = (typeof audit.scores?.visibility === 'number') ? audit.scores.visibility : null;
+          // Visibility may be object { score } after surface rollup — never number-only.
+          const visibilityScore = resolveAiSummaryVisibilityScore(audit.scores, null);
           const brandScore = (typeof audit.scores?.brandOverlay?.score === 'number') ? audit.scores.brandOverlay.score : null;
           if (snippetReadinessScore > 0 || visibilityScore != null || brandScore != null) {
             aiSummaryComponents = {
@@ -83803,6 +83825,15 @@ Composite of four inputs — not the Surface Visibility dial score.`;
             topOfPage = computeTopOfPageRollup(rankingRows);
           }
         } catch (_topErr) { topOfPage = null; }
+        // Align radar Visibility with Search performance Surface Visibility (live rollup wins).
+        {
+          const visHeal = resolveAiSummaryVisibilityScore(audit?.scores, surfaceVisibility);
+          if (visHeal != null) {
+            aiSummaryComponents = aiSummaryComponents
+              ? { ...aiSummaryComponents, visibility: visHeal }
+              : { snippetReadiness: 0, visibility: visHeal, brand: null };
+          }
+        }
 
         const pillars = computePillarScoresFromAudit(audit);
         if (pillars && audit?.scores) {
@@ -87810,32 +87841,36 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         // Extract AI Summary components (needed for AI Summary radar chart deltas)
         let aiSummaryComponents = auditData.aiSummaryComponents || null;
         
-        // If aiSummaryComponents is missing or has snippetReadiness=0, try to recalculate it
-        if (!aiSummaryComponents || (aiSummaryComponents.snippetReadiness === 0 && 
-            (scores.contentSchema != null || scores.visibility != null || scores.authority != null))) {
+        // Rebuild if missing, snippet=0, or Visibility missing/0 (object-shaped visibility used to become null)
+        const visMissing = !aiSummaryComponents
+          || aiSummaryComponents.visibility == null
+          || aiSummaryComponents.visibility === 0;
+        if (!aiSummaryComponents || aiSummaryComponents.snippetReadiness === 0 || visMissing) {
           let snippetReadinessScore = 0;
-          // Try to get from auditData.snippetReadiness first
           if (auditData.snippetReadiness) {
-            snippetReadinessScore = typeof auditData.snippetReadiness === 'number' 
-              ? auditData.snippetReadiness 
+            snippetReadinessScore = typeof auditData.snippetReadiness === 'number'
+              ? auditData.snippetReadiness
               : (auditData.snippetReadiness?.overallScore || 0);
           }
-          
-          // If still 0, recalculate from component scores
           if (snippetReadinessScore === 0 && typeof calculateSnippetReadiness === 'function') {
             snippetReadinessScore = calculateSnippetReadiness(scores, searchData);
-            console.log('[Dashboard] computeDashboardSnapshotFromAuditData: Recalculated snippetReadiness from scores:', snippetReadinessScore);
           }
-          
-          const visibilityScore = (typeof scores.visibility === 'number') ? scores.visibility : null;
+          const visibilityScore = resolveAiSummaryVisibilityScore(scores, surfaceVisibility);
           const brandScore = (typeof scores.brandOverlay?.score === 'number') ? scores.brandOverlay.score : null;
-          
           if (snippetReadinessScore > 0 || visibilityScore != null || brandScore != null) {
             aiSummaryComponents = {
-              snippetReadiness: snippetReadinessScore,
-              visibility: visibilityScore,
-              brand: brandScore
+              ...(aiSummaryComponents || {}),
+              snippetReadiness: snippetReadinessScore || (aiSummaryComponents?.snippetReadiness ?? 0),
+              visibility: visibilityScore ?? aiSummaryComponents?.visibility ?? null,
+              brand: brandScore ?? aiSummaryComponents?.brand ?? null,
             };
+          }
+        }
+        // Always prefer live surface rollup for visibility axis when available
+        {
+          const visHeal = resolveAiSummaryVisibilityScore(scores, surfaceVisibility);
+          if (visHeal != null && aiSummaryComponents) {
+            aiSummaryComponents = { ...aiSummaryComponents, visibility: visHeal };
           }
         }
         
