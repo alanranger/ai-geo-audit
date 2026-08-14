@@ -39862,25 +39862,22 @@
       // Check if saved audit exists and if its date range matches
       const savedAudit = loadAuditResultsSync();
       if (savedAudit && savedAudit.scores) {
-        const savedDateRange = savedAudit.dateRange || oldDateRange;
-        // Always update if date range changed (even if going back to a previous range)
-        // This ensures charts refresh properly when switching between ranges
+        const savedDateRange = parseInt(savedAudit.dateRange || oldDateRange, 10) || oldDateRange;
         if (savedDateRange !== days) {
-          // Date range changed - update GSC data and recalculate scores
           debugLog(`Date range changed from ${savedDateRange} to ${days} days. Updating metrics...`, 'info');
-          updateAuditForNewDateRange(days, savedAudit);
+          await updateAuditForNewDateRange(days, savedAudit);
         } else {
-          // Date range matches, but force refresh to ensure charts are updated
-          // This handles the case where user switches back to the same range
           debugLog(`Date range is already ${days} days, but refreshing charts to ensure they're up to date...`, 'info');
           if (savedAudit.scores && savedAudit.searchData) {
-            displayDashboard(savedAudit.scores, savedAudit.searchData, savedAudit.snippetReadiness, savedAudit.schemaAudit, savedAudit.localSignals);
+            await displayDashboard(savedAudit.scores, savedAudit.searchData, savedAudit.snippetReadiness, savedAudit.schemaAudit, savedAudit.localSignals);
           } else {
-            finishDateRangeProgress();
+            updateFullScreenLoading('No search data for this range', 'Run a GSC audit, then try again.');
+            setTimeout(() => finishDateRangeProgress(), 1200);
           }
         }
       } else {
-        finishDateRangeProgress();
+        updateFullScreenLoading('No saved audit in this browser tab', 'Run a GSC audit, then change date range.');
+        setTimeout(() => finishDateRangeProgress(), 1200);
       }
     }
 
@@ -41017,15 +41014,27 @@
     }
 
     function finishDateRangeProgress() {
-      window.__dateRangeBusy = false;
-      if (window.__dateRangeBusyTimer) {
-        clearInterval(window.__dateRangeBusyTimer);
-        window.__dateRangeBusyTimer = null;
+      const gen = window.__dateRangeBusyGen;
+      const hide = () => {
+        if (gen && window.__dateRangeBusyGen !== gen) return;
+        window.__dateRangeBusy = false;
+        if (window.__dateRangeBusyTimer) {
+          clearInterval(window.__dateRangeBusyTimer);
+          window.__dateRangeBusyTimer = null;
+        }
+        const banner = document.getElementById('dateRangeBusyBanner');
+        if (banner) banner.classList.remove('is-on');
+        hideFullScreenLoading(true);
+        setDateRangeButtonsDisabled(false);
+      };
+      if (!window.__dateRangeBusy) {
+        hide();
+        return;
       }
-      const banner = document.getElementById('dateRangeBusyBanner');
-      if (banner) banner.classList.remove('is-on');
-      hideFullScreenLoading(true);
-      setDateRangeButtonsDisabled(false);
+      const started = window.__dateRangeBusyStarted || Date.now();
+      const remain = Math.max(0, 900 - (Date.now() - started));
+      if (remain > 0) setTimeout(hide, remain);
+      else hide();
     }
 
     function updateFullScreenLoading(message, subtitle) {
@@ -48853,6 +48862,8 @@
         return;
       }
       window.__displayDashboardRunning = true;
+      const waitForDateRange = !!window.__dateRangeBusy;
+      const dateRangeGen = window.__dateRangeBusyGen || 0;
       try {
       // Normalize localSignals structure if needed (handle old format where it might just be {data: {...}})
       if (localSignals && localSignals.data && !localSignals.status) {
@@ -62894,8 +62905,8 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       // Wait a moment for DOM to update, then create charts (charts need visible canvas)
       await new Promise((resolve, reject) => {
       setTimeout(async () => {
-        const holdGen = window.__dateRangeBusy ? (window.__dateRangeBusyGen || 1) : 0;
-        const waitForTrends = !!holdGen;
+        const holdGen = waitForDateRange ? dateRangeGen : 0;
+        const waitForTrends = waitForDateRange;
         try {
         debugLog('Starting chart creation (setTimeout callback)...', 'info');
         

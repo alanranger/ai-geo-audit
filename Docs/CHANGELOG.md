@@ -4,7 +4,7 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 
 ## [2026-08-14] - Site AI Health date range: progress modal, date labels, traffic chart
 
-**Change:** Date-range toggles keep a full-screen progress modal (elapsed time + step text) until Score Trends finish rendering. Score Trends x-axis now shows interval date labels. New **Clicks and impressions** chart sits under Score Trends (GSC totals for the selected range). Progress stays locked (inline banner + overlay) so an in-flight chart render cannot dismiss it.
+**Change:** Date-range toggles keep a full-screen progress modal (elapsed time + step text) until Score Trends finish rendering. Score Trends x-axis now shows interval date labels. New **Clicks and impressions** chart sits under Score Trends (GSC totals for the selected range). Progress is owned by the click that started it (an older chart render cannot dismiss it) and stays visible at least 0.9s so it cannot flash.
 
 **Files:** `audit-dashboard.html`
 
