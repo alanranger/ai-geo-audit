@@ -14693,7 +14693,7 @@
       </div>
       <div class="chart-container chart-container--trends" id="gscTrafficChartContainer">
         <h3>Clicks and impressions</h3>
-        <p style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">Total Google Search Console clicks and impressions for the selected date range.</p>
+        <p id="gscTrafficChartSub" style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">Total Google Search Console clicks and impressions for the selected date range.</p>
         <div class="trend-canvas-wrap trend-canvas-wrap--traffic">
           <canvas id="gscTrafficChart"></canvas>
         </div>
@@ -41141,6 +41141,20 @@
       window[refName] = null;
     }
 
+    function rollupTrafficByMonth(timeseries) {
+      const months = new Map();
+      (timeseries || []).forEach((p) => {
+        const day = localYmd(p?.date);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
+        const key = day.slice(0, 7);
+        const row = months.get(key) || { date: `${key}-01`, clicks: 0, impressions: 0 };
+        if (p.clicks != null) row.clicks += Number(p.clicks) || 0;
+        if (p.impressions != null) row.impressions += Number(p.impressions) || 0;
+        months.set(key, row);
+      });
+      return Array.from(months.keys()).sort().map((k) => months.get(k));
+    }
+
     function renderGscTrafficChart(dateObjects, timeseries, dateRangeDays) {
       const canvas = document.getElementById('gscTrafficChart');
       if (!canvas || typeof Chart === 'undefined') return;
@@ -41148,17 +41162,41 @@
       const existing = Chart.getChart(canvas);
       if (existing) existing.destroy();
 
-      const clickMap = new Map();
-      const impressionMap = new Map();
-      (timeseries || []).forEach((p) => {
-        const key = localYmd(p?.date);
-        if (!key) return;
-        if (p.clicks != null) clickMap.set(key, Number(p.clicks) || 0);
-        if (p.impressions != null) impressionMap.set(key, Number(p.impressions) || 0);
-      });
-      const labels = (dateObjects || []).map((d) => localYmd(d));
-      const clicks = labels.map((k) => (clickMap.has(k) ? clickMap.get(k) : null));
-      const impressions = labels.map((k) => (impressionMap.has(k) ? impressionMap.get(k) : null));
+      const useMonthly = Number(dateRangeDays) >= 365;
+      let labels;
+      let clicks;
+      let impressions;
+      if (useMonthly) {
+        const monthly = rollupTrafficByMonth(timeseries);
+        labels = monthly.map((r) => r.date);
+        clicks = monthly.map((r) => r.clicks);
+        impressions = monthly.map((r) => r.impressions);
+      } else {
+        const clickMap = new Map();
+        const impressionMap = new Map();
+        (timeseries || []).forEach((p) => {
+          const key = localYmd(p?.date);
+          if (!key) return;
+          if (p.clicks != null) clickMap.set(key, Number(p.clicks) || 0);
+          if (p.impressions != null) impressionMap.set(key, Number(p.impressions) || 0);
+        });
+        labels = (dateObjects || []).map((d) => localYmd(d));
+        clicks = labels.map((k) => (clickMap.has(k) ? clickMap.get(k) : null));
+        impressions = labels.map((k) => (impressionMap.has(k) ? impressionMap.get(k) : null));
+      }
+
+      const sub = document.getElementById('gscTrafficChartSub');
+      if (sub) {
+        sub.textContent = useMonthly
+          ? 'Monthly totals from Google Search Console. The latest month may be incomplete.'
+          : 'Total Google Search Console clicks and impressions for the selected date range.';
+      }
+      const axisDate = (raw) => {
+        const dt = new Date(String(raw));
+        if (Number.isNaN(dt.getTime())) return '';
+        if (useMonthly) return dt.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+        return formatTrendAxisDate(dt, dateRangeDays);
+      };
 
       window.gscTrafficChart = new Chart(canvas.getContext('2d'), {
         type: 'line',
@@ -41172,8 +41210,8 @@
               backgroundColor: 'rgba(37, 99, 235, 0.12)',
               borderWidth: 2,
               tension: 0.25,
-              pointRadius: 0,
-              pointHoverRadius: 4,
+              pointRadius: useMonthly ? 3 : 0,
+              pointHoverRadius: 5,
               yAxisID: 'y',
               spanGaps: true,
               fill: true
@@ -41185,8 +41223,8 @@
               backgroundColor: 'rgba(249, 115, 22, 0.08)',
               borderWidth: 2,
               tension: 0.25,
-              pointRadius: 0,
-              pointHoverRadius: 4,
+              pointRadius: useMonthly ? 3 : 0,
+              pointHoverRadius: 5,
               yAxisID: 'y1',
               spanGaps: true
             }
@@ -41202,13 +41240,13 @@
             x: {
               ticks: {
                 autoSkip: true,
-                maxTicksLimit: dateRangeDays <= 30 ? 8 : dateRangeDays <= 90 ? 10 : 12,
+                maxTicksLimit: useMonthly ? 18 : dateRangeDays <= 30 ? 8 : dateRangeDays <= 90 ? 10 : 12,
                 maxRotation: 0,
                 minRotation: 0,
                 font: { size: 11, weight: '600' },
                 color: '#1e293b',
                 callback: function(value) {
-                  return formatTrendAxisDate(this.getLabelForValue(value), dateRangeDays);
+                  return axisDate(this.getLabelForValue(value));
                 }
               },
               grid: { color: 'rgba(0, 0, 0, 0.06)' }
@@ -41240,7 +41278,7 @@
             legend: { display: true, position: 'top', labels: { font: { size: 14, weight: 'bold' } } },
             tooltip: {
               callbacks: {
-                title: (items) => formatTrendAxisDate(items?.[0]?.label, dateRangeDays),
+                title: (items) => axisDate(items?.[0]?.label),
                 label: (ctx) => `${ctx.dataset.label}: ${Number(ctx.parsed.y || 0).toLocaleString('en-GB')}`
               }
             }

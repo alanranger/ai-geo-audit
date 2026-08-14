@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-08-14] - Clicks/impressions: monthly totals at 12 months+
+
+**Change:** On 12-month and 18-month ranges, the Clicks and impressions chart sums each calendar month instead of plotting every day, so the line shows the trend instead of daily spikes. Shorter ranges stay daily. Latest month can be partial.
+
+**Files:** `audit-dashboard.html`
+
+---
+
 ## [2026-08-14] - Date range uses Supabase audit, not this-tab localStorage only
 
 **Change:** Changing 30/60/90/12-month range no longer fails with “No saved audit in this browser tab” when `localStorage` is empty. The dashboard already has the scorecard in memory / Supabase (`audit_results` + `gsc_timeseries`). Date-range now uses that envelope, then `loadAuditResults()`. Trend session cache is keyed by selected days so 12 months is not stuck on the last 90-day series.
