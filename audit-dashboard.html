@@ -934,6 +934,30 @@
       border-color: var(--brand-orange);
       background: #fff5f0;
     }
+    .date-range-busy {
+      display: none;
+      align-items: flex-start;
+      gap: 0.75rem;
+      margin-top: 0.85rem;
+      padding: 0.85rem 1rem;
+      background: #fff7ed;
+      border: 1px solid #fdba74;
+      border-radius: 8px;
+      color: #9a3412;
+    }
+    .date-range-busy.is-on {
+      display: flex;
+    }
+    .date-range-busy-spin {
+      width: 22px;
+      height: 22px;
+      border: 3px solid #fed7aa;
+      border-top-color: #ea580c;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
     .date-range-btn.active {
       background: var(--brand-orange);
       color: white;
@@ -14541,6 +14565,14 @@
             <button class="btn btn-small" onclick="applyCustomDateRange()" style="margin-left: 0.5rem; padding: 0.5rem 1rem;" title="Apply the custom date range you entered">Apply</button>
       </div>
           <div class="help-text">Analysis period for historical data</div>
+          <div id="dateRangeBusyBanner" class="date-range-busy" role="status" aria-live="polite">
+            <div class="date-range-busy-spin" aria-hidden="true"></div>
+            <div>
+              <div id="dateRangeBusyTitle" style="font-weight: 700;">Updating Site AI Health…</div>
+              <div id="dateRangeBusySub" style="font-size: 0.88rem; margin-top: 0.2rem;">Fetching data and redrawing charts. This can take a minute.</div>
+              <div id="dateRangeBusyElapsed" style="font-size: 0.8rem; margin-top: 0.35rem; color: #c2410c;">Elapsed: 0s</div>
+            </div>
+          </div>
       </div>
     </div>
 
@@ -39805,7 +39837,9 @@
 
     // Save configuration
     // Date range selector functions
-    function setDateRange(days) {
+    async function setDateRange(days) {
+      startDateRangeProgress(days);
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));
       const oldDateRange = parseInt(document.getElementById('dateRange').value) || 28;
       document.getElementById('dateRange').value = days;
       localStorage.setItem('gsc_date_range', days);
@@ -39839,19 +39873,14 @@
           // Date range matches, but force refresh to ensure charts are updated
           // This handles the case where user switches back to the same range
           debugLog(`Date range is already ${days} days, but refreshing charts to ensure they're up to date...`, 'info');
-          // Force a refresh by calling displayDashboard with current data
           if (savedAudit.scores && savedAudit.searchData) {
-            showFullScreenLoading(`Refreshing charts for ${days} day period...`);
-            setDateRangeButtonsDisabled(true);
-            requestAnimationFrame(() => {
-              displayDashboard(savedAudit.scores, savedAudit.searchData, savedAudit.snippetReadiness, savedAudit.schemaAudit, savedAudit.localSignals)
-                .finally(() => {
-                  hideFullScreenLoading();
-                  setDateRangeButtonsDisabled(false);
-                });
-            });
+            displayDashboard(savedAudit.scores, savedAudit.searchData, savedAudit.snippetReadiness, savedAudit.schemaAudit, savedAudit.localSignals);
+          } else {
+            finishDateRangeProgress();
           }
         }
+      } else {
+        finishDateRangeProgress();
       }
     }
 
@@ -39892,7 +39921,7 @@
         if (savedAudit && savedAudit.scores) {
           const savedDateRange = savedAudit.dateRange || oldDateRange;
           if (savedDateRange !== customDays) {
-            // Date range changed - update GSC data and recalculate scores
+            startDateRangeProgress(customDays);
             debugLog(`Date range changed from ${savedDateRange} to ${customDays} days. Updating metrics...`, 'info');
             updateAuditForNewDateRange(customDays, savedAudit);
           }
@@ -40952,11 +40981,55 @@
       });
     }
 
-    function updateFullScreenLoading(message, subtitle) {
+    function updateDateRangeBusyCopy(message, subtitle) {
+      const title = document.getElementById('dateRangeBusyTitle');
+      if (title && message) title.textContent = message;
+      const sub = document.getElementById('dateRangeBusySub');
+      if (sub && subtitle) sub.textContent = subtitle;
       const msg = document.getElementById('fullScreenLoadingMessage');
       if (msg && message) msg.textContent = message;
-      const sub = document.getElementById('fullScreenLoadingSub');
-      if (sub && subtitle) sub.textContent = subtitle;
+      const overlaySub = document.getElementById('fullScreenLoadingSub');
+      if (overlaySub && subtitle) overlaySub.textContent = subtitle;
+    }
+
+    function startDateRangeProgress(days) {
+      window.__dateRangeBusy = true;
+      window.__dateRangeBusyGen = (window.__dateRangeBusyGen || 0) + 1;
+      setDateRangeButtonsDisabled(true);
+      const banner = document.getElementById('dateRangeBusyBanner');
+      if (banner) banner.classList.add('is-on');
+      const title = `Updating Site AI Health for ${days} days…`;
+      updateDateRangeBusyCopy(title, 'Fetching data and redrawing charts. This can take a minute.');
+      const elapsedBanner = document.getElementById('dateRangeBusyElapsed');
+      if (elapsedBanner) elapsedBanner.textContent = 'Elapsed: 0s';
+      if (window.__dateRangeBusyTimer) clearInterval(window.__dateRangeBusyTimer);
+      window.__dateRangeBusyStarted = Date.now();
+      window.__dateRangeBusyTimer = setInterval(() => {
+        if (!window.__dateRangeBusyStarted) return;
+        const s = Math.round((Date.now() - window.__dateRangeBusyStarted) / 1000);
+        const label = `Elapsed: ${s}s`;
+        const a = document.getElementById('dateRangeBusyElapsed');
+        if (a) a.textContent = label;
+        const b = document.getElementById('fullScreenLoadingElapsed');
+        if (b) b.textContent = label;
+      }, 500);
+      showFullScreenLoading(title);
+    }
+
+    function finishDateRangeProgress() {
+      window.__dateRangeBusy = false;
+      if (window.__dateRangeBusyTimer) {
+        clearInterval(window.__dateRangeBusyTimer);
+        window.__dateRangeBusyTimer = null;
+      }
+      const banner = document.getElementById('dateRangeBusyBanner');
+      if (banner) banner.classList.remove('is-on');
+      hideFullScreenLoading(true);
+      setDateRangeButtonsDisabled(false);
+    }
+
+    function updateFullScreenLoading(message, subtitle) {
+      updateDateRangeBusyCopy(message, subtitle);
     }
 
     // Show full-screen loading overlay
@@ -41052,7 +41125,8 @@
     }
     
     // Hide full-screen loading overlay
-    function hideFullScreenLoading() {
+    function hideFullScreenLoading(force) {
+      if (window.__dateRangeBusy && !force) return;
       if (window.__fullScreenLoadingTimer) {
         clearInterval(window.__fullScreenLoadingTimer);
         window.__fullScreenLoadingTimer = null;
@@ -41179,9 +41253,6 @@
     
     // Update audit results for new date range without full rescan
     async function updateAuditForNewDateRange(newDateRange, savedAudit) {
-      // Show full-screen loading overlay and let it paint before heavy work
-      setDateRangeButtonsDisabled(true);
-      showFullScreenLoading(`Updating metrics for ${newDateRange} day period...`);
       await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 50)));
       
       try {
@@ -41189,8 +41260,7 @@
         
         const propertyUrl = document.getElementById('propertyUrl')?.value || savedAudit.propertyUrl || '';
         if (!propertyUrl) {
-          hideFullScreenLoading();
-          setDateRangeButtonsDisabled(false);
+          finishDateRangeProgress();
           clearDashboard();
           showStatus(`Date range changed to ${newDateRange} days. Please run a new audit to see updated metrics.`, 'info');
           return;
@@ -41325,9 +41395,7 @@
         
         clearDashboard();
         showStatus(`Date range changed to ${newDateRange} days. Please run a new audit to see updated metrics.`, 'info');
-      } finally {
-        hideFullScreenLoading();
-        setDateRangeButtonsDisabled(false);
+        finishDateRangeProgress();
       }
     }
     
@@ -62826,7 +62894,8 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       // Wait a moment for DOM to update, then create charts (charts need visible canvas)
       await new Promise((resolve, reject) => {
       setTimeout(async () => {
-        const waitForTrends = !!document.getElementById('fullScreenLoadingOverlay');
+        const holdGen = window.__dateRangeBusy ? (window.__dateRangeBusyGen || 1) : 0;
+        const waitForTrends = !!holdGen;
         try {
         debugLog('Starting chart creation (setTimeout callback)...', 'info');
         
@@ -62836,6 +62905,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           debugLog('✗ Chart.js library not loaded', 'error');
           console.error('Chart.js library not loaded');
           showStatus('Chart.js library failed to load. Please refresh the page.', 'error');
+          if (holdGen && holdGen === window.__dateRangeBusyGen) finishDateRangeProgress();
           resolve();
           return;
         }
@@ -62848,6 +62918,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         if (!radarCanvas) {
           debugLog('✗ Radar chart canvas not found', 'error');
           console.error('Radar chart canvas not found');
+          if (holdGen && holdGen === window.__dateRangeBusyGen) finishDateRangeProgress();
           resolve();
           return;
         }
@@ -63057,6 +63128,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         if (!trendCanvas) {
           debugLog('✗ Trend chart canvas not found', 'error');
           console.error('Trend chart canvas not found');
+          if (holdGen && holdGen === window.__dateRangeBusyGen) finishDateRangeProgress();
           if (waitForTrends) resolve();
           return;
         }
@@ -64809,10 +64881,8 @@ Composite of four inputs — not the Surface Visibility dial score.`;
             debugLog('Removed inline trend chart loading spinner', 'info');
           }
           
-          if (waitForTrends) {
+          if (window.__dateRangeBusy) {
             updateFullScreenLoading('Drawing Score Trends…', 'Almost done — date labels and traffic chart next.');
-          } else {
-            hideFullScreenLoading();
           }
           
           // Destroy existing chart if it exists (prevent "Canvas is already in use" error)
@@ -65063,6 +65133,9 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           } catch (trafficErr) {
             debugLog(`⚠ Clicks/impressions chart: ${trafficErr.message}`, 'warn');
           }
+          if (holdGen && holdGen === window.__dateRangeBusyGen && window.__dateRangeBusy && !window.__displayDashboardQueued) {
+            finishDateRangeProgress();
+          }
           if (waitForTrends) resolve();
           
           // Add event listeners for Authority mode toggle buttons (sync with KPI toggle)
@@ -65112,7 +65185,9 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           debugLog(`Stack: ${e.stack}`, 'error');
           console.error('Error creating trend chart:', e);
           
-          // Hide full-screen loading overlay
+          if (holdGen && holdGen === window.__dateRangeBusyGen) {
+            finishDateRangeProgress();
+          }
           hideFullScreenLoading();
           
           // Show error message to user
