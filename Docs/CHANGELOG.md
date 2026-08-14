@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-08-14] - Site AI Health date range: progress modal, date labels, traffic chart
+
+**Change:** Date-range toggles keep a full-screen progress modal (elapsed time + step text) until Score Trends finish rendering. Score Trends x-axis now shows interval date labels. New **Clicks and impressions** chart sits under Score Trends (GSC totals for the selected range).
+
+**Files:** `audit-dashboard.html`
+
+---
+
 ## [2026-08-10] - Keyword & config: polish recently cleared wins UI
 
 **Change:** Wins panel **collapsed by default** (`details`), check-3 only (no noisy config rows), **volume + stream + age colour**, sticky black headers, sort by volume. Summary pills show win count + volume freed.

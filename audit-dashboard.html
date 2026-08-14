@@ -648,6 +648,21 @@
       border: 1px solid rgba(100, 116, 139, 0.2);
       overflow: hidden; /* Change to hidden to clip content that extends beyond container */
     }
+    .chart-container--trends {
+      height: auto;
+      min-height: 0;
+      overflow: visible;
+      padding-bottom: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    .trend-canvas-wrap {
+      position: relative;
+      height: 520px;
+      width: 100%;
+    }
+    .trend-canvas-wrap--traffic {
+      height: 380px;
+    }
     .chart-container.large {
       height: 1200px;
       min-height: 1200px;
@@ -14616,7 +14631,7 @@
 
       <div class="section-break"></div>
 
-      <div class="chart-container">
+      <div class="chart-container chart-container--trends">
         <h3>Score Trends</h3>
         <p style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">Historical performance for Surface visibility, Top of page, Authority, Content/Schema, and Brand demand.</p>
         <p id="authorityWeightsChangeNote" style="font-size: 0.82rem; color: #92400e; background: #fffbeb; border-left: 3px solid #f59e0b; padding: 0.5rem 0.75rem; margin: 0 0 0.5rem 0; border-radius: 0 4px 4px 0;">
@@ -14640,7 +14655,16 @@
           </div>
         </div>
         <div id="trendSummaryRow" class="trend-summary-row"></div>
-        <canvas id="trendChart"></canvas>
+        <div class="trend-canvas-wrap">
+          <canvas id="trendChart"></canvas>
+        </div>
+      </div>
+      <div class="chart-container chart-container--trends" id="gscTrafficChartContainer">
+        <h3>Clicks and impressions</h3>
+        <p style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">Total Google Search Console clicks and impressions for the selected date range.</p>
+        <div class="trend-canvas-wrap trend-canvas-wrap--traffic">
+          <canvas id="gscTrafficChart"></canvas>
+        </div>
       </div>
       </section>
 
@@ -39817,7 +39841,15 @@
           debugLog(`Date range is already ${days} days, but refreshing charts to ensure they're up to date...`, 'info');
           // Force a refresh by calling displayDashboard with current data
           if (savedAudit.scores && savedAudit.searchData) {
-            displayDashboard(savedAudit.scores, savedAudit.searchData, savedAudit.snippetReadiness, savedAudit.schemaAudit, savedAudit.localSignals);
+            showFullScreenLoading(`Refreshing charts for ${days} day period...`);
+            setDateRangeButtonsDisabled(true);
+            requestAnimationFrame(() => {
+              displayDashboard(savedAudit.scores, savedAudit.searchData, savedAudit.snippetReadiness, savedAudit.schemaAudit, savedAudit.localSignals)
+                .finally(() => {
+                  hideFullScreenLoading();
+                  setDateRangeButtonsDisabled(false);
+                });
+            });
           }
         }
       }
@@ -40894,11 +40926,48 @@
       }
     }
     
+    function localYmd(d) {
+      if (!d) return '';
+      if (typeof d === 'string') return String(d).split('T')[0];
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+
+    function formatTrendAxisDate(d, dateRangeDays) {
+      const dt = (d instanceof Date) ? d : new Date(String(d));
+      if (Number.isNaN(dt.getTime())) return '';
+      if (dateRangeDays > 90) {
+        return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
+      }
+      return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    }
+
+    function setDateRangeButtonsDisabled(disabled) {
+      document.querySelectorAll('.date-range-btn, #customDateBtn, #customDays').forEach((el) => {
+        el.disabled = !!disabled;
+        el.style.opacity = disabled ? '0.55' : '';
+        el.style.pointerEvents = disabled ? 'none' : '';
+      });
+    }
+
+    function updateFullScreenLoading(message, subtitle) {
+      const msg = document.getElementById('fullScreenLoadingMessage');
+      if (msg && message) msg.textContent = message;
+      const sub = document.getElementById('fullScreenLoadingSub');
+      if (sub && subtitle) sub.textContent = subtitle;
+    }
+
     // Show full-screen loading overlay
     function showFullScreenLoading(message = 'Loading...') {
       // Remove any existing overlay
       const existing = document.getElementById('fullScreenLoadingOverlay');
       if (existing) existing.remove();
+      if (window.__fullScreenLoadingTimer) {
+        clearInterval(window.__fullScreenLoadingTimer);
+        window.__fullScreenLoadingTimer = null;
+      }
       
       // Create overlay
       const overlay = document.createElement('div');
@@ -40914,7 +40983,7 @@
         flex-direction: column;
         justify-content: center;
         align-items: center;
-        z-index: 10000;
+        z-index: 2147483646;
         backdrop-filter: blur(4px);
       `;
       
@@ -40927,6 +40996,7 @@
         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
         text-align: center;
         min-width: 300px;
+        max-width: 440px;
       `;
       
       // Create spinner
@@ -40943,8 +41013,19 @@
       
       // Create message
       const messageDiv = document.createElement('div');
+      messageDiv.id = 'fullScreenLoadingMessage';
       messageDiv.style.cssText = 'font-size: 1.1rem; color: #1f2937; font-weight: 500;';
       messageDiv.textContent = message;
+
+      const subDiv = document.createElement('div');
+      subDiv.id = 'fullScreenLoadingSub';
+      subDiv.style.cssText = 'font-size: 0.9rem; color: #64748b; margin-top: 0.6rem; line-height: 1.4;';
+      subDiv.textContent = 'This can take a minute on longer ranges. Please wait.';
+
+      const elapsedDiv = document.createElement('div');
+      elapsedDiv.id = 'fullScreenLoadingElapsed';
+      elapsedDiv.style.cssText = 'font-size: 0.82rem; color: #94a3b8; margin-top: 0.85rem;';
+      elapsedDiv.textContent = 'Elapsed: 0s';
       
       // Add spin animation if not already in stylesheet
       if (!document.getElementById('full-screen-spin-style')) {
@@ -40956,31 +41037,160 @@
       
       spinnerContainer.appendChild(spinner);
       spinnerContainer.appendChild(messageDiv);
+      spinnerContainer.appendChild(subDiv);
+      spinnerContainer.appendChild(elapsedDiv);
       overlay.appendChild(spinnerContainer);
       document.body.appendChild(overlay);
+
+      window.__fullScreenLoadingStarted = Date.now();
+      window.__fullScreenLoadingTimer = setInterval(() => {
+        const el = document.getElementById('fullScreenLoadingElapsed');
+        if (!el || !window.__fullScreenLoadingStarted) return;
+        const s = Math.round((Date.now() - window.__fullScreenLoadingStarted) / 1000);
+        el.textContent = `Elapsed: ${s}s`;
+      }, 500);
     }
     
     // Hide full-screen loading overlay
     function hideFullScreenLoading() {
+      if (window.__fullScreenLoadingTimer) {
+        clearInterval(window.__fullScreenLoadingTimer);
+        window.__fullScreenLoadingTimer = null;
+      }
       const overlay = document.getElementById('fullScreenLoadingOverlay');
       if (overlay) overlay.remove();
+    }
+
+    function destroyChartIfAny(refName) {
+      const inst = window[refName];
+      if (inst && typeof inst.destroy === 'function') {
+        try { inst.destroy(); } catch (_e) { /* ignore */ }
+      }
+      window[refName] = null;
+    }
+
+    function renderGscTrafficChart(dateObjects, timeseries, dateRangeDays) {
+      const canvas = document.getElementById('gscTrafficChart');
+      if (!canvas || typeof Chart === 'undefined') return;
+      destroyChartIfAny('gscTrafficChart');
+      const existing = Chart.getChart(canvas);
+      if (existing) existing.destroy();
+
+      const clickMap = new Map();
+      const impressionMap = new Map();
+      (timeseries || []).forEach((p) => {
+        const key = localYmd(p?.date);
+        if (!key) return;
+        clickMap.set(key, Number(p.clicks) || 0);
+        impressionMap.set(key, Number(p.impressions) || 0);
+      });
+      const labels = (dateObjects || []).map((d) => localYmd(d));
+      const clicks = labels.map((k) => (clickMap.has(k) ? clickMap.get(k) : null));
+      const impressions = labels.map((k) => (impressionMap.has(k) ? impressionMap.get(k) : null));
+
+      window.gscTrafficChart = new Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'Impressions',
+              data: impressions,
+              borderColor: 'rgba(37, 99, 235, 1)',
+              backgroundColor: 'rgba(37, 99, 235, 0.12)',
+              borderWidth: 2,
+              tension: 0.25,
+              pointRadius: 0,
+              pointHoverRadius: 4,
+              yAxisID: 'y',
+              spanGaps: true,
+              fill: true
+            },
+            {
+              label: 'Clicks',
+              data: clicks,
+              borderColor: 'rgba(249, 115, 22, 1)',
+              backgroundColor: 'rgba(249, 115, 22, 0.08)',
+              borderWidth: 2,
+              tension: 0.25,
+              pointRadius: 0,
+              pointHoverRadius: 4,
+              yAxisID: 'y1',
+              spanGaps: true
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: 'index', intersect: false },
+          layout: { padding: { bottom: 8, left: 8, right: 12, top: 8 } },
+          scales: {
+            x: {
+              ticks: {
+                autoSkip: true,
+                maxTicksLimit: dateRangeDays <= 30 ? 8 : dateRangeDays <= 90 ? 10 : 12,
+                maxRotation: 0,
+                minRotation: 0,
+                font: { size: 11, weight: '600' },
+                color: '#1e293b',
+                callback: function(value) {
+                  return formatTrendAxisDate(this.getLabelForValue(value), dateRangeDays);
+                }
+              },
+              grid: { color: 'rgba(0, 0, 0, 0.06)' }
+            },
+            y: {
+              position: 'left',
+              beginAtZero: true,
+              title: { display: true, text: 'Impressions', color: '#2563eb', font: { size: 12, weight: '600' } },
+              ticks: {
+                color: '#2563eb',
+                font: { size: 11, weight: '600' },
+                callback: (v) => Number(v).toLocaleString('en-GB')
+              },
+              grid: { color: 'rgba(0, 0, 0, 0.08)' }
+            },
+            y1: {
+              position: 'right',
+              beginAtZero: true,
+              title: { display: true, text: 'Clicks', color: '#ea580c', font: { size: 12, weight: '600' } },
+              ticks: {
+                color: '#ea580c',
+                font: { size: 11, weight: '600' },
+                callback: (v) => Number(v).toLocaleString('en-GB')
+              },
+              grid: { drawOnChartArea: false }
+            }
+          },
+          plugins: {
+            legend: { display: true, position: 'top', labels: { font: { size: 14, weight: 'bold' } } },
+            tooltip: {
+              callbacks: {
+                title: (items) => formatTrendAxisDate(items?.[0]?.label, dateRangeDays),
+                label: (ctx) => `${ctx.dataset.label}: ${Number(ctx.parsed.y || 0).toLocaleString('en-GB')}`
+              }
+            }
+          }
+        }
+      });
     }
     
     // Update audit results for new date range without full rescan
     async function updateAuditForNewDateRange(newDateRange, savedAudit) {
-      // Show full-screen loading overlay
+      // Show full-screen loading overlay and let it paint before heavy work
+      setDateRangeButtonsDisabled(true);
       showFullScreenLoading(`Updating metrics for ${newDateRange} day period...`);
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 50)));
       
       try {
         showStatus(`Updating metrics for ${newDateRange} day period...`, 'info');
         
         const propertyUrl = document.getElementById('propertyUrl')?.value || savedAudit.propertyUrl || '';
         if (!propertyUrl) {
-          // Remove loading spinner
-          if (trendCanvas && trendCanvas.parentElement) {
-            const loadingDiv = trendCanvas.parentElement.querySelector('.trend-chart-loading');
-            if (loadingDiv) loadingDiv.remove();
-          }
+          hideFullScreenLoading();
+          setDateRangeButtonsDisabled(false);
           clearDashboard();
           showStatus(`Date range changed to ${newDateRange} days. Please run a new audit to see updated metrics.`, 'info');
           return;
@@ -40990,6 +41200,7 @@
         let apiKey = window._loadedApiKey || '';
         
         // Fetch new GSC data for the new date range (will use Supabase cache)
+        updateFullScreenLoading(`Fetching Search Console data (${newDateRange} days)…`, 'Loading historical series. This can take a minute.');
         debugLog(`Fetching GSC data for ${newDateRange} day period...`, 'info');
         const searchData = await fetchSearchConsoleData(apiKey, propertyUrl, newDateRange);
         
@@ -41088,17 +41299,14 @@
         
         // Update dashboard with new data - ensure scores object has all required properties
         debugLog(`Updating dashboard with scores: ${JSON.stringify(scores)}`, 'info');
-        displayDashboard(scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals);
+        updateFullScreenLoading('Rendering Site AI Health charts…', 'Building Score Trends and clicks/impressions.');
+        await displayDashboard(scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals);
         
         showStatus(`Metrics updated for ${newDateRange} day period.`, 'success');
         debugLog(`✓ Audit updated for ${newDateRange} day period`, 'success');
         
       } catch (error) {
         debugLog(`✗ Error updating audit for new date range: ${error.message}`, 'error');
-        
-        // Remove loading spinner and show error
-        // Hide full-screen loading overlay
-        hideFullScreenLoading();
         
         // Show error message in trend chart area
         const trendCanvas = document.getElementById('trendChart');
@@ -41117,6 +41325,9 @@
         
         clearDashboard();
         showStatus(`Date range changed to ${newDateRange} days. Please run a new audit to see updated metrics.`, 'info');
+      } finally {
+        hideFullScreenLoading();
+        setDateRangeButtonsDisabled(false);
       }
     }
     
@@ -41134,6 +41345,10 @@
       if (window.trendChart instanceof Chart && typeof window.trendChart.destroy === 'function') {
         window.trendChart.destroy();
         window.trendChart = null;
+      }
+      if (window.gscTrafficChart instanceof Chart && typeof window.gscTrafficChart.destroy === 'function') {
+        window.gscTrafficChart.destroy();
+        window.gscTrafficChart = null;
       }
       if (window.snippetReadinessChart) {
         window.snippetReadinessChart.destroy();
@@ -62131,12 +62346,12 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           </p>
         </div>
       `;
-      // Insert scorecard table after Score Trends chart (at the end)
+      // Insert scorecard table after Score Trends + clicks/impressions charts
+      const trafficWrap = document.getElementById('gscTrafficChartContainer');
       const trendChart = document.getElementById('trendChart');
-      if (trendChart && trendChart.parentElement && trendChart.parentElement.parentNode) {
-        // Find the chart container (parent of canvas) and insert after it
-        const trendChartContainer = trendChart.parentElement;
-        trendChartContainer.parentNode.insertBefore(scorecardTable, trendChartContainer.nextSibling);
+      const insertAfter = trafficWrap || trendChart?.parentElement;
+      if (insertAfter && insertAfter.parentNode) {
+        insertAfter.parentNode.insertBefore(scorecardTable, insertAfter.nextSibling);
       } else {
         // Fallback: insert at end of dashboard container
         const dashboardContainer = document.getElementById('dashboard');
@@ -62611,6 +62826,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       // Wait a moment for DOM to update, then create charts (charts need visible canvas)
       await new Promise((resolve, reject) => {
       setTimeout(async () => {
+        const waitForTrends = !!document.getElementById('fullScreenLoadingOverlay');
         try {
         debugLog('Starting chart creation (setTimeout callback)...', 'info');
         
@@ -62620,6 +62836,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           debugLog('✗ Chart.js library not loaded', 'error');
           console.error('Chart.js library not loaded');
           showStatus('Chart.js library failed to load. Please refresh the page.', 'error');
+          resolve();
           return;
         }
         debugLog('✓ Chart.js library available', 'success');
@@ -62631,6 +62848,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         if (!radarCanvas) {
           debugLog('✗ Radar chart canvas not found', 'error');
           console.error('Radar chart canvas not found');
+          resolve();
           return;
         }
         debugLog('✓ Radar chart canvas found', 'success');
@@ -62824,9 +63042,9 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           console.error('Error creating radar chart:', e);
         }
 
-        // Main dashboard is usable — unblock callers; trend chart loads heavy history async
+        // Main dashboard is usable — unblock callers unless a date-range overlay is waiting on trends
         debugLog('=== DISPLAY DASHBOARD: Core UI ready (trend chart continues async) ===', 'success');
-        resolve();
+        if (!waitForTrends) resolve();
         } catch (e) {
           debugLog(`✗ Error creating charts (core): ${e.message}`, 'error');
           reject(e);
@@ -62839,6 +63057,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         if (!trendCanvas) {
           debugLog('✗ Trend chart canvas not found', 'error');
           console.error('Trend chart canvas not found');
+          if (waitForTrends) resolve();
           return;
         }
         debugLog('✓ Trend chart canvas found', 'success');
@@ -64188,23 +64407,8 @@ Composite of four inputs — not the Surface Visibility dial score.`;
               }
             }
             
-            // Apply label spacing to dates with year detection (show every labelStep-th label)
-            let lastVisibleYear = null;
-            chartDates = allDates.map((d, i) => {
-              if (i % labelStep === 0 || i === allDates.length - 1) {
-                const currentYear = allDateObjects[i].getFullYear();
-                
-                // Add year if it changed from the last visible label
-                if (lastVisibleYear !== null && currentYear !== lastVisibleYear) {
-                  lastVisibleYear = currentYear;
-                  return `${d} ${currentYear}`;
-                }
-                
-                lastVisibleYear = currentYear;
-                return d;
-              }
-              return ''; // Empty string for labels we don't want to show
-            });
+            // Full date on every point so Chart.js can auto-skip readable interval labels
+            chartDates = allDateObjects.map((d) => localYmd(d));
             
             // Store date objects for timeseries data
             chartDateObjects = allDateObjects;
@@ -64267,7 +64471,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
                 dateObj.setDate(dateObj.getDate() - ((numDataPoints - 1 - i) * 7));
               }
               fallbackDateObjects.push(dateObj);
-              fallbackDates.push(dateObj.toLocaleDateString('en-GB', dateFormat));
+              fallbackDates.push(localYmd(dateObj));
             }
             chartDates = fallbackDates;
             chartDateObjects = fallbackDateObjects;
@@ -64605,8 +64809,11 @@ Composite of four inputs — not the Surface Visibility dial score.`;
             debugLog('Removed inline trend chart loading spinner', 'info');
           }
           
-          // Hide full-screen loading overlay
-          hideFullScreenLoading();
+          if (waitForTrends) {
+            updateFullScreenLoading('Drawing Score Trends…', 'Almost done — date labels and traffic chart next.');
+          } else {
+            hideFullScreenLoading();
+          }
           
           // Destroy existing chart if it exists (prevent "Canvas is already in use" error)
           if (window.trendChart instanceof Chart) {
@@ -64748,29 +64955,26 @@ Composite of four inputs — not the Surface Visibility dial score.`;
               animation: false, // Disable animation for better performance when changing periods
               layout: {
                 padding: {
-                  bottom: 100, // Extra padding for rotated 45-degree X-axis labels (need space for diagonal text)
-                  left: 15, // Space for left Y-axis labels
-                  right: 50, // Extra space for right Y-axis labels (100, 80, 60, 40, 29)
+                  bottom: 12,
+                  left: 15,
+                  right: 50,
                   top: 10
                 }
               },
               scales: {
                 x: {
                   ticks: {
-                    maxRotation: 45,
-                    minRotation: 45,
+                    autoSkip: true,
+                    maxTicksLimit: dateRange <= 30 ? 8 : dateRange <= 90 ? 10 : 12,
+                    maxRotation: 0,
+                    minRotation: 0,
                     font: {
                       size: 11,
-                      weight: 'normal'
+                      weight: '600'
                     },
-                    callback: function(value, index) {
-                      // Only show non-empty labels
-                      const label = this.getLabelForValue(value);
-                      // Hide year labels (they'll be drawn by plugin in bold)
-                      if (label && /\d{4}$/.test(label)) {
-                        return ''; // Return empty to hide, plugin will draw it
-                      }
-                      return label || '';
+                    color: '#1e293b',
+                    callback: function(value) {
+                      return formatTrendAxisDate(this.getLabelForValue(value), dateRange);
                     }
                   },
                   grid: {
@@ -64854,6 +65058,12 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           debugLog(`trendChart type after creation: ${typeof window.trendChart}`, 'info');
           debugLog(`trendChart instanceof Chart: ${window.trendChart instanceof Chart}`, 'info');
           debugLog(`Chart data points: Surface=${surfaceVisibilityData.length}, Top=${topOfPageData.length}, Authority=${authorityData.length}`, 'info');
+          try {
+            renderGscTrafficChart(chartDateObjects, timeseries, dateRange);
+          } catch (trafficErr) {
+            debugLog(`⚠ Clicks/impressions chart: ${trafficErr.message}`, 'warn');
+          }
+          if (waitForTrends) resolve();
           
           // Add event listeners for Authority mode toggle buttons (sync with KPI toggle)
           ['all', 'nonEducation', 'money'].forEach(mode => {
