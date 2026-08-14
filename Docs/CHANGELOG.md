@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-08-14] - Date range uses Supabase audit, not this-tab localStorage only
+
+**Change:** Changing 30/60/90/12-month range no longer fails with “No saved audit in this browser tab” when `localStorage` is empty. The dashboard already has the scorecard in memory / Supabase (`audit_results` + `gsc_timeseries`). Date-range now uses that envelope, then `loadAuditResults()`. Trend session cache is keyed by selected days so 12 months is not stuck on the last 90-day series.
+
+**Files:** `audit-dashboard.html`
+
+---
+
 ## [2026-08-14] - Site AI Health date range: progress modal, date labels, traffic chart
 
 **Change:** Date-range toggles keep a full-screen progress modal (elapsed time + step text) until Score Trends finish rendering. Score Trends x-axis now shows interval date labels. New **Clicks and impressions** chart sits under Score Trends (GSC totals for the selected range). Progress is owned by the click that started it (an older chart render cannot dismiss it) and stays visible at least 0.9s so it cannot flash.

@@ -39840,44 +39840,53 @@
     async function setDateRange(days) {
       startDateRangeProgress(days);
       await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));
-      const oldDateRange = parseInt(document.getElementById('dateRange').value) || 28;
       document.getElementById('dateRange').value = days;
       localStorage.setItem('gsc_date_range', days);
-      
-      // Update active button
+
       document.querySelectorAll('.date-range-btn').forEach(btn => {
         btn.classList.remove('active');
         const btnDays = parseInt(btn.getAttribute('data-days'));
-        if (btnDays === days) {
-          btn.classList.add('active');
-        }
+        if (btnDays === days) btn.classList.add('active');
       });
-      
-      // Hide custom input if showing
+
       document.getElementById('customDateRange').style.display = 'none';
       document.getElementById('customDateBtn').classList.remove('active');
-      
       debugLog(`Date range set to ${days} days`, 'info');
-      
-      // Check if saved audit exists and if its date range matches
-      const savedAudit = loadAuditResultsSync();
-      if (savedAudit && savedAudit.scores) {
-        const savedDateRange = parseInt(savedAudit.dateRange || oldDateRange, 10) || oldDateRange;
-        if (savedDateRange !== days) {
-          debugLog(`Date range changed from ${savedDateRange} to ${days} days. Updating metrics...`, 'info');
-          await updateAuditForNewDateRange(days, savedAudit);
-        } else {
-          debugLog(`Date range is already ${days} days, but refreshing charts to ensure they're up to date...`, 'info');
-          if (savedAudit.scores && savedAudit.searchData) {
-            await displayDashboard(savedAudit.scores, savedAudit.searchData, savedAudit.snippetReadiness, savedAudit.schemaAudit, savedAudit.localSignals);
-          } else {
-            updateFullScreenLoading('No search data for this range', 'Run a GSC audit, then try again.');
-            setTimeout(() => finishDateRangeProgress(), 1200);
-          }
+
+      let handedOff = false;
+      try {
+        let savedAudit = getLiveAuditEnvelope();
+        if (!savedAudit?.scores) {
+          updateFullScreenLoading('Loading saved audit from Supabase…', 'The scorecard is stored on the server, not only in this tab.');
+          savedAudit = await loadAuditResults({ forceRefresh: false });
         }
-      } else {
-        updateFullScreenLoading('No saved audit in this browser tab', 'Run a GSC audit, then change date range.');
-        setTimeout(() => finishDateRangeProgress(), 1200);
+        if (!savedAudit?.scores) {
+          savedAudit = await loadAuditResults({ forceRefresh: true });
+        }
+        const propertyUrl = savedAudit?.propertyUrl
+          || document.getElementById('propertyUrl')?.value
+          || localStorage.getItem('gsc_property_url')
+          || localStorage.getItem('last_property_url')
+          || '';
+        if (savedAudit && propertyUrl && !savedAudit.propertyUrl) {
+          savedAudit = { ...savedAudit, propertyUrl };
+        }
+        if (savedAudit?.scores && propertyUrl) {
+          handedOff = true;
+          await updateAuditForNewDateRange(days, savedAudit);
+          return;
+        }
+        updateFullScreenLoading(
+          'Could not load a saved audit',
+          'Tried this tab and Supabase. Check the property URL, then retry.'
+        );
+        await new Promise((r) => setTimeout(r, 2500));
+      } catch (err) {
+        debugLog(`Date range update failed: ${err.message}`, 'error');
+        updateFullScreenLoading('Date range update failed', err.message || 'Please retry.');
+        await new Promise((r) => setTimeout(r, 2000));
+      } finally {
+        if (!handedOff) finishDateRangeProgress();
       }
     }
 
@@ -39898,31 +39907,9 @@
     }
 
     function applyCustomDateRange() {
-      const customDaysInput = document.getElementById('customDays');
-      const dateRangeInput = document.getElementById('dateRange');
-      if (!customDaysInput || !dateRangeInput) {
-        showStatus('Date range inputs are missing. Please refresh the page.', 'error');
-        return;
-      }
-      const customDays = parseInt(customDaysInput.value);
+      const customDays = parseInt(document.getElementById('customDays')?.value, 10);
       if (customDays && customDays > 0) {
-        const oldDateRange = parseInt(dateRangeInput.value) || 28;
-        dateRangeInput.value = customDays;
-        localStorage.setItem('gsc_date_range', customDays);
-        document.getElementById('customDateRange').style.display = 'none';
-        document.getElementById('customDateBtn').classList.remove('active');
-        debugLog(`Custom date range set to ${customDays} days`, 'info');
-        
-        // Check if saved audit exists and if its date range matches
-        const savedAudit = loadAuditResultsSync();
-        if (savedAudit && savedAudit.scores) {
-          const savedDateRange = savedAudit.dateRange || oldDateRange;
-          if (savedDateRange !== customDays) {
-            startDateRangeProgress(customDays);
-            debugLog(`Date range changed from ${savedDateRange} to ${customDays} days. Updating metrics...`, 'info');
-            updateAuditForNewDateRange(customDays, savedAudit);
-          }
-        }
+        void setDateRange(customDays);
       } else {
         showStatus('Please enter a valid number of days', 'error');
       }
@@ -40990,6 +40977,8 @@
     }
 
     function startDateRangeProgress(days) {
+      window.__forceFreshTrendFetch = true;
+      window.__trendTimeseriesSession = null;
       window.__dateRangeBusy = true;
       window.__dateRangeBusyGen = (window.__dateRangeBusyGen || 0) + 1;
       setDateRangeButtonsDisabled(true);
@@ -41164,8 +41153,8 @@
       (timeseries || []).forEach((p) => {
         const key = localYmd(p?.date);
         if (!key) return;
-        clickMap.set(key, Number(p.clicks) || 0);
-        impressionMap.set(key, Number(p.impressions) || 0);
+        if (p.clicks != null) clickMap.set(key, Number(p.clicks) || 0);
+        if (p.impressions != null) impressionMap.set(key, Number(p.impressions) || 0);
       });
       const labels = (dateObjects || []).map((d) => localYmd(d));
       const clicks = labels.map((k) => (clickMap.has(k) ? clickMap.get(k) : null));
@@ -41953,6 +41942,28 @@
         window.__auditResultsSyncCacheRaw = null;
       }
       return null;
+    }
+
+    function getLiveAuditEnvelope() {
+      const sync = loadAuditResultsSync();
+      if (sync?.scores) return sync;
+      const session = window.__loadAuditResultsCache?.data;
+      if (session?.scores) return session;
+      const mem = window.__auditResultsSyncCache;
+      if (mem?.scores) return mem;
+      if (!window.latestAuditScores) return null;
+      return {
+        scores: window.latestAuditScores,
+        searchData: window.currentSearchData || null,
+        snippetReadiness: window.latestSnippetReadiness || null,
+        schemaAudit: window.latestSchemaAudit || null,
+        localSignals: window.latestLocalSignals || null,
+        backlinkMetrics: window.latestBacklinkMetrics || null,
+        propertyUrl: document.getElementById('propertyUrl')?.value
+          || localStorage.getItem('gsc_property_url')
+          || localStorage.getItem('last_property_url')
+          || ''
+      };
     }
 
     /** O(n) sweep for trend chart — latest map value on or before pointDate (dates must be processed in ascending order). */
@@ -43107,6 +43118,36 @@
       return last?.date ? String(last.date).split('T')[0] : null;
     }
 
+    function seriesSpanDays(series) {
+      if (!Array.isArray(series) || !series.length) return 0;
+      if (series.length === 1) return 1;
+      const first = Date.parse(String(series[0].date).slice(0, 10));
+      const last = Date.parse(String(series[series.length - 1].date).slice(0, 10));
+      if (!Number.isFinite(first) || !Number.isFinite(last)) return series.length;
+      return Math.round(Math.abs(last - first) / 86400000) + 1;
+    }
+
+    function alignTimeseriesToDateRange(series, days) {
+      const byDate = new Map();
+      (Array.isArray(series) ? series : []).forEach((p) => {
+        const d = String(p?.date || '').slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(d)) byDate.set(d, p);
+      });
+      const end = new Date();
+      end.setHours(0, 0, 0, 0);
+      end.setDate(end.getDate() - 3);
+      const start = new Date(end);
+      start.setDate(start.getDate() - Math.max(1, Number(days) || 90) + 1);
+      const out = [];
+      const cur = new Date(start);
+      while (cur <= end) {
+        const key = localYmd(cur);
+        out.push(byDate.get(key) || { date: key, clicks: null, impressions: null, ctr: null, position: null });
+        cur.setDate(cur.getDate() + 1);
+      }
+      return out;
+    }
+
     function isTrendRefreshForced() {
       if (window.__forceFreshTrendFetch) return true;
       try {
@@ -43143,11 +43184,13 @@
       if (!propertyUrl) return fallback;
 
       const forced = isTrendRefreshForced();
+      const requestedDays = Number(dateRangeDays) || 30;
       const session = window.__trendTimeseriesSession;
       if (
         !forced &&
         session?.series?.length &&
         session.propertyUrl === propertyUrl &&
+        Number(session.dateRangeDays) === requestedDays &&
         (Date.now() - session.t) < TREND_TS_SESSION_TTL_MS
       ) {
         return session.series;
@@ -43158,7 +43201,8 @@
         ? String(window.lastGscTimeseriesDate).split('T')[0]
         : null;
       const needsFetch = forced || !cacheLast || (bannerLast && bannerLast > cacheLast);
-      if (!needsFetch && !isSupabaseDegraded()) {
+      const fallbackCoversRange = seriesSpanDays(fallback) >= Math.round(requestedDays * 0.85);
+      if (!needsFetch && fallbackCoversRange && !isSupabaseDegraded()) {
         const today = new Date().toISOString().split('T')[0];
         const cacheAgeDays = (new Date(today) - new Date(cacheLast)) / 86400000;
         if (cacheAgeDays <= 2) {
@@ -43204,7 +43248,7 @@
         }
         patchLocalAuditTimeseriesIfNewer(fresh);
         if (freshLast) window.lastGscTimeseriesDate = freshLast;
-        window.__trendTimeseriesSession = { t: Date.now(), series: fresh, propertyUrl };
+        window.__trendTimeseriesSession = { t: Date.now(), series: fresh, propertyUrl, dateRangeDays: requestedDays };
         return fresh;
       } catch (err) {
         debugLog(`[Trend] timeseries fetch failed: ${err.message}`, 'warn');
@@ -63272,6 +63316,9 @@ Composite of four inputs — not the Surface Visibility dial score.`;
             timeseries = await fetchTrendTimeseriesFromSupabase(propertyUrl, dateRange, cachedTimeseries);
           } else if (!timeseries.length) {
             debugLog(`⚠ No timeseries and no property URL`, 'warn');
+          }
+          if (timeseries && timeseries.length) {
+            timeseries = alignTimeseriesToDateRange(timeseries, dateRange);
           }
           
           debugLog(`Using ${timeseries.length} timeseries data points (last date: ${timeseries.length > 0 ? timeseries[timeseries.length - 1].date : 'none'})`, 'info');
