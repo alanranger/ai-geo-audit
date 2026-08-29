@@ -12,6 +12,7 @@ import {
   normaliseAnalyticsWindow,
   missingSetup,
   credentialPresence,
+  youtubeEnvKeysSeen,
   hasAnalyticsScope,
 } from '../lib/acquisition/youtube-stats.js';
 import {
@@ -183,6 +184,15 @@ test('missingSetup pinpoints the single OAuth variable that did not save', () =>
   assert.ok(!missing.includes('YOUTUBE_CLIENT_ID'));
   assert.ok(!missing.includes('YOUTUBE_REFRESH_TOKEN'));
   assert.ok(!missing.some((m) => m.includes('YOUTUBE_CHANNEL_ID')));
+});
+
+test('youtubeEnvKeysSeen surfaces misspelled variable names', () => {
+  const seen = youtubeEnvKeysSeen({
+    YOUTUBE_CLIENT_ID: 'x',
+    YOUTUBE_CLIENT_SECRECT: 'typo',
+    UNRELATED_KEY: 'y',
+  });
+  assert.deepEqual(seen, ['YOUTUBE_CLIENT_ID', 'YOUTUBE_CLIENT_SECRECT']);
 });
 
 test('credentialPresence reports names only, never values', () => {
