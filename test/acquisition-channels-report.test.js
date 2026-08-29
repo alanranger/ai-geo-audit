@@ -10,9 +10,14 @@ import {
   bucketMonthlyFlat,
   bucketAcademySeries,
   youtubeWindowViews,
+  bucketGa4Visits,
+  bucketGa4Series,
   buildChannelRows,
   rankChannels,
 } from '../lib/acquisition/channels-report.js';
+
+const ga4Row = (date, channel_group, source, sessions, is_unattributed = false) =>
+  ({ date, channel_group, source, medium: '', sessions, is_unattributed });
 
 test('normalisePeriod only accepts the three offered windows', () => {
   assert.equal(normalisePeriod('60'), 60);
@@ -146,6 +151,66 @@ test('buildChannelRows returns null, never 0, for unmeasurable visits', () => {
     assert.equal(row.visits.value, null, `${key} visits must not be a misleading zero`);
     assert.ok(row.visits.note, `${key} must explain why visits are unavailable`);
   }
+});
+
+test('bucketGa4Visits keeps bot traffic out of every channel total', () => {
+  const out = bucketGa4Visits([
+    ga4Row('2026-08-29', 'AI Assistant', 'chatgpt.com', 69),
+    ga4Row('2026-08-29', 'AI Assistant', 'gemini.google.com', 32),
+    ga4Row('2026-08-29', 'Direct', '(direct)', 6928),
+    ga4Row('2026-08-29', 'Referral', 'togdays.co.uk', 28),
+    ga4Row('2026-08-29', 'Unassigned', '(not set)', 43407, true),
+  ]);
+  assert.equal(out.visits.chatgpt, 69);
+  assert.equal(out.visits.google_ai, 32);
+  assert.equal(out.visits.direct_referral, 6956);
+  assert.equal(out.visits.youtube, 0, 'no youtube source means a measured zero');
+  assert.equal(out.unattributed_sessions, 43407);
+  assert.equal(out.attributed_sessions, 7057);
+});
+
+test('bucketGa4Visits matches youtube subdomains but not lookalike hosts', () => {
+  const out = bucketGa4Visits([
+    ga4Row('2026-08-29', 'Referral', 'm.youtube.com', 5),
+    ga4Row('2026-08-29', 'Referral', 'youtube.com', 3),
+    ga4Row('2026-08-29', 'Referral', 'notyoutube.com', 99),
+  ]);
+  assert.equal(out.visits.youtube, 8);
+});
+
+test('bucketGa4Series buckets one channel by date and ignores bots', () => {
+  const buckets = [
+    { label: 'wk-2', start: '2026-08-15', end: '2026-08-21' },
+    { label: 'wk-1', start: '2026-08-22', end: '2026-08-28' },
+  ];
+  const series = bucketGa4Series([
+    ga4Row('2026-08-16', 'AI Assistant', 'chatgpt.com', 10),
+    ga4Row('2026-08-25', 'AI Assistant', 'chatgpt.com', 7),
+    ga4Row('2026-08-25', 'Unassigned', '(not set)', 5000, true),
+    ga4Row('2026-08-25', 'Direct', '(direct)', 900),
+  ], buckets, 'chatgpt');
+  assert.deepEqual(series, [10, 7]);
+});
+
+test('buildChannelRows leaves visits null when GA4 has not been pulled', () => {
+  const rows = buildChannelRows(SOURCES);
+  assert.equal(rows.find((r) => r.key === 'chatgpt').visits.value, null);
+  assert.match(rows.find((r) => r.key === 'chatgpt').visits.note, /not measurable/);
+});
+
+test('buildChannelRows fills visits from GA4 and keeps organic on GSC clicks', () => {
+  const rows = buildChannelRows({
+    ...SOURCES,
+    ga4: { visits: { chatgpt: 69, google_ai: 32, youtube: 0, direct_referral: 6956 } },
+  });
+  const by = (k) => rows.find((r) => r.key === k);
+  assert.equal(by('chatgpt').visits.value, 69);
+  assert.equal(by('google_ai').visits.value, 32);
+  assert.equal(by('direct_referral').visits.value, 6956);
+  assert.equal(by('youtube').visits.value, 0);
+  assert.equal(by('google_organic').visits.value, 5916, 'organic stays on Search Console clicks');
+  assert.match(by('google_organic').visits.note, /Search Console/);
+  assert.match(by('google_ai').visits.note, /AI Overviews/);
 });
 
 test('buildChannelRows separates a connected channel from an unconnected one', () => {

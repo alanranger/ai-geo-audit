@@ -89403,7 +89403,7 @@ Confidence: ${c}`;
           { key: 'dfs_full_index', label: 'DataForSEO backlink full index', tiers: ['full'], dependsOn: [], runner: runGlobalStepDfsFullIndex },
           { key: 'gsc_url_inspection', label: 'GSC URL Inspection refresh', tiers: ['full'], dependsOn: ['audit_scan'], runner: runGlobalStepGscUrlInspection },
           { key: 'domain_strength', label: 'Domain Strength snapshot (all batches)', tiers: ['full'], dependsOn: [], runner: runGlobalStepDomainStrength },
-          { key: 'acquisition_channels', label: 'Acquisition channels (AI mentions + YouTube)', tiers: ['standard','full'], dependsOn: [], runner: runGlobalStepAcquisitionChannels },
+          { key: 'acquisition_channels', label: 'Acquisition channels (AI mentions + YouTube + GA4)', tiers: ['standard','full'], dependsOn: [], runner: runGlobalStepAcquisitionChannels },
           { key: 'update_tasks', label: 'Update all tasks with latest data', tiers: ['quick','standard','full'], dependsOn: ['audit_scan'], runner: runGlobalStepUpdateTasks }
         ];
       }
@@ -89416,7 +89416,8 @@ Confidence: ${c}`;
         debugLog('[Global Run] [Acquisition channels] Starting...', 'info');
         const results = await Promise.all([
           fetch('/api/cron/llm-mentions-sync', { method: 'POST' }).then(r => r.json()),
-          fetch('/api/cron/youtube-stats-sync', { method: 'POST' }).then(r => r.json())
+          fetch('/api/cron/youtube-stats-sync', { method: 'POST' }).then(r => r.json()),
+          fetch('/api/cron/ga4-channels-sync', { method: 'POST' }).then(r => r.json())
         ]);
         const rows = results.reduce((total, r) => total + (r.rows_written || 0), 0);
         const failed = results.find(r => r && r.ok === false);
@@ -105239,7 +105240,10 @@ Confidence: ${c}`;
       return fmt(ch.reach.value) + (ch.reach.unit ? ' ' + ch.reach.unit : '');
     }
     function visitsText(ch) {
-      return ch.visits.value == null ? '—' : fmt(ch.visits.value);
+      if (ch.visits.value == null) {
+        return '<span class="acq-na" title="' + (ch.visits.note || '') + '">—</span>';
+      }
+      return '<span title="' + (ch.visits.note || '') + '">' + fmt(ch.visits.value) + '</span>';
     }
 
     // ---------------- zone 1: cards ----------------
@@ -105372,8 +105376,7 @@ Confidence: ${c}`;
             return '<td>' + reachText(ch) + awaiting + '</td>';
           }
           if (c[0] === 'visits') {
-            return '<td class="num">' + (ch.visits.value == null
-              ? '<span class="acq-na" title="' + ch.visits.note + '">—</span>' : fmt(ch.visits.value)) + '</td>';
+            return '<td class="num">' + visitsText(ch) + '</td>';
           }
           if (c[0] === 'cvr') {
             return '<td class="num">' + (ch.trial_to_paid_pct == null ? '—' : ch.trial_to_paid_pct + '%') + '</td>';
@@ -105400,8 +105403,15 @@ Confidence: ${c}`;
         ? 'Where traffic to alanranger.com comes from. Reach and visits have history; channel-to-signup tagging is Academy-only so far.'
         : 'Of each channel’s traffic, how many became Academy trials and members. Channel-to-signup from '
           + academy.attribution_start + ' (forward-only).';
+      var ga4 = state.data.ga4;
+      var botNote = ga4 && ga4.unattributed_sessions
+        ? ' <b>' + fmt(ga4.unattributed_sessions) + ' GA4 sessions in this period were excluded as unattributed automated traffic</b> ('
+          + (100 - (ga4.attributed_pct == null ? 0 : ga4.attributed_pct)) + '% of the total); channel visits describe the '
+          + fmt(ga4.attributed_sessions) + ' real sessions.'
+        : '';
       $('acq-foot').innerHTML = state.lens === 'site'
         ? state.data.notes.reach + ' ' + state.data.notes.ai_platforms
+          + ' ' + (state.data.notes.visits || '') + botNote
           + ' <a href="#ranking" class="rf-page-url">Keyword-level detail lives in Keyword Ranking &amp; AI.</a>'
         : 'Channel→member tracking is forward-only from ' + academy.attribution_start + ' — '
           + fmt(academy.pre_attribution_trials || 0) + ' pre-attribution trials cannot be attributed, and '
@@ -105461,7 +105471,8 @@ Confidence: ${c}`;
       try {
         var results = await Promise.all([
           fetch('/api/cron/llm-mentions-sync', { method: 'POST' }).then(function (r) { return r.json(); }),
-          fetch('/api/cron/youtube-stats-sync', { method: 'POST' }).then(function (r) { return r.json(); })
+          fetch('/api/cron/youtube-stats-sync', { method: 'POST' }).then(function (r) { return r.json(); }),
+          fetch('/api/cron/ga4-channels-sync', { method: 'POST' }).then(function (r) { return r.json(); })
         ]);
         var written = results.reduce(function (t, r) { return t + (r.rows_written || 0); }, 0);
         await load();

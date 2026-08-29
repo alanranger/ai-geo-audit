@@ -18,6 +18,8 @@ import {
   bucketGscSeries,
   bucketMonthlyFlat,
   bucketAcademySeries,
+  bucketGa4Series,
+  bucketGa4Visits,
   buildChannelRows,
 } from '../../lib/acquisition/channels-report.js';
 import {
@@ -128,6 +130,27 @@ function academyTotals(rows) {
   return { byChannel, unattributed };
 }
 
+/**
+ * Paginated on purpose. 90 days of channel/source/medium rows exceeds
+ * PostgREST's 1000-row default, and a silent truncation here would understate
+ * visits exactly the way gsc_page_timeseries once understated organic.
+ */
+async function fetchGa4(sb, days) {
+  const PAGE = 1000;
+  const all = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sb
+      .from('ga4_channel_sessions_daily')
+      .select('date, channel_group, source, medium, sessions, is_unattributed')
+      .gte('date', isoDaysAgo(days))
+      .order('date', { ascending: false })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`ga4_channel_sessions_daily: ${error.message}`);
+    all.push(...(data || []));
+    if (!data || data.length < PAGE) return all;
+  }
+}
+
 async function countPreAttributionTrials() {
   const sb = academyClient();
   if (!sb) return null;
@@ -139,7 +162,7 @@ async function countPreAttributionTrials() {
   return count ?? null;
 }
 
-function buildTrend(buckets, gscRows, llm, academyRows) {
+function buildTrend(buckets, gscRows, llm, academyRows, ga4Rows) {
   const gsc = bucketGscSeries(gscRows, buckets);
   const nulls = buckets.map(() => null);
   const academyFor = (key) => bucketAcademySeries(academyRows, buckets, key, (r) => channelForSource(r.signup_source));
@@ -149,7 +172,9 @@ function buildTrend(buckets, gscRows, llm, academyRows) {
     const a = academyFor(ch.key);
     series.trials[ch.key] = a.started;
     series.members[ch.key] = a.converted;
-    series.visits[ch.key] = ch.key === 'google_organic' ? gsc.clicks : nulls;
+    if (ch.key === 'google_organic') series.visits[ch.key] = gsc.clicks;
+    else if (ga4Rows) series.visits[ch.key] = bucketGa4Series(ga4Rows, buckets, ch.key);
+    else series.visits[ch.key] = nulls;
     if (ch.key === 'google_organic') series.reach[ch.key] = gsc.impressions;
     else if (ch.key === 'chatgpt') series.reach[ch.key] = bucketMonthlyFlat(llm.monthly.chat_gpt, buckets);
     else if (ch.key === 'google_ai') series.reach[ch.key] = bucketMonthlyFlat(llm.monthly.google, buckets);
@@ -176,20 +201,23 @@ export default async function handler(req, res) {
   const days = normalisePeriod(req.query?.days);
 
   try {
-    const [gscRows, llm, youtubeRows, academy] = await Promise.all([
+    const [gscRows, llm, youtubeRows, academy, ga4Rows] = await Promise.all([
       fetchGsc(sb, days),
       fetchLlm(sb, days),
       fetchYoutube(sb, days),
       fetchAcademyTrials(days),
+      fetchGa4(sb, days),
     ]);
 
     const totals = academyTotals(academy.rows);
+    const ga4 = ga4Rows.length ? bucketGa4Visits(ga4Rows) : null;
     const rows = buildChannelRows({
       gscTotals: totalsFromGsc(gscRows),
       llmMonthly: llm.monthly,
       llmLatest: llm.latest,
       youtubeSnapshots: youtubeRows,
       academyByChannel: totals.byChannel,
+      ga4,
     });
     const buckets = weekBuckets(days, new Date());
 
@@ -198,7 +226,12 @@ export default async function handler(req, res) {
       generated_at: new Date().toISOString(),
       period_days: days,
       channels: rows,
-      trend: buildTrend(buckets, gscRows, llm, academy.rows),
+      trend: buildTrend(buckets, gscRows, llm, academy.rows, ga4Rows.length ? ga4Rows : null),
+      ga4: ga4 && {
+        attributed_sessions: ga4.attributed_sessions,
+        unattributed_sessions: ga4.unattributed_sessions,
+        attributed_pct: ga4.attributed_pct,
+      },
       academy: {
         configured: academy.configured,
         attribution_start: ATTRIBUTION_START,
@@ -210,6 +243,7 @@ export default async function handler(req, res) {
         ai_granularity: `AI mention history is month-granular; this period uses the last ${monthsForPeriod(days)} month(s).`,
         reach: 'Reach units differ per channel (impressions vs mentions vs views) and are never summed. Channels rank on visits (site lens) or members (Academy lens).',
         keywords: 'Keyword-level detail lives in the Keyword Ranking & AI tab.',
+        visits: 'Google organic visits are Search Console clicks (Google only). Every other channel is GA4 sessions, excluding GA4\'s "Unassigned" bucket — on this property that bucket is automated traffic (3% engaged, ~5s sessions, 1.00 pages per session).',
       },
     });
   } catch (err) {
