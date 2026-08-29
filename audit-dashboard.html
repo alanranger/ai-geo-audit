@@ -105399,8 +105399,17 @@ Confidence: ${c}`;
           + 'AI and YouTube channels read 0 members until tagged signups arrive.';
     }
 
+    // The app has other .date-range-btn groups whose handlers clear .active
+    // across every button with that class, so re-assert ours on each render.
+    function renderPeriodButtons() {
+      document.querySelectorAll('[data-acq-days]').forEach(function (b) {
+        b.classList.toggle('active', Number(b.getAttribute('data-acq-days')) === state.days);
+      });
+    }
+
     function renderAll() {
       if (!state.data) return;
+      renderPeriodButtons();
       renderCopy();
       renderMetricPicker();
       renderCards();
@@ -105459,9 +105468,8 @@ Confidence: ${c}`;
       window.acqWired = true;
       document.querySelectorAll('[data-acq-days]').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          document.querySelectorAll('[data-acq-days]').forEach(function (b) { b.classList.remove('active'); });
-          btn.classList.add('active');
           state.days = Number(btn.getAttribute('data-acq-days'));
+          renderPeriodButtons();
           load();
         });
       });
