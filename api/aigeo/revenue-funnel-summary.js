@@ -11,7 +11,7 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
-import { readLatestGa4Metrics } from './ga4-data.js';
+import { readLatestGa4Metrics, ga4AttributedView } from './ga4-data.js';
 import { isRowIndexable, resolvePolicy } from '../../lib/page-indexability-policy.js';
 import { synthesiseLegacyTierRevenue } from '../../lib/booking-sheet-parser.mjs';
 import { parseIncludeJlr } from '../../lib/parse-include-jlr.mjs';
@@ -332,7 +332,7 @@ function enrichPageRowsWithPolicy(pageRows, policyBySlug, periodStart) {
   });
 }
 
-function computeKpisCore(pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap) {
+function computeKpisCore(pageRows, auditLatest, auditPrior, revenueSnap, ga4View) {
   const totals = pageRows.reduce((acc, r) => {
     const clicks = Number(r.clicks_28d) || 0;
     const impr = Number(r.impressions_28d) || 0;
@@ -349,7 +349,7 @@ function computeKpisCore(pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap
   const txns = revenueSnap ? Number(revenueSnap.transactions) || 0 : 0;
   const revPer1k = totals.impressions > 0 ? (revenue / totals.impressions) * 1000 : null;
   const clickToSale = pct(txns, totals.clicks);
-  const moneyEnquiry = ga4Snap != null ? Number(ga4Snap.money_page_enquiry_events_28d) : null;
+  const moneyEnquiry = ga4View != null ? Number(ga4View.money_page_enquiry_events) : null;
   const enquiryToSale = moneyEnquiry > 0 ? pct(txns, moneyEnquiry) : null;
 
   return {
@@ -364,27 +364,29 @@ function computeKpisCore(pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap
     total_impressions_28d: totals.impressions,
     total_money_clicks_28d: totals.moneyClicks,
     money_page_enquiry_events_28d: moneyEnquiry,
-    site_enquiry_events_28d: ga4Snap != null ? Number(ga4Snap.enquiry_events_28d) : null,
+    site_enquiry_events_28d: ga4View != null ? Number(ga4View.enquiry_events) : null,
+    ga4_sessions_28d: ga4View != null ? Number(ga4View.sessions) : null,
+    ga4_excluded_sessions_28d: ga4View != null ? Number(ga4View.excluded_sessions) : null,
     transactions_28d: txns,
     audit_date_latest: auditLatest ? auditLatest.audit_date : null,
     audit_date_prior: auditPrior ? auditPrior.audit_date : null
   };
 }
 
-function appendIndexableKpis(kpis, pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap) {
+function appendIndexableKpis(kpis, pageRows, auditLatest, auditPrior, revenueSnap, ga4View) {
   const indexableRows = pageRows.filter(isRowIndexable);
-  const indexable = computeKpisCore(indexableRows, auditLatest, auditPrior, revenueSnap, ga4Snap);
+  const indexable = computeKpisCore(indexableRows, auditLatest, auditPrior, revenueSnap, ga4View);
   const out = { ...kpis };
   for (const key of Object.keys(kpis)) out[`${key}_indexable`] = indexable[key];
   return out;
 }
 
-function computeKpis(pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap) {
-  const base = computeKpisCore(pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap);
-  return appendIndexableKpis(base, pageRows, auditLatest, auditPrior, revenueSnap, ga4Snap);
+function computeKpis(pageRows, auditLatest, auditPrior, revenueSnap, ga4View) {
+  const base = computeKpisCore(pageRows, auditLatest, auditPrior, revenueSnap, ga4View);
+  return appendIndexableKpis(base, pageRows, auditLatest, auditPrior, revenueSnap, ga4View);
 }
 
-function computeFunnel(kpis, revenueSnap, ga4Snap) {
+function computeFunnel(kpis, revenueSnap, ga4View) {
   // Six-stage funnel. Industry benchmark targets are conservative defaults;
   // tweak in dashboard if needed.
   const clicks = kpis.total_clicks_28d;
@@ -392,10 +394,10 @@ function computeFunnel(kpis, revenueSnap, ga4Snap) {
   const moneyClicks = kpis.total_money_clicks_28d;
   const txns = revenueSnap ? Number(revenueSnap.transactions) || 0 : 0;
   const revenue = revenueSnap ? Number(revenueSnap.revenue_amount) || 0 : 0;
-  const moneyEnquiry = ga4Snap != null ? Number(ga4Snap.money_page_enquiry_events_28d) : null;
+  const moneyEnquiry = ga4View != null ? Number(ga4View.money_page_enquiry_events) : null;
   const enquiry = moneyEnquiry != null && moneyEnquiry > 0
     ? moneyEnquiry
-    : (ga4Snap != null ? Number(ga4Snap.enquiry_events_28d) : null);
+    : (ga4View != null ? Number(ga4View.enquiry_events) : null);
   return [
     { stage: 'Impressions', value: impr, target_pct_next: 1.5 },
     { stage: 'Clicks', value: clicks, target_pct_next: 25 },
@@ -1334,8 +1336,9 @@ export default async function handler(req, res) {
     const enrichedPageRows = enrichPageRowsWithPolicy(pageRows, policyBySlug, periodStart);
     const auditLatest = audits[0] || null;
     const auditPrior = audits[1] || null;
-    const kpis = computeKpis(enrichedPageRows, auditLatest, auditPrior, revenueSnap, ga4Snap);
-    const funnel = computeFunnel(kpis, revenueSnap, ga4Snap);
+    const ga4View = ga4AttributedView(ga4Snap);
+    const kpis = computeKpis(enrichedPageRows, auditLatest, auditPrior, revenueSnap, ga4View);
+    const funnel = computeFunnel(kpis, revenueSnap, ga4View);
     const leakPages = pickLeakPages(pageRows);
     const earningPages = pickEarningPages(pageRows);
     const revenueHistoryDecorated = decorateHistoryWithTargets(revenueHistory);
@@ -1351,14 +1354,22 @@ export default async function handler(req, res) {
       page_metrics_date_end: pageMetrics.dateEnd,
       ga4_metrics_date_end: ga4Snap?.date_end || null,
       ga4_metrics_captured_at: ga4Snap?.captured_at || null,
-      ga4_metrics: ga4Snap ? {
+      ga4_metrics: ga4View ? {
         date_start: ga4Snap.date_start,
         date_end: ga4Snap.date_end,
-        sessions_28d: Number(ga4Snap.sessions_28d) || 0,
-        page_views_28d: Number(ga4Snap.page_views_28d) || 0,
-        enquiry_events_28d: Number(ga4Snap.enquiry_events_28d) || 0,
-        money_page_enquiry_events_28d: Number(ga4Snap.money_page_enquiry_events_28d) || 0,
-        top_events: Object.entries(ga4Snap.event_counts || {})
+        // Bot-excluded figures. Automated Unassigned traffic is ~73% of raw
+        // sessions, so the raw numbers are kept alongside for auditability only.
+        sessions_28d: ga4View.sessions,
+        page_views_28d: ga4View.page_views,
+        enquiry_events_28d: ga4View.enquiry_events,
+        money_page_enquiry_events_28d: ga4View.money_page_enquiry_events,
+        bot_excluded: ga4View.bot_excluded,
+        excluded_sessions_28d: ga4View.excluded_sessions,
+        excluded_page_views_28d: ga4View.excluded_page_views,
+        excluded_enquiry_events_28d: ga4View.excluded_enquiry_events,
+        raw_sessions_28d: ga4View.raw_sessions,
+        raw_page_views_28d: ga4View.raw_page_views,
+        top_events: Object.entries(ga4View.event_counts || {})
           .sort((a, b) => b[1] - a[1])
           .slice(0, 8)
           .map(([eventName, count]) => ({ eventName, count: Number(count) || 0 }))

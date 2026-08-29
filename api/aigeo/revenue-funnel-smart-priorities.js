@@ -21,7 +21,7 @@ import { COMMERCIAL_TIERS, classifyCommercialTier } from './commercial-tier.js';
 import { validateUrlsLive } from './lib/live-page-validator.js';
 import { loadBlendedSeasonality, factorFromBlend } from '../../lib/revenue-funnel-seasonality-blend.js';
 import { academyTierHealth } from '../../lib/revenue-funnel-academy-economics.js';
-import { readLatestGa4Metrics } from './ga4-data.js';
+import { readLatestGa4Metrics, ga4AttributedView } from './ga4-data.js';
 import {
   applyFunnelConversionBias,
   buildConversionGapCandidate,
@@ -2659,7 +2659,7 @@ export default async function handler(req, res) {
       fetchRollingRevenueSnap(supabase, propertyUrl)
     ]);
     activeBlendedSeasonality = blended;
-    const conversionHealth = conversionHealthFromMetrics(ga4Snap, revenueSnap);
+    const conversionHealth = conversionHealthFromMetrics(ga4AttributedView(ga4Snap), revenueSnap);
     let weights = validationWeightsFor(validationKey) || weightsRaw;
     weights = applyFunnelConversionBias(weights, conversionHealth);
     const suppressionMap = buildSuppressionMap(optimCycles);

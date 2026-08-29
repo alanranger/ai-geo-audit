@@ -13525,7 +13525,10 @@
                 const enq = g.money_page_enquiry_events_28d != null
                   ? ` · ${g.money_page_enquiry_events_28d} money-page enquiries`
                   : (g.enquiry_events_28d != null ? ` · ${g.enquiry_events_28d} enquiry events` : '');
-                ga4El.textContent = `${ts}${enq}`;
+                const bots = g.bot_excluded && g.excluded_sessions_28d > 0
+                  ? ` · excludes ${g.excluded_sessions_28d.toLocaleString()} automated sessions`
+                  : '';
+                ga4El.textContent = `${ts}${enq}${bots}`;
               }
             }
             setRevenueBannerCell('revSyncDfsBacklinks', s.dfs_backlinks);
@@ -104398,6 +104401,12 @@ Confidence: ${c}`;
               ga4Part += ')';
             }
             parts.push('GA4 28d ending ' + data.ga4_metrics_date_end + ga4Part);
+            const excluded = data.ga4_metrics?.excluded_sessions_28d;
+            if (data.ga4_metrics?.bot_excluded && excluded > 0) {
+              parts.push('excludes ' + excluded.toLocaleString() + ' automated sessions');
+            } else if (data.ga4_metrics && data.ga4_metrics.bot_excluded === false) {
+              parts.push('GA4 figures still include automated traffic — click Sync GA4 to re-split');
+            }
           } else {
             parts.push('GA4: click Sync GA4 to fill Add-to-cart / enquiry');
           }

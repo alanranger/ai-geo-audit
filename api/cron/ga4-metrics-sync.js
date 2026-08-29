@@ -37,7 +37,10 @@ export default async function handler(req, res) {
       refreshed,
       date_end: row?.date_end || null,
       money_page_enquiry_events_28d: row?.money_page_enquiry_events_28d ?? null,
-      enquiry_events_28d: row?.enquiry_events_28d ?? null
+      enquiry_events_28d: row?.enquiry_events_28d ?? null,
+      attributed_sessions_28d: row?.attributed_sessions_28d ?? null,
+      unattributed_sessions_28d: row?.unattributed_sessions_28d ?? null,
+      attributed_enquiry_events_28d: row?.attributed_enquiry_events_28d ?? null
     });
   } catch (err) {
     return send(res, 500, { error: 'ga4_cron_sync_failed', message: err?.message || String(err) });

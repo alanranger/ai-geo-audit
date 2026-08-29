@@ -13,6 +13,7 @@
 // and `last_period_end` to help show coverage if useful later.
 
 import { createClient } from '@supabase/supabase-js';
+import { ga4AttributedView } from './ga4-data.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE;
@@ -23,19 +24,23 @@ const SOURCES = ['squarespace_api', 'stripe_supplemental', 'booking_sheet', 'man
 async function fetchGa4Status(supabase, propertyUrl) {
   const { data, error } = await supabase
     .from('ga4_site_metrics_28d')
-    .select('captured_at, date_start, date_end, enquiry_events_28d, money_page_enquiry_events_28d')
+    .select('captured_at, date_start, date_end, enquiry_events_28d, money_page_enquiry_events_28d, attributed_enquiry_events_28d, attributed_money_page_enquiry_events_28d, attributed_sessions_28d, unattributed_sessions_28d, unattributed_enquiry_events_28d, sessions_28d')
     .eq('property_url', propertyUrl)
     .order('date_end', { ascending: false })
     .limit(1);
   if (error) throw error;
   const latest = data?.[0] || null;
+  const view = ga4AttributedView(latest);
   return {
     source: 'ga4_api',
     last_synced_at: latest ? latest.captured_at : null,
     last_period_start: latest ? latest.date_start : null,
     last_period_end: latest ? latest.date_end : null,
-    enquiry_events_28d: latest ? Number(latest.enquiry_events_28d) : null,
-    money_page_enquiry_events_28d: latest ? Number(latest.money_page_enquiry_events_28d) : null,
+    enquiry_events_28d: view ? view.enquiry_events : null,
+    money_page_enquiry_events_28d: view ? view.money_page_enquiry_events : null,
+    sessions_28d: view ? view.sessions : null,
+    bot_excluded: view ? view.bot_excluded : null,
+    excluded_sessions_28d: view ? view.excluded_sessions : null,
     row_count: latest ? 1 : 0
   };
 }
