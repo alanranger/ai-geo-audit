@@ -11,6 +11,7 @@ import {
   normaliseVideos,
   normaliseAnalyticsWindow,
   missingSetup,
+  hasAnalyticsScope,
 } from '../lib/acquisition/youtube-stats.js';
 import {
   channelForSource,
@@ -159,11 +160,22 @@ test('missingSetup names the YouTube credentials still owed', () => {
     apiKey: '',
     channelId: '',
     handle: '',
-    analytics: { refreshToken: '' },
+    oauth: { ready: false },
   });
-  assert.equal(missing.length, 3);
+  assert.equal(missing.length, 2);
   assert.ok(missing[0].includes('YOUTUBE_API_KEY'));
-  assert.ok(missing[2].includes('YOUTUBE_REFRESH_TOKEN'));
+  assert.ok(missing[1].includes('YOUTUBE_CHANNEL_ID'));
+});
+
+test('missingSetup owes nothing once owner OAuth is present — it covers the Data API too', () => {
+  const missing = missingSetup({ apiKey: '', channelId: '', handle: '', oauth: { ready: true } });
+  assert.deepEqual(missing, []);
+});
+
+test('hasAnalyticsScope only accepts the yt-analytics scope', () => {
+  assert.equal(hasAnalyticsScope('https://www.googleapis.com/auth/yt-analytics.readonly'), true);
+  assert.equal(hasAnalyticsScope('https://www.googleapis.com/auth/youtube.readonly'), false);
+  assert.equal(hasAnalyticsScope(''), false);
 });
 
 test('channelForSource maps known marketing sources and falls back safely', () => {

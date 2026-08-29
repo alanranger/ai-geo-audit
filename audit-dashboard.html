@@ -7692,6 +7692,10 @@
         <span class="aigeo-nav-icon">✅</span>
         <span>Optimisation Tracking</span>
       </button>
+      <button class="aigeo-nav-item" data-panel="acquisition" title="Acquisition — where traffic and Academy members come from, by channel: Google organic, ChatGPT (AI), Google AI, YouTube and Direct/referral. Channel-level only — keyword detail lives in Keyword Ranking &amp; AI.">
+        <span class="aigeo-nav-icon">📡</span>
+        <span>Acquisition</span>
+      </button>
 
       <div class="aigeo-nav-section">AIO</div>
       <button class="aigeo-nav-item" data-panel="overview" title="AI Health Scorecard — composite GAIO score with breakdown pillars (Schema, Content, Citations, Authority).">
@@ -8095,6 +8099,95 @@
         <div id="config-integrity-panel-body"><p style="margin:0.5rem 0 0; color:#666;">No run yet.</p></div>
       </div>
       <!-- Revenue Funnel Panel — exec view: impressions -> clicks -> revenue -->
+      <section class="aigeo-panel" data-panel="acquisition">
+        <style>
+          /* Reuses the same --dark-* vars and .rf-* component classes as the
+             other Planning panels so this reads as native, not bolted on. */
+          section[data-panel="acquisition"] {
+            background: var(--dark-bg) !important;
+            min-height: calc(100vh - 4rem);
+            color: var(--dark-text) !important;
+            width: calc(100vw - 260px);
+            margin-left: calc(-50vw + 50% + 130px);
+            margin-right: calc(-50vw + 50% - 130px);
+            padding: 2rem;
+            box-sizing: border-box;
+          }
+          section[data-panel="acquisition"] * { color: inherit; }
+          section[data-panel="acquisition"] h2 { color: var(--dark-brand) !important; margin: 0; }
+
+          .acq-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 0.35rem; }
+          .acq-sub { color: var(--dark-text-muted); font-size: 0.88rem; margin: 0 0 1rem; max-width: 70ch; }
+          .acq-ctl { display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.25rem; }
+          .acq-ctl-group { display: flex; align-items: center; gap: 0.5rem; }
+          .acq-ctl-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--dark-text-muted); font-weight: 700; }
+
+          .acq-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12.5rem, 1fr)); gap: 0.9rem; margin-bottom: 1.5rem; }
+          .acq-card { background: #0b1118; border: 1px solid var(--dark-border); border-radius: 10px; padding: 0.95rem 1.05rem; border-left: 4px solid #334155; }
+          .acq-card-name { font-size: 0.9rem; font-weight: 800; color: var(--dark-text); margin-bottom: 0.3rem; }
+          .acq-card-reach { font-size: 0.78rem; color: var(--dark-text-muted); margin-bottom: 0.65rem; }
+          .acq-card-row { display: flex; justify-content: space-between; font-size: 0.82rem; color: #cbd5e1; padding: 0.15rem 0; }
+          .acq-card-row b { color: var(--dark-brand); font-size: 1.05rem; }
+          .acq-card-note { font-size: 0.72rem; color: #f59e0b; margin-top: 0.5rem; line-height: 1.35; }
+          .acq-card-cited { font-size: 0.72rem; color: #93c5fd; margin-top: 0.45rem; }
+
+          .acq-legend { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 0.6rem; font-size: 0.78rem; color: var(--dark-text-muted); }
+          .acq-swatch { width: 9px; height: 9px; border-radius: 2px; display: inline-block; margin-right: 0.4rem; }
+          .acq-chart-wrap { position: relative; width: 100%; height: 270px; margin-bottom: 0.6rem; }
+          .acq-muted { color: var(--dark-text-muted); font-size: 0.78rem; line-height: 1.5; }
+          .acq-foot { margin-top: 0.85rem; max-width: 95ch; }
+          .acq-awaiting { color: #f59e0b; font-weight: 700; }
+          .acq-na { color: #64748b; }
+        </style>
+
+        <div class="acq-head">
+          <h2>Acquisition — channels</h2>
+          <span class="acq-muted">Site-wide · not keyword-led</span>
+        </div>
+        <p class="acq-sub" id="acq-subhead">Loading…</p>
+
+        <div class="acq-ctl">
+          <div class="acq-ctl-group">
+            <span class="acq-ctl-label">Period</span>
+            <button class="date-range-btn active" data-acq-days="28">Last 28 days</button>
+            <button class="date-range-btn" data-acq-days="60">Last 60 days</button>
+            <button class="date-range-btn" data-acq-days="90">Last 90 days</button>
+          </div>
+          <div class="acq-ctl-group">
+            <span class="acq-ctl-label">Outcome lens</span>
+            <select id="acq-lens" class="rf-select">
+              <option value="site">Site traffic (all)</option>
+              <option value="academy">Academy members</option>
+            </select>
+          </div>
+          <div class="acq-ctl-group">
+            <button class="rf-btn" id="acq-audit-btn" title="Re-run the channel data pulls (DataForSEO AI mentions + YouTube), then reload this tab.">Run channels audit</button>
+            <span class="acq-muted" id="acq-audit-status"></span>
+          </div>
+        </div>
+
+        <div class="acq-card-grid" id="acq-cards"></div>
+
+        <div class="rf-section">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:0.6rem;">
+            <h3 style="margin:0;">Trend over time</h3>
+            <select id="acq-metric" class="rf-select"></select>
+          </div>
+          <div class="acq-legend" id="acq-legend"></div>
+          <div class="acq-chart-wrap"><canvas id="acq-trend"></canvas></div>
+          <p class="acq-muted" id="acq-chart-note"></p>
+        </div>
+
+        <div class="rf-section">
+          <h3 style="margin:0 0 0.75rem;">Detail</h3>
+          <table class="rf-table" id="acq-table">
+            <thead><tr id="acq-thead"></tr></thead>
+            <tbody id="acq-tbody"></tbody>
+          </table>
+          <p class="acq-muted acq-foot" id="acq-foot"></p>
+        </div>
+      </section>
+
       <section class="aigeo-panel" data-panel="revenue-funnel">
         <style>
           /* Panel-wide dark theme — mirrors the Optimisation / Dashboard panels.
@@ -31802,6 +31895,14 @@
           setTimeout(() => {
             if (window.spScenarioLibrary?.refresh) window.spScenarioLibrary.refresh();
             if (typeof window.spRenderCockpit === 'function') window.spRenderCockpit();
+          }, 50);
+        }
+
+        if (isActive && panelId === 'acquisition') {
+          setTimeout(() => {
+            if (typeof window.renderAcquisitionTab === 'function') {
+              window.renderAcquisitionTab();
+            }
           }, 50);
         }
 
@@ -89283,11 +89384,28 @@ Confidence: ${c}`;
           { key: 'dfs_full_index', label: 'DataForSEO backlink full index', tiers: ['full'], dependsOn: [], runner: runGlobalStepDfsFullIndex },
           { key: 'gsc_url_inspection', label: 'GSC URL Inspection refresh', tiers: ['full'], dependsOn: ['audit_scan'], runner: runGlobalStepGscUrlInspection },
           { key: 'domain_strength', label: 'Domain Strength snapshot (all batches)', tiers: ['full'], dependsOn: [], runner: runGlobalStepDomainStrength },
+          { key: 'acquisition_channels', label: 'Acquisition channels (AI mentions + YouTube)', tiers: ['standard','full'], dependsOn: [], runner: runGlobalStepAcquisitionChannels },
           { key: 'update_tasks', label: 'Update all tasks with latest data', tiers: ['quick','standard','full'], dependsOn: ['audit_scan'], runner: runGlobalStepUpdateTasks }
         ];
       }
 
       // --- step runners (each kept compact to stay under complexity ceiling) ---
+
+      // Calls the cron endpoints directly rather than the tab's button, so a
+      // global run still refreshes channels when the tab has never been opened.
+      async function runGlobalStepAcquisitionChannels() {
+        debugLog('[Global Run] [Acquisition channels] Starting...', 'info');
+        const results = await Promise.all([
+          fetch('/api/cron/llm-mentions-sync', { method: 'POST' }).then(r => r.json()),
+          fetch('/api/cron/youtube-stats-sync', { method: 'POST' }).then(r => r.json())
+        ]);
+        const rows = results.reduce((total, r) => total + (r.rows_written || 0), 0);
+        const failed = results.find(r => r && r.ok === false);
+        if (failed) throw new Error(failed.error || 'acquisition channel sync failed');
+        debugLog(`[Global Run] [Acquisition channels] Completed. ${rows} rows refreshed.`, 'success');
+        if (typeof window.renderAcquisitionTab === 'function') window.renderAcquisitionTab();
+        return { rows_written: rows };
+      }
 
       async function runGlobalStepSyncCsv() {
         debugLog('[Global Run] [Sync CSV] Starting...', 'info');
@@ -101593,6 +101711,13 @@ Confidence: ${c}`;
         });
       });
     }
+    // Exposed at definition time, not inside rfInit(), so other panels can
+    // reuse the same sorting behaviour without first opening Revenue Funnel.
+    try {
+      window.rfBindSort = rfBindSort;
+      window.rfSortRows = rfSortRows;
+      window.rfUpdateSortIndicators = rfUpdateSortIndicators;
+    } catch (_) { /* ignore */ }
 
     // Strip tracking params + protocol/host for display. Keeps the path
     // readable so the user can tell which page it is without clicking.
@@ -105068,6 +105193,276 @@ Confidence: ${c}`;
     };
 
     try { window.rfRenderProfitGoalBarsToHost = rfRenderProfitGoalBarsToHost; } catch (_) { /* ignore */ }
+  })();
+</script>
+
+<script>
+  // ===================================================================
+  // Acquisition — Channels tab.
+  //
+  // One payload per period drives all three zones (cards, trend, table)
+  // so they can never disagree. Reach units differ per channel and are
+  // never summed; channels rank on visits (site lens) or members
+  // (Academy lens). Anything unmeasurable renders as an explicit dash or
+  // "awaiting" note rather than a zero that would read as real data.
+  // ===================================================================
+  (function () {
+    var COLOURS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4'];
+    var state = { days: 28, lens: 'site', metric: 'visits', data: null, loading: false };
+    var chart = null;
+
+    function $(id) { return document.getElementById(id); }
+    function fmt(n) { return Number(n).toLocaleString(); }
+    function colourFor(i) { return COLOURS[i % COLOURS.length]; }
+
+    function reachText(ch) {
+      if (ch.reach.value == null) return '—';
+      return fmt(ch.reach.value) + (ch.reach.unit ? ' ' + ch.reach.unit : '');
+    }
+    function visitsText(ch) {
+      return ch.visits.value == null ? '—' : fmt(ch.visits.value);
+    }
+
+    // ---------------- zone 1: cards ----------------
+    function renderCards() {
+      var host = $('acq-cards');
+      var rows = rankRows();
+      host.innerHTML = rows.map(function (ch) {
+        var i = state.data.channels.findIndex(function (c) { return c.key === ch.key; });
+        var body = state.lens === 'site'
+          ? '<div class="acq-card-row"><span>Visits</span><b>' + visitsText(ch) + '</b></div>'
+            + '<div class="acq-card-row"><span>Trials</span><span>' + ch.trials + '</span></div>'
+          : '<div class="acq-card-row"><span>Trials</span><span>' + ch.trials + '</span></div>'
+            + '<div class="acq-card-row"><span>Members</span><b>' + ch.members + '</b></div>';
+        var cited = ch.cited
+          ? '<div class="acq-card-cited">Cites us in ' + fmt(ch.cited.value) + ' of ' + fmt(ch.cited.of) + ' (latest snapshot)</div>'
+          : '';
+        var note = ch.reach.note && ch.state === 'awaiting_setup'
+          ? '<div class="acq-card-note">⚠ ' + ch.reach.note + '</div>'
+          : '';
+        return '<div class="acq-card" style="border-left-color:' + colourFor(i) + '">'
+          + '<div class="acq-card-name">' + ch.name + '</div>'
+          + '<div class="acq-card-reach">' + reachText(ch) + ' reach</div>'
+          + body + cited + note + '</div>';
+      }).join('');
+    }
+
+    // ---------------- zone 2: trend ----------------
+    function metricOptions() {
+      return state.lens === 'site'
+        ? [['visits', 'Site visits per channel'], ['reach', 'Reach per channel']]
+        : [['trials', 'Trials per channel'], ['members', 'Members per channel'], ['visits', 'Site visits per channel']];
+    }
+    function renderMetricPicker() {
+      var sel = $('acq-metric');
+      var opts = metricOptions();
+      if (!opts.some(function (o) { return o[0] === state.metric; })) state.metric = opts[0][0];
+      sel.innerHTML = opts.map(function (o) {
+        return '<option value="' + o[0] + '"' + (o[0] === state.metric ? ' selected' : '') + '>' + o[1] + '</option>';
+      }).join('');
+    }
+    function renderLegend() {
+      $('acq-legend').innerHTML = state.data.channels.map(function (c, i) {
+        return '<span><span class="acq-swatch" style="background:' + colourFor(i) + '"></span>' + c.name + '</span>';
+      }).join('');
+    }
+    function renderChart() {
+      var trend = state.data.trend;
+      var series = trend.series[state.metric] || {};
+      var datasets = state.data.channels.map(function (c, i) {
+        return {
+          label: c.name,
+          data: (series[c.key] || []).slice(),
+          borderColor: colourFor(i),
+          backgroundColor: colourFor(i),
+          borderWidth: 2,
+          tension: 0.3,
+          pointRadius: 3,
+          spanGaps: false
+        };
+      });
+      if (chart) chart.destroy();
+      chart = new Chart($('acq-trend').getContext('2d'), {
+        type: 'line',
+        data: { labels: trend.buckets, datasets: datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: { beginAtZero: true, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.15)' } },
+            x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.08)' } }
+          }
+        }
+      });
+      $('acq-chart-note').textContent = state.metric === 'reach'
+        ? state.data.notes.ai_granularity + ' AI lines are held flat within each month rather than given invented weekly detail. Gaps mean no measurable data for that channel, not zero.'
+        : 'Gaps mean the channel has no measurable series for this metric, not zero.';
+    }
+
+    // ---------------- zone 3: table ----------------
+    function columns() {
+      var base = [['name', 'Channel', 0], ['reach', 'Reach', 0], ['visits', 'Visits', 1], ['trials', 'Trials', 1]];
+      if (state.lens !== 'academy') return base;
+      return base.concat([['members', 'Members', 1], ['cvr', 'Trial→paid', 1]]);
+    }
+    function sortValue(ch, key) {
+      if (key === 'name') return ch.name;
+      if (key === 'reach') return ch.reach.value;
+      if (key === 'visits') return ch.visits.value;
+      if (key === 'cvr') return ch.trial_to_paid_pct;
+      return ch[key];
+    }
+    function renderHead() {
+      $('acq-thead').innerHTML = columns().map(function (c) {
+        return '<th class="sortable' + (c[2] ? ' num' : '') + '" data-sort="' + c[0] + '">'
+          + c[1] + '<span class="rf-sort-ind">↕</span></th>';
+      }).join('');
+    }
+    function renderTable() {
+      var table = $('acq-table');
+      var key = table.dataset.sortKey || defaultSortKey();
+      var dir = table.dataset.sortDir || 'desc';
+      var flat = state.data.channels.map(function (ch) {
+        var o = { _ch: ch };
+        columns().forEach(function (c) { o[c[0]] = sortValue(ch, c[0]); });
+        return o;
+      });
+      var sorted = window.rfSortRows(flat, key, dir);
+      window.rfUpdateSortIndicators(table, key, dir);
+      $('acq-tbody').innerHTML = sorted.map(function (row) {
+        var ch = row._ch;
+        var i = state.data.channels.findIndex(function (c) { return c.key === ch.key; });
+        return '<tr>' + columns().map(function (c) {
+          if (c[0] === 'name') {
+            return '<td><span class="acq-swatch" style="background:' + colourFor(i) + '"></span>' + ch.name + '</td>';
+          }
+          if (c[0] === 'reach') {
+            var awaiting = ch.state === 'awaiting_setup'
+              ? ' <span class="acq-awaiting" title="' + ch.reach.note + '">awaiting setup</span>' : '';
+            return '<td>' + reachText(ch) + awaiting + '</td>';
+          }
+          if (c[0] === 'visits') {
+            return '<td class="num">' + (ch.visits.value == null
+              ? '<span class="acq-na" title="' + ch.visits.note + '">—</span>' : fmt(ch.visits.value)) + '</td>';
+          }
+          if (c[0] === 'cvr') {
+            return '<td class="num">' + (ch.trial_to_paid_pct == null ? '—' : ch.trial_to_paid_pct + '%') + '</td>';
+          }
+          return '<td class="num">' + fmt(ch[c[0]]) + '</td>';
+        }).join('') + '</tr>';
+      }).join('');
+    }
+    function defaultSortKey() { return state.lens === 'academy' ? 'members' : 'visits'; }
+
+    function rankRows() {
+      var key = defaultSortKey();
+      return state.data.channels.slice().sort(function (a, b) {
+        var av = key === 'members' ? a.members : (a.visits.value == null ? -1 : a.visits.value);
+        var bv = key === 'members' ? b.members : (b.visits.value == null ? -1 : b.visits.value);
+        return bv - av || (b.trials || 0) - (a.trials || 0);
+      });
+    }
+
+    // ---------------- copy that changes with the lens ----------------
+    function renderCopy() {
+      var academy = state.data.academy || {};
+      $('acq-subhead').textContent = state.lens === 'site'
+        ? 'Where traffic to alanranger.com comes from. Reach and visits have history; channel-to-signup tagging is Academy-only so far.'
+        : 'Of each channel’s traffic, how many became Academy trials and members. Channel-to-signup from '
+          + academy.attribution_start + ' (forward-only).';
+      $('acq-foot').innerHTML = state.lens === 'site'
+        ? state.data.notes.reach + ' ' + state.data.notes.ai_platforms
+          + ' <a href="#ranking" class="rf-page-url">Keyword-level detail lives in Keyword Ranking &amp; AI.</a>'
+        : 'Channel→member tracking is forward-only from ' + academy.attribution_start + ' — '
+          + fmt(academy.pre_attribution_trials || 0) + ' pre-attribution trials cannot be attributed, and '
+          + fmt(academy.unattributed_trials_in_window || 0) + ' trials in this period carry no source tag. '
+          + 'AI and YouTube channels read 0 members until tagged signups arrive.';
+    }
+
+    function renderAll() {
+      if (!state.data) return;
+      renderCopy();
+      renderMetricPicker();
+      renderCards();
+      renderHead();
+      var table = $('acq-table');
+      table.dataset.rfSortBound = '';
+      table.dataset.sortKey = defaultSortKey();
+      table.dataset.sortDir = 'desc';
+      window.rfBindSort('acq-table', defaultSortKey(), renderTable);
+      renderTable();
+      renderLegend();
+      renderChart();
+    }
+
+    function setStatus(msg) { $('acq-audit-status').textContent = msg || ''; }
+
+    async function load() {
+      if (state.loading) return;
+      state.loading = true;
+      try {
+        var res = await fetch('/api/aigeo/acquisition-channels?days=' + state.days);
+        var json = await res.json();
+        if (!json.ok) throw new Error(json.error || 'request failed');
+        state.data = json;
+        renderAll();
+        setStatus('');
+      } catch (err) {
+        $('acq-subhead').textContent = 'Could not load channel data: ' + (err.message || err);
+      } finally {
+        state.loading = false;
+      }
+    }
+
+    // Audit button: re-run the channel pulls, then reload the tab.
+    async function runAudit() {
+      var btn = $('acq-audit-btn');
+      btn.disabled = true;
+      setStatus('Running channel pulls…');
+      try {
+        var results = await Promise.all([
+          fetch('/api/cron/llm-mentions-sync', { method: 'POST' }).then(function (r) { return r.json(); }),
+          fetch('/api/cron/youtube-stats-sync', { method: 'POST' }).then(function (r) { return r.json(); })
+        ]);
+        var written = results.reduce(function (t, r) { return t + (r.rows_written || 0); }, 0);
+        await load();
+        setStatus('Done — ' + written + ' rows refreshed.');
+      } catch (err) {
+        setStatus('Failed: ' + (err.message || err));
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function wire() {
+      if (window.acqWired) return;
+      window.acqWired = true;
+      document.querySelectorAll('[data-acq-days]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          document.querySelectorAll('[data-acq-days]').forEach(function (b) { b.classList.remove('active'); });
+          btn.classList.add('active');
+          state.days = Number(btn.getAttribute('data-acq-days'));
+          load();
+        });
+      });
+      $('acq-lens').addEventListener('change', function (e) {
+        state.lens = e.target.value;
+        state.metric = metricOptions()[0][0];
+        renderAll();
+      });
+      $('acq-metric').addEventListener('change', function (e) {
+        state.metric = e.target.value;
+        renderChart();
+      });
+      $('acq-audit-btn').addEventListener('click', runAudit);
+    }
+
+    window.renderAcquisitionTab = function () {
+      wire();
+      load();
+    };
+    window.runAcquisitionChannelsAudit = runAudit;
   })();
 </script>
 
