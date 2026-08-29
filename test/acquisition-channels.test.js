@@ -11,6 +11,7 @@ import {
   normaliseVideos,
   normaliseAnalyticsWindow,
   missingSetup,
+  credentialPresence,
   hasAnalyticsScope,
 } from '../lib/acquisition/youtube-stats.js';
 import {
@@ -162,9 +163,43 @@ test('missingSetup names the YouTube credentials still owed', () => {
     handle: '',
     oauth: { ready: false },
   });
-  assert.equal(missing.length, 2);
-  assert.ok(missing[0].includes('YOUTUBE_API_KEY'));
-  assert.ok(missing[1].includes('YOUTUBE_CHANNEL_ID'));
+  assert.deepEqual(missing, [
+    'YOUTUBE_CLIENT_ID',
+    'YOUTUBE_CLIENT_SECRET',
+    'YOUTUBE_REFRESH_TOKEN',
+    'YOUTUBE_API_KEY (only needed if not using owner OAuth)',
+    'YOUTUBE_CHANNEL_ID or YOUTUBE_CHANNEL_HANDLE',
+  ]);
+});
+
+test('missingSetup pinpoints the single OAuth variable that did not save', () => {
+  const missing = missingSetup({
+    apiKey: '',
+    channelId: 'UCfvzMEnG6HaQVu_q3K5tw8A',
+    handle: '',
+    oauth: { ready: false, clientId: 'id', clientSecret: '', refreshToken: 'token' },
+  });
+  assert.ok(missing.includes('YOUTUBE_CLIENT_SECRET'));
+  assert.ok(!missing.includes('YOUTUBE_CLIENT_ID'));
+  assert.ok(!missing.includes('YOUTUBE_REFRESH_TOKEN'));
+  assert.ok(!missing.some((m) => m.includes('YOUTUBE_CHANNEL_ID')));
+});
+
+test('credentialPresence reports names only, never values', () => {
+  const presence = credentialPresence({
+    apiKey: '',
+    channelId: 'UCfvzMEnG6HaQVu_q3K5tw8A',
+    handle: '',
+    oauth: { clientId: 'id', clientSecret: '', refreshToken: 'token' },
+  });
+  assert.deepEqual(presence, {
+    YOUTUBE_CLIENT_ID: true,
+    YOUTUBE_CLIENT_SECRET: false,
+    YOUTUBE_REFRESH_TOKEN: true,
+    YOUTUBE_CHANNEL_ID: true,
+    YOUTUBE_API_KEY: false,
+  });
+  assert.ok(Object.values(presence).every((v) => typeof v === 'boolean'));
 });
 
 test('missingSetup owes nothing once owner OAuth is present — it covers the Data API too', () => {

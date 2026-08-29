@@ -26,7 +26,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return send(res, 204, {});
   if (!isRequestAuthorized(req)) return send(res, 401, { ok: false, error: 'unauthorized' });
 
-  const dryRun = String(req.query?.dryRun || '') === 'true';
+  const dryRun = ['true', '1', 'yes'].includes(String(req.query?.dryRun || '').toLowerCase());
   const triggerSource = detectTriggerSource(req);
   const runId = dryRun ? null : await startRun(JOB, triggerSource);
 
