@@ -7825,7 +7825,8 @@
         'overview':        { label: 'Loading AI Health Scorecard',    sub: 'Composite GAIO scores\u2026' },
         'portfolio':       { label: 'Loading Portfolio',              sub: 'Segment charts + monthly tracker from Supabase\u2026 (first load can take 15\u201330s)' },
         'backlinks':       { label: 'Loading Backlinks',              sub: 'DataForSEO domain index from Supabase\u2026' },
-        'implementation-progress': { label: 'Loading Implementation Progress', sub: 'Task status from Supabase\u2026' }
+        'implementation-progress': { label: 'Loading Implementation Progress', sub: 'Task status from Supabase\u2026' },
+        'acquisition':     { label: 'Loading Acquisition \u2014 channels', sub: 'GSC, GA4 channels, AI mentions, YouTube + Academy signups from Supabase\u2026' }
       };
 
       var LOADER_SEL = '.rt-loading, .trend-chart-loading, .spinner, #money-pages-refresh-overlay';
@@ -8163,6 +8164,9 @@
           <h2>Acquisition — channels</h2>
           <span class="acq-muted">Site-wide · not keyword-led</span>
         </div>
+        <!-- The shared tab-load overlay hides itself once no LOADER_SEL element
+             is visible in the active panel, so this is what keeps it up. -->
+        <div id="acq-loading" class="rt-loading" style="display:none">Loading channel data…</div>
         <p class="acq-sub" id="acq-subhead">Loading…</p>
 
         <div class="acq-ctl">
@@ -105318,10 +105322,25 @@ Confidence: ${c}`;
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                // The axis is week-commencing; the tooltip gives the full span.
+                title: function (items) {
+                  var ranges = (state.data.trend || {}).bucket_ranges || [];
+                  var i = items && items.length ? items[0].dataIndex : -1;
+                  return ranges[i] || (items[0] && items[0].label) || '';
+                }
+              }
+            }
+          },
           scales: {
             y: { beginAtZero: true, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.15)' } },
-            x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.08)' } }
+            x: {
+              ticks: { color: '#94a3b8', maxRotation: 0, autoSkip: true, maxTicksLimit: 13 },
+              grid: { color: 'rgba(148,163,184,0.08)' }
+            }
           }
         }
       });
@@ -105446,9 +105465,15 @@ Confidence: ${c}`;
 
     function setStatus(msg) { $('acq-audit-status').textContent = msg || ''; }
 
+    function setLoading(on) {
+      var node = $('acq-loading');
+      if (node) node.style.display = on ? '' : 'none';
+    }
+
     async function load() {
       if (state.loading) return;
       state.loading = true;
+      setLoading(true);
       try {
         var res = await fetch('/api/aigeo/acquisition-channels?days=' + state.days);
         var json = await res.json();
@@ -105460,6 +105485,7 @@ Confidence: ${c}`;
         $('acq-subhead').textContent = 'Could not load channel data: ' + (err.message || err);
       } finally {
         state.loading = false;
+        setLoading(false);
       }
     }
 

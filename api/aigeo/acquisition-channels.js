@@ -180,7 +180,11 @@ function buildTrend(buckets, gscRows, llm, academyRows, ga4Rows) {
     else if (ch.key === 'google_ai') series.reach[ch.key] = bucketMonthlyFlat(llm.monthly.google, buckets);
     else series.reach[ch.key] = nulls;
   }
-  return { buckets: buckets.map((b) => b.label), series };
+  return {
+    buckets: buckets.map((b) => b.label),
+    bucket_ranges: buckets.map((b) => b.range),
+    series,
+  };
 }
 
 function totalsFromGsc(rows) {

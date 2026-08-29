@@ -6,6 +6,7 @@ import {
   monthsForPeriod,
   monthKeysBack,
   weekBuckets,
+  shortDate,
   bucketGscSeries,
   bucketMonthlyFlat,
   bucketAcademySeries,
@@ -40,10 +41,30 @@ test('monthKeysBack walks backwards across a year boundary', () => {
 test('weekBuckets covers the period oldest first and ends today', () => {
   const buckets = weekBuckets(28, new Date('2026-08-29T00:00:00Z'));
   assert.equal(buckets.length, 4);
-  assert.equal(buckets[0].label, 'wk-4');
-  assert.equal(buckets[3].label, 'wk-1');
   assert.equal(buckets[3].end, '2026-08-29');
   assert.equal(buckets[3].start, '2026-08-23');
+});
+
+test('weekBuckets labels with real dates — a relative week number dates nothing', () => {
+  const buckets = weekBuckets(28, new Date('2026-08-29T00:00:00Z'));
+  assert.equal(buckets[0].label, '2 Aug');
+  assert.equal(buckets[3].label, '23 Aug');
+  assert.equal(buckets[3].range, '23 Aug – 29 Aug');
+  assert.ok(!buckets.some((b) => /^wk-/.test(b.label)));
+});
+
+test('weekBuckets stays readable across a 90 day period', () => {
+  const buckets = weekBuckets(90, new Date('2026-08-29T00:00:00Z'));
+  assert.equal(buckets.length, 13);
+  assert.equal(buckets[0].label, '31 May');
+  assert.equal(buckets[12].label, '23 Aug');
+});
+
+test('shortDate renders a day and month, and refuses junk', () => {
+  assert.equal(shortDate('2026-08-04'), '4 Aug');
+  assert.equal(shortDate('2026-12-31'), '31 Dec');
+  assert.equal(shortDate('nonsense'), '');
+  assert.equal(shortDate(null), '');
 });
 
 test('bucketGscSeries sums daily clicks and impressions into their week', () => {
