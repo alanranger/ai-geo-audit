@@ -86,6 +86,7 @@ test('bucketAcademySeries counts starts and conversions in their own weeks', () 
 test('youtubeWindowViews will not guess a period from a single snapshot', () => {
   const one = youtubeWindowViews([{ captured_date: '2026-08-29', total_views: 76779 }]);
   assert.equal(one.value, null);
+  assert.equal(one.state, 'awaiting_history');
   assert.match(one.note, /second daily snapshot|yt-analytics/);
 });
 
@@ -106,6 +107,7 @@ test('youtubeWindowViews differences two snapshots and prefers Analytics when pr
 test('youtubeWindowViews reports no snapshot rather than zero', () => {
   const none = youtubeWindowViews([]);
   assert.equal(none.value, null);
+  assert.equal(none.state, 'awaiting_setup');
   assert.match(none.note, /awaiting YouTube authorisation/);
 });
 
@@ -146,12 +148,23 @@ test('buildChannelRows returns null, never 0, for unmeasurable visits', () => {
   }
 });
 
-test('buildChannelRows marks YouTube as awaiting setup while reach is unknown', () => {
-  const rows = buildChannelRows(SOURCES);
-  const yt = rows.find((r) => r.key === 'youtube');
-  assert.equal(yt.state, 'awaiting_setup');
-  assert.equal(yt.reach.value, null);
-  assert.equal(yt.trials, 1, 'Academy trials are still attributed while reach is missing');
+test('buildChannelRows separates a connected channel from an unconnected one', () => {
+  const connected = buildChannelRows(SOURCES).find((r) => r.key === 'youtube');
+  assert.equal(connected.state, 'awaiting_history', 'one snapshot means connected, not unconfigured');
+  assert.equal(connected.reach.value, null);
+  assert.equal(connected.trials, 1, 'Academy trials are still attributed while reach is missing');
+
+  const unconnected = buildChannelRows({ ...SOURCES, youtubeSnapshots: [] }).find((r) => r.key === 'youtube');
+  assert.equal(unconnected.state, 'awaiting_setup');
+  assert.equal(unconnected.context, null);
+});
+
+test('buildChannelRows carries lifetime YouTube facts while period reach accrues', () => {
+  const yt = buildChannelRows({
+    ...SOURCES,
+    youtubeSnapshots: [{ captured_date: '2026-08-29', total_views: 76800, subscribers: 154, total_videos: 40 }],
+  }).find((r) => r.key === 'youtube');
+  assert.deepEqual(yt.context, { subscribers: 154, total_views: 76800, total_videos: 40 });
 });
 
 test('buildChannelRows computes trial to paid only when there are trials', () => {

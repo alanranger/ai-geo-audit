@@ -105256,13 +105256,20 @@ Confidence: ${c}`;
         var cited = ch.cited
           ? '<div class="acq-card-cited">Cites us in ' + fmt(ch.cited.value) + ' of ' + fmt(ch.cited.of) + ' (latest snapshot)</div>'
           : '';
-        var note = ch.reach.note && ch.state === 'awaiting_setup'
-          ? '<div class="acq-card-note">⚠ ' + ch.reach.note + '</div>'
+        var note = '';
+        if (ch.reach.note && ch.state === 'awaiting_setup') {
+          note = '<div class="acq-card-note">⚠ ' + ch.reach.note + '</div>';
+        } else if (ch.reach.note && ch.state === 'awaiting_history') {
+          note = '<div class="acq-card-note">' + ch.reach.note + '</div>';
+        }
+        var ctx = ch.context
+          ? '<div class="acq-card-cited">' + fmt(ch.context.subscribers) + ' subscribers · '
+            + fmt(ch.context.total_views) + ' lifetime views · ' + fmt(ch.context.total_videos) + ' videos</div>'
           : '';
         return '<div class="acq-card" style="border-left-color:' + colourFor(i) + '">'
           + '<div class="acq-card-name">' + ch.name + '</div>'
           + '<div class="acq-card-reach">' + reachText(ch) + ' reach</div>'
-          + body + cited + note + '</div>';
+          + body + cited + ctx + note + '</div>';
       }).join('');
     }
 
@@ -105357,8 +105364,11 @@ Confidence: ${c}`;
             return '<td><span class="acq-swatch" style="background:' + colourFor(i) + '"></span>' + ch.name + '</td>';
           }
           if (c[0] === 'reach') {
-            var awaiting = ch.state === 'awaiting_setup'
-              ? ' <span class="acq-awaiting" title="' + ch.reach.note + '">awaiting setup</span>' : '';
+            var awaiting = '';
+            if (ch.state === 'awaiting_setup' || ch.state === 'awaiting_history') {
+              awaiting = ' <span class="acq-awaiting" title="' + ch.reach.note + '">'
+                + (ch.state === 'awaiting_setup' ? 'awaiting setup' : 'awaiting 2nd snapshot') + '</span>';
+            }
             return '<td>' + reachText(ch) + awaiting + '</td>';
           }
           if (c[0] === 'visits') {
