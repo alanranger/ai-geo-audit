@@ -105553,8 +105553,13 @@ Confidence: ${c}`;
         + '<td class="num">' + tileValue(r) + '</td></tr>';
     }
     function renderDetailTable(table, key, dir) {
-      var flat = (state.data.detail || []).map(function (d) {
-        return { _d: d, channel: d.channel, section: d.section, source: d.source, unit: d.unit, value: d.value };
+      // The "Measured" column sorts on payload position, not the section name,
+      // so the default view groups rows by tool. Sorting by Value across units
+      // would rank 1.51M GSC impressions above 8,526 GA4 visits — the exact
+      // comparison the rest of this tab exists to prevent. It stays available
+      // on a click, beside the Unit column that says what it means.
+      var flat = (state.data.detail || []).map(function (d, i) {
+        return { _d: d, channel: d.channel, section: i, source: d.source, unit: d.unit, value: d.value };
       });
       var sorted = window.rfSortRows(flat, key, dir);
       window.rfUpdateSortIndicators(table, key, dir);
@@ -105563,7 +105568,7 @@ Confidence: ${c}`;
     function renderTable() {
       var table = $('acq-table');
       var key = table.dataset.sortKey || defaultSortKey();
-      var dir = table.dataset.sortDir || 'desc';
+      var dir = table.dataset.sortDir || defaultSortDir();
       if (state.lens !== 'academy') return renderDetailTable(table, key, dir);
       var flat = state.data.channels.map(function (ch) {
         var o = { _ch: ch };
@@ -105597,7 +105602,8 @@ Confidence: ${c}`;
         }).join('') + '</tr>';
       }).join('');
     }
-    function defaultSortKey() { return state.lens === 'academy' ? 'members' : 'value'; }
+    function defaultSortKey() { return state.lens === 'academy' ? 'members' : 'section'; }
+    function defaultSortDir() { return state.lens === 'academy' ? 'desc' : 'asc'; }
 
     function rankRows() {
       var key = defaultSortKey();
@@ -105651,7 +105657,7 @@ Confidence: ${c}`;
       var table = $('acq-table');
       table.dataset.rfSortBound = '';
       table.dataset.sortKey = defaultSortKey();
-      table.dataset.sortDir = 'desc';
+      table.dataset.sortDir = defaultSortDir();
       window.rfBindSort('acq-table', defaultSortKey(), renderTable);
       renderTable();
       renderLegend();
