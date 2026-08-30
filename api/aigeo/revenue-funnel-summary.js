@@ -12,6 +12,7 @@ export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
 import { readLatestGa4Metrics, ga4AttributedView } from './ga4-data.js';
+import { buildTxnCountMap, applyTxnCount, txnWindowFor } from '../../lib/revenue-funnel-txn-counts.js';
 import { isRowIndexable, resolvePolicy } from '../../lib/page-indexability-policy.js';
 import { synthesiseLegacyTierRevenue } from '../../lib/booking-sheet-parser.mjs';
 import { parseIncludeJlr } from '../../lib/parse-include-jlr.mjs';
@@ -332,7 +333,17 @@ function enrichPageRowsWithPolicy(pageRows, policyBySlug, periodStart) {
   });
 }
 
-function computeKpisCore(pageRows, auditLatest, auditPrior, revenueSnap, ga4View) {
+/**
+ * Sales over the same 28 days as the clicks/enquiries the rates divide by.
+ * Falls back to the monthly snapshot count only when that aligned window is
+ * unavailable, since a month of sales over 28 days of traffic is not a rate.
+ */
+function saleCount(txns28d, revenueSnap) {
+  if (txns28d != null) return Number(txns28d) || 0;
+  return revenueSnap ? Number(revenueSnap.transactions) || 0 : 0;
+}
+
+function computeKpisCore(pageRows, auditLatest, auditPrior, revenueSnap, ga4View, txns28d) {
   const totals = pageRows.reduce((acc, r) => {
     const clicks = Number(r.clicks_28d) || 0;
     const impr = Number(r.impressions_28d) || 0;
@@ -344,9 +355,12 @@ function computeKpisCore(pageRows, auditLatest, auditPrior, revenueSnap, ga4View
 
   const ctr = pct(totals.clicks, totals.impressions);
   const moneyShare = pct(totals.moneyClicks, totals.clicks);
+  // audit_results.gsc_ctr is stored as a percentage already (0.31 = 0.31%),
+  // on the same basis as pct() above. Do not rescale.
   const ctrPrior = auditPrior ? Number(auditPrior.gsc_ctr) || null : null;
+  const ctrLatestAudit = auditLatest ? Number(auditLatest.gsc_ctr) || null : null;
   const revenue = revenueSnap ? Number(revenueSnap.revenue_amount) || 0 : 0;
-  const txns = revenueSnap ? Number(revenueSnap.transactions) || 0 : 0;
+  const txns = saleCount(txns28d, revenueSnap);
   const revPer1k = totals.impressions > 0 ? (revenue / totals.impressions) * 1000 : null;
   const clickToSale = pct(txns, totals.clicks);
   const moneyEnquiry = ga4View != null ? Number(ga4View.money_page_enquiry_events) : null;
@@ -355,6 +369,9 @@ function computeKpisCore(pageRows, auditLatest, auditPrior, revenueSnap, ga4View
   return {
     ctr_28d_pct: ctr,
     ctr_prior_pct: ctrPrior,
+    // Same-source CTR pair, so the prior comparison can be checked like-for-like
+    // against the page-aggregated headline above.
+    ctr_latest_audit_pct: ctrLatestAudit,
     money_page_click_share_pct: moneyShare,
     click_to_sale_pct: clickToSale,
     enquiry_to_sale_pct: enquiryToSale,
@@ -373,17 +390,17 @@ function computeKpisCore(pageRows, auditLatest, auditPrior, revenueSnap, ga4View
   };
 }
 
-function appendIndexableKpis(kpis, pageRows, auditLatest, auditPrior, revenueSnap, ga4View) {
+function appendIndexableKpis(kpis, pageRows, auditLatest, auditPrior, revenueSnap, ga4View, txns28d) {
   const indexableRows = pageRows.filter(isRowIndexable);
-  const indexable = computeKpisCore(indexableRows, auditLatest, auditPrior, revenueSnap, ga4View);
+  const indexable = computeKpisCore(indexableRows, auditLatest, auditPrior, revenueSnap, ga4View, txns28d);
   const out = { ...kpis };
   for (const key of Object.keys(kpis)) out[`${key}_indexable`] = indexable[key];
   return out;
 }
 
-function computeKpis(pageRows, auditLatest, auditPrior, revenueSnap, ga4View) {
-  const base = computeKpisCore(pageRows, auditLatest, auditPrior, revenueSnap, ga4View);
-  return appendIndexableKpis(base, pageRows, auditLatest, auditPrior, revenueSnap, ga4View);
+function computeKpis(pageRows, auditLatest, auditPrior, revenueSnap, ga4View, txns28d) {
+  const base = computeKpisCore(pageRows, auditLatest, auditPrior, revenueSnap, ga4View, txns28d);
+  return appendIndexableKpis(base, pageRows, auditLatest, auditPrior, revenueSnap, ga4View, txns28d);
 }
 
 function computeFunnel(kpis, revenueSnap, ga4View) {
@@ -392,7 +409,7 @@ function computeFunnel(kpis, revenueSnap, ga4View) {
   const clicks = kpis.total_clicks_28d;
   const impr = kpis.total_impressions_28d;
   const moneyClicks = kpis.total_money_clicks_28d;
-  const txns = revenueSnap ? Number(revenueSnap.transactions) || 0 : 0;
+  const txns = Number(kpis.transactions_28d) || 0;
   const revenue = revenueSnap ? Number(revenueSnap.revenue_amount) || 0 : 0;
   const moneyEnquiry = ga4View != null ? Number(ga4View.money_page_enquiry_events) : null;
   const enquiry = moneyEnquiry != null && moneyEnquiry > 0
@@ -644,6 +661,34 @@ async function buildJlrSubtractCtx(supabase, propertyUrl) {
   };
 }
 
+// Sale count over the same 28-day window as the GSC/GA4 denominators. A sale is
+// amount > 0 and not a voucher redemption offset, matching the monthly view.
+async function fetchTxnCountForWindow(supabase, propertyUrl, dateEndIso, includeJlr) {
+  const window = txnWindowFor(dateEndIso);
+  if (!window) return { count: null, window: null };
+  let query = supabase
+    .from('booking_sheet_transactions')
+    .select('*', { count: 'exact', head: true })
+    .eq('property_url', propertyUrl)
+    .eq('is_redemption', false)
+    .gt('amount', 0)
+    .gte('txn_date', window.start)
+    .lte('txn_date', window.end);
+  if (!includeJlr) query = query.eq('is_jlr', false);
+  const { count, error } = await query;
+  if (error) throw error;
+  return { count: Number(count) || 0, window };
+}
+
+async function fetchMonthlyTxnCounts(supabase, propertyUrl) {
+  const { data, error } = await supabase
+    .from('booking_sheet_monthly_txn_counts')
+    .select('period_start, transactions_all, transactions_nonjlr, transactions_jlr, redemptions_excluded')
+    .eq('property_url', propertyUrl);
+  if (error) throw error;
+  return buildTxnCountMap(data || []);
+}
+
 const BOOKING_WIDE_SELECT = 'period_start, period_end, revenue_amount, currency, source, transactions, tier_transactions, operational_revenue, adjustment_net, market_revenue, category_revenue, notes';
 
 async function fetchBookingSheetWideRows(supabase, propertyUrl) {
@@ -673,11 +718,15 @@ function buildRevenueHistoryFromShaped(allShaped) {
 }
 
 async function fetchBookingSheetBundle(supabase, propertyUrl, includeJlr) {
-  const [jlrCtx, wideRows] = await Promise.all([
+  const [jlrCtx, wideRows, txnCounts] = await Promise.all([
     includeJlr ? Promise.resolve(null) : buildJlrSubtractCtx(supabase, propertyUrl),
-    fetchBookingSheetWideRows(supabase, propertyUrl)
+    fetchBookingSheetWideRows(supabase, propertyUrl),
+    fetchMonthlyTxnCounts(supabase, propertyUrl)
   ]);
-  const allShaped = wideRows.map((r) => ({ ...shapeWideViewRow(r, jlrCtx), notes: r.notes }));
+  const allShaped = wideRows.map((r) => ({
+    ...applyTxnCount(shapeWideViewRow(r, jlrCtx), txnCounts, includeJlr),
+    notes: r.notes
+  }));
   return {
     revenueSnaps: buildRevenueSnapsFromShaped(allShaped),
     revenueHistory: buildRevenueHistoryFromShaped(allShaped)
@@ -1337,7 +1386,8 @@ export default async function handler(req, res) {
     const auditLatest = audits[0] || null;
     const auditPrior = audits[1] || null;
     const ga4View = ga4AttributedView(ga4Snap);
-    const kpis = computeKpis(enrichedPageRows, auditLatest, auditPrior, revenueSnap, ga4View);
+    const txn28 = await fetchTxnCountForWindow(supabase, propertyUrl, pageMetrics.dateEnd, includeJlr);
+    const kpis = computeKpis(enrichedPageRows, auditLatest, auditPrior, revenueSnap, ga4View, txn28.count);
     const funnel = computeFunnel(kpis, revenueSnap, ga4View);
     const leakPages = pickLeakPages(pageRows);
     const earningPages = pickEarningPages(pageRows);
@@ -1352,6 +1402,9 @@ export default async function handler(req, res) {
       include_jlr: includeJlr,
       generated_at: new Date().toISOString(),
       page_metrics_date_end: pageMetrics.dateEnd,
+      transactions_window: txn28.window
+        ? { ...txn28.window, transactions: txn28.count, include_jlr: includeJlr }
+        : null,
       ga4_metrics_date_end: ga4Snap?.date_end || null,
       ga4_metrics_captured_at: ga4Snap?.captured_at || null,
       ga4_metrics: ga4View ? {
