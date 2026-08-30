@@ -29,7 +29,6 @@ import {
 } from '../../lib/acquisition/academy-signup-source.js';
 import {
   SOURCES,
-  BADGE_LEGEND,
   ga4Section,
   gscSection,
   gscCoverage,
@@ -304,7 +303,6 @@ export default async function handler(req, res) {
       generated_at: new Date().toISOString(),
       period_days: days,
       sources: SOURCES,
-      badge_legend: BADGE_LEGEND,
       sections,
       detail: detailRows(sections),
       channels: rows,

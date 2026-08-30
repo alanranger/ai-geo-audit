@@ -8165,8 +8165,15 @@
             font-size: 0.62rem; font-weight: 800; padding: 0.12rem 0.36rem; border-radius: 4px;
             letter-spacing: 0.02em; display: inline-block; vertical-align: middle; white-space: nowrap;
           }
-          .acq-legend-bar { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin: 0 0 1.1rem; font-size: 0.76rem; color: var(--dark-text-muted); }
-          .acq-legend-bar span.acq-legend-item { display: inline-flex; align-items: center; gap: 0.35rem; }
+          .acq-legend-item { display: inline-flex; align-items: center; gap: 0.35rem; }
+
+          /* ONE fixed grid for every section, so a 3-tile row and a 6-tile row
+             share the same column width. auto-fit would stretch the short rows
+             and make identical tiles look like different weights of thing. */
+          .acq-grid-6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.7rem; margin-bottom: 0.5rem; }
+          @media (max-width: 1500px) { .acq-grid-6 { grid-template-columns: repeat(4, 1fr); } }
+          @media (max-width: 1100px) { .acq-grid-6 { grid-template-columns: repeat(3, 1fr); } }
+          @media (max-width: 760px) { .acq-grid-6 { grid-template-columns: repeat(2, 1fr); } }
 
           .acq-sec { margin-bottom: 1.5rem; }
           .acq-sec-head { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
@@ -8175,7 +8182,12 @@
           .acq-sec-fenced { border-left: 2px solid var(--dark-border); padding-left: 0.9rem; }
           .acq-sec-explainer { font-size: 0.73rem; color: var(--dark-text-muted); margin: 0.5rem 0 0; max-width: 95ch; line-height: 1.5; }
 
-          .acq-tile { background: #0b1118; border: 1px solid var(--dark-border); border-radius: 10px; padding: 0.85rem 0.95rem; position: relative; }
+          /* Right-angled on the accent side so the colour reads as an edge
+             marker rather than a rounded stripe floating inside the tile. */
+          .acq-tile {
+            background: #0b1118; border: 1px solid var(--dark-border); border-left: 3px solid #334155;
+            border-radius: 0 10px 10px 0; padding: 0.85rem 0.95rem; position: relative; min-width: 0;
+          }
           .acq-tile-badge { position: absolute; top: 0.6rem; right: 0.6rem; }
           .acq-tile-label { font-size: 0.74rem; color: var(--dark-text-muted); padding-right: 2.6rem; }
           .acq-tile-value { font-size: 1.35rem; font-weight: 700; color: var(--dark-text); line-height: 1.25; margin-top: 0.1rem; }
@@ -8219,7 +8231,6 @@
           </div>
         </div>
 
-        <div class="acq-legend-bar" id="acq-badge-legend"></div>
         <div id="acq-sections"></div>
         <div class="acq-card-grid" id="acq-cards"></div>
 
@@ -105326,44 +105337,39 @@ Confidence: ${c}`;
     // ---------------- zone 1a: source-grouped sections (site lens) ----------------
     function tileHtml(section, t) {
       var badgeHtml = t.muted ? '' : '<span class="acq-tile-badge">' + badge(section.source) + '</span>';
-      return '<div class="acq-tile' + (t.muted ? ' acq-tile-muted' : '') + '">' + badgeHtml
+      var accent = t.accent ? ' style="border-left-color:' + t.accent + '"' : '';
+      return '<div class="acq-tile' + (t.muted ? ' acq-tile-muted' : '') + '"' + accent + '>' + badgeHtml
         + '<div class="acq-tile-label">' + t.label + '</div>'
         + '<div class="acq-tile-value">' + tileValue(t) + '</div>'
         + (t.sub ? '<div class="acq-tile-sub">' + t.sub + '</div>' : '')
         + '</div>';
     }
+    // No badge on the heading: the per-tile corner badges already say which tool
+    // measured each figure, and repeating it on the heading read as a second,
+    // section-level claim.
     function sectionHtml(s) {
       var checks = (s.checks || []).map(checkHtml).join('');
       return '<div class="acq-sec' + (s.fenced ? ' acq-sec-fenced' : '') + '">'
-        + '<div class="acq-sec-head">' + badge(s.source)
+        + '<div class="acq-sec-head">'
         + '<span class="acq-sec-title">' + s.title + '</span>'
         + '<span class="acq-sec-sub">— ' + s.subtitle + '</span></div>'
-        + '<div class="acq-card-grid" style="margin-bottom:0.5rem">'
+        + '<div class="acq-grid-6">'
         + s.tiles.map(function (t) { return tileHtml(s, t); }).join('') + '</div>'
         + (checks ? '<div>' + checks + '</div>' : '')
         + (s.explainer ? '<p class="acq-sec-explainer">' + s.explainer + '</p>' : '')
         + '</div>';
-    }
-    function renderBadgeLegend() {
-      var items = state.data.badge_legend || [];
-      $('acq-badge-legend').innerHTML = items.map(function (i) {
-        return '<span class="acq-legend-item">' + badge(i.source) + ' ' + i.text + '</span>';
-      }).join('');
     }
     // The two layouts are mutually exclusive by design: the site lens groups by
     // measurement tool, the Academy lens ranks channels by members produced.
     function renderSections() {
       var host = $('acq-sections');
       var cards = $('acq-cards');
-      var legend = $('acq-badge-legend');
       if (state.lens !== 'site') {
         host.style.display = 'none';
-        legend.style.display = 'none';
         cards.style.display = '';
         return;
       }
       cards.style.display = 'none';
-      legend.style.display = '';
       host.style.display = '';
       host.innerHTML = (state.data.sections || []).map(sectionHtml).join('');
     }
@@ -105650,7 +105656,6 @@ Confidence: ${c}`;
       renderPeriodButtons();
       renderCopy();
       renderMetricPicker();
-      renderBadgeLegend();
       renderSections();
       if (state.lens !== 'site') renderCards();
       renderHead();

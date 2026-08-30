@@ -218,3 +218,32 @@ test('every section badge resolves to a defined source', () => {
   ];
   for (const s of sections) assert.ok(SOURCES[s.source], `${s.source} needs badge metadata`);
 });
+
+test('every tile carries an accent colour, so the UI never guesses one', () => {
+  const sections = [
+    ga4Section(rows()),
+    gscSection({ clicks: 1, impressions: 2 }),
+    aiSection({ monthly: {}, latest: {} }),
+    youtubeSection(null, null, null),
+  ];
+  for (const s of sections) {
+    for (const t of s.tiles) {
+      assert.match(t.accent || '', /^#[0-9a-fA-F]{6}$/, `${s.title} / ${t.label} needs an accent`);
+    }
+  }
+});
+
+test('GA4 tiles vary their accent per channel; other sections use the source colour', () => {
+  const ga4 = ga4Section(rows());
+  const accents = ga4.tiles.map((t) => t.accent);
+  assert.equal(new Set(accents).size, accents.length, 'six same-unit tiles must stay separable');
+
+  const gsc = gscSection({ clicks: 1, impressions: 2 });
+  for (const t of gsc.tiles) assert.equal(t.accent, SOURCES.GSC.colour);
+});
+
+test('an unmeasured tile takes a neutral accent, not a source colour', () => {
+  const section = aiSection({ monthly: {}, latest: {} });
+  const unavailable = section.tiles.find((t) => t.muted);
+  assert.notEqual(unavailable.accent, SOURCES.D4S.colour, 'colour would imply D4S measured it');
+});
