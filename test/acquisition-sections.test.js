@@ -11,6 +11,7 @@ import {
   SOURCES,
   ga4Section,
   gscSection,
+  gscCoverage,
   gscExplainer,
   aiSection,
   youtubeSection,
@@ -120,6 +121,27 @@ test('gscSection is fenced off, and its CTR derives from its own clicks and impr
   assert.equal(Number(ctr.value.toFixed(2)), 0.37);
 });
 
+test('gscCoverage reports the days actually present, not the days requested', () => {
+  const rows = [
+    { date: '2026-08-02' }, { date: '2026-08-03' }, { date: '2026-08-26' },
+  ];
+  const cov = gscCoverage(rows);
+  assert.equal(cov.first_day, '2026-08-02');
+  assert.equal(cov.last_day, '2026-08-26');
+  assert.equal(cov.days_with_data, 3);
+  assert.equal(gscCoverage([]), null);
+});
+
+test('the clicks tile states its real coverage, since GSC publishes days behind', () => {
+  const section = gscSection({ clicks: 5761, impressions: 1505716 }, {
+    first_day: '2026-08-02', last_day: '2026-08-26', days_with_data: 25,
+  });
+  const clicks = section.tiles.find((t) => t.label === 'Clicks');
+  assert.match(clicks.sub, /25 days of data/);
+  assert.match(clicks.sub, /2026-08-26/);
+  assert.equal(section.coverage.days_with_data, 25);
+});
+
 test('the GSC explainer names both figures so neither looks wrong', () => {
   const text = gscExplainer(6307, 8526);
   assert.match(text, /6,307/);
@@ -136,7 +158,10 @@ test('aiSection labels mentions as citations and says which platforms are missin
   assert.match(section.subtitle, /NOT visits/);
   assert.equal(section.tiles[0].value, 93);
   assert.equal(section.tiles[0].unit, 'mentions');
-  assert.match(section.tiles[0].sub, /cites you in 24 of 93/);
+  // The citation count comes from the newest snapshot, the value from the
+  // period, so the sub-line must name its basis. Google AI otherwise reads
+  // "274 mentions · cites you in 832 of 832", which looks impossible.
+  assert.match(section.tiles[0].sub, /latest snapshot: cited in 24 of 93 tracked prompts/);
   const unavailable = section.tiles.find((t) => t.muted);
   assert.equal(unavailable.text, 'not available');
   assert.equal(unavailable.value, null);
@@ -155,6 +180,17 @@ test('youtubeSection says a view is not a visit, and marks impressions pending',
   assert.equal(section.tiles[2].sub, '40 videos');
   const pending = section.tiles.find((t) => t.muted);
   assert.equal(pending.text, 'pending');
+});
+
+test('a measured zero clicks-to-site does not turn impressions into a blank number', () => {
+  const section = youtubeSection({ value: 123, unit: 'views' }, null, {
+    views: 123, impressions: null, clicks_to_site: 0,
+  });
+  const pending = section.tiles.find((t) => t.label.startsWith('Impressions'));
+  assert.equal(pending.value, null, 'a null impressions figure must not render as an empty tile');
+  assert.equal(pending.text, 'pending');
+  assert.equal(pending.muted, true);
+  assert.match(pending.sub, /0 clicks to site/);
 });
 
 test('detailRows carry source and unit per row, and skip unmeasured figures', () => {

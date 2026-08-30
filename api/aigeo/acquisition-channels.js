@@ -32,6 +32,7 @@ import {
   BADGE_LEGEND,
   ga4Section,
   gscSection,
+  gscCoverage,
   gscExplainer,
   aiSection,
   youtubeSection,
@@ -256,13 +257,13 @@ function totalsFromGsc(rows) {
   );
 }
 
-function buildSections({ ga4Rows, gscTotals, llm, rows }) {
-  const ga4 = ga4Section(ga4Rows);
+function buildSections({ ga4Rows, gscTotals, gscRows, llm, rows }) {
   const organicVisits = rows.find((r) => r.key === 'google_organic')?.visits?.value ?? null;
   const yt = rows.find((r) => r.key === 'youtube');
+  const gsc = gscSection(gscTotals, gscCoverage(gscRows));
   return [
-    ga4,
-    { ...gscSection(gscTotals), explainer: gscExplainer(gscTotals?.clicks ?? null, organicVisits) },
+    ga4Section(ga4Rows),
+    { ...gsc, explainer: gscExplainer(gscTotals?.clicks ?? null, organicVisits) },
     aiSection(llm),
     youtubeSection(yt?.reach, yt?.context, yt?.engagement),
   ];
@@ -296,7 +297,7 @@ export default async function handler(req, res) {
       ga4,
     });
     const buckets = weekBuckets(days, new Date());
-    const sections = buildSections({ ga4Rows, gscTotals, llm, rows });
+    const sections = buildSections({ ga4Rows, gscTotals, gscRows, llm, rows });
 
     return send(res, 200, {
       ok: true,
