@@ -105253,7 +105253,23 @@ Confidence: ${c}`;
 
     function reachText(ch) {
       if (ch.reach.value == null) return '—';
-      return fmt(ch.reach.value) + (ch.reach.unit ? ' ' + ch.reach.unit : '');
+      var text = fmt(ch.reach.value) + (ch.reach.unit ? ' ' + ch.reach.unit : '');
+      if (!ch.reach.note) return text;
+      return '<span title="' + ch.reach.note + '">' + text + '</span>';
+    }
+    // Period engagement beside reach. Views are omitted when reach is already
+    // showing views, so the same number never appears twice on one card.
+    function engagementText(ch) {
+      if (!ch.engagement) return '';
+      var e = ch.engagement;
+      var bits = [];
+      if (e.views != null && ch.reach.unit !== 'views') bits.push(fmt(e.views) + ' views');
+      if (e.watch_time_minutes != null) bits.push(fmt(e.watch_time_minutes) + ' min watched');
+      if (e.impressions_ctr_pct != null) bits.push(e.impressions_ctr_pct.toFixed(2) + '% CTR');
+      if (e.clicks_to_site != null) bits.push(fmt(e.clicks_to_site) + ' card clicks');
+      if (!bits.length) return '';
+      var win = e.window_days ? ' · ' + e.window_days + 'd' : '';
+      return '<div class="acq-card-cited">' + bits.join(' · ') + win + '</div>';
     }
     function visitsText(ch) {
       if (ch.visits.value == null) {
@@ -105279,7 +105295,11 @@ Confidence: ${c}`;
         var note = '';
         if (ch.reach.note && ch.state === 'awaiting_setup') {
           note = '<div class="acq-card-note">⚠ ' + ch.reach.note + '</div>';
-        } else if (ch.reach.note && ch.state === 'awaiting_history') {
+        } else if (ch.reach.note && ch.state !== 'ok') {
+          note = '<div class="acq-card-note">' + ch.reach.note + '</div>';
+        } else if (ch.reach.note && ch.reach.unit === 'views') {
+          // Reach is measured in a weaker unit than the other rows. Say so on
+          // the card rather than only in a tooltip, or it reads as comparable.
           note = '<div class="acq-card-note">' + ch.reach.note + '</div>';
         }
         var ctx = ch.context
@@ -105289,7 +105309,7 @@ Confidence: ${c}`;
         return '<div class="acq-card" style="border-left-color:' + colourFor(i) + '">'
           + '<div class="acq-card-name">' + ch.name + '</div>'
           + '<div class="acq-card-reach">' + reachText(ch) + ' reach</div>'
-          + body + cited + ctx + note + '</div>';
+          + body + cited + engagementText(ch) + ctx + note + '</div>';
       }).join('');
     }
 

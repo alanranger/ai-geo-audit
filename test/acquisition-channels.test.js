@@ -141,16 +141,25 @@ test('normaliseAnalyticsWindow reads metrics positionally from column headers', 
     columnHeaders: [
       { name: 'views' },
       { name: 'estimatedMinutesWatched' },
-      { name: 'impressions' },
-      { name: 'impressionsClickThroughRate' },
       { name: 'cardClicks' },
     ],
-    rows: [[1200, 4300, 50000, 3.4, 27]],
+    rows: [[1200, 4300, 27]],
   });
   assert.equal(mapped.views_window, 1200);
-  assert.equal(mapped.impressions_window, 50000);
-  assert.equal(mapped.impressions_ctr_window, 3.4);
+  assert.equal(mapped.watch_time_minutes_window, 4300);
   assert.equal(mapped.clicks_to_site_window, 27);
+});
+
+// The Analytics API rejects the whole request if ANY metric is unknown, so
+// asking for impressions there cost us views and watch time too. Impressions
+// must come from the Reporting API, never from this payload.
+test('normaliseAnalyticsWindow does not claim impressions from an Analytics payload', () => {
+  const mapped = normaliseAnalyticsWindow({
+    columnHeaders: [{ name: 'views' }, { name: 'estimatedMinutesWatched' }, { name: 'cardClicks' }],
+    rows: [[123, 265, 0]],
+  });
+  assert.ok(!('impressions_window' in mapped), 'must not invent an impressions figure');
+  assert.ok(!('impressions_ctr_window' in mapped), 'must not invent a CTR figure');
 });
 
 test('normaliseAnalyticsWindow returns empty when the report has no rows', () => {

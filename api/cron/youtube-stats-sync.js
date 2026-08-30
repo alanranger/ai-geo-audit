@@ -12,6 +12,7 @@
 export const config = { runtime: 'nodejs', maxDuration: 120 };
 
 import { collectYoutubeStats, oauthDiagnostics } from '../../lib/acquisition/youtube-stats.js';
+import { collectYoutubeReach } from '../../lib/acquisition/youtube-reach.js';
 import { detectTriggerSource, isRequestAuthorized, startRun, finishRun } from '../../lib/acquisition/sync-runs.js';
 
 const JOB = 'youtube_stats';
@@ -31,12 +32,18 @@ export default async function handler(req, res) {
   const runId = dryRun ? null : await startRun(JOB, triggerSource);
 
   try {
-    const result = await collectYoutubeStats({ persist: !dryRun });
+    const result = await collectYoutubeStats({ persist: !dryRun, reach: collectYoutubeReach });
     await finishRun(runId, {
       status: result.configured ? 'ok' : 'skipped',
       rows_written: result.rows_written,
       error_message: result.configured ? null : `awaiting_setup: ${result.missing.join(', ')}`,
-      meta: { source: result.source || null, videos: result.videos || 0, missing: result.missing },
+      meta: {
+        source: result.source || null,
+        videos: result.videos || 0,
+        missing: result.missing,
+        reach_state: result.reach?.state || null,
+        reach_error: result.reach?.error || null,
+      },
     });
     return send(res, 200, { ok: true, job: JOB, dry_run: dryRun, ...result });
   } catch (err) {

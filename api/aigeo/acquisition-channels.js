@@ -93,7 +93,9 @@ async function fetchLlm(sb, days) {
 async function fetchYoutube(sb, days) {
   const { data, error } = await sb
     .from('youtube_channel_stats')
-    .select('captured_date, total_views, views_window, subscribers, total_videos, source')
+    .select('captured_date, total_views, views_window, subscribers, total_videos, source, '
+      + 'window_days, impressions_window, impressions_ctr_window, '
+      + 'watch_time_minutes_window, clicks_to_site_window')
     .gte('captured_date', isoDaysAgo(days))
     .order('captured_date', { ascending: false })
     .limit(200);
