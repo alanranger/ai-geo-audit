@@ -7712,7 +7712,7 @@
       </button>
 
       <div class="aigeo-nav-section">SEO</div>
-      <button class="aigeo-nav-item" data-panel="acquisition" title="Acquisition — where traffic and Academy members come from, by channel: Google organic, ChatGPT (AI), Google AI, YouTube and Direct/referral. Channel-level only — keyword detail lives in Keyword Ranking &amp; AI.">
+      <button class="aigeo-nav-item" data-panel="acquisition" title="Acquisition — where traffic comes from, grouped by the tool that measured it: GA4 site visits (these add up), Google Search Console clicks, DataForSEO AI mentions and YouTube reach. Every figure carries its source and unit. Channel-level only — keyword detail lives in Keyword Ranking &amp; AI.">
         <span class="aigeo-nav-icon">📡</span>
         <span>Acquisition</span>
       </button>
@@ -8158,6 +8158,36 @@
           .acq-foot { margin-top: 0.85rem; max-width: 95ch; }
           .acq-awaiting { color: #f59e0b; font-weight: 700; }
           .acq-na { color: #64748b; }
+
+          /* Source badges. Coloured text, not brand logos: always legible and
+             no trademark question. */
+          .acq-badge {
+            font-size: 0.62rem; font-weight: 800; padding: 0.12rem 0.36rem; border-radius: 4px;
+            letter-spacing: 0.02em; display: inline-block; vertical-align: middle; white-space: nowrap;
+          }
+          .acq-legend-bar { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin: 0 0 1.1rem; font-size: 0.76rem; color: var(--dark-text-muted); }
+          .acq-legend-bar span.acq-legend-item { display: inline-flex; align-items: center; gap: 0.35rem; }
+
+          .acq-sec { margin-bottom: 1.5rem; }
+          .acq-sec-head { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+          .acq-sec-title { font-size: 0.88rem; font-weight: 800; color: var(--dark-text); }
+          .acq-sec-sub { font-size: 0.74rem; color: var(--dark-text-muted); }
+          .acq-sec-fenced { border-left: 2px solid var(--dark-border); padding-left: 0.9rem; }
+          .acq-sec-explainer { font-size: 0.73rem; color: var(--dark-text-muted); margin: 0.5rem 0 0; max-width: 95ch; line-height: 1.5; }
+
+          .acq-tile { background: #0b1118; border: 1px solid var(--dark-border); border-radius: 10px; padding: 0.85rem 0.95rem; position: relative; }
+          .acq-tile-badge { position: absolute; top: 0.6rem; right: 0.6rem; }
+          .acq-tile-label { font-size: 0.74rem; color: var(--dark-text-muted); padding-right: 2.6rem; }
+          .acq-tile-value { font-size: 1.35rem; font-weight: 700; color: var(--dark-text); line-height: 1.25; margin-top: 0.1rem; }
+          .acq-tile-sub { font-size: 0.7rem; color: #64748b; margin-top: 0.1rem; }
+          .acq-tile-muted .acq-tile-value { font-size: 0.95rem; font-weight: 500; color: var(--dark-text-muted); }
+          .acq-tile-muted { opacity: 0.72; }
+
+          /* Validation output. An error must not be styleable as a footnote. */
+          .acq-check { font-size: 0.76rem; border-radius: 6px; padding: 0.35rem 0.6rem; display: inline-block; margin: 0.15rem 0.4rem 0.15rem 0; }
+          .acq-check-ok { background: rgba(42,120,214,0.14); color: #cbd5e1; }
+          .acq-check-warn { background: rgba(230,162,60,0.14); color: #e6a23c; font-weight: 700; }
+          .acq-check-error { background: rgba(239,68,68,0.16); color: #fca5a5; font-weight: 800; border: 1px solid rgba(239,68,68,0.45); }
         </style>
 
         <div class="acq-head">
@@ -8189,6 +8219,8 @@
           </div>
         </div>
 
+        <div class="acq-legend-bar" id="acq-badge-legend"></div>
+        <div id="acq-sections"></div>
         <div class="acq-card-grid" id="acq-cards"></div>
 
         <div class="rf-section">
@@ -105251,6 +105283,91 @@ Confidence: ${c}`;
     function fmt(n) { return Number(n).toLocaleString(); }
     function colourFor(i) { return COLOURS[i % COLOURS.length]; }
 
+    // ---------------- source badges ----------------
+    // Every figure on this tab carries the tool that measured it. Without that
+    // label, GA4 sessions and Search Console clicks look like the same unit and
+    // invite a total that means nothing.
+    var SOURCE_FALLBACK = {
+      GA4: { label: 'GA4', colour: '#2a78d6', ink: '#ffffff', name: 'Google Analytics 4' },
+      GSC: { label: 'GSC', colour: '#f9ab00', ink: '#3c4043', name: 'Google Search Console' },
+      D4S: { label: 'D4S', colour: '#10a37f', ink: '#ffffff', name: 'DataForSEO' },
+      YT: { label: '\u25B6 YT', colour: '#ff0000', ink: '#ffffff', name: 'YouTube API' },
+      Academy: { label: 'Academy', colour: '#8b5cf6', ink: '#ffffff', name: 'Academy database' }
+    };
+    function sourceMeta(key) {
+      var fromApi = state.data && state.data.sources ? state.data.sources[key] : null;
+      return fromApi || SOURCE_FALLBACK[key] || { label: key, colour: '#334155', ink: '#e2e8f0', name: key };
+    }
+    function badge(key) {
+      var s = sourceMeta(key);
+      return '<span class="acq-badge" style="background:' + s.colour + ';color:' + s.ink + '" title="'
+        + (s.name || s.label) + '">' + s.label + '</span>';
+    }
+
+    function fmtCompact(n) {
+      if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+      if (n >= 1e5) return Math.round(n / 1e3) + 'k';
+      return fmt(n);
+    }
+    function tileValue(t) {
+      if (t.value == null) return t.text || '—';
+      if (t.kind === 'pct') return Number(t.value).toFixed(2) + '%';
+      return fmtCompact(Number(t.value));
+    }
+
+    // ---------------- self-validation output ----------------
+    var CHECK_CLASS = { ok: 'acq-check-ok', warn: 'acq-check-warn', error: 'acq-check-error' };
+    var CHECK_MARK = { ok: '', warn: '\u26A0 ', error: '\u2715 ' };
+    function checkHtml(c) {
+      var cls = CHECK_CLASS[c.level] || 'acq-check-ok';
+      return '<span class="acq-check ' + cls + '">' + (CHECK_MARK[c.level] || '') + c.message + '</span>';
+    }
+
+    // ---------------- zone 1a: source-grouped sections (site lens) ----------------
+    function tileHtml(section, t) {
+      var badgeHtml = t.muted ? '' : '<span class="acq-tile-badge">' + badge(section.source) + '</span>';
+      return '<div class="acq-tile' + (t.muted ? ' acq-tile-muted' : '') + '">' + badgeHtml
+        + '<div class="acq-tile-label">' + t.label + '</div>'
+        + '<div class="acq-tile-value">' + tileValue(t) + '</div>'
+        + (t.sub ? '<div class="acq-tile-sub">' + t.sub + '</div>' : '')
+        + '</div>';
+    }
+    function sectionHtml(s) {
+      var checks = (s.checks || []).map(checkHtml).join('');
+      return '<div class="acq-sec' + (s.fenced ? ' acq-sec-fenced' : '') + '">'
+        + '<div class="acq-sec-head">' + badge(s.source)
+        + '<span class="acq-sec-title">' + s.title + '</span>'
+        + '<span class="acq-sec-sub">— ' + s.subtitle + '</span></div>'
+        + '<div class="acq-card-grid" style="margin-bottom:0.5rem">'
+        + s.tiles.map(function (t) { return tileHtml(s, t); }).join('') + '</div>'
+        + (checks ? '<div>' + checks + '</div>' : '')
+        + (s.explainer ? '<p class="acq-sec-explainer">' + s.explainer + '</p>' : '')
+        + '</div>';
+    }
+    function renderBadgeLegend() {
+      var items = state.data.badge_legend || [];
+      $('acq-badge-legend').innerHTML = items.map(function (i) {
+        return '<span class="acq-legend-item">' + badge(i.source) + ' ' + i.text + '</span>';
+      }).join('');
+    }
+    // The two layouts are mutually exclusive by design: the site lens groups by
+    // measurement tool, the Academy lens ranks channels by members produced.
+    function renderSections() {
+      var host = $('acq-sections');
+      var cards = $('acq-cards');
+      var legend = $('acq-badge-legend');
+      if (state.lens !== 'site') {
+        host.style.display = 'none';
+        legend.style.display = 'none';
+        cards.style.display = '';
+        return;
+      }
+      cards.style.display = 'none';
+      legend.style.display = '';
+      host.style.display = '';
+      host.innerHTML = (state.data.sections || []).map(sectionHtml).join('');
+    }
+
     function reachText(ch) {
       if (ch.reach.value == null) return '—';
       var text = fmt(ch.reach.value) + (ch.reach.unit ? ' ' + ch.reach.unit : '');
@@ -105314,31 +105431,44 @@ Confidence: ${c}`;
     }
 
     // ---------------- zone 2: trend ----------------
-    function metricOptions() {
-      return state.lens === 'site'
-        ? [['visits', 'Site visits per channel'], ['reach', 'Reach per channel']]
-        : [['trials', 'Trials per channel'], ['members', 'Members per channel'], ['visits', 'Site visits per channel']];
+    // One metric = one unit = one source. The chart never shares an axis
+    // between tools: GSC impressions run to millions and AI mentions to
+    // hundreds, so plotting them together flattened everything but impressions
+    // onto the baseline and implied the two were the same measurement.
+    function availableMetrics() {
+      var all = ((state.data.trend || {}).metrics) || [];
+      return all.filter(function (m) { return m.lens === 'both' || m.lens === state.lens; });
+    }
+    function currentMetric() {
+      var opts = availableMetrics();
+      var found = opts.filter(function (m) { return m.key === state.metric; })[0];
+      return found || opts[0] || null;
     }
     function renderMetricPicker() {
-      var sel = $('acq-metric');
-      var opts = metricOptions();
-      if (!opts.some(function (o) { return o[0] === state.metric; })) state.metric = opts[0][0];
-      sel.innerHTML = opts.map(function (o) {
-        return '<option value="' + o[0] + '"' + (o[0] === state.metric ? ' selected' : '') + '>' + o[1] + '</option>';
+      var opts = availableMetrics();
+      if (!opts.some(function (o) { return o.key === state.metric; })) {
+        state.metric = opts.length ? opts[0].key : 'visits';
+      }
+      $('acq-metric').innerHTML = opts.map(function (o) {
+        return '<option value="' + o.key + '"' + (o.key === state.metric ? ' selected' : '') + '>'
+          + o.label + ' (' + o.source + ' · ' + o.unit + ')</option>';
       }).join('');
     }
     function renderLegend() {
-      $('acq-legend').innerHTML = state.data.channels.map(function (c, i) {
-        return '<span><span class="acq-swatch" style="background:' + colourFor(i) + '"></span>' + c.name + '</span>';
-      }).join('');
+      var m = currentMetric();
+      if (!m) { $('acq-legend').innerHTML = ''; return; }
+      $('acq-legend').innerHTML = '<span class="acq-legend-item">' + badge(m.source) + ' ' + m.unit + '</span>'
+        + m.series.map(function (s, i) {
+          return '<span><span class="acq-swatch" style="background:' + colourFor(i) + '"></span>' + s.label + '</span>';
+        }).join('');
     }
     function renderChart() {
       var trend = state.data.trend;
-      var series = trend.series[state.metric] || {};
-      var datasets = state.data.channels.map(function (c, i) {
+      var m = currentMetric();
+      var datasets = (m ? m.series : []).map(function (s, i) {
         return {
-          label: c.name,
-          data: (series[c.key] || []).slice(),
+          label: s.label,
+          data: (s.data || []).slice(),
           borderColor: colourFor(i),
           backgroundColor: colourFor(i),
           borderWidth: 2,
@@ -105376,16 +105506,30 @@ Confidence: ${c}`;
           }
         }
       });
-      $('acq-chart-note').textContent = state.metric === 'reach'
-        ? state.data.notes.ai_granularity + ' AI lines are held flat within each month rather than given invented weekly detail. Gaps mean no measurable data for that channel, not zero.'
-        : 'Gaps mean the channel has no measurable series for this metric, not zero.';
+      var note = m
+        ? 'Single unit per chart: this one plots ' + m.unit + ' from ' + sourceMeta(m.source).name
+          + ' only. Units from different tools never share an axis. '
+        : '';
+      if (m && m.key === 'ai_mentions') {
+        note += state.data.notes.ai_granularity
+          + ' AI lines are held flat within each month rather than given invented weekly detail. ';
+      }
+      $('acq-chart-note').textContent = note + 'Gaps mean no measurable data for that series, not zero.';
     }
 
     // ---------------- zone 3: table ----------------
+    // The site lens table carries Source and Unit as their own columns, so
+    // sorting by value cannot quietly line up clicks against sessions.
+    var DETAIL_COLUMNS = [
+      ['channel', 'Figure', 0], ['section', 'Measured', 0],
+      ['source', 'Source', 0], ['unit', 'Unit', 0], ['value', 'Value', 1]
+    ];
     function columns() {
-      var base = [['name', 'Channel', 0], ['reach', 'Reach', 0], ['visits', 'Visits', 1], ['trials', 'Trials', 1]];
-      if (state.lens !== 'academy') return base;
-      return base.concat([['members', 'Members', 1], ['cvr', 'Trial→paid', 1]]);
+      if (state.lens !== 'academy') return DETAIL_COLUMNS;
+      return [
+        ['name', 'Channel', 0], ['reach', 'Reach', 0], ['visits', 'Visits', 1],
+        ['trials', 'Trials', 1], ['members', 'Members', 1], ['cvr', 'Trial→paid', 1]
+      ];
     }
     function sortValue(ch, key) {
       if (key === 'name') return ch.name;
@@ -105400,10 +105544,27 @@ Confidence: ${c}`;
           + c[1] + '<span class="rf-sort-ind">↕</span></th>';
       }).join('');
     }
+    function detailRowHtml(row) {
+      var r = row._d;
+      return '<tr><td>' + r.channel + '</td>'
+        + '<td class="acq-muted">' + r.section + '</td>'
+        + '<td>' + badge(r.source) + '</td>'
+        + '<td class="acq-muted">' + r.unit + '</td>'
+        + '<td class="num">' + tileValue(r) + '</td></tr>';
+    }
+    function renderDetailTable(table, key, dir) {
+      var flat = (state.data.detail || []).map(function (d) {
+        return { _d: d, channel: d.channel, section: d.section, source: d.source, unit: d.unit, value: d.value };
+      });
+      var sorted = window.rfSortRows(flat, key, dir);
+      window.rfUpdateSortIndicators(table, key, dir);
+      $('acq-tbody').innerHTML = sorted.map(detailRowHtml).join('');
+    }
     function renderTable() {
       var table = $('acq-table');
       var key = table.dataset.sortKey || defaultSortKey();
       var dir = table.dataset.sortDir || 'desc';
+      if (state.lens !== 'academy') return renderDetailTable(table, key, dir);
       var flat = state.data.channels.map(function (ch) {
         var o = { _ch: ch };
         columns().forEach(function (c) { o[c[0]] = sortValue(ch, c[0]); });
@@ -105436,7 +105597,7 @@ Confidence: ${c}`;
         }).join('') + '</tr>';
       }).join('');
     }
-    function defaultSortKey() { return state.lens === 'academy' ? 'members' : 'visits'; }
+    function defaultSortKey() { return state.lens === 'academy' ? 'members' : 'value'; }
 
     function rankRows() {
       var key = defaultSortKey();
@@ -105451,7 +105612,7 @@ Confidence: ${c}`;
     function renderCopy() {
       var academy = state.data.academy || {};
       $('acq-subhead').textContent = state.lens === 'site'
-        ? 'Where traffic to alanranger.com comes from. Reach and visits have history; channel-to-signup tagging is Academy-only so far.'
+        ? 'Where traffic to alanranger.com comes from, grouped by the tool that measured it. Every tile shows its source and unit; only the GA4 visits section adds up.'
         : 'Of each channel’s traffic, how many became Academy trials and members. Channel-to-signup from '
           + academy.attribution_start + ' (forward-only).';
       var ga4 = state.data.ga4;
@@ -105483,7 +105644,9 @@ Confidence: ${c}`;
       renderPeriodButtons();
       renderCopy();
       renderMetricPicker();
-      renderCards();
+      renderBadgeLegend();
+      renderSections();
+      if (state.lens !== 'site') renderCards();
       renderHead();
       var table = $('acq-table');
       table.dataset.rfSortBound = '';
@@ -105554,7 +105717,8 @@ Confidence: ${c}`;
       });
       $('acq-lens').addEventListener('change', function (e) {
         state.lens = e.target.value;
-        state.metric = metricOptions()[0][0];
+        var opts = availableMetrics();
+        state.metric = opts.length ? opts[0].key : 'visits';
         renderAll();
       });
       $('acq-metric').addEventListener('change', function (e) {

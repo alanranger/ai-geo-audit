@@ -158,7 +158,10 @@ test('buildChannelRows returns all five channels with native reach units', () =>
 
   assert.equal(byKey.google_organic.reach.value, 1575519);
   assert.equal(byKey.google_organic.reach.unit, 'impr');
-  assert.equal(byKey.google_organic.visits.value, 5916);
+  // Visits are GA4 for every channel including organic, so the column has one
+  // unit. With no GA4 pull in SOURCES there is nothing to report, and a GSC
+  // click count borrowed from another tool would not be an answer.
+  assert.equal(byKey.google_organic.visits.value, null);
 
   assert.equal(byKey.chatgpt.reach.value, 25);
   assert.equal(byKey.chatgpt.reach.unit, 'mentions');
@@ -167,7 +170,7 @@ test('buildChannelRows returns all five channels with native reach units', () =>
 
 test('buildChannelRows returns null, never 0, for unmeasurable visits', () => {
   const rows = buildChannelRows(SOURCES);
-  for (const key of ['chatgpt', 'google_ai', 'youtube', 'direct_referral']) {
+  for (const key of ['google_organic', 'chatgpt', 'google_ai', 'youtube', 'direct_referral']) {
     const row = rows.find((r) => r.key === key);
     assert.equal(row.visits.value, null, `${key} visits must not be a misleading zero`);
     assert.ok(row.visits.note, `${key} must explain why visits are unavailable`);
@@ -219,19 +222,32 @@ test('buildChannelRows leaves visits null when GA4 has not been pulled', () => {
   assert.match(rows.find((r) => r.key === 'chatgpt').visits.note, /not measurable/);
 });
 
-test('buildChannelRows fills visits from GA4 and keeps organic on GSC clicks', () => {
+test('buildChannelRows fills every visits figure from GA4, organic included', () => {
   const rows = buildChannelRows({
     ...SOURCES,
-    ga4: { visits: { chatgpt: 69, google_ai: 32, youtube: 0, direct_referral: 6956 } },
+    ga4: { visits: { google_organic: 8526, chatgpt: 69, google_ai: 32, youtube: 0, direct_referral: 6956 } },
   });
   const by = (k) => rows.find((r) => r.key === k);
   assert.equal(by('chatgpt').visits.value, 69);
   assert.equal(by('google_ai').visits.value, 32);
   assert.equal(by('direct_referral').visits.value, 6956);
   assert.equal(by('youtube').visits.value, 0);
-  assert.equal(by('google_organic').visits.value, 5916, 'organic stays on Search Console clicks');
-  assert.match(by('google_organic').visits.note, /Search Console/);
+  // One ruler for the visits column. Organic used to report the 5,916 GSC
+  // clicks from SOURCES, which sat beside GA4 sessions looking addable.
+  assert.equal(by('google_organic').visits.value, 8526);
+  assert.notEqual(by('google_organic').visits.value, SOURCES.gscTotals.clicks);
+  assert.match(by('google_organic').visits.note, /GA4 Organic Search sessions/);
   assert.match(by('google_ai').visits.note, /AI Overviews/);
+});
+
+test('GA4 buckets Organic Search into the organic channel, so one ruler is possible', () => {
+  const out = bucketGa4Visits([
+    ga4Row('2026-08-29', 'Organic Search', 'google', 8526),
+    ga4Row('2026-08-29', 'Direct', '(direct)', 6937),
+    ga4Row('2026-08-29', 'Unassigned', '(not set)', 42756, true),
+  ]);
+  assert.equal(out.visits.google_organic, 8526);
+  assert.equal(out.attributed_sessions, 15463);
 });
 
 test('buildChannelRows separates a connected channel from an unconnected one', () => {
@@ -263,10 +279,13 @@ test('buildChannelRows computes trial to paid only when there are trials', () =>
 });
 
 test('rankChannels ranks on the common denominator, not on reach', () => {
-  const rows = buildChannelRows(SOURCES);
+  const rows = buildChannelRows({
+    ...SOURCES,
+    ga4: { visits: { google_organic: 8526, chatgpt: 69, google_ai: 32, youtube: 0, direct_referral: 6956 } },
+  });
 
   const site = rankChannels(rows, 'site');
-  assert.equal(site[0].key, 'google_organic', 'organic has the only measurable visits');
+  assert.equal(site[0].key, 'google_organic', 'organic has the most GA4 visits');
 
   const academy = rankChannels(rows, 'academy');
   assert.equal(academy[0].members, 0);

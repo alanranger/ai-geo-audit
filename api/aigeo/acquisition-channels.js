@@ -27,6 +27,16 @@ import {
   channelForSource,
   academyClient,
 } from '../../lib/acquisition/academy-signup-source.js';
+import {
+  SOURCES,
+  BADGE_LEGEND,
+  ga4Section,
+  gscSection,
+  gscExplainer,
+  aiSection,
+  youtubeSection,
+  detailRows,
+} from '../../lib/acquisition/acquisition-sections.js';
 
 const PROPERTY = 'https://www.alanranger.com';
 
@@ -164,28 +174,75 @@ async function countPreAttributionTrials() {
   return count ?? null;
 }
 
-function buildTrend(buckets, gscRows, llm, academyRows, ga4Rows) {
+/**
+ * Trend metrics, one unit and one source each.
+ *
+ * The old chart offered a single "Reach per channel" line set that put GSC
+ * impressions (millions), AI mentions (hundreds) and YouTube views (dozens) on
+ * one shared axis. Everything except impressions was flattened onto the
+ * baseline, and the shape implied the four were the same measurement. Each
+ * unit now trends on its own axis or not at all.
+ */
+function trendMetrics(buckets, gscRows, llm, academyRows, ga4Rows) {
   const gsc = bucketGscSeries(gscRows, buckets);
   const nulls = buckets.map(() => null);
   const academyFor = (key) => bucketAcademySeries(academyRows, buckets, key, (r) => channelForSource(r.signup_source));
+  const named = (key) => CHANNELS.find((c) => c.key === key)?.name || key;
 
-  const series = { visits: {}, reach: {}, trials: {}, members: {} };
-  for (const ch of CHANNELS) {
-    const a = academyFor(ch.key);
-    series.trials[ch.key] = a.started;
-    series.members[ch.key] = a.converted;
-    if (ch.key === 'google_organic') series.visits[ch.key] = gsc.clicks;
-    else if (ga4Rows) series.visits[ch.key] = bucketGa4Series(ga4Rows, buckets, ch.key);
-    else series.visits[ch.key] = nulls;
-    if (ch.key === 'google_organic') series.reach[ch.key] = gsc.impressions;
-    else if (ch.key === 'chatgpt') series.reach[ch.key] = bucketMonthlyFlat(llm.monthly.chat_gpt, buckets);
-    else if (ch.key === 'google_ai') series.reach[ch.key] = bucketMonthlyFlat(llm.monthly.google, buckets);
-    else series.reach[ch.key] = nulls;
-  }
+  const visits = CHANNELS.map((ch) => ({
+    key: ch.key,
+    label: named(ch.key),
+    data: ga4Rows ? bucketGa4Series(ga4Rows, buckets, ch.key) : nulls,
+  }));
+  const trials = CHANNELS.map((ch) => ({ key: ch.key, label: named(ch.key), data: academyFor(ch.key).started }));
+  const members = CHANNELS.map((ch) => ({ key: ch.key, label: named(ch.key), data: academyFor(ch.key).converted }));
+
+  return [
+    {
+      key: 'visits',
+      label: 'Site visits per channel',
+      unit: 'visits',
+      source: 'GA4',
+      lens: 'both',
+      series: visits,
+    },
+    {
+      key: 'gsc_clicks',
+      label: 'Google Search clicks',
+      unit: 'clicks',
+      source: 'GSC',
+      lens: 'site',
+      series: [{ key: 'gsc_clicks', label: 'Clicks (all pages)', data: gsc.clicks }],
+    },
+    {
+      key: 'gsc_impressions',
+      label: 'Google Search impressions',
+      unit: 'impr',
+      source: 'GSC',
+      lens: 'site',
+      series: [{ key: 'gsc_impressions', label: 'Impressions (all pages)', data: gsc.impressions }],
+    },
+    {
+      key: 'ai_mentions',
+      label: 'AI mentions',
+      unit: 'mentions',
+      source: 'D4S',
+      lens: 'site',
+      series: [
+        { key: 'chatgpt', label: 'ChatGPT', data: bucketMonthlyFlat(llm.monthly.chat_gpt, buckets) },
+        { key: 'google_ai', label: 'Google AI', data: bucketMonthlyFlat(llm.monthly.google, buckets) },
+      ],
+    },
+    { key: 'trials', label: 'Trials per channel', unit: 'trials', source: 'Academy', lens: 'academy', series: trials },
+    { key: 'members', label: 'Members per channel', unit: 'members', source: 'Academy', lens: 'academy', series: members },
+  ];
+}
+
+function buildTrend(buckets, gscRows, llm, academyRows, ga4Rows) {
   return {
     buckets: buckets.map((b) => b.label),
     bucket_ranges: buckets.map((b) => b.range),
-    series,
+    metrics: trendMetrics(buckets, gscRows, llm, academyRows, ga4Rows),
   };
 }
 
@@ -197,6 +254,18 @@ function totalsFromGsc(rows) {
     }),
     { clicks: 0, impressions: 0 }
   );
+}
+
+function buildSections({ ga4Rows, gscTotals, llm, rows }) {
+  const ga4 = ga4Section(ga4Rows);
+  const organicVisits = rows.find((r) => r.key === 'google_organic')?.visits?.value ?? null;
+  const yt = rows.find((r) => r.key === 'youtube');
+  return [
+    ga4,
+    { ...gscSection(gscTotals), explainer: gscExplainer(gscTotals?.clicks ?? null, organicVisits) },
+    aiSection(llm),
+    youtubeSection(yt?.reach, yt?.context, yt?.engagement),
+  ];
 }
 
 export default async function handler(req, res) {
@@ -217,8 +286,9 @@ export default async function handler(req, res) {
 
     const totals = academyTotals(academy.rows);
     const ga4 = ga4Rows.length ? bucketGa4Visits(ga4Rows) : null;
+    const gscTotals = totalsFromGsc(gscRows);
     const rows = buildChannelRows({
-      gscTotals: totalsFromGsc(gscRows),
+      gscTotals,
       llmMonthly: llm.monthly,
       llmLatest: llm.latest,
       youtubeSnapshots: youtubeRows,
@@ -226,11 +296,16 @@ export default async function handler(req, res) {
       ga4,
     });
     const buckets = weekBuckets(days, new Date());
+    const sections = buildSections({ ga4Rows, gscTotals, llm, rows });
 
     return send(res, 200, {
       ok: true,
       generated_at: new Date().toISOString(),
       period_days: days,
+      sources: SOURCES,
+      badge_legend: BADGE_LEGEND,
+      sections,
+      detail: detailRows(sections),
       channels: rows,
       trend: buildTrend(buckets, gscRows, llm, academy.rows, ga4Rows.length ? ga4Rows : null),
       ga4: ga4 && {
@@ -247,9 +322,9 @@ export default async function handler(req, res) {
       notes: {
         ai_platforms: 'ChatGPT and Google AI are the only platforms DataForSEO llm_mentions covers — Gemini and Perplexity are not available from this source.',
         ai_granularity: `AI mention history is month-granular; this period uses the last ${monthsForPeriod(days)} month(s).`,
-        reach: 'Reach units differ per channel (impressions vs mentions vs views) and are never summed. Channels rank on visits (site lens) or members (Academy lens).',
+        reach: 'Reach units differ per tool (impressions vs mentions vs views) and are never summed. Only the GA4 visits section adds up.',
         keywords: 'Keyword-level detail lives in the Keyword Ranking & AI tab.',
-        visits: 'Google organic visits are Search Console clicks (Google only). Every other channel is GA4 sessions, excluding GA4\'s "Unassigned" bucket — on this property that bucket is automated traffic (3% engaged, ~5s sessions, 1.00 pages per session).',
+        visits: 'Every visits figure on this tab is GA4 sessions, including Google organic — one ruler throughout. GA4\'s "Unassigned" bucket is excluded: on this property it is automated traffic (3% engaged, ~5s sessions, 1.00 pages per session).',
       },
     });
   } catch (err) {
