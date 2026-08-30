@@ -8177,15 +8177,15 @@
 
           .acq-sec { margin-bottom: 1.5rem; }
           .acq-sec-head { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
-          .acq-sec-title { font-size: 0.88rem; font-weight: 800; color: var(--dark-text); }
-          .acq-sec-sub { font-size: 0.74rem; color: var(--dark-text-muted); }
+          .acq-sec-title { font-size: 0.88rem; font-weight: 800; color: var(--dark-text); cursor: help; }
           /* The "do not add this to GA4" fence marks the heading, not the
              section body. Indenting the body would narrow its grid and throw
              these tiles out of column alignment with every other section. */
           .acq-sec-fenced .acq-sec-head {
             border-left: 2px solid var(--dark-border); padding-left: 0.6rem; margin-left: -0.02rem;
           }
-          .acq-sec-explainer { font-size: 0.73rem; color: var(--dark-text-muted); margin: 0.5rem 0 0; max-width: 95ch; line-height: 1.5; }
+          .acq-sec-checks { margin-top: 0.35rem; }
+          .acq-tile[title] { cursor: help; }
 
           /* Right-angled on the accent side so the colour reads as an edge
              marker rather than a rounded stripe floating inside the tile. */
@@ -105334,34 +105334,57 @@ Confidence: ${c}`;
     // ---------------- self-validation output ----------------
     var CHECK_CLASS = { ok: 'acq-check-ok', warn: 'acq-check-warn', error: 'acq-check-error' };
     var CHECK_MARK = { ok: '', warn: '\u26A0 ', error: '\u2715 ' };
+    function escapeAttr(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;');
+    }
     function checkHtml(c) {
       var cls = CHECK_CLASS[c.level] || 'acq-check-ok';
       return '<span class="acq-check ' + cls + '">' + (CHECK_MARK[c.level] || '') + c.message + '</span>';
     }
 
     // ---------------- zone 1a: source-grouped sections (site lens) ----------------
+    // Prose (section subtitle, explainer, long tile notes) lives in hover tips
+    // so the grid keeps one visual rhythm: label, number, short unit.
+    function sectionTip(s) {
+      var bits = [];
+      if (s.subtitle) bits.push(s.subtitle);
+      if (s.explainer) bits.push(s.explainer);
+      return bits.join(' \u2014 ');
+    }
+    function tileUnit(t) {
+      if (t.value == null && t.text) return '';
+      if (t.kind === 'pct') return '%';
+      return t.unit || '';
+    }
     function tileHtml(section, t) {
       var badgeHtml = t.muted ? '' : '<span class="acq-tile-badge">' + badge(section.source) + '</span>';
-      var accent = t.accent ? ' style="border-left-color:' + t.accent + '"' : '';
-      return '<div class="acq-tile' + (t.muted ? ' acq-tile-muted' : '') + '"' + accent + '>' + badgeHtml
+      var accent = t.accent ? 'border-left-color:' + t.accent + ';' : '';
+      var tip = t.sub || '';
+      var tipAttr = tip ? ' title="' + escapeAttr(tip) + '"' : '';
+      var unit = tileUnit(t);
+      return '<div class="acq-tile' + (t.muted ? ' acq-tile-muted' : '') + '"'
+        + (accent ? ' style="' + accent + '"' : '') + tipAttr + '>' + badgeHtml
         + '<div class="acq-tile-label">' + t.label + '</div>'
         + '<div class="acq-tile-value">' + tileValue(t) + '</div>'
-        + (t.sub ? '<div class="acq-tile-sub">' + t.sub + '</div>' : '')
+        + (unit ? '<div class="acq-tile-sub">' + unit + '</div>' : '')
         + '</div>';
     }
     // No badge on the heading: the per-tile corner badges already say which tool
-    // measured each figure, and repeating it on the heading read as a second,
-    // section-level claim.
+    // measured each figure. Subtitle + explainer are hover-only — visible prose
+    // between sections was breaking the tile-grid rhythm.
     function sectionHtml(s) {
       var checks = (s.checks || []).map(checkHtml).join('');
+      var tip = sectionTip(s);
+      var tipAttr = tip ? ' title="' + escapeAttr(tip) + '"' : '';
       return '<div class="acq-sec' + (s.fenced ? ' acq-sec-fenced' : '') + '">'
         + '<div class="acq-sec-head">'
-        + '<span class="acq-sec-title">' + s.title + '</span>'
-        + '<span class="acq-sec-sub">— ' + s.subtitle + '</span></div>'
+        + '<span class="acq-sec-title"' + tipAttr + '>' + s.title + '</span></div>'
         + '<div class="acq-grid-6">'
         + s.tiles.map(function (t) { return tileHtml(s, t); }).join('') + '</div>'
-        + (checks ? '<div>' + checks + '</div>' : '')
-        + (s.explainer ? '<p class="acq-sec-explainer">' + s.explainer + '</p>' : '')
+        + (checks ? '<div class="acq-sec-checks">' + checks + '</div>' : '')
         + '</div>';
     }
     // The two layouts are mutually exclusive by design: the site lens groups by
@@ -105628,10 +105651,15 @@ Confidence: ${c}`;
     // ---------------- copy that changes with the lens ----------------
     function renderCopy() {
       var academy = state.data.academy || {};
-      $('acq-subhead').textContent = state.lens === 'site'
-        ? 'Where traffic to alanranger.com comes from, grouped by the tool that measured it. Every tile shows its source and unit; only the GA4 visits section adds up.'
-        : 'Of each channel’s traffic, how many became Academy trials and members. Channel-to-signup from '
-          + academy.attribution_start + ' (forward-only).';
+      var sub = $('acq-subhead');
+      if (state.lens === 'site') {
+        sub.textContent = 'Grouped by the tool that measured it. Hover a section title or tile for the detail.';
+        sub.title = 'Every tile shows its source and unit; only the GA4 visits section adds up. '
+          + 'Section titles and tiles carry the longer notes on hover so the grid stays readable.';
+      } else {
+        sub.textContent = 'Of each channel\u2019s traffic, how many became Academy trials and members.';
+        sub.title = 'Channel-to-signup from ' + academy.attribution_start + ' (forward-only).';
+      }
       var ga4 = state.data.ga4;
       var botNote = ga4 && ga4.unattributed_sessions
         ? ' <b>' + fmt(ga4.unattributed_sessions) + ' GA4 sessions in this period were excluded as unattributed automated traffic</b> ('
