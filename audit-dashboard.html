@@ -8233,11 +8233,11 @@
           .acq-tile-delta[data-dir="up"] { color: #10b981; }
           .acq-tile-delta[data-dir="down"] { color: #ef4444; }
           .acq-tile-delta[data-dir="flat"] { color: #94a3b8; }
-          .acq-tile-engage { font-size: 0.72rem; color: #94a3b8; margin-top: 0.15rem; line-height: 1.35; }
-          .acq-rag { font-weight: 700; }
-          .acq-rag-green { color: #10b981; }
-          .acq-rag-amber { color: #e6a23c; }
-          .acq-rag-red { color: #ef4444; }
+          .acq-tile-engage { font-size: 0.72rem; margin-top: 0.15rem; line-height: 1.35; }
+          .acq-tile-engage .acq-rag { font-weight: 700; }
+          .acq-tile-engage .acq-rag-green { color: #10b981 !important; }
+          .acq-tile-engage .acq-rag-amber { color: #e6a23c !important; }
+          .acq-tile-engage .acq-rag-red { color: #ef4444 !important; }
 
           /* Validation output. An error must not be styleable as a footnote. */
           .acq-check { font-size: 0.76rem; border-radius: 6px; padding: 0.35rem 0.6rem; display: inline-block; margin: 0.15rem 0.4rem 0.15rem 0; }
@@ -105421,10 +105421,11 @@ Confidence: ${c}`;
       if (s >= 120) return '~' + Math.round(s / 60) + ' min';
       return '~' + Math.round(s) + 's';
     }
+    var ACQ_RAG_COLOR = { green: '#10b981', amber: '#e6a23c', red: '#ef4444' };
     function acqRagSpan(text, band) {
       if (!text) return '';
-      var cls = band ? ' acq-rag-' + band : '';
-      return '<span class="acq-rag' + cls + '">' + text + '</span>';
+      var color = band && ACQ_RAG_COLOR[band] ? ACQ_RAG_COLOR[band] : '#94a3b8';
+      return '<span class="acq-rag acq-rag-' + (band || 'muted') + '" style="color:' + color + ';">' + text + '</span>';
     }
     function tileEngageHtml(t) {
       if (t.engaged_pct == null && t.avg_session_seconds == null) return '';
@@ -105440,6 +105441,13 @@ Confidence: ${c}`;
     }
     function formatAcqPctDelta(curr, prev, opts) {
       opts = opts || {};
+      if (opts.requireComparable && state.data && state.data.comparison && !state.data.comparison.prior_comparable) {
+        var cmp = state.data.comparison;
+        var tip = 'GA4 channel history starts ' + (cmp.ga4_history_start || 'unknown')
+          + '. The prior ' + (cmp.prior_period_days || '') + '-day window only has '
+          + (cmp.prior_ga4_days_with_data || 0) + ' day(s) of data, so this delta would be misleading.';
+        return '<div class="acq-tile-delta" data-dir="flat" title="' + escapeAttr(tip) + '">— limited history</div>';
+      }
       var c = curr == null || curr === '' ? null : Number(curr);
       var p = prev == null || prev === '' ? null : Number(prev);
       if (c == null || p == null) return '';
@@ -105492,7 +105500,10 @@ Confidence: ${c}`;
       var tipAttr = tip ? ' title="' + escapeAttr(tip) + '"' : '';
       var unit = tileUnit(t);
       var delta = (t.value != null && t.prev != null)
-        ? formatAcqPctDelta(t.value, t.prev, { betterLower: t.kind === 'pct' && /position/i.test(t.label) })
+        ? formatAcqPctDelta(t.value, t.prev, {
+          betterLower: t.kind === 'pct' && /position/i.test(t.label),
+          requireComparable: section.source === 'GA4',
+        })
         : '';
       return '<div class="acq-tile' + (t.muted ? ' acq-tile-muted' : '') + '"'
         + (accent ? ' style="' + accent + '"' : '') + tipAttr + '>' + badgeHtml
@@ -105663,7 +105674,23 @@ Confidence: ${c}`;
             }
           },
           scales: {
-            y: { beginAtZero: true, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.15)' } },
+            y: {
+              beginAtZero: true,
+              ticks: {
+                color: '#94a3b8',
+                callback: function (value) {
+                  if (!m) return value;
+                  if (m.unit === '%') return value + '%';
+                  if (m.unit === 'sec') {
+                    var s = Number(value);
+                    if (!Number.isFinite(s)) return value;
+                    return s >= 120 ? Math.round(s / 60) + ' min' : s + 's';
+                  }
+                  return value;
+                },
+              },
+              grid: { color: 'rgba(148,163,184,0.15)' },
+            },
             x: {
               ticks: { color: '#94a3b8', maxRotation: 0, autoSkip: true, maxTicksLimit: 13 },
               grid: { color: 'rgba(148,163,184,0.08)' }
@@ -105678,6 +105705,12 @@ Confidence: ${c}`;
       if (m && m.key === 'ai_mentions') {
         note += state.data.notes.ai_granularity
           + ' AI lines are held flat within each month rather than given invented weekly detail. ';
+      }
+      if (m && (m.key === 'ga4_engaged_pct' || m.key === 'ga4_avg_session')) {
+        note += 'Engagement lines use session-weighted weekly totals from GA4 (bots excluded). ';
+      }
+      if (state.data && state.data.comparison && !state.data.comparison.prior_comparable) {
+        note += state.data.comparison.note + ' ';
       }
       $('acq-chart-note').textContent = note + 'Gaps mean no measurable data for that series, not zero.';
     }

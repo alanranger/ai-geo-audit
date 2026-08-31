@@ -7,9 +7,14 @@ import {
   NAMED_GA4_GROUPS,
   DIRECT_SHARE_WARN_PCT,
   engagementRag,
+  ga4PriorComparable,
   ENGAGED_PCT_GREEN,
   DURATION_SEC_GREEN,
 } from '../lib/acquisition/ga4-channels.js';
+import {
+  weekBuckets,
+  bucketGa4EngagementSeries,
+} from '../lib/acquisition/channels-report.js';
 import {
   SOURCES,
   ga4RealVisitsSection,
@@ -109,6 +114,30 @@ test('every named group keeps its own tile so nothing hides inside Other', () =>
   for (const name of NAMED_GA4_GROUPS) {
     assert.ok(view.tiles.some((t) => t.name === name), `${name} must have its own tile`);
   }
+});
+
+test('ga4PriorComparable hides 90d deltas until enough prior history exists', () => {
+  assert.equal(ga4PriorComparable(2, 90), false);
+  assert.equal(ga4PriorComparable(31, 60), true);
+  assert.equal(ga4PriorComparable(28, 28), true);
+});
+
+test('bucketGa4EngagementSeries returns weekly engaged rate and duration', () => {
+  const buckets = weekBuckets(28, new Date('2026-08-30'));
+  const rows = [{
+    date: '2026-08-20',
+    channel_group: 'Organic Search',
+    source: 'google',
+    medium: 'organic',
+    sessions: 100,
+    engaged_sessions: 52,
+    avg_session_seconds: 180,
+    is_unattributed: false,
+  }];
+  const pct = bucketGa4EngagementSeries(rows, buckets, 'google_organic', 'engaged_pct');
+  const sec = bucketGa4EngagementSeries(rows, buckets, 'google_organic', 'avg_session_seconds');
+  assert.ok(pct.some((v) => v === 52));
+  assert.ok(sec.some((v) => v === 180));
 });
 
 test('engagementRag bands human traffic green and bot-like traffic red', () => {

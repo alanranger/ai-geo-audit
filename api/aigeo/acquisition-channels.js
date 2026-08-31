@@ -19,9 +19,11 @@ import {
   bucketMonthlyFlat,
   bucketAcademySeries,
   bucketGa4Series,
+  bucketGa4EngagementSeries,
   bucketGa4Visits,
   buildChannelRows,
 } from '../../lib/acquisition/channels-report.js';
+import { ga4PriorComparable } from '../../lib/acquisition/ga4-channels.js';
 import {
   ATTRIBUTION_START,
   channelForSource,
@@ -75,6 +77,27 @@ function splitByIsoDate(rows, dateKey, days) {
     else if (d >= prevStart) previous.push(row);
   }
   return { current, previous };
+}
+
+/** Distinct attributed GA4 days — used to gate period-over-period deltas. */
+function ga4DistinctDays(rows) {
+  const dates = new Set();
+  for (const row of rows || []) {
+    if (row?.is_unattributed) continue;
+    const d = String(row?.date || '').slice(0, 10);
+    if (d) dates.add(d);
+  }
+  return dates.size;
+}
+
+function ga4HistoryStart(rows) {
+  let min = null;
+  for (const row of rows || []) {
+    if (row?.is_unattributed) continue;
+    const d = String(row?.date || '').slice(0, 10);
+    if (d && (!min || d < min)) min = d;
+  }
+  return min;
 }
 
 function splitAcademyTrials(rows, days) {
@@ -243,6 +266,16 @@ function trendMetrics(buckets, gscRows, llm, academyRows, ga4Rows) {
     label: named(ch.key),
     data: ga4Rows ? bucketGa4Series(ga4Rows, buckets, ch.key) : nulls,
   }));
+  const engaged = CHANNELS.map((ch) => ({
+    key: ch.key,
+    label: named(ch.key),
+    data: ga4Rows ? bucketGa4EngagementSeries(ga4Rows, buckets, ch.key, 'engaged_pct') : nulls,
+  }));
+  const duration = CHANNELS.map((ch) => ({
+    key: ch.key,
+    label: named(ch.key),
+    data: ga4Rows ? bucketGa4EngagementSeries(ga4Rows, buckets, ch.key, 'avg_session_seconds') : nulls,
+  }));
   const trials = CHANNELS.map((ch) => ({ key: ch.key, label: named(ch.key), data: academyFor(ch.key).started }));
   const members = CHANNELS.map((ch) => ({ key: ch.key, label: named(ch.key), data: academyFor(ch.key).converted }));
 
@@ -254,6 +287,22 @@ function trendMetrics(buckets, gscRows, llm, academyRows, ga4Rows) {
       source: 'GA4',
       lens: 'both',
       series: visits,
+    },
+    {
+      key: 'ga4_engaged_pct',
+      label: 'Engaged rate per channel',
+      unit: '%',
+      source: 'GA4',
+      lens: 'site',
+      series: engaged,
+    },
+    {
+      key: 'ga4_avg_session',
+      label: 'Avg session per channel',
+      unit: 'sec',
+      source: 'GA4',
+      lens: 'site',
+      series: duration,
     },
     {
       key: 'gsc_clicks',
@@ -383,6 +432,9 @@ export default async function handler(req, res) {
         academyRows: academySplit.previous,
       })
     );
+    const priorGa4Days = ga4DistinctDays(ga4Split.previous);
+    const ga4Start = ga4HistoryStart(ga4All);
+    const priorComparable = ga4PriorComparable(priorGa4Days, days);
 
     return send(res, 200, {
       ok: true,
@@ -406,7 +458,12 @@ export default async function handler(req, res) {
       },
       comparison: {
         prior_period_days: days,
-        note: `Deltas compare this ${days}-day window with the previous ${days} days.`,
+        ga4_history_start: ga4Start,
+        prior_ga4_days_with_data: priorGa4Days,
+        prior_comparable: priorComparable,
+        note: priorComparable
+          ? `Deltas compare this ${days}-day window with the previous ${days} days.`
+          : `GA4 channel history starts ${ga4Start || 'unknown'} — the prior ${days}-day window only has ${priorGa4Days} day(s) of data, so visit deltas are hidden until enough history exists.`,
       },
       notes: {
         ai_platforms: 'ChatGPT and Google AI are the only platforms DataForSEO llm_mentions covers — Gemini and Perplexity are not available from this source.',
