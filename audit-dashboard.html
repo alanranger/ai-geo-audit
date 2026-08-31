@@ -8063,6 +8063,35 @@
       </div>
     </div>
 
+    <!-- Acquisition — Channels audit progress -->
+    <div id="acqChannelsProgressModal" class="modal" style="display: none; z-index: 1002;">
+      <div class="modal-content" style="max-width: 520px; max-height: 90vh; overflow-y: auto; background: var(--dark-panel); color: var(--dark-text); border: 1px solid var(--dark-border); position: fixed; left: 20px; top: 8%; margin: 0;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+          <h2 style="margin:0; color:var(--dark-brand); font-size:1.15rem;">Running channels audit</h2>
+          <button id="acqChannelsProgressClose" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--dark-text-muted);opacity:0.5;" disabled title="Close when complete">&times;</button>
+        </div>
+        <div style="margin-bottom:1rem;">
+          <div style="width:100%;height:20px;background:rgba(148,163,184,0.25);border-radius:999px;overflow:hidden;">
+            <div id="acqChannelsProgressFill" style="width:0%;height:100%;background:linear-gradient(90deg,var(--dark-brand),#ff8c42);transition:width 0.25s ease;"></div>
+          </div>
+          <div id="acqChannelsProgressText" style="margin-top:0.45rem;text-align:center;font-size:0.88rem;color:var(--dark-text-muted);font-weight:600;">0%</div>
+        </div>
+        <div id="acqChannelsCurrentStep" style="font-weight:700;margin-bottom:0.35rem;">Initializing…</div>
+        <div id="acqChannelsNarrative" style="font-size:0.9rem;color:var(--dark-text-muted);line-height:1.5;margin-bottom:0.75rem;">Pulling channel data from DataForSEO, YouTube and GA4.</div>
+        <div style="border-top:1px solid var(--dark-border);padding-top:0.85rem;">
+          <div style="font-size:0.78rem;font-weight:700;color:var(--dark-text-muted);margin-bottom:0.55rem;text-transform:uppercase;letter-spacing:0.04em;">Steps</div>
+          <div id="acqChannelsStepsList" style="display:flex;flex-direction:column;gap:0.45rem;"></div>
+        </div>
+        <div id="acqChannelsSummary" style="display:none;border-top:2px solid #10b981;padding-top:1rem;margin-top:1rem;">
+          <div style="font-weight:800;color:#10b981;margin-bottom:0.5rem;">✓ Channels audit complete</div>
+          <div id="acqChannelsSummaryContent" style="color:var(--dark-text);font-size:0.92rem;line-height:1.55;"></div>
+          <div style="margin-top:1rem;text-align:right;">
+            <button id="acqChannelsSummaryClose" class="btn" style="background:var(--brand-orange);color:white;border-color:var(--brand-orange);padding:0.45rem 1.2rem;font-size:0.88rem;font-weight:600;cursor:pointer;">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="dashboard" style="display: none;">
       <div id="dashboard-empty-state" style="display: none; padding: 3rem; text-align: center; background: white; border-radius: 8px; margin: 2rem;">
         <h2 style="color: #1e293b; margin-bottom: 1rem;">No Audit Data Found</h2>
@@ -8079,6 +8108,7 @@
         <div><strong>Stripe:</strong> <span id="revSyncStripe" title="Last successful Stripe charge sync (Acuity + Memberships)">Not yet run</span></div>
         <div><strong>Booking Sheet:</strong> <span id="revSyncBookingSheet" title="Last local import of Bank + Cash entries from Booking Sheet xlsm">Not yet run</span></div>
         <div><strong>GA4:</strong> <span id="revSyncGa4" title="Last GA4 Data API pull (28d enquiry events for funnel)">Not yet run</span></div>
+        <div><strong>Acquisition channels:</strong> <span id="revSyncAcquisition" title="Last channels audit (DataForSEO AI mentions + YouTube + GA4 channel sessions)">Not yet run</span></div>
         <div style="border-left:1px solid #cbd5e1; padding-left:1rem;"><strong>DFS Backlinks:</strong> <span id="revSyncDfsBacklinks" title="Last full DataForSEO backlink domain index (dfs_backlink_ingest_state.last_full_at)">Not yet run</span></div>
         <div><strong>Schema audit:</strong> <span id="revSyncSchema" title="Latest audit_results row with schema_pages_detail populated">Not yet run</span></div>
         <div><strong>CSV / tiers:</strong> <span id="revSyncCsvTier" title="Last csv_metadata import_session (product tier segmentation map)">Not yet run</span></div>
@@ -8199,6 +8229,10 @@
           .acq-tile-sub { font-size: 0.7rem; color: #64748b; margin-top: 0.1rem; }
           .acq-tile-muted .acq-tile-value { font-size: 0.95rem; font-weight: 500; color: var(--dark-text-muted); }
           .acq-tile-muted { opacity: 0.72; }
+          .acq-tile-delta { font-size: 0.76rem; font-weight: 700; margin-top: 0.2rem; }
+          .acq-tile-delta[data-dir="up"] { color: #10b981; }
+          .acq-tile-delta[data-dir="down"] { color: #ef4444; }
+          .acq-tile-delta[data-dir="flat"] { color: #94a3b8; }
 
           /* Validation output. An error must not be styleable as a footnote. */
           .acq-check { font-size: 0.76rem; border-radius: 6px; padding: 0.35rem 0.6rem; display: inline-block; margin: 0.15rem 0.4rem 0.15rem 0; }
@@ -13542,10 +13576,11 @@
           const stEl = document.getElementById('revSyncStripe');
           const bsEl = document.getElementById('revSyncBookingSheet');
           const ga4El = document.getElementById('revSyncGa4');
+          const acqEl = document.getElementById('revSyncAcquisition');
           const dfsEl = document.getElementById('revSyncDfsBacklinks');
           const schemaEl = document.getElementById('revSyncSchema');
           const csvTierEl = document.getElementById('revSyncCsvTier');
-          if (!ssEl && !stEl && !bsEl && !ga4El && !dfsEl && !schemaEl && !csvTierEl) return;
+          if (!ssEl && !stEl && !bsEl && !ga4El && !acqEl && !dfsEl && !schemaEl && !csvTierEl) return;
           const propUrl = propertyUrlArg
             || document.getElementById('propertyUrl')?.value
             || localStorage.getItem('gsc_property_url')
@@ -13579,6 +13614,16 @@
                 ga4El.textContent = `${ts}${enq}${bots}`;
               }
             }
+            if (acqEl) {
+              const acq = s.acquisition_channels;
+              if (!acq || !acq.last_synced_at) {
+                acqEl.textContent = acq?.error ? '—' : 'Not yet run';
+              } else {
+                const ts = formatUtcShort(acq.last_synced_at);
+                const rows = acq.row_count != null ? ` · ${acq.row_count} ${acq.row_count_unit || 'rows'}` : '';
+                acqEl.textContent = `${ts}${rows}`;
+              }
+            }
             setRevenueBannerCell('revSyncDfsBacklinks', s.dfs_backlinks);
             if (schemaEl) {
               const sc = s.schema_audit;
@@ -13598,6 +13643,7 @@
             markErr(stEl);
             markErr(bsEl);
             markErr(ga4El);
+            markErr(acqEl);
             markErr(dfsEl);
             markErr(schemaEl);
             markErr(csvTierEl);
@@ -89508,6 +89554,9 @@ Confidence: ${c}`;
         const failed = results.find(r => r && r.ok === false);
         if (failed) throw new Error(failed.error || 'acquisition channel sync failed');
         debugLog(`[Global Run] [Acquisition channels] Completed. ${rows} rows refreshed.`, 'success');
+        if (typeof updateRevenueSyncBanner === 'function') {
+          try { await updateRevenueSyncBanner(globalRunPropertyUrl()); } catch (_e) { /* swallow */ }
+        }
         if (typeof window.renderAcquisitionTab === 'function') window.renderAcquisitionTab();
         return { rows_written: rows };
       }
@@ -105361,6 +105410,25 @@ Confidence: ${c}`;
       return fmtCompact(Number(t.value));
     }
 
+    function formatAcqPctDelta(curr, prev, opts) {
+      opts = opts || {};
+      var c = curr == null || curr === '' ? null : Number(curr);
+      var p = prev == null || prev === '' ? null : Number(prev);
+      if (c == null || p == null) return '';
+      if (p === 0) {
+        if (c === 0) return '<div class="acq-tile-delta" data-dir="flat">— 0.0%</div>';
+        return '<div class="acq-tile-delta" data-dir="up">▲ new</div>';
+      }
+      var raw = ((c - p) / Math.abs(p)) * 100;
+      var betterLower = !!opts.betterLower;
+      var dir = betterLower
+        ? (raw < 0 ? 'up' : raw > 0 ? 'down' : 'flat')
+        : (raw > 0 ? 'up' : raw < 0 ? 'down' : 'flat');
+      var absText = (raw >= 0 ? '+' : '') + raw.toFixed(1) + '%';
+      var arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '—';
+      return '<div class="acq-tile-delta" data-dir="' + dir + '">' + arrow + ' ' + absText + '</div>';
+    }
+
     // ---------------- self-validation output ----------------
     var CHECK_CLASS = { ok: 'acq-check-ok', warn: 'acq-check-warn', error: 'acq-check-error' };
     var CHECK_MARK = { ok: '', warn: '\u26A0 ', error: '\u2715 ' };
@@ -105395,10 +105463,14 @@ Confidence: ${c}`;
       var tip = t.sub || '';
       var tipAttr = tip ? ' title="' + escapeAttr(tip) + '"' : '';
       var unit = tileUnit(t);
+      var delta = (t.value != null && t.prev != null)
+        ? formatAcqPctDelta(t.value, t.prev, { betterLower: t.kind === 'pct' && /position/i.test(t.label) })
+        : '';
       return '<div class="acq-tile' + (t.muted ? ' acq-tile-muted' : '') + '"'
         + (accent ? ' style="' + accent + '"' : '') + tipAttr + '>' + badgeHtml
         + '<div class="acq-tile-label">' + t.label + '</div>'
         + '<div class="acq-tile-value">' + tileValue(t) + '</div>'
+        + delta
         + (unit ? '<div class="acq-tile-sub">' + unit + '</div>' : '')
         + '</div>';
     }
@@ -105760,21 +105832,124 @@ Confidence: ${c}`;
       }
     }
 
-    // Audit button: re-run the channel pulls, then reload the tab.
+    // Audit button: re-run the channel pulls with progress modal, then reload.
+    var ACQ_AUDIT_STEPS = [
+      { key: 'llm_mentions', label: 'DataForSEO AI mentions', url: '/api/cron/llm-mentions-sync' },
+      { key: 'youtube_stats', label: 'YouTube channel stats', url: '/api/cron/youtube-stats-sync' },
+      { key: 'ga4_channels', label: 'GA4 channel sessions', url: '/api/cron/ga4-channels-sync' }
+    ];
+
+    var AcqChannelsAuditModal = {
+      steps: [],
+      show: function () {
+        var modal = $('acqChannelsProgressModal');
+        var summary = $('acqChannelsSummary');
+        if (summary) summary.style.display = 'none';
+        if (modal) modal.style.display = 'block';
+        this.steps = ACQ_AUDIT_STEPS.map(function (s) {
+          return { key: s.key, label: s.label, status: 'Pending', detail: '' };
+        });
+        this.renderSteps();
+        this.setProgress(0, 'Starting channel pulls…', 'Re-syncs AI mentions, YouTube and GA4 channel sessions.');
+        var close = $('acqChannelsProgressClose');
+        if (close) { close.disabled = true; close.style.opacity = '0.5'; }
+      },
+      hide: function () {
+        var modal = $('acqChannelsProgressModal');
+        if (modal) modal.style.display = 'none';
+      },
+      setProgress: function (pct, step, narrative) {
+        var fill = $('acqChannelsProgressFill');
+        var text = $('acqChannelsProgressText');
+        var p = Math.max(0, Math.min(100, pct));
+        if (fill) fill.style.width = p + '%';
+        if (text) text.textContent = p + '%';
+        if ($('acqChannelsCurrentStep')) $('acqChannelsCurrentStep').textContent = step || '';
+        if ($('acqChannelsNarrative')) $('acqChannelsNarrative').textContent = narrative || '';
+      },
+      renderSteps: function () {
+        var list = $('acqChannelsStepsList');
+        if (!list) return;
+        list.innerHTML = this.steps.map(function (s) {
+          var colour = s.status === 'Done' ? '#10b981'
+            : s.status === 'Running' ? '#f59e0b'
+              : s.status === 'Failed' ? '#ef4444' : 'var(--dark-text-muted)';
+          var detail = s.detail ? '<div style="font-size:0.74rem;color:#94a3b8;margin-top:0.15rem;">' + s.detail + '</div>' : '';
+          return '<div style="display:flex;justify-content:space-between;gap:0.75rem;padding:0.45rem 0.65rem;border:1px solid var(--dark-border);border-radius:8px;background:rgba(15,20,25,0.35);">'
+            + '<div><div style="font-weight:700;">' + s.label + '</div>' + detail + '</div>'
+            + '<div style="font-weight:800;color:' + colour + ';">' + s.status + '</div></div>';
+        }).join('');
+      },
+      finish: function (results, err) {
+        var summary = $('acqChannelsSummary');
+        var content = $('acqChannelsSummaryContent');
+        var close = $('acqChannelsProgressClose');
+        var written = (results || []).reduce(function (t, r) { return t + (Number(r && r.rows_written) || 0); }, 0);
+        var failed = (results || []).find(function (r) { return r && r.ok === false; });
+        if (err || failed) {
+          this.setProgress(100, 'Channels audit failed', (err && err.message) || (failed && failed.error) || 'One or more pulls failed.');
+        } else {
+          this.setProgress(100, 'Channels audit complete', written + ' rows refreshed across 3 pulls.');
+        }
+        if (content) {
+          content.innerHTML = (results || []).map(function (r, i) {
+            var step = ACQ_AUDIT_STEPS[i];
+            var ok = r && r.ok !== false;
+            var rows = r && r.rows_written != null ? r.rows_written + ' rows' : '—';
+            var note = ok ? rows : (r && (r.error || r.error_message)) || 'failed';
+            return '<div><strong>' + (step ? step.label : 'Step') + ':</strong> '
+              + (ok ? '✓ ' + note : '✗ ' + note) + '</div>';
+          }).join('');
+        }
+        if (summary) summary.style.display = 'block';
+        if (close) { close.disabled = false; close.style.opacity = '1'; }
+      }
+    };
+
+    function wireAcqAuditModalClose() {
+      if (window.acqAuditModalWired) return;
+      window.acqAuditModalWired = true;
+      ['acqChannelsProgressClose', 'acqChannelsSummaryClose'].forEach(function (id) {
+        var btn = $(id);
+        if (btn) btn.addEventListener('click', function () { AcqChannelsAuditModal.hide(); });
+      });
+    }
+
     async function runAudit() {
       var btn = $('acq-audit-btn');
       btn.disabled = true;
+      wireAcqAuditModalClose();
+      AcqChannelsAuditModal.show();
       setStatus('Running channel pulls…');
+      var results = [];
       try {
-        var results = await Promise.all([
-          fetch('/api/cron/llm-mentions-sync', { method: 'POST' }).then(function (r) { return r.json(); }),
-          fetch('/api/cron/youtube-stats-sync', { method: 'POST' }).then(function (r) { return r.json(); }),
-          fetch('/api/cron/ga4-channels-sync', { method: 'POST' }).then(function (r) { return r.json(); })
-        ]);
-        var written = results.reduce(function (t, r) { return t + (r.rows_written || 0); }, 0);
+        for (var i = 0; i < ACQ_AUDIT_STEPS.length; i += 1) {
+          var step = ACQ_AUDIT_STEPS[i];
+          AcqChannelsAuditModal.steps[i].status = 'Running';
+          AcqChannelsAuditModal.renderSteps();
+          AcqChannelsAuditModal.setProgress(
+            Math.round((i / ACQ_AUDIT_STEPS.length) * 100),
+            step.label,
+            'Pull ' + (i + 1) + ' of ' + ACQ_AUDIT_STEPS.length + '…'
+          );
+          var res = await fetch(step.url, { method: 'POST' }).then(function (r) { return r.json(); });
+          results.push(res);
+          var ok = res && res.ok !== false;
+          AcqChannelsAuditModal.steps[i].status = ok ? 'Done' : 'Failed';
+          AcqChannelsAuditModal.steps[i].detail = ok
+            ? (res.rows_written != null ? res.rows_written + ' rows' : 'ok')
+            : (res.error || res.error_message || 'failed');
+          AcqChannelsAuditModal.renderSteps();
+          if (!ok) throw new Error(res.error || res.error_message || step.label + ' failed');
+        }
         await load();
-        setStatus('Done — ' + written + ' rows refreshed.');
+        if (typeof updateRevenueSyncBanner === 'function') {
+          try { await updateRevenueSyncBanner(); } catch (_e) { /* swallow */ }
+        }
+        AcqChannelsAuditModal.finish(results);
+        setStatus('Done — channel pulls complete.');
       } catch (err) {
+        AcqChannelsAuditModal.finish(results, err);
         setStatus('Failed: ' + (err.message || err));
       } finally {
         btn.disabled = false;

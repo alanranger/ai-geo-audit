@@ -36,6 +36,7 @@ import {
   aiSection,
   youtubeSection,
   detailRows,
+  attachPrevToSections,
 } from '../../lib/acquisition/acquisition-sections.js';
 
 const PROPERTY = 'https://www.alanranger.com';
@@ -56,6 +57,52 @@ function admin() {
 
 const isoDaysAgo = (days) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
 
+function periodBounds(days) {
+  const currentStart = isoDaysAgo(days);
+  const prevStart = isoDaysAgo(days * 2);
+  return { currentStart, prevStart };
+}
+
+function splitByIsoDate(rows, dateKey, days) {
+  const { currentStart, prevStart } = periodBounds(days);
+  const current = [];
+  const previous = [];
+  for (const row of rows || []) {
+    const d = String(row?.[dateKey] || '').slice(0, 10);
+    if (!d) continue;
+    if (d >= currentStart) current.push(row);
+    else if (d >= prevStart) previous.push(row);
+  }
+  return { current, previous };
+}
+
+function splitAcademyTrials(rows, days) {
+  const { currentStart, prevStart } = periodBounds(days);
+  const curMs = new Date(`${currentStart}T00:00:00.000Z`).getTime();
+  const prevMs = new Date(`${prevStart}T00:00:00.000Z`).getTime();
+  const current = [];
+  const previous = [];
+  for (const row of rows || []) {
+    const ms = new Date(row.trial_start_at).getTime();
+    if (!Number.isFinite(ms)) continue;
+    if (ms >= curMs) current.push(row);
+    else if (ms >= prevMs) previous.push(row);
+  }
+  return { current, previous };
+}
+
+function splitLlmMonths(llm, days) {
+  const n = monthsForPeriod(days);
+  const keys = monthKeysBack(n * 2);
+  const currentKeys = new Set(keys.slice(0, n));
+  const prevKeys = new Set(keys.slice(n));
+  const pick = (platform, keySet) => (llm?.monthly?.[platform] || []).filter((r) => keySet.has(r.month));
+  return {
+    current: { monthly: { chat_gpt: pick('chat_gpt', currentKeys), google: pick('google', currentKeys) }, latest: llm.latest },
+    previous: { monthly: { chat_gpt: pick('chat_gpt', prevKeys), google: pick('google', prevKeys) }, latest: {} },
+  };
+}
+
 /**
  * Property-level daily totals, NOT gsc_page_timeseries. The page-level table
  * holds ~8k rows per 28 days, which silently truncates at PostgREST's 1000-row
@@ -75,7 +122,8 @@ async function fetchGsc(sb, days) {
 }
 
 async function fetchLlm(sb, days) {
-  const months = monthKeysBack(monthsForPeriod(days));
+  const monthCount = monthsForPeriod(days);
+  const months = monthKeysBack(monthCount);
   const [monthlyRes, dailyRes] = await Promise.all([
     sb.from('llm_mentions_monthly')
       .select('platform, month, mentions, ai_search_volume')
@@ -268,6 +316,21 @@ function buildSections({ ga4Rows, gscTotals, gscRows, llm, rows }) {
   ];
 }
 
+function buildPeriodBundle({ ga4Rows, gscRows, llm, youtubeRows, academyRows }) {
+  const totals = academyTotals(academyRows);
+  const ga4 = ga4Rows.length ? bucketGa4Visits(ga4Rows) : null;
+  const gscTotals = totalsFromGsc(gscRows);
+  const rows = buildChannelRows({
+    gscTotals,
+    llmMonthly: llm.monthly,
+    llmLatest: llm.latest,
+    youtubeSnapshots: youtubeRows,
+    academyByChannel: totals.byChannel,
+    ga4,
+  });
+  return buildSections({ ga4Rows, gscTotals, gscRows, llm, rows });
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return send(res, 204, {});
 
@@ -276,15 +339,27 @@ export default async function handler(req, res) {
   const days = normalisePeriod(req.query?.days);
 
   try {
-    const [gscRows, llm, youtubeRows, academy, ga4Rows] = await Promise.all([
-      fetchGsc(sb, days),
-      fetchLlm(sb, days),
-      fetchYoutube(sb, days),
-      fetchAcademyTrials(days),
-      fetchGa4(sb, days),
+    const [gscAll, llmAll, youtubeAll, academyAll, ga4All] = await Promise.all([
+      fetchGsc(sb, days * 2),
+      fetchLlm(sb, days * 2),
+      fetchYoutube(sb, days * 2),
+      fetchAcademyTrials(days * 2),
+      fetchGa4(sb, days * 2),
     ]);
 
-    const totals = academyTotals(academy.rows);
+    const gscSplit = splitByIsoDate(gscAll, 'date', days);
+    const ga4Split = splitByIsoDate(ga4All, 'date', days);
+    const ytSplit = splitByIsoDate(youtubeAll, 'captured_date', days);
+    const academySplit = splitAcademyTrials(academyAll.rows, days);
+    const llmSplit = splitLlmMonths(llmAll, days);
+
+    const gscRows = gscSplit.current;
+    const ga4Rows = ga4Split.current;
+    const youtubeRows = ytSplit.current;
+    const academyRows = academySplit.current;
+    const llm = llmSplit.current;
+
+    const totals = academyTotals(academyRows);
     const ga4 = ga4Rows.length ? bucketGa4Visits(ga4Rows) : null;
     const gscTotals = totalsFromGsc(gscRows);
     const rows = buildChannelRows({
@@ -296,7 +371,16 @@ export default async function handler(req, res) {
       ga4,
     });
     const buckets = weekBuckets(days, new Date());
-    const sections = buildSections({ ga4Rows, gscTotals, gscRows, llm, rows });
+    const sections = attachPrevToSections(
+      buildPeriodBundle({ ga4Rows, gscRows, llm, youtubeRows, academyRows }),
+      buildPeriodBundle({
+        ga4Rows: ga4Split.previous,
+        gscRows: gscSplit.previous,
+        llm: llmSplit.previous,
+        youtubeRows: ytSplit.previous,
+        academyRows: academySplit.previous,
+      })
+    );
 
     return send(res, 200, {
       ok: true,
@@ -306,17 +390,21 @@ export default async function handler(req, res) {
       sections,
       detail: detailRows(sections),
       channels: rows,
-      trend: buildTrend(buckets, gscRows, llm, academy.rows, ga4Rows.length ? ga4Rows : null),
+      trend: buildTrend(buckets, gscRows, llm, academyRows, ga4Rows.length ? ga4Rows : null),
       ga4: ga4 && {
         attributed_sessions: ga4.attributed_sessions,
         unattributed_sessions: ga4.unattributed_sessions,
         attributed_pct: ga4.attributed_pct,
       },
       academy: {
-        configured: academy.configured,
+        configured: academyAll.configured,
         attribution_start: ATTRIBUTION_START,
         unattributed_trials_in_window: totals.unattributed,
         pre_attribution_trials: await countPreAttributionTrials(),
+      },
+      comparison: {
+        prior_period_days: days,
+        note: `Deltas compare this ${days}-day window with the previous ${days} days.`,
       },
       notes: {
         ai_platforms: 'ChatGPT and Google AI are the only platforms DataForSEO llm_mentions covers — Gemini and Perplexity are not available from this source.',

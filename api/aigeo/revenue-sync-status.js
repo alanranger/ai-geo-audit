@@ -125,6 +125,34 @@ async function fetchSchemaAuditStatus(supabase, propertyUrl) {
   };
 }
 
+async function fetchAcquisitionChannelsStatus(supabase) {
+  const jobs = ['llm_mentions', 'youtube_stats', 'ga4_channels'];
+  const { data, error } = await supabase
+    .from('acquisition_sync_runs')
+    .select('job, finished_at, status, rows_written, started_at')
+    .in('job', jobs)
+    .in('status', ['ok', 'skipped'])
+    .order('finished_at', { ascending: false })
+    .limit(30);
+  if (error) throw error;
+  const latestByJob = {};
+  for (const row of data || []) {
+    if (!latestByJob[row.job]) latestByJob[row.job] = row;
+  }
+  const finished = Object.values(latestByJob)
+    .map((r) => r.finished_at)
+    .filter(Boolean)
+    .map((t) => new Date(t).getTime());
+  const rows = Object.values(latestByJob).reduce((sum, r) => sum + (Number(r.rows_written) || 0), 0);
+  return {
+    source: 'acquisition_channels',
+    last_synced_at: finished.length ? new Date(Math.max(...finished)).toISOString() : null,
+    row_count: rows,
+    row_count_unit: 'rows',
+    jobs: latestByJob,
+  };
+}
+
 async function fetchCsvTierSyncStatus(supabase) {
   const { data, error } = await supabase
     .from('csv_metadata')
@@ -220,7 +248,8 @@ export default async function handler(req, res) {
     for (const [key, fn] of [
       ['dfs_backlinks', () => fetchDfsBacklinkStatus(supabase, propertyUrl)],
       ['schema_audit', () => fetchSchemaAuditStatus(supabase, propertyUrl)],
-      ['csv_tier_sync', () => fetchCsvTierSyncStatus(supabase)]
+      ['csv_tier_sync', () => fetchCsvTierSyncStatus(supabase)],
+      ['acquisition_channels', () => fetchAcquisitionChannelsStatus(supabase)]
     ]) {
       try {
         // eslint-disable-next-line no-await-in-loop
