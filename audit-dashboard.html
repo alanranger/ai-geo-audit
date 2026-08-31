@@ -85263,7 +85263,13 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       function formatDashboardPctDelta(curr, prev, { betterLower = false } = {}) {
         const c = toNum(curr);
         const p = toNum(prev);
-        if (c == null || p == null || p === 0) return '';
+        if (c == null || p == null) return '';
+        if (p === 0) {
+          if (c === 0) {
+            return `<div class="dashboard-kpi-delta" data-dir="flat">— 0.0%</div>`;
+          }
+          return `<div class="dashboard-kpi-delta" data-dir="up">▲ new</div>`;
+        }
         const raw = ((c - p) / Math.abs(p)) * 100;
         const dir = betterLower ? (raw < 0 ? 'up' : raw > 0 ? 'down' : 'flat') : (raw > 0 ? 'up' : raw < 0 ? 'down' : 'flat');
         const absText = `${raw >= 0 ? '+' : ''}${raw.toFixed(1)}%`;
@@ -86456,14 +86462,6 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         const twentyeightPrevBySegment = buildReconciledPeriodBySegment(twentyEightDayWindow?.prev);
         const ninetyBySegment = buildReconciledPeriodBySegment(ninetyDayWindow?.current);
         const ninetyPrevBySegment = buildReconciledPeriodBySegment(ninetyDayWindow?.prev);
-        const [latestWindowRows, sevenWindowRows, twentyeightWindowRows, ninetyWindowRows] =
-          await fetchDashboardPageRowsMergedForWindowsBatch(propertyUrl, [
-            { startDate: latestWindow?.endDate, endDate: latestWindow?.endDate },
-            { startDate: sevenDayWindow?.startDate, endDate: sevenDayWindow?.endDate },
-            { startDate: twentyEightDayWindow?.startDate, endDate: twentyEightDayWindow?.endDate },
-            { startDate: ninetyDayWindow?.startDate, endDate: ninetyDayWindow?.endDate }
-          ], moneySegmentLookup);
-
         const latestPrevStart = addDaysToIsoDate(latestWindow?.endDate, -1);
         const latestPrevEnd = addDaysToIsoDate(latestWindow?.endDate, -1);
         const sevenPrevStart = addDaysToIsoDate(sevenDayWindow?.endDate, -(2 * 7 - 1));
@@ -86472,6 +86470,25 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         const twentyeightPrevEnd = addDaysToIsoDate(twentyEightDayWindow?.endDate, -28);
         const ninetyPrevStart = addDaysToIsoDate(ninetyDayWindow?.endDate, -(2 * 90 - 1));
         const ninetyPrevEnd = addDaysToIsoDate(ninetyDayWindow?.endDate, -90);
+
+        const [latestWindowRows, sevenWindowRows, twentyeightWindowRows, ninetyWindowRows] =
+          await fetchDashboardPageRowsMergedForWindowsBatch(propertyUrl, [
+            { startDate: latestWindow?.endDate, endDate: latestWindow?.endDate },
+            { startDate: sevenDayWindow?.startDate, endDate: sevenDayWindow?.endDate },
+            { startDate: twentyEightDayWindow?.startDate, endDate: twentyEightDayWindow?.endDate },
+            { startDate: ninetyDayWindow?.startDate, endDate: ninetyDayWindow?.endDate }
+          ], moneySegmentLookup);
+        const [
+          latestPrevWindowRows,
+          sevenPrevWindowRows,
+          twentyeightPrevWindowRows,
+          ninetyPrevWindowRows
+        ] = await fetchDashboardPageRowsMergedForWindowsBatch(propertyUrl, [
+          { startDate: latestPrevStart, endDate: latestPrevEnd },
+          { startDate: sevenPrevStart, endDate: sevenPrevEnd },
+          { startDate: twentyeightPrevStart, endDate: twentyeightPrevEnd },
+          { startDate: ninetyPrevStart, endDate: ninetyPrevEnd }
+        ], moneySegmentLookup);
 
         const [
           canonicalLatest, canonicalLatestPrev,
@@ -86502,10 +86519,18 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         const sevenWindowRowsResolved = sevenWindowRows.map(applyLookupSegment);
         const twentyeightWindowRowsResolved = twentyeightWindowRows.map(applyLookupSegment);
         const ninetyWindowRowsResolved = ninetyWindowRows.map(applyLookupSegment);
+        const latestPrevWindowRowsResolved = latestPrevWindowRows.map(applyLookupSegment);
+        const sevenPrevWindowRowsResolved = sevenPrevWindowRows.map(applyLookupSegment);
+        const twentyeightPrevWindowRowsResolved = twentyeightPrevWindowRows.map(applyLookupSegment);
+        const ninetyPrevWindowRowsResolved = ninetyPrevWindowRows.map(applyLookupSegment);
         const latestWindowSummary = summarizeDashboardWindowRowsBySegment(latestWindowRowsResolved, moneySegmentLookup);
         const sevenWindowSummary = summarizeDashboardWindowRowsBySegment(sevenWindowRowsResolved, moneySegmentLookup);
         const twentyeightWindowSummary = summarizeDashboardWindowRowsBySegment(twentyeightWindowRowsResolved, moneySegmentLookup);
         const ninetyWindowSummary = summarizeDashboardWindowRowsBySegment(ninetyWindowRowsResolved, moneySegmentLookup);
+        const latestPrevWindowSummary = summarizeDashboardWindowRowsBySegment(latestPrevWindowRowsResolved, moneySegmentLookup);
+        const sevenPrevWindowSummary = summarizeDashboardWindowRowsBySegment(sevenPrevWindowRowsResolved, moneySegmentLookup);
+        const twentyeightPrevWindowSummary = summarizeDashboardWindowRowsBySegment(twentyeightPrevWindowRowsResolved, moneySegmentLookup);
+        const ninetyPrevWindowSummary = summarizeDashboardWindowRowsBySegment(ninetyPrevWindowRowsResolved, moneySegmentLookup);
         const latestSubsegmentActivity = latestWindowSummary;
         const sevenSubsegmentActivity = sevenWindowSummary;
         const twentyeightSubsegmentActivity = twentyeightWindowSummary;
@@ -86675,26 +86700,31 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           defs
         ) || ninetyDisplayFromRows;
 
+        const latestPrevDisplayFromRows = applyWindowSummaryMetrics(latestPrevBySegment, latestPrevWindowSummary) || latestPrevBySegment;
+        const sevenPrevDisplayFromRows = applyWindowSummaryMetrics(sevenPrevBySegment, sevenPrevWindowSummary) || sevenPrevBySegment;
+        const twentyeightPrevDisplayFromRows = applyWindowSummaryMetrics(twentyeightPrevBySegment, twentyeightPrevWindowSummary) || twentyeightPrevBySegment;
+        const ninetyPrevDisplayFromRows = applyWindowSummaryMetrics(ninetyPrevBySegment, ninetyPrevWindowSummary) || ninetyPrevBySegment;
+
         const latestPrevDisplayBalanced = normalizeDashboardPeriodBySegmentToCanonical(
-          latestPrevBySegment,
+          latestPrevDisplayFromRows,
           canonicalLatestPrev || latestWindow?.prev,
           defs
-        ) || latestPrevBySegment;
+        ) || latestPrevDisplayFromRows;
         const sevenPrevDisplayBalanced = normalizeDashboardPeriodBySegmentToCanonical(
-          sevenPrevBySegment,
+          sevenPrevDisplayFromRows,
           canonicalSevenPrev || sevenDayWindow?.prev,
           defs
-        ) || sevenPrevBySegment;
+        ) || sevenPrevDisplayFromRows;
         const twentyeightPrevDisplayBalanced = normalizeDashboardPeriodBySegmentToCanonical(
-          twentyeightPrevBySegment,
+          twentyeightPrevDisplayFromRows,
           canonicalTwentyeightPrev || twentyEightDayWindow?.prev,
           defs
-        ) || twentyeightPrevBySegment;
+        ) || twentyeightPrevDisplayFromRows;
         const ninetyPrevDisplayBalanced = normalizeDashboardPeriodBySegmentToCanonical(
-          ninetyPrevBySegment,
+          ninetyPrevDisplayFromRows,
           canonicalNinetyPrev || ninetyDayWindow?.prev,
           defs
-        ) || ninetyPrevBySegment;
+        ) || ninetyPrevDisplayFromRows;
 
         const uniqueTotalsForTop = {
           latest: { clickPages: 0, impressionPages: 0 },
@@ -86803,10 +86833,10 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           };
         };
         const totalCardPeriodRows = {
-          today: renderDashboardPeriodRow('Today', latestWindow?.endDate || '—', buildTotalPeriodMetrics(latestDisplayBalanced), null, sumActivityByDefs(latestSubsegmentActivity), { periodKey: 'today' }),
-          '7d': renderDashboardPeriodRow('7 days', `${sevenDayWindow?.startDate || '—'} -> ${sevenDayWindow?.endDate || '—'}`, buildTotalPeriodMetrics(sevenDisplayBalanced), null, sumActivityByDefs(sevenSubsegmentActivity), { periodKey: '7d' }),
-          '28d': renderDashboardPeriodRow('28 days', `${twentyEightDayWindow?.startDate || '—'} -> ${twentyEightDayWindow?.endDate || '—'}`, buildTotalPeriodMetrics(twentyeightDisplayBalanced), null, sumActivityByDefs(twentyeightSubsegmentActivity), { periodKey: '28d' }),
-          '90d': renderDashboardPeriodRow('90 days', `${ninetyDayWindow?.startDate || '—'} -> ${ninetyDayWindow?.endDate || '—'}`, buildTotalPeriodMetrics(ninetyDisplayBalanced), null, sumActivityByDefs(ninetySubsegmentActivity), { periodKey: '90d' })
+          today: renderDashboardPeriodRow('Today', latestWindow?.endDate || '—', buildTotalPeriodMetrics(latestDisplayBalanced), buildTotalPeriodMetrics(latestPrevDisplayBalanced), sumActivityByDefs(latestSubsegmentActivity), { periodKey: 'today' }),
+          '7d': renderDashboardPeriodRow('7 days', `${sevenDayWindow?.startDate || '—'} -> ${sevenDayWindow?.endDate || '—'}`, buildTotalPeriodMetrics(sevenDisplayBalanced), buildTotalPeriodMetrics(sevenPrevDisplayBalanced), sumActivityByDefs(sevenSubsegmentActivity), { periodKey: '7d' }),
+          '28d': renderDashboardPeriodRow('28 days', `${twentyEightDayWindow?.startDate || '—'} -> ${twentyEightDayWindow?.endDate || '—'}`, buildTotalPeriodMetrics(twentyeightDisplayBalanced), buildTotalPeriodMetrics(twentyeightPrevDisplayBalanced), sumActivityByDefs(twentyeightSubsegmentActivity), { periodKey: '28d' }),
+          '90d': renderDashboardPeriodRow('90 days', `${ninetyDayWindow?.startDate || '—'} -> ${ninetyDayWindow?.endDate || '—'}`, buildTotalPeriodMetrics(ninetyDisplayBalanced), buildTotalPeriodMetrics(ninetyPrevDisplayBalanced), sumActivityByDefs(ninetySubsegmentActivity), { periodKey: '90d' })
         };
         const totalActivityPages = {
           today: toNum(sumActivityByDefs(latestSubsegmentActivity)?.impressionPages) || 0,
