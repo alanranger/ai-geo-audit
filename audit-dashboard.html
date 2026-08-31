@@ -8234,6 +8234,10 @@
           .acq-tile-delta[data-dir="down"] { color: #ef4444; }
           .acq-tile-delta[data-dir="flat"] { color: #94a3b8; }
           .acq-tile-engage { font-size: 0.72rem; color: #94a3b8; margin-top: 0.15rem; line-height: 1.35; }
+          .acq-rag { font-weight: 700; }
+          .acq-rag-green { color: #10b981; }
+          .acq-rag-amber { color: #e6a23c; }
+          .acq-rag-red { color: #ef4444; }
 
           /* Validation output. An error must not be styleable as a footnote. */
           .acq-check { font-size: 0.76rem; border-radius: 6px; padding: 0.35rem 0.6rem; display: inline-block; margin: 0.15rem 0.4rem 0.15rem 0; }
@@ -105417,14 +105421,22 @@ Confidence: ${c}`;
       if (s >= 120) return '~' + Math.round(s / 60) + ' min';
       return '~' + Math.round(s) + 's';
     }
+    function acqRagSpan(text, band) {
+      if (!text) return '';
+      var cls = band ? ' acq-rag-' + band : '';
+      return '<span class="acq-rag' + cls + '">' + text + '</span>';
+    }
     function tileEngageHtml(t) {
       if (t.engaged_pct == null && t.avg_session_seconds == null) return '';
       var bits = [];
-      if (t.engaged_pct != null) bits.push(Math.round(Number(t.engaged_pct)) + '% engaged');
+      if (t.engaged_pct != null) {
+        bits.push(acqRagSpan(Math.round(Number(t.engaged_pct)) + '% engaged', t.engaged_band));
+      }
       var dur = formatAcqDuration(t.avg_session_seconds);
-      if (dur) bits.push(dur + ' avg');
+      if (dur) bits.push(acqRagSpan(dur + ' avg', t.duration_band));
       if (!bits.length) return '';
-      return '<div class="acq-tile-engage">' + bits.join(' · ') + '</div>';
+      var tip = 'Engaged rate: green \u226545%, amber 25\u201344%, red \u003c25%. Avg session: green \u226590s, amber 30\u201389s, red \u003c30s.';
+      return '<div class="acq-tile-engage" title="' + escapeAttr(tip) + '">' + bits.join(' \u00b7 ') + '</div>';
     }
     function formatAcqPctDelta(curr, prev, opts) {
       opts = opts || {};
@@ -105495,7 +105507,7 @@ Confidence: ${c}`;
     // measured each figure. Subtitle + explainer are hover-only — visible prose
     // between sections was breaking the tile-grid rhythm.
     function sectionHtml(s) {
-      var checks = (s.checks || []).map(checkHtml).join('');
+      var checks = (s.checks || []).filter(function (c) { return c.level === 'error'; }).map(checkHtml).join('');
       var tip = sectionTip(s);
       var tipAttr = tip ? ' title="' + escapeAttr(tip) + '"' : '';
       return '<div class="acq-sec' + (s.fenced ? ' acq-sec-fenced' : '') + '">'

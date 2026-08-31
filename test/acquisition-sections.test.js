@@ -6,6 +6,9 @@ import {
   ga4Checks,
   NAMED_GA4_GROUPS,
   DIRECT_SHARE_WARN_PCT,
+  engagementRag,
+  ENGAGED_PCT_GREEN,
+  DURATION_SEC_GREEN,
 } from '../lib/acquisition/ga4-channels.js';
 import {
   SOURCES,
@@ -106,6 +109,31 @@ test('every named group keeps its own tile so nothing hides inside Other', () =>
   for (const name of NAMED_GA4_GROUPS) {
     assert.ok(view.tiles.some((t) => t.name === name), `${name} must have its own tile`);
   }
+});
+
+test('engagementRag bands human traffic green and bot-like traffic red', () => {
+  assert.deepEqual(engagementRag({ engaged_pct: 52.4, avg_session_seconds: 172 }), {
+    engaged_band: 'green',
+    duration_band: 'green',
+  });
+  assert.deepEqual(engagementRag({ engaged_pct: 48.2, avg_session_seconds: 69 }), {
+    engaged_band: 'green',
+    duration_band: 'amber',
+  });
+  assert.deepEqual(engagementRag({ engaged_pct: 3.5, avg_session_seconds: 5 }), {
+    engaged_band: 'red',
+    duration_band: 'red',
+  });
+});
+
+test('ga4Section tiles carry RAG bands for the UI', () => {
+  const section = ga4Section(rows());
+  const organic = section.tiles.find((t) => t.label === 'Google organic');
+  const direct = section.tiles.find((t) => t.label === 'Direct');
+  assert.equal(organic.engaged_band, 'green');
+  assert.equal(organic.duration_band, 'green');
+  assert.equal(direct.engaged_band, 'green');
+  assert.equal(direct.duration_band, 'amber');
 });
 
 test('ga4AttributedView attaches engaged rate and avg session per channel', () => {
