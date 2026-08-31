@@ -9,6 +9,7 @@ import {
 } from '../lib/acquisition/ga4-channels.js';
 import {
   SOURCES,
+  ga4RealVisitsSection,
   ga4Section,
   gscSection,
   gscCoverage,
@@ -16,6 +17,7 @@ import {
   aiSection,
   youtubeSection,
   detailRows,
+  attachPrevToSections,
 } from '../lib/acquisition/acquisition-sections.js';
 
 /** The real 28d shape as at 30 Aug 2026, including the tiny channels. */
@@ -95,9 +97,35 @@ test('every named group keeps its own tile so nothing hides inside Other', () =>
   }
 });
 
+test('ga4RealVisitsSection shows attributed total and names excluded bots', () => {
+  const section = ga4RealVisitsSection(rows());
+  assert.equal(section.key, 'ga4_real_visits');
+  assert.equal(section.tiles.length, 1);
+  assert.equal(section.tiles[0].label, 'Total visits');
+  assert.equal(section.tiles[0].value, 15834);
+  assert.match(section.tiles[0].sub, /excl\. 42,756 bots/);
+  assert.equal(section.unattributed_sessions, 42756);
+  assert.match(section.explainer, /42,756 Unassigned sessions excluded/);
+});
+
+test('attachPrevToSections merges prior totals for period deltas', () => {
+  const current = [ga4RealVisitsSection(rows()), ga4Section(rows())];
+  const previous = [
+    ga4RealVisitsSection(rows({ 'Organic Search': 7000, Direct: 5000 })),
+    ga4Section(rows({ 'Organic Search': 7000, Direct: 5000 })),
+  ];
+  const merged = attachPrevToSections(current, previous);
+  const headline = merged[0].tiles[0];
+  assert.equal(headline.value, 15834);
+  assert.equal(headline.prev, 12371);
+  const organic = merged[1].tiles.find((t) => t.label === 'Google organic');
+  assert.equal(organic.prev, 7000);
+});
+
 test('ga4Section labels Google organic as visits and reconciles', () => {
   const section = ga4Section(rows());
   assert.equal(section.source, 'GA4');
+  assert.equal(section.title, 'Visits by channel');
   assert.equal(section.unit, 'visits');
   const organic = section.tiles.find((t) => t.label === 'Google organic');
   assert.equal(organic.value, 8526, 'GA4 sessions, not the 6,307 GSC clicks');

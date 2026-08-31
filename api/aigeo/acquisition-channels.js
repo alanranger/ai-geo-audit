@@ -29,6 +29,7 @@ import {
 } from '../../lib/acquisition/academy-signup-source.js';
 import {
   SOURCES,
+  ga4RealVisitsSection,
   ga4Section,
   gscSection,
   gscCoverage,
@@ -309,6 +310,7 @@ function buildSections({ ga4Rows, gscTotals, gscRows, llm, rows }) {
   const yt = rows.find((r) => r.key === 'youtube');
   const gsc = gscSection(gscTotals, gscCoverage(gscRows));
   return [
+    ga4RealVisitsSection(ga4Rows),
     ga4Section(ga4Rows),
     { ...gsc, explainer: gscExplainer(gscTotals?.clicks ?? null, organicVisits) },
     aiSection(llm),
