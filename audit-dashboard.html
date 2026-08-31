@@ -8233,6 +8233,7 @@
           .acq-tile-delta[data-dir="up"] { color: #10b981; }
           .acq-tile-delta[data-dir="down"] { color: #ef4444; }
           .acq-tile-delta[data-dir="flat"] { color: #94a3b8; }
+          .acq-tile-engage { font-size: 0.72rem; color: #94a3b8; margin-top: 0.15rem; line-height: 1.35; }
 
           /* Validation output. An error must not be styleable as a footnote. */
           .acq-check { font-size: 0.76rem; border-radius: 6px; padding: 0.35rem 0.6rem; display: inline-block; margin: 0.15rem 0.4rem 0.15rem 0; }
@@ -105410,6 +105411,21 @@ Confidence: ${c}`;
       return fmtCompact(Number(t.value));
     }
 
+    function formatAcqDuration(sec) {
+      var s = Number(sec);
+      if (!Number.isFinite(s) || s <= 0) return '';
+      if (s >= 120) return '~' + Math.round(s / 60) + ' min';
+      return '~' + Math.round(s) + 's';
+    }
+    function tileEngageHtml(t) {
+      if (t.engaged_pct == null && t.avg_session_seconds == null) return '';
+      var bits = [];
+      if (t.engaged_pct != null) bits.push(Math.round(Number(t.engaged_pct)) + '% engaged');
+      var dur = formatAcqDuration(t.avg_session_seconds);
+      if (dur) bits.push(dur + ' avg');
+      if (!bits.length) return '';
+      return '<div class="acq-tile-engage">' + bits.join(' · ') + '</div>';
+    }
     function formatAcqPctDelta(curr, prev, opts) {
       opts = opts || {};
       var c = curr == null || curr === '' ? null : Number(curr);
@@ -105471,6 +105487,7 @@ Confidence: ${c}`;
         + '<div class="acq-tile-label">' + t.label + '</div>'
         + '<div class="acq-tile-value">' + tileValue(t) + '</div>'
         + delta
+        + tileEngageHtml(t)
         + (unit ? '<div class="acq-tile-sub">' + unit + '</div>' : '')
         + '</div>';
     }

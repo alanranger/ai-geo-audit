@@ -202,7 +202,7 @@ async function fetchGa4(sb, days) {
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await sb
       .from('ga4_channel_sessions_daily')
-      .select('date, channel_group, source, medium, sessions, is_unattributed')
+      .select('date, channel_group, source, medium, sessions, engaged_sessions, avg_session_seconds, is_unattributed')
       .gte('date', isoDaysAgo(days))
       .order('date', { ascending: false })
       .range(from, from + PAGE - 1);

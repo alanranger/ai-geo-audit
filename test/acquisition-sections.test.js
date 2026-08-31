@@ -23,21 +23,32 @@ import {
 /** The real 28d shape as at 30 Aug 2026, including the tiny channels. */
 const rows = (over = {}) => {
   const groups = {
-    'Organic Search': 8526,
-    Direct: 6937,
-    'Organic Social': 136,
-    Referral: 109,
-    'AI Assistant': 105,
-    Email: 10,
-    'Organic Shopping': 10,
-    'Paid Search': 1,
+    'Organic Search': { sessions: 8526, engaged: 4467, avgSec: 172 },
+    Direct: { sessions: 6937, engaged: 3344, avgSec: 69 },
+    'Organic Social': { sessions: 136, engaged: 40, avgSec: 91 },
+    Referral: { sessions: 109, engaged: 66, avgSec: 180 },
+    'AI Assistant': { sessions: 105, engaged: 52, avgSec: 198 },
+    Email: { sessions: 10, engaged: 6, avgSec: 263 },
+    'Organic Shopping': { sessions: 10, engaged: 6, avgSec: 141 },
+    'Paid Search': { sessions: 1, engaged: 1, avgSec: 11 },
     ...over,
   };
-  const out = Object.entries(groups).map(([channel_group, sessions]) => ({
-    date: '2026-08-20', channel_group, source: '', medium: '', sessions, is_unattributed: false,
-  }));
+  const out = Object.entries(groups).map(([channel_group, meta]) => {
+    const m = typeof meta === 'number' ? { sessions: meta, engaged: Math.round(meta * 0.5), avgSec: 120 } : meta;
+    return {
+      date: '2026-08-20',
+      channel_group,
+      source: '',
+      medium: '',
+      sessions: m.sessions,
+      engaged_sessions: m.engaged,
+      avg_session_seconds: m.avgSec,
+      is_unattributed: false,
+    };
+  });
   out.push({
-    date: '2026-08-20', channel_group: 'Unassigned', source: '', medium: '', sessions: 42756, is_unattributed: true,
+    date: '2026-08-20', channel_group: 'Unassigned', source: '', medium: '', sessions: 42756,
+    engaged_sessions: 1496, avg_session_seconds: 5, is_unattributed: true,
   });
   return out;
 };
@@ -97,6 +108,27 @@ test('every named group keeps its own tile so nothing hides inside Other', () =>
   }
 });
 
+test('ga4AttributedView attaches engaged rate and avg session per channel', () => {
+  const view = ga4AttributedView(rows());
+  const organic = view.tiles.find((t) => t.name === 'Organic Search');
+  const direct = view.tiles.find((t) => t.name === 'Direct');
+  assert.equal(organic.engaged_pct, 52.4);
+  assert.equal(organic.avg_session_seconds, 172);
+  assert.equal(direct.engaged_pct, 48.2);
+  assert.equal(direct.avg_session_seconds, 69);
+  assert.ok(view.engaged_pct > 48 && view.engaged_pct < 51);
+});
+
+test('ga4Section tiles expose engagement metrics for the UI', () => {
+  const section = ga4Section(rows());
+  const organic = section.tiles.find((t) => t.label === 'Google organic');
+  const direct = section.tiles.find((t) => t.label === 'Direct');
+  assert.equal(organic.engaged_pct, 52.4);
+  assert.equal(organic.avg_session_seconds, 172);
+  assert.equal(direct.engaged_pct, 48.2);
+  assert.equal(direct.avg_session_seconds, 69);
+});
+
 test('ga4RealVisitsSection shows attributed total and names excluded bots', () => {
   const section = ga4RealVisitsSection(rows());
   assert.equal(section.key, 'ga4_real_visits');
@@ -104,6 +136,8 @@ test('ga4RealVisitsSection shows attributed total and names excluded bots', () =
   assert.equal(section.tiles[0].label, 'Total visits');
   assert.equal(section.tiles[0].value, 15834);
   assert.match(section.tiles[0].sub, /excl\. 42,756 bots/);
+  assert.ok(section.tiles[0].engaged_pct > 48);
+  assert.ok(section.tiles[0].avg_session_seconds > 100);
   assert.equal(section.unattributed_sessions, 42756);
   assert.match(section.explainer, /42,756 Unassigned sessions excluded/);
 });
@@ -111,8 +145,8 @@ test('ga4RealVisitsSection shows attributed total and names excluded bots', () =
 test('attachPrevToSections merges prior totals for period deltas', () => {
   const current = [ga4RealVisitsSection(rows()), ga4Section(rows())];
   const previous = [
-    ga4RealVisitsSection(rows({ 'Organic Search': 7000, Direct: 5000 })),
-    ga4Section(rows({ 'Organic Search': 7000, Direct: 5000 })),
+    ga4RealVisitsSection(rows({ 'Organic Search': { sessions: 7000, engaged: 3500, avgSec: 160 }, Direct: { sessions: 5000, engaged: 2400, avgSec: 60 } })),
+    ga4Section(rows({ 'Organic Search': { sessions: 7000, engaged: 3500, avgSec: 160 }, Direct: { sessions: 5000, engaged: 2400, avgSec: 60 } })),
   ];
   const merged = attachPrevToSections(current, previous);
   const headline = merged[0].tiles[0];
