@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-03] - Monday CEO weekly health report (v1 draft)
+
+**Change:** Two Monday crons — `ceo-weekly-refresh` (00:00 UTC ≈ 01:00 London BST) warms dashboard data paths and logs `ceo_weekly_refresh_runs`; `ceo-weekly-report` (05:45 UTC ≈ 06:45 BST) fail-safe gates on that run, builds a 6-section CEO email with WoW deltas, snapshots to `ceo_weekly_report_snapshots`, and sends (or dry-runs). Unassigned GA4 dropped; movers/new-lost RDs placeholder until week 2. Iterate with Alan.
+
+**Files:** `api/cron/ceo-weekly-*.js`, `lib/ceo-weekly/*`, `vercel.json`, `migrations/20260903_ceo_weekly_report.sql`
+
+---
+
 ## [2026-09-03] - domain_rank_history: backfill + append on DFS scalar save
 
 **Change:** `domain_rank_history` was never written (0 rows). Backfilled one alanranger.com row from live `dfs_backlink_summary_cache`. Hooked append-only snapshots onto the v13 DFS scalar persist path (`persistDfsBacklinkScalarsToAuditResults`) and full `save-audit` saves. No new DFS calls; `domain_rank_pending` untouched.
