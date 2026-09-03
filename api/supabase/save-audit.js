@@ -18,7 +18,11 @@ import { createClient } from '@supabase/supabase-js';
 import { computeSurfaceOutcomesRollup } from '../../lib/audit/surfaceOutcomes.js';
 import { computeSurfaceVisibilityRollup } from '../../lib/audit/surfaceScores.js';
 import { computeTopOfPageRollup } from '../../lib/audit/topOfPage.js';
-import { readDfsBacklinkScalars } from '../../lib/audit/persistDfsBacklinkScalars.js';
+import {
+  readDfsBacklinkScalars,
+  appendDomainRankHistoryFromCache,
+  normalizeDomainHost
+} from '../../lib/audit/persistDfsBacklinkScalars.js';
 import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
 import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
 
@@ -1045,6 +1049,8 @@ export default async function handler(req, res) {
 
     // Persist-only: copy DFS summary rank/RDs onto this audit row when cache has them.
     // domain_rating column = DFS domain rank (NOT Moz/Ahrefs DR). No score formula change.
+    // Full saves also append one domain_rank_history row after upsert (see below).
+    let appliedDfsScalars = false;
     if (!isPartialUpdate) {
       try {
         const sb = createClient(supabaseUrl, supabaseKey);
@@ -1052,6 +1058,7 @@ export default async function handler(req, res) {
         if (dfsScalars) {
           if (dfsScalars.domain_rating != null) auditRecord.domain_rating = dfsScalars.domain_rating;
           if (dfsScalars.referring_domains != null) auditRecord.referring_domains = dfsScalars.referring_domains;
+          appliedDfsScalars = true;
           console.log(
             `[Save Audit] DFS scalars → domain_rating=${auditRecord.domain_rating} (DFS domain rank), referring_domains=${auditRecord.referring_domains}`
           );
@@ -1060,6 +1067,21 @@ export default async function handler(req, res) {
         console.warn('[Save Audit] DFS scalar persist skipped:', err?.message || err);
       }
     }
+
+    const appendDomainRankHistoryForSavedAudit = async (savedRows) => {
+      if (!appliedDfsScalars || isPartialUpdate) return;
+      try {
+        const auditId = Array.isArray(savedRows) && savedRows[0]?.id ? savedRows[0].id : null;
+        const sb = createClient(supabaseUrl, supabaseKey);
+        const hist = await appendDomainRankHistoryFromCache(sb, {
+          domainHost: normalizeDomainHost(propertyUrl),
+          auditId
+        });
+        console.log('[Save Audit] domain_rank_history append:', hist?.inserted || 0, hist?.reason || 'ok');
+      } catch (err) {
+        console.warn('[Save Audit] domain_rank_history append skipped:', err?.message || err);
+      }
+    };
 
     // ---- Merge schema_pages_detail with previous run --------------------
     // Only merge when we actually have a new schema_pages_detail payload
@@ -1466,6 +1488,7 @@ export default async function handler(req, res) {
         isUpdate = true;
         // Use the update result as the final result
         const finalResult = updateResult;
+        await appendDomainRankHistoryForSavedAudit(finalResult);
         return res.status(200).json({
           status: 'ok',
           message: 'Audit results saved successfully',
@@ -1577,6 +1600,7 @@ export default async function handler(req, res) {
           const retryResult = retryText ? JSON.parse(retryText) : [];
           if (Array.isArray(retryResult) && retryResult.length > 0) {
             console.log('[Supabase Save] ✓ Updated existing audit record after stripping missing columns');
+            await appendDomainRankHistoryForSavedAudit(retryResult);
             return res.status(200).json({
               status: 'ok',
               message: 'Audit results saved successfully',
@@ -1622,6 +1646,7 @@ export default async function handler(req, res) {
           const retryText = await retryInsert.text();
           const retryResult = retryText ? JSON.parse(retryText) : null;
           console.log('[Supabase Save] ✓ Successfully inserted audit after stripping missing columns');
+          await appendDomainRankHistoryForSavedAudit(retryResult);
           return res.status(200).json({
             status: 'ok',
             message: 'Audit results saved successfully',
@@ -1676,6 +1701,8 @@ export default async function handler(req, res) {
     } else {
       console.log('[Supabase Save] ✓ Successfully inserted new audit results');
     }
+
+    await appendDomainRankHistoryForSavedAudit(result);
 
     // Prepare response first (don't block on per-date calculation)
     const responseData = {
