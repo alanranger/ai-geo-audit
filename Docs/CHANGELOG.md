@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-03] - domain_rank_history: backfill + append on DFS scalar save
+
+**Change:** `domain_rank_history` was never written (0 rows). Backfilled one alanranger.com row from live `dfs_backlink_summary_cache`. Hooked append-only snapshots onto the v13 DFS scalar persist path (`persistDfsBacklinkScalarsToAuditResults`) and full `save-audit` saves. No new DFS calls; `domain_rank_pending` untouched.
+
+**Files:** `lib/audit/persistDfsBacklinkScalars.js`, `api/supabase/save-audit.js`
+
+---
+
 ## [2026-08-14] - Clicks/impressions: monthly totals at 12 months+
 
 **Change:** On 12-month and 18-month ranges, the Clicks and impressions chart sums each calendar month instead of plotting every day, so the line shows the trend instead of daily spikes. Shorter ranges stay daily. Latest month can be partial.
