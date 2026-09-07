@@ -186,7 +186,14 @@ export default async function handler(req, res) {
           weekStart,
           propertyUrl,
           skipGate: true,
-          dryRun: false
+          forceResend: true,
+          dryRun: false,
+          refreshLog: {
+            source: 'monday_full_refresh_cron',
+            status: progress.email_sent ? 'ok' : 'partial',
+            steps: progress.steps,
+            finished_at: new Date().toISOString()
+          }
         });
         const ok = report?.mode === 'report' || report?.mode === 'already_sent';
         result = {

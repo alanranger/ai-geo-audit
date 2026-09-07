@@ -89541,7 +89541,7 @@ Confidence: ${c}`;
           { key: 'domain_strength', label: 'Domain Strength snapshot (all batches)', tiers: ['full'], dependsOn: [], runner: runGlobalStepDomainStrength },
           { key: 'acquisition_channels', label: 'Acquisition channels (AI mentions + YouTube + GA4)', tiers: ['standard','full'], dependsOn: [], runner: runGlobalStepAcquisitionChannels },
           { key: 'update_tasks', label: 'Update all tasks with latest data', tiers: ['quick','standard','full'], dependsOn: ['audit_scan'], runner: runGlobalStepUpdateTasks },
-          { key: 'ceo_weekly_email', label: 'CEO weekly HTML email', tiers: ['full'], dependsOn: ['audit_scan', 'ranking_ai'], runner: runGlobalStepCeoWeeklyEmail }
+          { key: 'ceo_weekly_email', label: 'CEO weekly HTML email', tiers: ['full'], dependsOn: [], runner: runGlobalStepCeoWeeklyEmail }
         ];
       }
 
@@ -89882,25 +89882,48 @@ Confidence: ${c}`;
         try { await window.loadAllOptimisationTasks({ forceRefresh: true }); } catch (_e) { /* best-effort reload */ }
       }
 
-      async function runGlobalStepCeoWeeklyEmail() {
+      async function runGlobalStepCeoWeeklyEmail(ctx = {}) {
         debugLog('[Global Run] [CEO weekly email] Starting (last Full Refresh step)...', 'info');
+        const failedKeys = ctx.failedKeys instanceof Set ? ctx.failedKeys : new Set();
+        const steps = Array.isArray(ctx.steps) ? ctx.steps : [];
+        const criticalFailed = failedKeys.has('audit_scan') || failedKeys.has('ranking_ai');
+        const partial = failedKeys.size > 0;
+        const refreshLog = {
+          source: 'manual_full_refresh',
+          status: criticalFailed || partial ? 'partial' : 'ok',
+          started_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+          error: criticalFailed
+            ? `manual_full_deps_failed:${[...failedKeys].join(',')}`
+            : (partial ? `manual_full_partial:${[...failedKeys].join(',')}` : null),
+          steps: steps.map((s) => ({
+            key: s.key,
+            status: s.status,
+            error: s.errorMessage || null,
+            elapsed: s.elapsedTime || null
+          })).concat([{ key: 'ceo_weekly_email', status: 'Running', source: 'manual_full_refresh' }])
+        };
         const res = await fetch(apiUrl('/api/cron/ceo-weekly-report'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ skipGate: true, fromFullRefresh: true })
+          body: JSON.stringify({
+            skipGate: true,
+            fromFullRefresh: true,
+            forceResend: true,
+            forceFailSafe: criticalFailed,
+            failReason: criticalFailed ? refreshLog.error : undefined,
+            refreshLog
+          })
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
           throw new Error(body?.message || body?.error || `ceo_weekly_report_${res.status}`);
         }
         if (body?.mode === 'fail_safe') {
-          throw new Error(body?.gate?.reason || 'ceo_weekly_fail_safe');
-        }
-        if (body?.mode === 'already_sent') {
-          debugLog('[Global Run] [CEO weekly email] Already sent this week — ok', 'success');
+          debugLog(`[Global Run] [CEO weekly email] Fail-safe sent (${body?.send?.id || body?.gate?.reason || 'ok'})`, 'warn');
           return body;
         }
-        debugLog(`[Global Run] [CEO weekly email] ✓ Sent (${body?.send?.provider || body?.mode || 'ok'})`, 'success');
+        debugLog(`[Global Run] [CEO weekly email] ✓ Sent (${body?.send?.provider || body?.mode || 'ok'} · ${body?.send?.id || ''})`, 'success');
         return body;
       }
 
@@ -89932,7 +89955,7 @@ Confidence: ${c}`;
         return window.confirm('Admin key is not set. The "Update All Tasks" step will likely fail.\n\nRun anyway?');
       }
 
-      async function executeGlobalRunStep(stepDef, stepState, failedKeys, stepStartTime) {
+      async function executeGlobalRunStep(stepDef, stepState, failedKeys, stepStartTime, steps) {
         const skipReason = stepShouldSkipDueToFailedDeps(stepDef, failedKeys);
         if (skipReason) {
           stepState.status = 'Skipped';
@@ -89942,7 +89965,7 @@ Confidence: ${c}`;
         }
         try {
           debugLog(`[Global Run] Starting step: ${stepDef.label} (${stepDef.key})`, 'info');
-          const stepResult = await stepDef.runner();
+          const stepResult = await stepDef.runner({ failedKeys, steps });
           if (stepResult && typeof stepResult === 'object' && stepResult.success === false) {
             throw new Error(stepResult.error || stepResult.message || 'Step reported failure');
           }
@@ -90049,7 +90072,7 @@ Confidence: ${c}`;
             if (stepTimeEl) stepTimeEl.textContent = formatGlobalRunElapsed(Date.now() - stepStartTime);
           }, 100);
 
-          await executeGlobalRunStep(stepDef, steps[i], failedKeys, stepStartTime);
+          await executeGlobalRunStep(stepDef, steps[i], failedKeys, stepStartTime, steps);
 
           clearInterval(stepTimeInterval);
           dashboardRunModalRenderSteps(steps);

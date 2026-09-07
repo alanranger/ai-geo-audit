@@ -20,10 +20,11 @@ export default async function handler(req, res) {
       weekStart,
       dryRun: flag(req, 'dryRun'),
       forceFailSafe: flag(req, 'forceFailSafe'),
-      // Full Refresh just finished — skip Monday refresh-gate
+      // Full Refresh (manual or Monday) — skip gate; always re-send so every Full produces an email
       skipGate: flag(req, 'skipGate') || flag(req, 'fromFullRefresh'),
-      forceResend: flag(req, 'forceResend'),
-      failReason: req.query?.failReason || req.body?.failReason || undefined
+      forceResend: flag(req, 'forceResend') || flag(req, 'fromFullRefresh'),
+      failReason: req.query?.failReason || req.body?.failReason || undefined,
+      refreshLog: req.body?.refreshLog || null
     });
     return sendJson(res, 200, result);
   } catch (err) {
