@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-07] - CEO email sections D/E/F (Backlinks, Rankings, SEO health)
+
+**Change:** Append approved mock sections D · Backlinks & authority, E · Ranking changes, F · SEO health below C · The AI front. Live metrics from DFS tiles / keyword_rankings / Trad SEO evaluation cache + domain strength + GSC csv40d click movers. DA-band Δ and new DA≥50 dofollow list wire to prior Monday snapshot (shows “from next Monday” until ≥2 weeks).
+
+**Files:** `lib/ceo-weekly/{email,metrics,defSections}.js`, `Docs/CHANGELOG.md`
+
+---
+
 ## [2026-09-07] - Monday unattended Full Refresh + CEO email
 
 **Change:** Monday cron `ceo-weekly-full-refresh` (`*/15 0-3 * * 1` UTC ≈ 01:00–04:45 London BST) runs a server-side Full Refresh stepper (revenue / GSC / Ranking / DFS / etc.) and ends with the CEO HTML email. Dashboard **Full refresh** still ends with the same email. Backup `ceo-weekly-report` at 05:45 UTC skips if already sent that week. Replaces Monday-only `ceo-weekly-refresh`.
