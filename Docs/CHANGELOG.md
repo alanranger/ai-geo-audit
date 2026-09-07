@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-07] - Monday unattended Full Refresh + CEO email
+
+**Change:** Monday cron `ceo-weekly-full-refresh` (`*/15 0-3 * * 1` UTC ≈ 01:00–04:45 London BST) runs a server-side Full Refresh stepper (revenue / GSC / Ranking / DFS / etc.) and ends with the CEO HTML email. Dashboard **Full refresh** still ends with the same email. Backup `ceo-weekly-report` at 05:45 UTC skips if already sent that week. Replaces Monday-only `ceo-weekly-refresh`.
+
+**Files:** `api/cron/ceo-weekly-full-refresh.js`, `lib/ceo-weekly/report.js`, `vercel.json`, `audit-dashboard.html`
+
+---
+
 ## [2026-09-03] - Monday CEO weekly health report (v1 draft)
 
 **Change:** Two Monday crons — `ceo-weekly-refresh` (00:00 UTC ≈ 01:00 London BST) warms dashboard data paths and logs `ceo_weekly_refresh_runs`; `ceo-weekly-report` (05:45 UTC ≈ 06:45 BST) fail-safe gates on that run, builds a 6-section CEO email with WoW deltas, snapshots to `ceo_weekly_report_snapshots`, and sends (or dry-runs). Unassigned GA4 dropped; movers/new-lost RDs placeholder until week 2. Iterate with Alan.
