@@ -3,6 +3,8 @@ import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
 import { runFullAudit } from '../../lib/audit/fullAudit.js';
 import { logCronEvent } from '../../lib/cron/logCron.js';
 
+export const config = { runtime: 'nodejs', maxDuration: 300 };
+
 const MAINTENANCE_KEY = 'gsc_audit';
 
 // Self-lock so the dashboard's pre-flight guard (and a second audit) can see an
