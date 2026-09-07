@@ -1,4 +1,4 @@
-export const config = { runtime: 'nodejs', maxDuration: 800 };
+export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 import { authoriseCron, sendJson, londonWeekStartYmd } from '../../lib/ceo-weekly/shared.js';
 import { runCeoWeeklyRefresh } from '../../lib/ceo-weekly/refresh.js';
