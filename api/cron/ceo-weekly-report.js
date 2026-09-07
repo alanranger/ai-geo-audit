@@ -22,6 +22,7 @@ export default async function handler(req, res) {
       forceFailSafe: flag(req, 'forceFailSafe'),
       // Full Refresh just finished — skip Monday refresh-gate
       skipGate: flag(req, 'skipGate') || flag(req, 'fromFullRefresh'),
+      forceResend: flag(req, 'forceResend'),
       failReason: req.query?.failReason || req.body?.failReason || undefined
     });
     return sendJson(res, 200, result);
