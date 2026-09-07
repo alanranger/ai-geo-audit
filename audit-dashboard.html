@@ -13726,7 +13726,7 @@
                 </div>
               </div>
               <div style="font-size: 0.75rem; color: var(--dark-text-muted); text-align: right; max-width: 520px;">
-                <strong>Quick</strong> ~1 min · <strong>Standard</strong> ~weekly · <strong>Full</strong> ~monthly (DFS). Booking Sheet &amp; RF “Sync everything” stay on Revenue Funnel tab.
+                <strong>Quick</strong> ~1 min · <strong>Standard</strong> ~weekly · <strong>Full</strong> ~monthly (DFS) — ends with CEO weekly email. Booking Sheet &amp; RF “Sync everything” stay on Revenue Funnel tab.
               </div>
             </div>
           </div>
@@ -89540,7 +89540,8 @@ Confidence: ${c}`;
           { key: 'gsc_url_inspection', label: 'GSC URL Inspection refresh', tiers: ['full'], dependsOn: ['audit_scan'], runner: runGlobalStepGscUrlInspection },
           { key: 'domain_strength', label: 'Domain Strength snapshot (all batches)', tiers: ['full'], dependsOn: [], runner: runGlobalStepDomainStrength },
           { key: 'acquisition_channels', label: 'Acquisition channels (AI mentions + YouTube + GA4)', tiers: ['standard','full'], dependsOn: [], runner: runGlobalStepAcquisitionChannels },
-          { key: 'update_tasks', label: 'Update all tasks with latest data', tiers: ['quick','standard','full'], dependsOn: ['audit_scan'], runner: runGlobalStepUpdateTasks }
+          { key: 'update_tasks', label: 'Update all tasks with latest data', tiers: ['quick','standard','full'], dependsOn: ['audit_scan'], runner: runGlobalStepUpdateTasks },
+          { key: 'ceo_weekly_email', label: 'CEO weekly HTML email', tiers: ['full'], dependsOn: ['audit_scan', 'ranking_ai'], runner: runGlobalStepCeoWeeklyEmail }
         ];
       }
 
@@ -89879,6 +89880,24 @@ Confidence: ${c}`;
           debugLog(`[Global Run] [Update All Tasks] ✓ Verified: ${bulkUpdateResult.updated} tasks updated`, 'success');
         }
         try { await window.loadAllOptimisationTasks({ forceRefresh: true }); } catch (_e) { /* best-effort reload */ }
+      }
+
+      async function runGlobalStepCeoWeeklyEmail() {
+        debugLog('[Global Run] [CEO weekly email] Starting (last Full Refresh step)...', 'info');
+        const res = await fetch(apiUrl('/api/cron/ceo-weekly-report'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ skipGate: true, fromFullRefresh: true })
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(body?.message || body?.error || `ceo_weekly_report_${res.status}`);
+        }
+        if (body?.mode === 'fail_safe') {
+          throw new Error(body?.gate?.reason || 'ceo_weekly_fail_safe');
+        }
+        debugLog(`[Global Run] [CEO weekly email] ✓ Sent (${body?.send?.provider || body?.mode || 'ok'})`, 'success');
+        return body;
       }
 
       // --- orchestrator helpers -------------------------------------------------
@@ -90243,7 +90262,7 @@ Confidence: ${c}`;
         const tiers = [
           { id: 'quick', title: 'Quick', hint: '~1 min · no DataForSEO spend' },
           { id: 'standard', title: 'Standard run', hint: '~4–6 min · weekly' },
-          { id: 'full', title: 'Full refresh', hint: '15+ min · monthly · DFS credits' }
+          { id: 'full', title: 'Full refresh', hint: '~90 min · monthly · DFS · CEO email last' }
         ];
         const parts = tiers.map(t => {
           const steps = globalRunStepsForTier(t.id).map(s => '<li>' + globalRunEscHtml(s.label) + '</li>').join('');
