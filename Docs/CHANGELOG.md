@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-14] - CEO money section uses rolling 28d (not completed month)
+
+**Change:** Section B Sales headline + category drop/rise lines now use **Booking Sheet transactions, rolling 28 days vs prior 28 days** (non-JLR). Survival (£4,450) and narrative compare against that 28d total. Last completed calendar month remains in metrics for reference only — no longer the CEO email headline (Aug mid-Sep was useless for weekly trend).
+
+**Files:** `lib/ceo-weekly/metrics.js`, `lib/ceo-weekly/email.js`, `Docs/CHANGELOG.md`
+
+---
+
 ## [2026-09-14] - Monday Full Refresh = dashboard Full catalog + Ranking parity
 
 **Change:** Unattended Monday cron now walks the **same Full-tier step keys** as the dashboard Full Refresh button (`globalRunStepCatalog`), with matching endpoints/params (13-month revenue, GA4 refresh, RF summary/trust/seasonality, auto-optimise, DFS `action=full`, domain strength batches, acquisition channels, bulk update, CEO email). **Ranking & AI** no longer awaits `/api/cron/keyword-ranking-ai` monolith; it uses dashboard-parity ticks (`SERP batch 20` / `AI batch 10` / `depth: 50` / begin-day / preflight / no client locations map) across cron invokes so it cannot stall the stepper at 300s. Schedule widened to `*/15 0-4 * * 1` UTC (still finishes before 05:45 backup report).
