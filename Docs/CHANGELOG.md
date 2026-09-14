@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-14] - Monday Full Refresh = dashboard Full catalog + Ranking parity
+
+**Change:** Unattended Monday cron now walks the **same Full-tier step keys** as the dashboard Full Refresh button (`globalRunStepCatalog`), with matching endpoints/params (13-month revenue, GA4 refresh, RF summary/trust/seasonality, auto-optimise, DFS `action=full`, domain strength batches, acquisition channels, bulk update, CEO email). **Ranking & AI** no longer awaits `/api/cron/keyword-ranking-ai` monolith; it uses dashboard-parity ticks (`SERP batch 20` / `AI batch 10` / `depth: 50` / begin-day / preflight / no client locations map) across cron invokes so it cannot stall the stepper at 300s. Schedule widened to `*/15 0-4 * * 1` UTC (still finishes before 05:45 backup report).
+
+**Files:** `api/cron/ceo-weekly-full-refresh.js`, `lib/ceo-weekly/dashboard-full-catalog.js`, `lib/keyword-ranking/dashboard-parity-tick.js`, `vercel.json`, `Docs/CHANGELOG.md`
+
+---
+
 ## [2026-09-07] - CEO email sections D/E/F (Backlinks, Rankings, SEO health)
 
 **Change:** Append approved mock sections D · Backlinks & authority, E · Ranking changes, F · SEO health below C · The AI front. Live metrics from DFS tiles / keyword_rankings / Trad SEO evaluation cache + domain strength + GSC csv40d click movers. DA-band Δ and new DA≥50 dofollow list wire to prior Monday snapshot (shows “from next Monday” until ≥2 weeks).
