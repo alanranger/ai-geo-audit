@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-14] - CEO money section lists all 12 Booking Sheet categories
+
+**Change:** Section B now renders every sales category (Courses … Academy) for rolling 28d vs prior 28d, not just biggest drop/rise picks.
+
+**Files:** `lib/ceo-weekly/email.js`
+
+---
+
 ## [2026-09-14] - CEO money section uses rolling 28d (not completed month)
 
 **Change:** Section B Sales headline + category drop/rise lines now use **Booking Sheet transactions, rolling 28 days vs prior 28 days** (non-JLR). Survival (£4,450) and narrative compare against that 28d total. Last completed calendar month remains in metrics for reference only — no longer the CEO email headline (Aug mid-Sep was useless for weekly trend).
