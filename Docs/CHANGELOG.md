@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-14] - CEO money: drop Pick n Mix / Vouchers Out; add month pulse projection
+
+**Change:** Section B omits Pick n Mix Inc/Out and Gift Vouchers Out. Adds **Current Month Pulse** projected month-end (same Revenue Truth tile / `revenue-truth-summary`, non-JLR worst-case) with DEFCON miss vs survival.
+
+**Files:** `lib/ceo-weekly/metrics.js`, `lib/ceo-weekly/email.js`
+
+---
+
 ## [2026-09-14] - CEO money section lists all 12 Booking Sheet categories
 
 **Change:** Section B now renders every sales category (Courses … Academy) for rolling 28d vs prior 28d, not just biggest drop/rise picks.
