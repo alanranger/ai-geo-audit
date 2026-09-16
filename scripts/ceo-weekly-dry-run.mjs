@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
 import { londonWeekStartYmd } from '../lib/ceo-weekly/shared.js';
 import { runCeoWeeklyReport } from '../lib/ceo-weekly/report.js';
+import { DEFAULT_TIER_BANDS } from '../lib/revenue-truth-ui-core.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -83,7 +84,7 @@ async function main() {
   }, null, 2));
 
   if (dry.mode !== 'report' || !dry.numbers_included) throw new Error('DRY_RUN_REPORT_FAILED');
-  if (!dry.revenue_truth || dry.revenue_truth.survival !== 4450) {
+  if (!dry.revenue_truth || dry.revenue_truth.survival !== DEFAULT_TIER_BANDS.survival) {
     throw new Error('REVENUE_TRUTH_SURVIVAL_MISMATCH');
   }
   console.log(JSON.stringify({ phase: 'PASS' }, null, 2));

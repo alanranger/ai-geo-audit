@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-16] - Tier bands: survival £3,700 / comfortable £5,000 / thrive £6,000+
+
+**Change:** Reset monthly Revenue Truth / Pulse thresholds to Survival £3,700, Comfortable £5,000, Thrive £6,000+. Annual targets follow (×12). DEFCON GBP cutoffs now derive as 30% / 50% / 75% / 100% of the survival line so they stay aligned when the floor moves. Label set 16 Sep 2026.
+
+**Files:** `lib/revenue-truth-ui-core.mjs`, `lib/revenue-truth-current-month-pulse.mjs`, `lib/ceo-weekly/metrics.js`, `scripts/ceo-weekly-dry-run.mjs`, `test/revenue-truth-current-month-pulse.test.js`, `Docs/AGENT_ONBOARDING.md`
+
+---
+
 ## [2026-09-14] - CEO money: drop Pick n Mix / Vouchers Out; add month pulse projection
 
 **Change:** Section B omits Pick n Mix Inc/Out and Gift Vouchers Out. Adds **Current Month Pulse** projected month-end (same Revenue Truth tile / `revenue-truth-summary`, non-JLR worst-case) with DEFCON miss vs survival.
