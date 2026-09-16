@@ -69,7 +69,7 @@ that must never be conflated**:
   J48 for 2026 = £19,598.04). The dashboard headline MUST equal the
   figure the user reads on the Booking Sheet — anything else destroys
   trust on every glance.
-- **Tier-band comparison** (survival £3.7k / comfortable £5k / thrive £6k)
+- **Tier-band comparison** (survival £5k / comfortable £6k / thrive £7k)
   is also against `revenue_amount`, so "which tier am I in" matches the
   spreadsheet.
 - **Secondary breakdown line** = `operational_revenue` = D2C + B2B,

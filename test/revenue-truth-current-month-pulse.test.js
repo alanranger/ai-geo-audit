@@ -150,10 +150,11 @@ describe('revenue-truth current month pulse', () => {
   });
 
   it('DEFCON level colours follow green → red scale (% of survival)', () => {
-    assert.equal(computeDefcon(5000, bands.survival).colour, '#22c55e'); // ≥ survival
-    assert.equal(computeDefcon(3200, bands.survival).colour, '#a3c04a'); // 75–100%
-    assert.equal(computeDefcon(2200, bands.survival).colour, '#f59e0b'); // 50–75%
-    assert.equal(computeDefcon(1400, bands.survival).colour, '#ea580c'); // 30–50%
+    // survival £5k → cutoffs 1500 / 2500 / 3750 / 5000
+    assert.equal(computeDefcon(5500, bands.survival).colour, '#22c55e'); // ≥ survival
+    assert.equal(computeDefcon(4000, bands.survival).colour, '#a3c04a'); // 75–100%
+    assert.equal(computeDefcon(3000, bands.survival).colour, '#f59e0b'); // 50–75%
+    assert.equal(computeDefcon(2000, bands.survival).colour, '#ea580c'); // 30–50%
     assert.equal(computeDefcon(700, bands.survival).colour, '#dc2626');  // <30%
   });
 
@@ -212,9 +213,9 @@ describe('revenue-truth current month pulse', () => {
 
   it('classifies bands consistently', () => {
     assert.equal(classifyBand(900, bands), 'below_survival');
-    assert.equal(classifyBand(4000, bands), 'survival');
-    assert.equal(classifyBand(5500, bands), 'comfortable');
-    assert.equal(classifyBand(6500, bands), 'thrive');
+    assert.equal(classifyBand(5200, bands), 'survival');
+    assert.equal(classifyBand(6500, bands), 'comfortable');
+    assert.equal(classifyBand(7500, bands), 'thrive');
   });
 
   it('pulse rescue chips derive from live at-risk and rank high-margin tiers first', () => {

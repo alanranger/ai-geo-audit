@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-16] - Tier bands corrected to revenue: £5k / £6k / £7k
+
+**Change:** Previous £3.7k / £5k / £6k retune used GP figures by mistake. Monthly bands are now Survival £5,000 / Comfortable £6,000 / Thrive £7,000+ (annual ×12). DEFCON cutoffs still scale as 30/50/75/100% of survival.
+
+**Files:** `lib/revenue-truth-ui-core.mjs`, `test/revenue-truth-current-month-pulse.test.js`, `Docs/AGENT_ONBOARDING.md`
+
+---
+
 ## [2026-09-16] - Tier bands: survival £3,700 / comfortable £5,000 / thrive £6,000+
 
 **Change:** Reset monthly Revenue Truth / Pulse thresholds to Survival £3,700, Comfortable £5,000, Thrive £6,000+. Annual targets follow (×12). DEFCON GBP cutoffs now derive as 30% / 50% / 75% / 100% of the survival line so they stay aligned when the floor moves. Label set 16 Sep 2026.
