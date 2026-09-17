@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-17] - Pulse MTD truncated at 1000 booking-sheet rows
+
+**Change:** `revenue-truth-summary` `fetchTransactions` hit PostgREST’s default 1000-row page, dropping the newest bookings (incl. Dartmoor £787.50). Current Month Pulse paced from £1,471 instead of ~£2.5k headline MTD → bogus ~£2,596 projected. Paginate like findings.
+
+**Files:** `api/aigeo/revenue-truth-summary.js`
+
+---
+
 ## [2026-09-16] - Tier bands corrected to revenue: £5k / £6k / £7k
 
 **Change:** Previous £3.7k / £5k / £6k retune used GP figures by mistake. Monthly bands are now Survival £5,000 / Comfortable £6,000 / Thrive £7,000+ (annual ×12). DEFCON cutoffs still scale as 30/50/75/100% of survival.
