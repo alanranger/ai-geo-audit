@@ -177,13 +177,29 @@ async function fetchGp(supabase, propertyUrl) {
 }
 
 async function fetchTransactions(supabase, propertyUrl) {
-  const { data, error } = await supabase
-    .from('booking_sheet_transactions')
-    .select('year, txn_date, category_order, category_label, funding, amount, booking_source, channel, client_type, canonical_product, is_jlr, is_redemption')
-    .eq('property_url', propertyUrl)
-    .order('txn_date', { ascending: true });
-  if (error) throw error;
-  return (data || []).map(r => ({ ...r, month: monthOfIso(r.txn_date), amount: Number(r.amount), is_jlr: r.is_jlr === true, is_redemption: r.is_redemption === true }));
+  // PostgREST defaults to 1000 rows — paginate or Pulse/MTD truncates newest bookings.
+  const pageSize = 1000;
+  const out = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('booking_sheet_transactions')
+      .select('year, txn_date, category_order, category_label, funding, amount, booking_source, channel, client_type, canonical_product, is_jlr, is_redemption')
+      .eq('property_url', propertyUrl)
+      .order('txn_date', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    out.push(...(data || []));
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return out.map(r => ({
+    ...r,
+    month: monthOfIso(r.txn_date),
+    amount: Number(r.amount),
+    is_jlr: r.is_jlr === true,
+    is_redemption: r.is_redemption === true
+  }));
 }
 
 async function fetchCanonicalProducts(supabase) {
