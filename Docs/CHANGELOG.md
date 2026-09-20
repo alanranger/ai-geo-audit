@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-20] - Monday CEO email: stop stalling before send
+
+**Change:** Last two Mondays the overnight Full Refresh stuck mid-run (`ceo_monday_full_refresh` left `running` after GSC); morning email never fired and the only sends were afternoon manual Full Refresh (~14:26 / ~19:04 London). After **04:15 UTC** the stepper now jumps to the CEO email (still with numbers). Multi-tick Ranking/DFS abort after 12 continues. Backup `ceo-weekly-report` always `skipGate` so 05:45 UTC still delivers if Full never finished. Reset stalled maintenance row for a clean Mon 21 start.
+
+**Files:** `api/cron/ceo-weekly-full-refresh.js`, `api/cron/ceo-weekly-report.js`
+
+---
+
 ## [2026-09-17] - Pulse MTD truncated at 1000 booking-sheet rows
 
 **Change:** `revenue-truth-summary` `fetchTransactions` hit PostgREST’s default 1000-row page, dropping the newest bookings (incl. Dartmoor £787.50). Current Month Pulse paced from £1,471 instead of ~£2.5k headline MTD → bogus ~£2,596 projected. Paginate like findings.

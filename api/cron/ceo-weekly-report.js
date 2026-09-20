@@ -20,8 +20,9 @@ export default async function handler(req, res) {
       weekStart,
       dryRun: flag(req, 'dryRun'),
       forceFailSafe: flag(req, 'forceFailSafe'),
-      // Full Refresh (manual or Monday) — skip gate; always re-send so every Full produces an email
-      skipGate: flag(req, 'skipGate') || flag(req, 'fromFullRefresh'),
+      // Monday 05:45 backup + Full Refresh: never block on refresh gate (stalled Full was
+      // the last-two-Mondays failure mode). Still no-ops if already sent this week.
+      skipGate: true,
       forceResend: flag(req, 'forceResend') || flag(req, 'fromFullRefresh'),
       failReason: req.query?.failReason || req.body?.failReason || undefined,
       refreshLog: req.body?.refreshLog || null
