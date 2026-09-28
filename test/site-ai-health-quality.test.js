@@ -77,6 +77,19 @@ test('historical Surface/Top delta withheld before pin→city break', () => {
   assert.equal(prov.qualify, true);
 });
 
+test('Brand prior-month delta is not suppressed by Local geo method break', () => {
+  const brand = qualifyHistoricalScoreDelta('2026-09-02', { metric: 'brand' });
+  assert.equal(brand.withhold, false);
+  assert.equal(brand.reason, null);
+
+  const brandExplicit = qualifyHistoricalScoreDelta('2026-09-02', { applyGeoBreak: false });
+  assert.equal(brandExplicit.withhold, false);
+
+  const surface = qualifyHistoricalScoreDelta('2026-09-02', { metric: 'surface' });
+  assert.equal(surface.withhold, true);
+  assert.equal(surface.reason, 'geo_method_break');
+});
+
 test('stale snapshot fallback: empty-stack audit rows still exclude failed empties from mean', () => {
   // Mimic audit rankingAiData without capture_status on most rows + empty stubs
   const auditLike = [

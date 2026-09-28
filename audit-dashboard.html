@@ -69974,8 +69974,10 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       return `<span class="hero-mono-delta" data-dir="${dir}" title="${String(tip).replace(/"/g, '&quot;')}">${sign}${d}${qualifyBit}</span>`;
     }
 
-    function qualifyHeroDeltaAgainstPrior(priorDate, coverage) {
-      if (rankingIsPreGeoBreak(priorDate)) {
+    function qualifyHeroDeltaAgainstPrior(priorDate, coverage, opts = {}) {
+      // Geo break is SERP Local only — Brand (GBP+GSC) must keep genuine prior-month deltas.
+      const applyGeoBreak = opts.applyGeoBreak !== false;
+      if (applyGeoBreak && rankingIsPreGeoBreak(priorDate)) {
         return {
           withheld: true,
           note: `${GEO_METHOD_BREAK_NOTE} vs ${String(priorDate || '').slice(0, 10)} withheld.`,
@@ -69996,6 +69998,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
      * Number only when a STORED comparator exists that is (1) ≤ latest−26d,
      * (2) ≥ clean 151-kw baseline, (3) Brand ≥ GBP-formula era, (4) never re-derived.
      * Surface/Top withheld when prior is before pin→city geo break (2026-09-28).
+     * Brand is not geo-sensitive — keep real ~28d delta (e.g. +14).
      * Otherwise grey `baselining` until baseline+28d.
      */
     async function fetchHero28dDeltas(propertyUrl, current) {
@@ -70060,9 +70063,9 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           return null;
         };
 
-        const mk = (cur, prior, coverage) => {
+        const mk = (cur, prior, coverage, qualifyOpts = {}) => {
           if (cur == null || !prior) return hero28dBaseliningChip(availableFrom);
-          const q = qualifyHeroDeltaAgainstPrior(prior.date, coverage);
+          const q = qualifyHeroDeltaAgainstPrior(prior.date, coverage, qualifyOpts);
           if (q?.withheld) {
             return { withheld: true, note: q.note, prior: prior.score, priorDate: prior.date };
           }
@@ -70083,7 +70086,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         return {
           surface: mk(current?.surface, surfacePrior, cov),
           top: mk(current?.top, topPrior, cov),
-          brand: mk(current?.brand, brandPrior, null),
+          brand: mk(current?.brand, brandPrior, null, { applyGeoBreak: false }),
           priorDate: surfacePrior?.date || topPrior?.date || brandPrior?.date || null,
           availableFrom,
           ageCutoff,

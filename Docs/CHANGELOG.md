@@ -2,9 +2,17 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-28] - Site AI Health: Brand ~28d delta not geo-suppressed
+
+**Change:** Monopoly-tile geo pin→city **n/c** applies only to Surface/Top. Brand (GBP+GSC) keeps genuine prior-month comparison (e.g. **+14**). Regression from earlier quality-aware scorecard commit.
+
+**Files:** `lib/audit/heroScoreComparability.js`, `audit-dashboard.html`, `test/site-ai-health-quality.test.js`
+
+---
+
 ## [2026-09-28] - Site AI Health: quality-aware Surface/Top + withhold incomparable deltas
 
-**Change:** Site AI Health / Dashboard scorecard now shares the same quality-aware Surface Visibility + Top-of-Page rollups as Ranking (exclude incomplete/empty from means; coverage + provisional on tiles). Monopoly-tile ~28d deltas show **n/c** when prior is before pin→city break (`2026-09-28`). CEO weekly chips withhold the same Surface/Top WoW. `save-ranking-ai-summary` no longer wipes `ranking_ai_data.combinedRows` with `[]`. No new paid DFS — score 23 is real from stored keyword_rankings; honesty fix is uncertainty + comparability.
+**Change:** Site AI Health / Dashboard scorecard now shares the same quality-aware Surface Visibility + Top-of-Page rollups as Ranking (exclude incomplete/empty from means; coverage + provisional on tiles). Monopoly-tile ~28d deltas show **n/c** when prior is before pin→city break (`2026-09-28`) for **Surface/Top only** (Brand keeps real deltas). CEO weekly chips withhold the same Surface/Top WoW. `save-ranking-ai-summary` no longer wipes `ranking_ai_data.combinedRows` with `[]`. No new paid DFS — score 23 is real from stored keyword_rankings; honesty fix is uncertainty + comparability.
 
 **Files:** `lib/audit/surfaceScores.js`, `lib/audit/heroScoreComparability.js`, `lib/ceo-weekly/tabMetrics.js`, `api/supabase/save-ranking-ai-summary.js`, `audit-dashboard.html`, `test/site-ai-health-quality.test.js`
 
