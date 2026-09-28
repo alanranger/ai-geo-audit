@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-28] - Full Refresh: DFS before Ranking (CEO backlinks were stale)
+
+**Change:** Mon 28 overnight ran `sync_csv` + `audit_scan`, then Ranking burned until the 04:15 UTC email deadline and **deadline-skipped `dfs_full_index`** — DFS banner stayed on 14 Sep; CEO §D showed → 0. Reordered Full catalog (dashboard + Monday cron): **DFS full index + revenue/GA4/RF before Ranking**. GSC & Backlink Audit ≠ DFS index.
+
+**Files:** `lib/ceo-weekly/dashboard-full-catalog.js`, `audit-dashboard.html`
+
+---
+
 ## [2026-09-20] - Monday CEO email: stop stalling before send
 
 **Change:** Last two Mondays the overnight Full Refresh stuck mid-run (`ceo_monday_full_refresh` left `running` after GSC); morning email never fired and the only sends were afternoon manual Full Refresh (~14:26 / ~19:04 London). After **04:15 UTC** the stepper now jumps to the CEO email (still with numbers). Multi-tick Ranking/DFS abort after 12 continues. Backup `ceo-weekly-report` always `skipGate` so 05:45 UTC still delivers if Full never finished. Reset stalled maintenance row for a clean Mon 21 start.
