@@ -97,7 +97,8 @@ export default async function handler(req, res) {
         row.location_name = loc.location_name;
         row.location_unmapped = loc.unmapped === true;
       }
-      // Local-tier: always persist Coventry code (city-level — no GBP pin).
+      // Local-tier: persist verified GBP pin + Coventry code (primary series).
+      // Explicit city-code observations are preserved (never relabelled as pin).
       stampLocalCaptureOnRow(row);
       // Always stamp locked class (lookup-only).
       if (!row.keyword_class) {

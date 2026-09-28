@@ -201,12 +201,12 @@ async function runPreflight() {
     /Grid PARKED/.test(serpSrc)
       && !/fetchLocalGridSerp\(/.test(serpSrc)
       && /applyTrackedEmptySerpStubs/.test(refreshSrc),
-    'serp-rank-test city-level Local + refresh-core stubs'
+    'serp-rank-test GBP-pin Local + refresh-core stubs'
   );
   check(
     '4b prior fixes encoded',
     true,
-    'Coventry city Local (no GBP pin) + empty-SERP stubs + regional-money in VALID_CLASSES'
+    'Coventry GBP-pin Local (primary series) + empty-SERP stubs + regional-money in VALID_CLASSES'
   );
 
   const localKws = Object.values(locked.by)
@@ -214,10 +214,10 @@ async function runPreflight() {
     .map((r) => r.keyword);
   const localPf = preflightLocalCapture(localKws);
   check(
-    '4c every Local-tier keyword resolves Coventry location_code 9215523 (city, no pin)',
-    localPf.ok && localKws.length > 0 && localPf.pin == null && Number(localPf.location_code) === 9215523,
+    '4c every Local-tier keyword resolves Coventry code + verified GBP pin',
+    localPf.ok && localKws.length > 0 && !!localPf.pin && Number(localPf.location_code) === 9215523,
     localPf.ok
-      ? `code=${localPf.location_code} local=${localKws.length} pin=null`
+      ? `code=${localPf.location_code} local=${localKws.length} pin=${localPf.pin}`
       : `missing=${localPf.missingKeywords.slice(0, 8).join('|') || 'code'}`
   );
 }

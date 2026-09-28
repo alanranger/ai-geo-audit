@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-28] - Ranking reliability: restore GBP-pin series + bounded confirmation
+
+**Change:** Local weekly series restored to verified Coventry **GBP pin** (`52.3991769,-1.5937149,14z` + code 9215523) so history is comparable again. City-code-only remains a **separate** method (`coventry_city_code` / `local_city_code_v1`) — Sep28 city observations are never relabelled as pin. Observations store explicit `geo_method` + `method_version`. Significant worsenings from a comparable strong prior get **one** capped confirmation (not a full re-audit); conflicting results → `unconfirmed_unstable`, failed → `unknown`, with dated `last_confirmed_*` kept separate from current. Global per-run DFS attempt/cost caps + per-keyword confirm bound (env-configurable; defaults conservative). Shared across Ranking UI, Site AI Health presentation, Monday `dashboard-parity-tick`, refresh-keywords/cron, and CEO geo-withhold (city-only day only). **No paid DFS during this implement/test.** Fixture tests in `test/ranking-reliability.test.js`.
+
+**Files:** `lib/keyword-ranking/local-capture-preflight.js`, `dfs-serp-quality.js`, `rank-confirmation.js`, `dfs-spend-limits.js`, `load-rank-baselines.js`, `refresh-core.js`, `dashboard-parity-tick.js`, `api/aigeo/serp-rank-test.js`, `refresh-keywords.js`, `api/cron/keyword-ranking-ai.js`, `api/supabase/save-keyword-batch.js`, `lib/audit/heroScoreComparability.js`, `lib/ceo-weekly/tabMetrics.js`, `audit-dashboard.html`, `scripts/keyword-audit-gates.mjs`, `test/ranking-reliability.test.js`, related quality tests.
+
+---
+
 ## [2026-09-28] - Site AI Health: Brand ~28d delta not geo-suppressed
 
 **Change:** Monopoly-tile geo pin→city **n/c** applies only to Surface/Top. Brand (GBP+GSC) keeps genuine prior-month comparison (e.g. **+14**). Regression from earlier quality-aware scorecard commit.

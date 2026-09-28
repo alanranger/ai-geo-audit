@@ -66898,11 +66898,11 @@ Composite of four inputs — not the Surface Visibility dial score.`;
 
     const GEO_METHOD_BREAK_DATE = '2026-09-28';
     const GEO_METHOD_BREAK_NOTE =
-      'Local geo method changed pin→city on 2026-09-28 — historical Local deltas are not comparable.';
+      'Local pin series restored. Do not compare to 2026-09-28 city-code-only Local ranks; city-wide is a separate method.';
 
     function rankingIsPreGeoBreak(dateStr) {
       if (!dateStr) return false;
-      return String(dateStr).slice(0, 10) < GEO_METHOD_BREAK_DATE;
+      return String(dateStr).slice(0, 10) === GEO_METHOD_BREAK_DATE;
     }
 
     function summarizeRankingCaptureCoverage(rows) {
@@ -69997,7 +69997,8 @@ Composite of four inputs — not the Surface Visibility dial score.`;
      * Honest ~28d hero Monopoly deltas (Surface / Top / Brand).
      * Number only when a STORED comparator exists that is (1) ≤ latest−26d,
      * (2) ≥ clean 151-kw baseline, (3) Brand ≥ GBP-formula era, (4) never re-derived.
-     * Surface/Top withheld when prior is before pin→city geo break (2026-09-28).
+     * Surface/Top withheld when prior audit is the city-code-only Local day (2026-09-28).
+     * Pin series history (pre-Sep28 and post-restore) is comparable again.
      * Brand is not geo-sensitive — keep real ~28d delta (e.g. +14).
      * Otherwise grey `baselining` until baseline+28d.
      */
@@ -70833,7 +70834,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         deltaEl.textContent = opts.geoBreakNote
           || `${GEO_METHOD_BREAK_NOTE} Snapshot comparison vs ${String(previousAuditDate || '').slice(0, 10) || 'earlier audit'} withheld.`;
         deltaEl.setAttribute('data-dir', 'flat');
-        deltaEl.title = 'Pin→city Local method break on 2026-09-28. Headline delta is not a real ranking movement.';
+        deltaEl.title = '2026-09-28 city-code-only Local day is not comparable to the GBP-pin Local series.';
         return;
       }
       if (typeof previousScore !== 'number') {
@@ -72581,6 +72582,54 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           throw pfErr;
         }
 
+        // Comparable pin-series baselines for bounded confirmation (read-only; no DFS).
+        // Prefer last known pin audit (2026-09-21) — never use Sep28 city-only as pin baseline.
+        let rankingBaselines = {};
+        if (propertyUrl) {
+          try {
+            const pinDates = ['2026-09-21', '2026-09-14', '2026-08-31'];
+            let priorRows = [];
+            for (const d of pinDates) {
+              const baseRes = await fetch(
+                apiUrl(`/api/supabase/get-keyword-rankings?propertyUrl=${encodeURIComponent(propertyUrl)}&auditDate=${d}&_=${Date.now()}`),
+                { cache: 'no-store' }
+              );
+              const baseJson = await baseRes.json().catch(() => ({}));
+              const rows = Array.isArray(baseJson?.data) ? baseJson.data
+                : (Array.isArray(baseJson?.keywords) ? baseJson.keywords
+                  : (Array.isArray(baseJson?.rows) ? baseJson.rows : []));
+              if (rows.length) { priorRows = rows; break; }
+            }
+            for (const row of priorRows) {
+              if (!row?.keyword || row.best_rank_group == null) continue;
+              const geo = row?.serp_features?.geo_method
+                || (row.location_coordinate ? 'gbp_pin'
+                  : (Number(row.location_code) === 2826 ? 'uk_national' : null));
+              if (geo === 'coventry_city_code') continue;
+              const coord = row.location_coordinate
+                || (Number(row.location_code) === 9215523 ? '52.3991769,-1.5937149,14z' : null);
+              rankingBaselines[row.keyword] = {
+                keyword: row.keyword,
+                audit_date: row.audit_date,
+                best_rank_group: row.best_rank_group,
+                best_rank_absolute: row.best_rank_absolute,
+                best_url: row.best_url,
+                location_code: row.location_code,
+                location_coordinate: coord,
+                serp_features: {
+                  ...(row.serp_features || {}),
+                  capture_status: row.serp_features?.capture_status || 'complete_ranked',
+                  geo_method: geo || (coord ? 'gbp_pin' : (Number(row.location_code) === 2826 ? 'uk_national' : 'gbp_pin')),
+                },
+              };
+            }
+            debugLog(`✓ Loaded ${Object.keys(rankingBaselines).length} confirmation baselines (pin-comparable)`, 'info');
+          } catch (baseErr) {
+            debugLog(`⚠ baseline load skipped: ${baseErr.message}`, 'warn');
+            rankingBaselines = {};
+          }
+        }
+
         // Batch keywords if needed
         allSerpResults = [];
         const batches = [];
@@ -72613,7 +72662,17 @@ Composite of four inputs — not the Surface Visibility dial score.`;
             const serpRes = await fetch(mod.SERP_RANK_ENDPOINT, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ keywords: batch, depth: 50 })
+              body: JSON.stringify({
+                keywords: batch,
+                depth: 50,
+                baselines: Object.keys(rankingBaselines).length ? (() => {
+                  const subset = {};
+                  for (const kw of batch) {
+                    if (rankingBaselines[kw]) subset[kw] = rankingBaselines[kw];
+                  }
+                  return Object.keys(subset).length ? subset : undefined;
+                })() : undefined,
+              })
             });
             debugLog(`📊 SERP response status for batch ${batchIdx + 1}: ${serpRes.status}`, 'info');
             
@@ -72776,10 +72835,15 @@ Composite of four inputs — not the Surface Visibility dial score.`;
               if (mapped.dfs_cost != null) feats.dfs_cost = mapped.dfs_cost;
               if (mapped.se_results_count != null) feats.se_results_count = mapped.se_results_count;
               feats.serp_depth_requested = mapped.serp_depth != null ? Number(mapped.serp_depth) : 50;
-              if (Number(mapped.location_code) === 9215523 && !mapped.location_coordinate) {
-                feats.geo_method = 'coventry_city_code';
+              if (mapped.location_coordinate || (feats.geo_method === 'gbp_pin')) {
+                feats.geo_method = 'gbp_pin';
+                feats.method_version = feats.method_version || 'local_gbp_pin_v1';
+              } else if (Number(mapped.location_code) === 9215523 && !mapped.location_coordinate) {
+                feats.geo_method = feats.geo_method || 'coventry_city_code';
+                feats.method_version = feats.method_version || 'local_city_code_v1';
               } else if (Number(mapped.location_code) === 2826) {
                 feats.geo_method = 'uk_national';
+                feats.method_version = feats.method_version || 'national_uk_v1';
               }
               if (captureStatus === 'empty') {
                 feats.stub = true;
@@ -77065,6 +77129,16 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         const when = feats.last_good_at ? new Date(feats.last_good_at).toLocaleString() : 'prior';
         tipParts.push(`Last good organic #${feats.last_good_rank_group} (${when}) — not current`);
       }
+      if (feats.last_confirmed_rank_group != null) {
+        const when = feats.last_confirmed_at
+          ? (String(feats.last_confirmed_at).length <= 10
+            ? feats.last_confirmed_at
+            : new Date(feats.last_confirmed_at).toLocaleString())
+          : 'prior';
+        tipParts.push(`Last confirmed #${feats.last_confirmed_rank_group} (${when}) — not current`);
+      }
+      if (feats.confirmation_state) tipParts.push(`Confirm: ${feats.confirmation_state}`);
+      if (feats.geo_method) tipParts.push(`Method: ${feats.geo_method}${feats.method_version ? `/${feats.method_version}` : ''}`);
       timeEl.title = tipParts.join(' · ');
       if (rankingCaptureFailed(row) || status === 'legacy_unverified') timeEl.style.color = '#b45309';
       wrap.appendChild(timeEl);
@@ -78502,6 +78576,11 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           if (feats.last_good_rank_group != null) {
             tip += ` Last good #${feats.last_good_rank_group}${feats.last_good_at ? ` on ${new Date(feats.last_good_at).toLocaleString()}` : ''} (not current).`;
           }
+          if (feats.last_confirmed_rank_group != null) {
+            tip += ` Last confirmed #${feats.last_confirmed_rank_group}${feats.last_confirmed_at ? ` on ${feats.last_confirmed_at}` : ''} (not current).`;
+          }
+          if (feats.confirmation_state) tip += ` Confirm: ${feats.confirmation_state}.`;
+          if (feats.geo_method) tip += ` Method: ${feats.geo_method}.`;
           tdUrl.title = tip;
         } else if (rankingCaptureStatus(row) === 'complete_no_match') {
           tdUrl.textContent = `Not in top ${rankingOrganicDepth(row)}`;

@@ -232,9 +232,9 @@ test('coverage summary + geo break date', () => {
   assert.equal(cov.failed, 2);
   assert.equal(cov.provisional, true);
   assert.match(formatCaptureCoverageLine(cov), /2 measured of 4 tracked/);
-  assert.equal(isPreGeoMethodBreakDate('2026-09-14'), true);
-  assert.equal(isPreGeoMethodBreakDate(GEO_METHOD_BREAK_DATE), false);
-  assert.equal(isPreGeoMethodBreakDate('2026-09-28'), false);
+  assert.equal(isPreGeoMethodBreakDate('2026-09-14'), false);
+  assert.equal(isPreGeoMethodBreakDate(GEO_METHOD_BREAK_DATE), true);
+  assert.equal(isPreGeoMethodBreakDate('2026-09-28'), true);
 });
 
 test('Top-of-Page rollup excludes empty/incomplete from mean and keeps coverage', () => {

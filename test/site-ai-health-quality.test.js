@@ -57,15 +57,20 @@ test('Site AI Health presentation: mixed legacy/new/failed is provisional with c
   assert.match(present.coverageLine, /provisional/);
 });
 
-test('historical Surface/Top delta withheld before pin→city break', () => {
-  const q = qualifyHistoricalScoreDelta('2026-09-14', {
+test('historical Surface/Top delta withheld only for city-only Local day', () => {
+  const q = qualifyHistoricalScoreDelta('2026-09-28', {
     coverage: { provisional: true, tracked: 155, measurable: 152, failed: 3 },
   });
   assert.equal(q.withhold, true);
   assert.equal(q.reason, 'geo_method_break');
   assert.ok(String(q.note || '').toLowerCase().includes('pin'));
 
-  const ok = qualifyHistoricalScoreDelta(GEO_METHOD_BREAK_DATE, {
+  const pinHistory = qualifyHistoricalScoreDelta('2026-09-14', {
+    coverage: { provisional: false, tracked: 10, measurable: 10, failed: 0, legacy_unverified: 0 },
+  });
+  assert.equal(pinHistory.withhold, false);
+
+  const ok = qualifyHistoricalScoreDelta('2026-09-29', {
     coverage: { provisional: false, tracked: 10, measurable: 10, failed: 0, legacy_unverified: 0 },
   });
   assert.equal(ok.withhold, false);
@@ -78,14 +83,14 @@ test('historical Surface/Top delta withheld before pin→city break', () => {
 });
 
 test('Brand prior-month delta is not suppressed by Local geo method break', () => {
-  const brand = qualifyHistoricalScoreDelta('2026-09-02', { metric: 'brand' });
+  const brand = qualifyHistoricalScoreDelta(GEO_METHOD_BREAK_DATE, { metric: 'brand' });
   assert.equal(brand.withhold, false);
   assert.equal(brand.reason, null);
 
-  const brandExplicit = qualifyHistoricalScoreDelta('2026-09-02', { applyGeoBreak: false });
+  const brandExplicit = qualifyHistoricalScoreDelta(GEO_METHOD_BREAK_DATE, { applyGeoBreak: false });
   assert.equal(brandExplicit.withhold, false);
 
-  const surface = qualifyHistoricalScoreDelta('2026-09-02', { metric: 'surface' });
+  const surface = qualifyHistoricalScoreDelta(GEO_METHOD_BREAK_DATE, { metric: 'surface' });
   assert.equal(surface.withhold, true);
   assert.equal(surface.reason, 'geo_method_break');
 });

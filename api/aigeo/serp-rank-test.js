@@ -21,13 +21,22 @@
 import { extractCitationsFromDfsResult } from '../../lib/ai-citation-extract.js';
 import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
 import { getBusinessDevice } from '../../lib/keyword-ranking/business-location.js';
-import { preflightLocalCapture } from '../../lib/keyword-ranking/local-capture-preflight.js';
+import {
+  preflightLocalCapture,
+  resolveLocalCaptureFields,
+} from '../../lib/keyword-ranking/local-capture-preflight.js';
 import {
   isIncompleteSerpCrawl,
   SERP_CRAWL_INCOMPLETE_ERROR,
   buildSerpCaptureFeatures,
   CAPTURE_STATUS,
 } from '../../lib/keyword-ranking/dfs-serp-quality.js';
+import { createDfsSpendTracker } from '../../lib/keyword-ranking/dfs-spend-limits.js';
+import {
+  isSignificantWorsening,
+  resolveConfirmationState,
+  buildConfirmationFeatures,
+} from '../../lib/keyword-ranking/rank-confirmation.js';
 import { extractSerpSurfaces } from '../../lib/keyword-ranking/serp-surface-extract.js';
 import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
 // Grid PARKED (Alan 2026-07-16): do not import fetchLocalGridSerp into production refresh.
@@ -343,14 +352,15 @@ function isDfsFatalStatus(statusCode) {
 function buildEmptySerpResult(keyword, depth, errorMessage, errorCode, locationName = null) {
   const classInfo = resolveKeywordClass(keyword);
   const loc = resolveTrackingLocation(keyword);
+  const capture = resolveLocalCaptureFields(keyword);
   const isLocal = loc.tier === 'L';
   const errMsg = errorMessage || 'DataForSEO request failed';
   const emptyStatus = /empty SERP/i.test(errMsg) ? CAPTURE_STATUS.EMPTY : CAPTURE_STATUS.ERROR;
   return {
     keyword,
     location_name: locationName || loc.location_name,
-    location_code: loc.location_code ?? null,
-    location_coordinate: null,
+    location_code: capture.location_code ?? loc.location_code ?? null,
+    location_coordinate: isLocal ? (capture.location_coordinate || null) : null,
     device: isLocal ? getBusinessDevice() : 'desktop',
     os: 'windows',
     best_rank_group: null,
@@ -367,8 +377,10 @@ function buildEmptySerpResult(keyword, depth, errorMessage, errorCode, locationN
       crawl_incomplete: true,
       organic_count: 0,
       serp_depth: depth,
-      location_code: loc.location_code,
-      location_coordinate: null,
+      location_code: capture.location_code ?? loc.location_code,
+      location_coordinate: isLocal ? (capture.location_coordinate || null) : null,
+      geo_method: capture.geo_method || null,
+      method_version: capture.method_version || null,
       error: errMsg,
       checked_at: new Date().toISOString(),
       best_rank_group: null,
@@ -412,11 +424,19 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
   const isLocalTier = opts.tier === 'L';
   const device = isLocalTier ? getBusinessDevice() : 'desktop';
   const os = device === 'desktop' ? 'windows' : 'android';
-  // City-level Local (Coventry code). Only pass coordinate when caller opts in
-  // (e.g. parked grid tooling) — ranking audits must not auto-attach GBP pin.
-  const locationCoordinate = opts.location_coordinate != null && opts.location_coordinate !== ''
-    ? opts.location_coordinate
-    : null;
+  // Primary Local series = verified GBP pin. City-code only when caller opts in
+  // (forceCityCode / explicit null coordinate with geo_method city).
+  const locationCoordinate = Object.prototype.hasOwnProperty.call(opts, 'location_coordinate')
+    ? (opts.location_coordinate || null)
+    : (isLocalTier ? (resolveLocalCaptureFields(keyword).location_coordinate || null) : null);
+  const geoMethod = opts.geo_method
+    || (isLocalTier
+      ? (locationCoordinate ? 'gbp_pin' : 'coventry_city_code')
+      : null);
+  const methodVersion = opts.method_version
+    || (geoMethod === 'gbp_pin'
+      ? 'local_gbp_pin_v1'
+      : (geoMethod === 'coventry_city_code' ? 'local_city_code_v1' : (locationCode === 2826 ? 'national_uk_v1' : null)));
 
   try {
     const taskPayload = {
@@ -580,6 +600,8 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
       serp_depth: depth,
       location_code: locationCode,
       location_coordinate: locationCoordinate,
+      geo_method: geoMethod,
+      method_version: methodVersion,
       error: serpResult.error || null,
       checked_at: new Date().toISOString(),
       best_rank_group: bestRankGroup,
@@ -672,13 +694,17 @@ export default async function handler(req, res) {
     return;
   }
 
-  // Pre-flight: every Local-tier keyword must resolve Coventry city location_code
+  // Pre-flight: every Local-tier keyword must resolve verified GBP pin + Coventry code
   // before any DataForSEO spend (dashboard can also POST preflight_only: true).
-  const localPreflight = preflightLocalCapture(keywords);
+  // Opt-in city-code series via force_city_code — never the default weekly path.
+  const forceCityCode = body?.force_city_code === true
+    || /^(1|true|yes)$/i.test(String(req.query.force_city_code || ''));
+  const localPreflight = preflightLocalCapture(keywords, { forceCityCode });
   if (body?.preflight_only === true || /^(1|true|yes)$/i.test(String(req.query.preflight_only || ''))) {
     return res.status(localPreflight.ok ? 200 : 400).json({
       status: localPreflight.ok ? 'ok' : 'error',
       preflight: localPreflight,
+      spend_limits: createDfsSpendTracker().snapshot(),
       meta: { generatedAt: new Date().toISOString() },
     });
   }
@@ -729,13 +755,23 @@ export default async function handler(req, res) {
   // (SPA rewrite served HTML for the locked JSON, then the API honoured it).
   const resolveLoc = (keyword) => {
     const resolved = resolveTrackingLocation(keyword);
+    const capture = resolveLocalCaptureFields(keyword, { forceCityCode });
     return {
       location_name: resolved.location_name,
-      location_code: resolved.location_code,
+      location_code: capture.location_code ?? resolved.location_code,
+      location_coordinate: capture.location_coordinate,
       tier: resolved.tier,
       location_unmapped: resolved.unmapped === true,
+      geo_method: capture.geo_method,
+      method_version: capture.method_version,
     };
   };
+
+  // Optional comparable baselines for confirmation (keyword → prior row).
+  const baselinesIn = (body?.baselines && typeof body.baselines === 'object')
+    ? body.baselines
+    : {};
+  const spend = createDfsSpendTracker();
 
   // Declared outside try so mergeVolume can close over it (const inside try is block-scoped).
   let volumeByKeyword = {};
@@ -755,19 +791,79 @@ export default async function handler(req, res) {
     };
   };
 
-  // Coventry city-level Local SERP. Retry thin/incomplete DFS crawls up to 2 times
-  // (depth:50 sometimes returns page-1-only / $0.002 degraded SERPs as 20000).
+  const markIncompleteResult = (result) => {
+    if (!result || result.fatal) return result;
+    if (!(
+      result.crawl_incomplete
+      || !Array.isArray(result.serp_surface_stack)
+      || result.serp_surface_stack.length === 0
+    )) {
+      return result;
+    }
+    result.crawl_incomplete = true;
+    result.error = result.error || SERP_CRAWL_INCOMPLETE_ERROR;
+    result.best_rank_group = null;
+    result.best_rank_absolute = null;
+    result.best_url = null;
+    result.best_title = null;
+    const emptyStack = !Array.isArray(result.serp_surface_stack) || result.serp_surface_stack.length === 0;
+    result.serp_features = buildSerpCaptureFeatures(result.serp_features, {
+      capture_status: emptyStack ? CAPTURE_STATUS.EMPTY : CAPTURE_STATUS.INCOMPLETE,
+      crawl_incomplete: true,
+      organic_count: result.organic_count ?? 0,
+      dfs_cost: result.dfs_cost ?? null,
+      se_results_count: result.se_results_count ?? null,
+      serp_depth: depth,
+      location_code: result.location_code,
+      location_coordinate: result.location_coordinate,
+      geo_method: result.serp_features?.geo_method || locGeoFallback(result),
+      method_version: result.serp_features?.method_version || null,
+      error: result.error,
+      checked_at: new Date().toISOString(),
+      best_rank_group: null,
+      best_rank_absolute: null,
+      serp_surface_stack: result.serp_surface_stack,
+    });
+    return result;
+  };
+
+  function locGeoFallback(result) {
+    if (result?.location_coordinate) return 'gbp_pin';
+    if (Number(result?.location_code) === 9215523) return 'coventry_city_code';
+    if (Number(result?.location_code) === 2826) return 'uk_national';
+    return null;
+  }
+
+  // Primary Local = GBP pin. Thin retries reuse the same capture path.
+  // Significant worsenings get at most one bounded confirmation (spend-capped).
   const fetchOneKeyword = async (keyword, loc) => {
     const opts = {
       expandAiOverview,
       location_name: loc.location_name,
       location_code: loc.location_code,
+      location_coordinate: loc.location_coordinate,
       tier: loc.tier,
+      geo_method: loc.geo_method,
+      method_version: loc.method_version,
     };
-    const maxAttempts = 3; // 1 initial + 2 retries
+    const maxThin = spend.limits.thin_max_attempts;
     let result = null;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    for (let attempt = 1; attempt <= maxThin; attempt++) {
+      const gate = spend.canAttempt();
+      if (!gate.ok) {
+        if (!result) {
+          result = buildEmptySerpResult(
+            keyword,
+            depth,
+            `Aborted: ${gate.reason}`,
+            null,
+            loc.location_name
+          );
+        }
+        break;
+      }
       result = await fetchSerpForKeyword(keyword, auth, targetRoot, depth, opts);
+      spend.recordAttempt(result?.dfs_cost);
       if (result?.fatal) break;
       const incomplete = result?.crawl_incomplete === true
         || !Array.isArray(result?.serp_surface_stack)
@@ -781,44 +877,48 @@ export default async function handler(req, res) {
           error: result?.error,
         }));
       if (!incomplete) break;
-      if (attempt < maxAttempts) {
+      if (attempt < maxThin) {
         console.warn(
           `[Handler] Incomplete DFS crawl for "${keyword}" `
           + `(organic=${result?.organic_count ?? 0}, cost=${result?.dfs_cost ?? 'n/a'}, `
-          + `se_results=${result?.se_results_count ?? 'n/a'}) — retry ${attempt}/${maxAttempts - 1}`
+          + `se_results=${result?.se_results_count ?? 'n/a'}) — retry ${attempt}/${maxThin - 1}`
         );
       }
     }
-    if (result && !result.fatal && (
-      result.crawl_incomplete
-      || !Array.isArray(result.serp_surface_stack)
-      || result.serp_surface_stack.length === 0
-    )) {
-      result.crawl_incomplete = true;
-      result.error = result.error || SERP_CRAWL_INCOMPLETE_ERROR;
-      // Do not present thin/empty crawls as confident unranked.
-      result.best_rank_group = null;
-      result.best_rank_absolute = null;
-      result.best_url = null;
-      result.best_title = null;
-      const emptyStack = !Array.isArray(result.serp_surface_stack) || result.serp_surface_stack.length === 0;
-      result.serp_features = buildSerpCaptureFeatures(result.serp_features, {
-        capture_status: emptyStack ? CAPTURE_STATUS.EMPTY : CAPTURE_STATUS.INCOMPLETE,
-        crawl_incomplete: true,
-        organic_count: result.organic_count ?? 0,
-        dfs_cost: result.dfs_cost ?? null,
-        se_results_count: result.se_results_count ?? null,
-        serp_depth: depth,
-        location_code: result.location_code,
-        location_coordinate: result.location_coordinate,
-        error: result.error,
-        checked_at: new Date().toISOString(),
-        best_rank_group: null,
-        best_rank_absolute: null,
-        serp_surface_stack: result.serp_surface_stack,
+    result = markIncompleteResult(result);
+
+    const baselineRaw = baselinesIn[keyword] || baselinesIn[normalizeKeyword(keyword)] || null;
+    let confirmation = null;
+    let confirmCount = 0;
+    if (baselineRaw && result && !result.fatal && isSignificantWorsening(baselineRaw, result)) {
+      const gate = spend.canConfirm(confirmCount);
+      if (gate.ok) {
+        spend.recordConfirm();
+        confirmCount += 1;
+        confirmation = await fetchSerpForKeyword(keyword, auth, targetRoot, depth, opts);
+        spend.recordAttempt(confirmation?.dfs_cost);
+        confirmation = markIncompleteResult(confirmation);
+      }
+    }
+
+    const budgetExhausted = !!spend.snapshot().stopped_reason
+      || (baselineRaw && isSignificantWorsening(baselineRaw, result) && !confirmation);
+    const resolved = resolveConfirmationState(baselineRaw, result, confirmation, {
+      budgetExhausted: budgetExhausted && !confirmation,
+    });
+    // Current observation = confirmation when present (latest), else primary.
+    // Never pick the "best" of the two.
+    const current = confirmation && !confirmation.fatal ? confirmation : result;
+    if (current?.serp_features) {
+      current.serp_features = buildConfirmationFeatures(current.serp_features, {
+        state: resolved.state,
+        baseline: baselineRaw,
+        primary: result,
+        confirmation,
+        budgetExhausted: resolved.state === 'exhausted_budget',
       });
     }
-    return result;
+    return current;
   };
 
   try {
@@ -859,7 +959,7 @@ export default async function handler(req, res) {
       const batchPromises = batch.map(async (keyword) => {
         try {
           const loc = resolveLoc(keyword);
-          // Coventry city-level Local — grid PARKED (no fetchLocalGridSerp).
+          // Local GBP-pin series — grid PARKED (no fetchLocalGridSerp).
           const result = await fetchOneKeyword(keyword, loc);
           const mergedResult = mergeVolume(keyword, result, loc);
           console.log(`[VOL MAP] For row keyword "${keyword}" ⇒ search_volume=${mergedResult.search_volume ?? 'none'}`);
@@ -1009,6 +1109,8 @@ export default async function handler(req, res) {
         dfs_fatal: dfsFatalHit,
         dfs_fatal_reason: dfsFatalReason,
       },
+      spend_limits: spend.snapshot(),
+      preflight: localPreflight,
       per_keyword: perKeyword,
     });
   } catch (err) {

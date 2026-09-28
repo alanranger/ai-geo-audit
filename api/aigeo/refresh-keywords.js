@@ -106,7 +106,13 @@ export default async function handler(req, res) {
     // a single batch is always enough, so concurrency=1 / batchSize=MAX_BATCH
     // keeps the call profile predictable.
     const [serpRows, aiRows] = await Promise.all([
-      fetchSerpRows(baseUrl, keywords, { batchSize: MAX_BATCH, concurrency: 1, depth }),
+      fetchSerpRows(baseUrl, keywords, {
+        batchSize: MAX_BATCH,
+        concurrency: 1,
+        depth,
+        propertyUrl,
+        auditDate,
+      }),
       fetchAiRows(baseUrl, keywords, { batchSize: MAX_BATCH, concurrency: 1 })
     ]);
 

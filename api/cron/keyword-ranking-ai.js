@@ -147,7 +147,12 @@ export default async function handler(req, res) {
     // Empty SERP rows almost always mean DFS billing/credit failure; retrying
     // with smaller batches just fires the same expensive requests 3 more times
     // ($50-70 in credits on 2026-04-22). One pass, then surface the error.
-    const serpRows = await fetchSerpRows(baseUrl, keywords, { batchSize: 20, concurrency: 4 });
+    const serpRows = await fetchSerpRows(baseUrl, keywords, {
+      batchSize: 20,
+      concurrency: 4,
+      propertyUrl,
+      auditDate: nowIso.slice(0, 10),
+    });
     const aiRows = await fetchAiRows(baseUrl, keywords, { batchSize: 10, concurrency: 4 });
     const combinedRows = buildCombinedRows(serpRows, aiRows);
     if (!combinedRows.length) {
