@@ -7554,6 +7554,21 @@
       letter-spacing: 0.03em;
       text-transform: lowercase;
     }
+    .hero-mono-delta[data-dir="withheld"] {
+      color: #92400e;
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: lowercase;
+    }
+    .hero-mono-coverage {
+      margin-top: 0.45rem;
+      font-size: 0.68rem;
+      line-height: 1.35;
+      color: #92400e;
+      font-weight: 600;
+      text-align: left;
+    }
   </style>
 </head>
 <body>
@@ -49603,6 +49618,10 @@
       const heroRowsReady = Array.isArray(rankingRowsForHero) && rankingRowsForHero.length > 0;
       const surfaceVisibilityHero = heroRowsReady ? computeSurfaceVisibilityRollup(rankingRowsForHero) : null;
       const topOfPageHero = heroRowsReady ? computeTopOfPageRollup(rankingRowsForHero) : null;
+      const heroCoverage = surfaceVisibilityHero?.coverage
+        || topOfPageHero?.coverage
+        || (heroRowsReady ? summarizeRankingCaptureCoverage(rankingRowsForHero) : null);
+      const heroProvisional = !!(surfaceVisibilityHero?.provisional || topOfPageHero?.provisional || heroCoverage?.provisional);
       const heroSurfaceScore = heroRowsReady ? Math.round(Number(surfaceVisibilityHero?.overall) || 0) : null;
       const heroTopOfPageScore = heroRowsReady ? Math.round(Number(topOfPageHero?.overall) || 0) : null;
       const heroSurfaceDisplay = heroSurfaceScore == null ? '—' : String(heroSurfaceScore);
@@ -49611,7 +49630,8 @@
       const heroTopOutOf = heroTopOfPageScore == null ? '—' : `${heroTopOfPageScore}/100`;
       const heroSurfaceRag = heroSurfaceScore == null ? 'amber' : surfaceRagClass(heroSurfaceScore);
       const heroTopRag = heroTopOfPageScore == null ? 'amber' : topOfPageRagClass(heroTopOfPageScore);
-      debugLog(`Phase 1 hero: Surface visibility=${heroSurfaceDisplay}, Top-of-Page=${heroTopDisplay}, rows=${rankingRowsForHero.length}`, 'info');
+      const heroCoverageLine = heroCoverage ? formatRankingCaptureCoverageLine(heroCoverage) : '';
+      debugLog(`Phase 1 hero: Surface visibility=${heroSurfaceDisplay}, Top-of-Page=${heroTopDisplay}, rows=${rankingRowsForHero.length}, provisional=${heroProvisional}`, 'info');
       // Visibility lever = surface-aware rollup (not classic posScore)
       if (heroRowsReady && surfaceVisibilityHero) {
         const localMoney = surfaceVisibilityHero.byClass?.['local-money']?.score;
@@ -49622,6 +49642,8 @@
           local: localMoney,
           national: nationalMoney,
           byClass: surfaceVisibilityHero.byClass,
+          coverage: heroCoverage,
+          provisional: heroProvisional,
           source: 'surface'
         };
         if (window.latestAuditScores && typeof window.latestAuditScores === 'object') {
@@ -49637,12 +49659,16 @@
         surfaceVisibilityNational: surfaceVisibilityHero?.byClass?.['national-money']?.score,
         topOfPage: heroTopOfPageScore,
         surfaceRag: heroSurfaceRag,
+        coverage: heroCoverage,
+        provisional: heroProvisional,
+        coverageLine: heroCoverageLine,
       });
       if (surfaceOutcomes?.biggestGap) {
         debugLog(`Phase 2 outcomes: ${surfaceOutcomes.biggestGap.text}`, 'info');
       }
       window.__overviewHeroSurface = heroSurfaceScore;
       window.__overviewHeroTopOfPage = heroTopOfPageScore;
+      window.__overviewHeroCoverage = heroCoverage;
       window.__overviewSurfaceOutcomes = surfaceOutcomes;
 
       // ~28d Monopoly-tile deltas (Surface/Top from keyword_rankings; Brand from audit history)
@@ -49659,6 +49685,8 @@
           surface: heroSurfaceScore,
           top: heroTopOfPageScore,
           brand: heroBrandScoreForDelta,
+          coverage: heroCoverage,
+          provisional: heroProvisional,
         });
       } catch (_heroDeltaErr) {
         debugLog(`Hero 28d deltas: ${_heroDeltaErr?.message || _heroDeltaErr}`, 'warn');
@@ -49955,17 +49983,19 @@
                   })()}
                 </div>
                 <div style="margin-top: 1.25rem; display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center;" id="hero-three-up-tiles">
-                  <div class="hero-mono-tile" style="text-align: center; padding: 1rem 1.25rem; background: #faf5f0; border-radius: 10px; border: 2px solid #78350f; min-width: 160px; flex: 1 1 140px;" data-hero-tile="surface">
+                  <div class="hero-mono-tile" style="text-align: center; padding: 1rem 1.25rem; background: #faf5f0; border-radius: 10px; border: 2px solid #78350f; min-width: 160px; flex: 1 1 140px;" data-hero-tile="surface" data-provisional="${heroProvisional ? '1' : '0'}">
                     ${formatHeroDeltaBadge(heroDeltas?.surface)}
-                    <div style="font-size: 0.75rem; color: #78350f; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.35rem;">Surface</div>
+                    <div style="font-size: 0.75rem; color: #78350f; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.35rem;">Surface${heroProvisional ? ' · provisional' : ''}</div>
                     <div style="font-size: 2.5rem; font-weight: 800; color: #78350f; line-height: 1;">${heroSurfaceOutOf}</div>
                     <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.4rem; line-height: 1.35;">answer surfaces owned (demand-weighted)</div>
+                    ${heroCoverageLine ? `<div class="hero-mono-coverage" title="Tracked denominator kept; excluding unknowns does not inflate the score.">${heroCoverageLine}</div>` : ''}
                   </div>
-                  <div class="hero-mono-tile" style="text-align: center; padding: 1rem 1.25rem; background: #fdf2fd; border-radius: 10px; border: 2px solid #BF0FBF; min-width: 160px; flex: 1 1 140px;" data-hero-tile="top">
+                  <div class="hero-mono-tile" style="text-align: center; padding: 1rem 1.25rem; background: #fdf2fd; border-radius: 10px; border: 2px solid #BF0FBF; min-width: 160px; flex: 1 1 140px;" data-hero-tile="top" data-provisional="${heroProvisional ? '1' : '0'}">
                     ${formatHeroDeltaBadge(heroDeltas?.top)}
-                    <div style="font-size: 0.75rem; color: #BF0FBF; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.35rem;">Top of page</div>
+                    <div style="font-size: 0.75rem; color: #BF0FBF; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.35rem;">Top of page${heroProvisional ? ' · provisional' : ''}</div>
                     <div style="font-size: 2.5rem; font-weight: 800; color: #BF0FBF; line-height: 1;">${heroTopOutOf}</div>
                     <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.4rem; line-height: 1.35;">how close to the top of Google's page you sit</div>
+                    ${heroCoverageLine ? `<div class="hero-mono-coverage" title="Tracked denominator kept; excluding unknowns does not inflate the score.">${heroCoverageLine}</div>` : ''}
                   </div>
                   ${(() => {
                     const heroBrand = window.__brandDemandCachedOverlay || scores?.brandOverlay || null;
@@ -50000,32 +50030,34 @@
                             </div>
                           </div>`;
                       }
-                      const surfStatus = heroSurfaceRag === 'green' ? 'Strong' : heroSurfaceRag === 'amber' ? 'Moderate' : 'Weak';
+                      const surfStatus = (heroSurfaceRag === 'green' ? 'Strong' : heroSurfaceRag === 'amber' ? 'Moderate' : 'Weak')
+                        + (heroProvisional ? ' · provisional' : '');
                       const surfClassLine = (cls, label) => {
                         const d = surfaceVisibilityHero.byClass?.[cls];
                         if (!d || !d.count || d.count <= 0) return '';
                         const sc = d.score != null && Number.isFinite(Number(d.score)) ? Math.round(Number(d.score)) : null;
                         if (sc == null) return '';
-                        return `<div style="display:flex;justify-content:space-between;gap:0.5rem;padding:0.2rem 0;border-bottom:1px solid #e7e5e4;"><span>${label}</span><b>${sc}/100</b></div>`;
+                        return `<div style="display:flex;justify-content:space-between;gap:0.5rem;padding:0.2rem 0;border-bottom:1px solid #e7e5e4;"><span>${label}</span><b>${sc}/100</b> <span style="color:#78716c;font-size:0.8rem;">${d.count} measured</span></div>`;
                       };
                       const surfClassHtml = [
                         surfClassLine('local-money', 'Local money Pages'),
                         surfClassLine('national-money', 'National money Pages'),
                       ].filter(Boolean).join('');
-                      const surfTooltip = `Surface visibility ${heroSurfaceOutOf}: demand-weighted ownership across surfaces Google actually served (organic, map pack, AI answer, answer boxes).`;
+                      const surfTooltip = `Surface visibility ${heroSurfaceOutOf}: demand-weighted ownership across surfaces Google actually served (organic, map pack, AI answer, answer boxes). ${heroCoverageLine || ''}`;
                       return `
                           <div style="display: flex; align-items: flex-start; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-                            <span style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: #faf5f0; color: ${surfaceId}; border: 1px solid ${surfaceId}; cursor: help; width: 170px; justify-content: center; flex-shrink: 0;" title="${surfTooltip}">
+                            <span style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: #faf5f0; color: ${surfaceId}; border: 1px solid ${surfaceId}; cursor: help; width: 170px; justify-content: center; flex-shrink: 0;" title="${surfTooltip.replace(/"/g, '&quot;')}">
                               ${surfStatus} (${heroSurfaceOutOf})
-                              <span style="display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: ${surfaceId}; color: white; font-size: 0.75rem; font-weight: 700; cursor: help; flex-shrink: 0;" title="${surfTooltip}">i</span>
+                              <span style="display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: ${surfaceId}; color: white; font-size: 0.75rem; font-weight: 700; cursor: help; flex-shrink: 0;" title="${surfTooltip.replace(/"/g, '&quot;')}">i</span>
                             </span>
                             <div style="width: 320px; background: #fffef7; border: 2px solid #1e293b; border-radius: 4px; overflow: hidden; box-shadow: 0 3px 10px rgba(0,0,0,0.12); text-align: center;">
                               <div style="background: ${surfaceId}; color: #fff; padding: 0.7rem 0.85rem; font-size: 0.92rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.25;">Surface visibility</div>
                               <div style="padding: 0.9rem 1rem 1rem; text-align: left; color: #1e293b; font-size: 0.98rem; line-height: 1.55;">
                                 <p style="margin:0 0 0.65rem;font-size:0.9rem;color:#57534e;line-height:1.45;">Answer surfaces you own — demand-weighted rollup on money keywords.</p>
                                 ${surfClassHtml}
+                                ${heroCoverageLine ? `<p style="margin:0.65rem 0 0;font-size:0.78rem;color:#92400e;line-height:1.4;background:#fffbeb;border:1px solid #fcd34d;border-radius:4px;padding:0.4rem 0.5rem;">${heroCoverageLine}</p>` : ''}
                                 <p style="margin:0.75rem 0 0;font-size:0.82rem;color:#78716c;line-height:1.4;">What moves this: win more served surfaces (organic rank, map pack, AI answer citations, featured snippets).</p>
-                                <div style="margin-top:0.75rem;text-align:center;font-size:1.15rem;font-weight:800;color:#1e293b;">Score ${heroSurfaceOutOf}</div>
+                                <div style="margin-top:0.75rem;text-align:center;font-size:1.15rem;font-weight:800;color:#1e293b;">Score ${heroSurfaceOutOf}${heroProvisional ? ' · provisional' : ''}</div>
                               </div>
                             </div>
                           </div>`;
@@ -50044,33 +50076,35 @@
                         }
                         const topBg = heroTopRag === 'green' ? '#d1fae5' : heroTopRag === 'amber' ? '#fef3c7' : '#fee2e2';
                         const topTxt = heroTopRag === 'green' ? '#065f46' : heroTopRag === 'amber' ? '#92400e' : '#991b1b';
-                        const topStatus = heroTopRag === 'green' ? 'Strong' : heroTopRag === 'amber' ? 'Moderate' : 'Weak';
+                        const topStatus = (heroTopRag === 'green' ? 'Strong' : heroTopRag === 'amber' ? 'Moderate' : 'Weak')
+                          + (heroProvisional ? ' · provisional' : '');
                         const topClassLine = (cls, label) => {
                           const d = topOfPageHero.byClass?.[cls];
                           if (!d || !d.count || d.count <= 0) return '';
                           const sc = d.score != null && Number.isFinite(Number(d.score)) ? Math.round(Number(d.score)) : null;
                           if (sc == null) return '';
-                          return `<div style="display:flex;justify-content:space-between;gap:0.5rem;padding:0.2rem 0;border-bottom:1px solid #e7e5e4;"><span>${label}</span><b>${sc}/100</b></div>`;
+                          return `<div style="display:flex;justify-content:space-between;gap:0.5rem;padding:0.2rem 0;border-bottom:1px solid #e7e5e4;"><span>${label}</span><b>${sc}/100</b> <span style="color:#78716c;font-size:0.8rem;">${d.count} measured</span></div>`;
                         };
                         const topClassHtml = [
                           topClassLine('local-money', 'Local money Pages'),
                           topClassLine('national-money', 'National money Pages'),
                           topClassLine('brand', 'Brand'),
                         ].filter(Boolean).join('');
-                        const topTooltip = `Top of page ${heroTopOutOf}: how close to the top of Google's page you sit across surfaces served — best single appearance per keyword, rolled up on money keywords. Scored on slot/position quality (AI answer, map pack, organic), not won-of-served count.`;
+                        const topTooltip = `Top of page ${heroTopOutOf}: how close to the top of Google's page you sit across surfaces served — best single appearance per keyword, rolled up on money keywords. ${heroCoverageLine || ''}`;
                         return `
                           <div style="display: flex; align-items: flex-start; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-                            <span style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: #fdf2fd; color: #BF0FBF; border: 1px solid #BF0FBF; cursor: help; width: 170px; justify-content: center; flex-shrink: 0;" title="${topTooltip}">
+                            <span style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: #fdf2fd; color: #BF0FBF; border: 1px solid #BF0FBF; cursor: help; width: 170px; justify-content: center; flex-shrink: 0;" title="${topTooltip.replace(/"/g, '&quot;')}">
                               ${topStatus} (${heroTopOutOf})
-                              <span style="display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: #BF0FBF; color: white; font-size: 0.75rem; font-weight: 700; cursor: help; flex-shrink: 0;" title="${topTooltip}">i</span>
+                              <span style="display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: #BF0FBF; color: white; font-size: 0.75rem; font-weight: 700; cursor: help; flex-shrink: 0;" title="${topTooltip.replace(/"/g, '&quot;')}">i</span>
                             </span>
                             <div style="width: 320px; background: #fffef7; border: 2px solid #1e293b; border-radius: 4px; overflow: hidden; box-shadow: 0 3px 10px rgba(0,0,0,0.12); text-align: center;">
                               <div style="background: #BF0FBF; color: #fff; padding: 0.7rem 0.85rem; font-size: 0.92rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.25;">Top of page</div>
                               <div style="padding: 0.9rem 1rem 1rem; text-align: left; color: #1e293b; font-size: 0.98rem; line-height: 1.55;">
                                 <p style="margin:0 0 0.65rem;font-size:0.9rem;color:#57534e;line-height:1.45;">How close to the top of Google's page you sit — best single appearance per keyword, rolled up on money keywords.</p>
                                 ${topClassHtml}
+                                ${heroCoverageLine ? `<p style="margin:0.65rem 0 0;font-size:0.78rem;color:#92400e;line-height:1.4;background:#fffbeb;border:1px solid #fcd34d;border-radius:4px;padding:0.4rem 0.5rem;">${heroCoverageLine}</p>` : ''}
                                 <p style="margin:0.75rem 0 0;font-size:0.82rem;color:#78716c;line-height:1.4;">What moves this: best-slot ownership on served surfaces (AI answer, map pack, organic) — position quality, not won/served share.</p>
-                                <div style="margin-top:0.75rem;text-align:center;font-size:1.15rem;font-weight:800;color:#1e293b;">Score ${heroTopOutOf}</div>
+                                <div style="margin-top:0.75rem;text-align:center;font-size:1.15rem;font-weight:800;color:#1e293b;">Score ${heroTopOutOf}${heroProvisional ? ' · provisional' : ''}</div>
                               </div>
                             </div>
                           </div>`;
@@ -67984,6 +68018,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       return surfaceRoundScore(sSum / wSum);
     }
     function computeSurfaceVisibilityRollup(rows) {
+      const coverage = summarizeRankingCaptureCoverage(rows);
       const perKeyword = [];
       const byClass = {
         'local-money': [],
@@ -67993,6 +68028,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         education: []
       };
       for (const row of rows || []) {
+        if (!rankingIsMeasurable(row)) continue;
         const surface = computeKeywordSurfaceScore(row);
         const entry = { row, surface, score: surface.score, keyword: row.keyword };
         perKeyword.push(entry);
@@ -68023,7 +68059,9 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         baseline_date: SURFACE_VISIBILITY_BASELINE_DATE,
         overall,
         byClass: dials,
-        weakestClass
+        weakestClass,
+        coverage,
+        provisional: coverage.provisional,
       };
     }
     function surfaceRag(score) {
@@ -69912,8 +69950,12 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       return { baselining: true, availableFrom: availableFrom || hero28dAvailableFromDate() };
     }
 
-    /** Delta badge for hero Monopoly tiles (top-right). Honest comparator or grey baselining. */
+    /** Delta badge for hero Monopoly tiles (top-right). Honest comparator, withheld, or grey baselining. */
     function formatHeroDeltaBadge(deltaObj) {
+      if (deltaObj?.withheld) {
+        const tip = deltaObj.note || GEO_METHOD_BREAK_NOTE;
+        return `<span class="hero-mono-delta" data-dir="withheld" title="${String(tip).replace(/"/g, '&quot;')}">n/c</span>`;
+      }
       if (deltaObj?.baselining) {
         const from = deltaObj.availableFrom || hero28dAvailableFromDate();
         const tip = `28-day comparison available from ${from}`;
@@ -69925,16 +69967,35 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         return `<span class="hero-mono-delta" data-dir="baselining" title="${tip}">baselining</span>`;
       }
       const d = Math.round(Number(deltaObj.delta));
-      const dir = d > 0 ? 'up' : d < 0 ? 'down' : 'flat';
+      const dir = deltaObj.qualify ? 'flat' : (d > 0 ? 'up' : d < 0 ? 'down' : 'flat');
       const sign = d > 0 ? '+' : '';
-      const tip = `vs ${deltaObj.priorDate || '?'} (was ${deltaObj.prior}) · ~28d audit window`;
-      return `<span class="hero-mono-delta" data-dir="${dir}" title="${tip}">${sign}${d}</span>`;
+      const qualifyBit = deltaObj.qualify ? ' · provisional' : '';
+      const tip = `vs ${deltaObj.priorDate || '?'} (was ${deltaObj.prior}) · ~28d audit window${qualifyBit}${deltaObj.note ? ' — ' + deltaObj.note : ''}`;
+      return `<span class="hero-mono-delta" data-dir="${dir}" title="${String(tip).replace(/"/g, '&quot;')}">${sign}${d}${qualifyBit}</span>`;
+    }
+
+    function qualifyHeroDeltaAgainstPrior(priorDate, coverage) {
+      if (rankingIsPreGeoBreak(priorDate)) {
+        return {
+          withheld: true,
+          note: `${GEO_METHOD_BREAK_NOTE} vs ${String(priorDate || '').slice(0, 10)} withheld.`,
+          priorDate: priorDate ? String(priorDate).slice(0, 10) : null,
+        };
+      }
+      if (coverage?.provisional) {
+        return {
+          qualify: true,
+          note: 'Provisional coverage (legacy/incomplete) — not a verified like-for-like change.',
+        };
+      }
+      return null;
     }
 
     /**
      * Honest ~28d hero Monopoly deltas (Surface / Top / Brand).
      * Number only when a STORED comparator exists that is (1) ≤ latest−26d,
      * (2) ≥ clean 151-kw baseline, (3) Brand ≥ GBP-formula era, (4) never re-derived.
+     * Surface/Top withheld when prior is before pin→city geo break (2026-09-28).
      * Otherwise grey `baselining` until baseline+28d.
      */
     async function fetchHero28dDeltas(propertyUrl, current) {
@@ -69999,19 +70060,30 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           return null;
         };
 
-        const mk = (cur, prior) => {
+        const mk = (cur, prior, coverage) => {
           if (cur == null || !prior) return hero28dBaseliningChip(availableFrom);
-          return { delta: Number(cur) - Number(prior.score), prior: prior.score, priorDate: prior.date };
+          const q = qualifyHeroDeltaAgainstPrior(prior.date, coverage);
+          if (q?.withheld) {
+            return { withheld: true, note: q.note, prior: prior.score, priorDate: prior.date };
+          }
+          return {
+            delta: Number(cur) - Number(prior.score),
+            prior: prior.score,
+            priorDate: prior.date,
+            qualify: !!q?.qualify,
+            note: q?.note || null,
+          };
         };
 
         const surfacePrior = pickStored('surface', kwBaseline);
         const topPrior = pickStored('top', kwBaseline);
         const brandPrior = pickStored('brand', brandEra);
+        const cov = current?.coverage || null;
 
         return {
-          surface: mk(current?.surface, surfacePrior),
-          top: mk(current?.top, topPrior),
-          brand: mk(current?.brand, brandPrior),
+          surface: mk(current?.surface, surfacePrior, cov),
+          top: mk(current?.top, topPrior, cov),
+          brand: mk(current?.brand, brandPrior, null),
           priorDate: surfacePrior?.date || topPrior?.date || brandPrior?.date || null,
           availableFrom,
           ageCutoff,

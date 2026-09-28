@@ -12,6 +12,7 @@
 
 import { computeSurfaceVisibilityRollup } from '../../lib/audit/surfaceScores.js';
 import { computeTopOfPageRollup } from '../../lib/audit/topOfPage.js';
+import { summarizeSerpCaptureCoverage } from '../../lib/keyword-ranking/dfs-serp-quality.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
@@ -114,20 +115,40 @@ export default async function handler(req, res) {
 
     const rankingRows = await fetchRankingRows(supabaseUrl, supabaseKey, propertyUrl, auditDate);
     const { surface, top } = resolveSurfaceTopFromBodyOrRows(body, rankingRows);
+    const captureCoverage = Array.isArray(rankingRows) && rankingRows.length
+      ? summarizeSerpCaptureCoverage(rankingRows)
+      : null;
 
-    const rankingAiData = {
-      combinedRows: [],
-      summary,
-      timestamp: new Date().toISOString(),
-      source: 'keyword_rankings_table'
-    };
-
+    // Score + pillar columns only. Never replace ranking_ai_data here — a prior
+    // build wrote combinedRows:[] and wiped the audit snapshot stacks/capture_status.
     const patchPayload = {
-      ranking_ai_data: rankingAiData,
       updated_at: new Date().toISOString()
     };
     if (rankingAiPillarScores !== null && rankingAiPillarScores !== undefined) {
-      patchPayload.ranking_ai_pillar_scores = rankingAiPillarScores;
+      const pillar = (typeof rankingAiPillarScores === 'object' && rankingAiPillarScores)
+        ? { ...rankingAiPillarScores }
+        : rankingAiPillarScores;
+      if (pillar && typeof pillar === 'object') {
+        if (summary != null) pillar.summary = summary;
+        if (captureCoverage) {
+          pillar.capture_coverage = captureCoverage;
+          if (pillar.surfaceVisibility && typeof pillar.surfaceVisibility === 'object') {
+            pillar.surfaceVisibility = {
+              ...pillar.surfaceVisibility,
+              coverage: captureCoverage,
+              provisional: captureCoverage.provisional,
+            };
+          }
+          if (pillar.topOfPage && typeof pillar.topOfPage === 'object') {
+            pillar.topOfPage = {
+              ...pillar.topOfPage,
+              coverage: captureCoverage,
+              provisional: captureCoverage.provisional,
+            };
+          }
+        }
+      }
+      patchPayload.ranking_ai_pillar_scores = pillar;
     }
     if (surface != null) patchPayload.surface_visibility_score = surface;
     if (top != null) patchPayload.top_of_page_score = top;
