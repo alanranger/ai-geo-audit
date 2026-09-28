@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-28] - Site AI Health: quality-aware Surface/Top + withhold incomparable deltas
+
+**Change:** Site AI Health / Dashboard scorecard now shares the same quality-aware Surface Visibility + Top-of-Page rollups as Ranking (exclude incomplete/empty from means; coverage + provisional on tiles). Monopoly-tile ~28d deltas show **n/c** when prior is before pin→city break (`2026-09-28`). CEO weekly chips withhold the same Surface/Top WoW. `save-ranking-ai-summary` no longer wipes `ranking_ai_data.combinedRows` with `[]`. No new paid DFS — score 23 is real from stored keyword_rankings; honesty fix is uncertainty + comparability.
+
+**Files:** `lib/audit/surfaceScores.js`, `lib/audit/heroScoreComparability.js`, `lib/ceo-weekly/tabMetrics.js`, `api/supabase/save-ranking-ai-summary.js`, `audit-dashboard.html`, `test/site-ai-health-quality.test.js`
+
+---
+
 ## [2026-09-28] - Ranking: quality-aware Top-of-Page / census / movement display
 
 **Change:** Finish display/rollup accuracy after live UI review of `a6b17e4`. Top-10 distribution splits **positions 21–50** vs **complete no-match** (no longer “complete miss or 21+”). Top-of-Page hero/per-class/census/movement/insights exclude incomplete/empty/error as real zeros or losses; show measured/tracked + incomplete + legacy-unverified counts with provisional status; do not invent proven-complete for legacy rows missing `capture_status`. Historical headline deltas and Map movement vs pre-`2026-09-28` baselines are withheld/qualified (pin→city geo break). No new paid DFS.
