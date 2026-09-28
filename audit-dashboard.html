@@ -90823,7 +90823,7 @@ Confidence: ${c}`;
       { rule_key: 'keyword_in_h1', rule_name: 'K3 — Keyword in H1', description: 'All meaningful words in primary H1 plain text (longest H1; Extract HTML).', category: 'keywords', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.25, sort_order: 38 },
       { rule_key: 'keyword_slug_tokens', rule_name: 'K4 — Slug token alignment', description: 'Final path segment tokens (hyphen split): ≥1 meaningful keyword token appears in slug (stopwords ignored).', category: 'keywords', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 39 },
       { rule_key: 'keyword_in_intro', rule_name: 'K5 — Keyword in intro', description: 'All meaningful words appear in first ~150 words of visible body text (snippet-enriched HTML).', category: 'keywords', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 40 },
-      { rule_key: 'canonical_self_or_valid', rule_name: 'Canonical is valid', description: 'HTML <link rel="canonical"> from Extractability: pass when self-referencing; warn when evidence is missing/unknown or points elsewhere (unverified); fail when missing or malformed. Schema @id / missing_id is not this rule.', category: 'technical', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 45 },
+      { rule_key: 'canonical_self_or_valid', rule_name: 'Canonical is valid', description: 'HTML <head> <link rel="canonical"> from Extractability: pass when self-referencing; warn when evidence is missing/unknown or points elsewhere (unverified); fail when missing or malformed. Body canonical tags are hygiene notes only (not a warn if head is valid). Schema @id / missing_id is not this rule.', category: 'technical', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 45 },
       { rule_key: 'url_slug_word_count', rule_name: 'URL slug word count (3–6)', description: 'Final path segment (after splitting on -/_) should be 3–6 words. Homepage root passes.', category: 'technical', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 50 },
       { rule_key: 'indexable_status', rule_name: 'Indexable status', description: 'Technical indexability (HTTP + noindex). Utility/login URLs excluded from this list.', category: 'indexation', severity: 'critical', scope: 'page', current_status: 'pass', enabled: true, weight: 2.0, sort_order: 55 },
       { rule_key: 'google_gsc_visible', rule_name: 'Seen in Google (GSC 90d)', description: 'When Technical Foundation includes GSC signals: fail if URL had no impressions/clicks in last 90d window.', category: 'indexation', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.6, sort_order: 60 },
@@ -95958,9 +95958,23 @@ Confidence: ${c}`;
     }
 
     /**
-     * HTML <link rel="canonical"> only — mirrors lib/traditional-seo-canonical-rule.js.
-     * Never maps schema missing_id / @id to this rule.
+     * HTML head <link rel="canonical"> — mirrors lib/traditional-seo-canonical-rule.js.
+     * Body tags are hygiene notes only. Never maps schema missing_id / @id to this rule.
      */
+    function traditionalSeoBodyCanonicalCleanupNote(extractSignal) {
+      const bodyCount = Number(extractSignal?.seoCanonicalBodyCount);
+      if (!Number.isFinite(bodyCount) || bodyCount <= 0) return '';
+      const bodyHref = String(extractSignal.seoCanonicalBodyHref || extractSignal.seoCanonicalBodyRaw || '').trim();
+      const where = bodyHref ? `: ${bodyHref}` : '';
+      return ` Misplaced body <link rel="canonical"> (${bodyCount})${where} — not a valid head signal; clean source (Google accepts head only).`;
+    }
+
+    function traditionalSeoWithBodyCanonicalNote(result, extractSignal) {
+      const extra = traditionalSeoBodyCanonicalCleanupNote(extractSignal);
+      if (!extra) return result;
+      return Object.assign({}, result, { note: `${result.note}${extra}` });
+    }
+
     function traditionalSeoEvaluateCanonicalRule(pageUrl, extractSignal) {
       if (extractSignal?.excludedFromAudit === true) {
         return { status: 'pass', code: 'excluded', note: 'Page excluded from Traditional SEO audit — canonical check skipped.' };
@@ -95985,64 +95999,65 @@ Confidence: ${c}`;
       const rawOriginal = String(extractSignal.seoCanonicalRaw ?? extractSignal.seoCanonicalHref ?? '');
       const raw = rawOriginal.trim();
       const href = String(extractSignal.seoCanonicalHref || '').trim();
+      const bodyHint = traditionalSeoBodyCanonicalCleanupNote(extractSignal);
       if (Number.isFinite(count) && count > 0 && !raw && !href) {
-        return {
+        return traditionalSeoWithBodyCanonicalNote({
           status: 'fail',
           code: 'missing_canonical',
-          note: 'Canonical link tag found but href is missing.'
-        };
+          note: 'Head canonical link tag found but href is missing.'
+        }, extractSignal);
       }
       if (!raw && !href) {
-        return {
+        return traditionalSeoWithBodyCanonicalNote({
           status: 'fail',
           code: 'missing_canonical',
-          note: 'No HTML <link rel="canonical"> found.'
-        };
+          note: bodyHint ? 'No HTML <link rel="canonical"> in <head>.' : 'No HTML <link rel="canonical"> found.'
+        }, extractSignal);
       }
       if (traditionalSeoHasForbiddenCanonicalChars(rawOriginal)
         || (href && traditionalSeoHasForbiddenCanonicalChars(String(extractSignal.seoCanonicalHref || '')))) {
-        return {
+        return traditionalSeoWithBodyCanonicalNote({
           status: 'fail',
           code: 'malformed_canonical',
-          note: `HTML canonical is malformed (whitespace/control): ${raw || href}.`
-        };
+          note: `HTML head canonical is malformed (whitespace/control): ${raw || href}.`
+        }, extractSignal);
       }
       const pageKey = traditionalSeoNormalizeCanonicalCompareKey(pageUrl);
       const canKey = traditionalSeoNormalizeCanonicalCompareKey(href || raw, pageUrl);
       const display = href || raw;
       if (!canKey) {
-        return {
+        return traditionalSeoWithBodyCanonicalNote({
           status: 'fail',
           code: 'malformed_canonical',
-          note: `HTML canonical is malformed or non-http(s): ${display}.`
-        };
+          note: `HTML head canonical is malformed or non-http(s): ${display}.`
+        }, extractSignal);
       }
       if (Number.isFinite(count) && count > 1) {
         if (pageKey && canKey === pageKey) {
-          return {
+          return traditionalSeoWithBodyCanonicalNote({
             status: 'warn',
             code: 'multiple_canonical',
-            note: `Multiple HTML canonical tags (${count}); first matches page: ${display}.`
-          };
+            note: `Multiple HTML head canonical tags (${count}); first matches page: ${display}.`
+          }, extractSignal);
         }
-        return {
+        return traditionalSeoWithBodyCanonicalNote({
           status: 'warn',
           code: 'multiple_canonical',
-          note: `Multiple HTML canonical tags (${count}); first is unverified alternative: ${display}.`
-        };
+          note: `Multiple HTML head canonical tags (${count}); first is unverified alternative: ${display}.`
+        }, extractSignal);
       }
       if (pageKey && canKey === pageKey) {
-        return {
+        return traditionalSeoWithBodyCanonicalNote({
           status: 'pass',
           code: 'self_canonical',
-          note: `HTML canonical matches page URL: ${display}.`
-        };
+          note: `HTML head canonical matches page URL: ${display}.`
+        }, extractSignal);
       }
-      return {
+      return traditionalSeoWithBodyCanonicalNote({
         status: 'warn',
         code: 'alternative_canonical',
-        note: `HTML canonical points elsewhere (unverified): ${display}.`
-      };
+        note: `HTML head canonical points elsewhere (unverified): ${display}.`
+      }, extractSignal);
     }
 
     function traditionalSeoRuleStatusForUrl(rule, url, tier, metric, context) {

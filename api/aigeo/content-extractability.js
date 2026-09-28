@@ -782,7 +782,10 @@ function buildTraditionalSeoSignalsFromHtml(html, htmlForChecks, pageUrl = '') {
     seoExtMissingTargetBlank: seo.extMissingTargetBlank,
     seoCanonicalHref: canonical.seoCanonicalHref || '',
     seoCanonicalRaw: canonical.seoCanonicalRaw || '',
-    seoCanonicalCount: Number(canonical.seoCanonicalCount) || 0
+    seoCanonicalCount: Number(canonical.seoCanonicalCount) || 0,
+    seoCanonicalBodyHref: canonical.seoCanonicalBodyHref || '',
+    seoCanonicalBodyRaw: canonical.seoCanonicalBodyRaw || '',
+    seoCanonicalBodyCount: Number(canonical.seoCanonicalBodyCount) || 0
   };
 }
 
@@ -806,7 +809,10 @@ async function checkUrl(url, tierLookup = null, sitemapLastmodMap = null) {
     seoExtMissingTargetBlank: 0,
     seoCanonicalHref: '',
     seoCanonicalRaw: '',
-    seoCanonicalCount: 0
+    seoCanonicalCount: 0,
+    seoCanonicalBodyHref: '',
+    seoCanonicalBodyRaw: '',
+    seoCanonicalBodyCount: 0
   };
   const pageTier = getTierForUrl(url, tierLookup);
   const preflightExclusionReason = getPreflightExclusionReason(url);

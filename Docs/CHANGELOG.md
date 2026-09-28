@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-28] - Canonical rule: score head only; body tags are hygiene notes
+
+**Change:** Extractability now parses real `<head>` `<link rel="canonical">` (ignores comment/script/style lookalikes) and counts body tags separately. `Canonical is valid` passes when head is self-referencing even if a misplaced body tag exists — note asks for source cleanup. Real missing/invalid/multiple head and old-cache unknown states unchanged. `/home` not exempted.
+
+**Files:** `lib/traditional-seo-canonical-rule.js`, `api/aigeo/content-extractability.js`, `audit-dashboard.html`, `test/traditional-seo-canonical-rule.test.js`
+
+---
+
 ## [2026-09-28] - Schema QA: Service per-entity checks + HTML canonical rule
 
 **Change:** Traditional SEO `canonical_self_or_valid` now scores HTML `<link rel="canonical">` from Extractability (not schema `@id` / `missing_id`). Schema QA checks each full **Service** entity (skips `@id`-only refs); other types keep prior type-group behaviour. Clearer Service name (block) / `@id` (warning) notes; sync preserves admin bypass intent.

@@ -40,10 +40,12 @@ function loadDashboardCanonicalFns() {
   const normalizeSrc = extractDashboardFunction(html, 'traditionalSeoNormalizeCanonicalCompareKey');
   const evaluateSrc = extractDashboardFunction(html, 'traditionalSeoEvaluateCanonicalRule');
   const forbiddenSrc = extractDashboardFunction(html, 'traditionalSeoHasForbiddenCanonicalChars');
+  const bodyNoteSrc = extractDashboardFunction(html, 'traditionalSeoBodyCanonicalCleanupNote');
+  const withBodySrc = extractDashboardFunction(html, 'traditionalSeoWithBodyCanonicalNote');
   const context = { console, URL };
   vm.createContext(context);
   vm.runInContext(
-    `${forbiddenSrc}\n${normalizeSrc}\n${evaluateSrc}\n`,
+    `${forbiddenSrc}\n${normalizeSrc}\n${bodyNoteSrc}\n${withBodySrc}\n${evaluateSrc}\n`,
     context
   );
   return {
@@ -52,30 +54,112 @@ function loadDashboardCanonicalFns() {
   };
 }
 
-test('extractHtmlCanonicalFromHtml: reads link rel=canonical', () => {
-  const html = `<html><head><link rel="canonical" href="${pageUrl}"/></head></html>`;
+test('extractHtmlCanonicalFromHtml: reads head link rel=canonical', () => {
+  const html = `<html><head><link rel="canonical" href="${pageUrl}"/></head><body></body></html>`;
   const out = extractHtmlCanonicalFromHtml(html, pageUrl);
   assert.equal(out.seoCanonicalCount, 1);
   assert.equal(out.seoCanonicalHref, pageUrl);
+  assert.equal(out.seoCanonicalBodyCount, 0);
 });
 
-test('extractHtmlCanonicalFromHtml: multi-value rel and missing href', () => {
+test('extractHtmlCanonicalFromHtml: multi-value rel and missing href in head', () => {
   const multi = extractHtmlCanonicalFromHtml(
-    '<link rel="canonical prefetch" href="https://www.alanranger.com/a">',
+    '<html><head><link rel="canonical prefetch" href="https://www.alanranger.com/a"></head></html>',
     pageUrl
   );
   assert.equal(multi.seoCanonicalCount, 1);
   assert.equal(multi.seoCanonicalHref, 'https://www.alanranger.com/a');
 
   const spacedRel = extractHtmlCanonicalFromHtml(
-    '<link rel="nofollow canonical" href="https://www.alanranger.com/b">',
+    '<html><head><link rel="nofollow canonical" href="https://www.alanranger.com/b"></head></html>',
     pageUrl
   );
   assert.equal(spacedRel.seoCanonicalCount, 1);
 
-  const missingHref = extractHtmlCanonicalFromHtml('<link rel="canonical">', pageUrl);
+  const missingHref = extractHtmlCanonicalFromHtml(
+    '<html><head><link rel="canonical"></head></html>',
+    pageUrl
+  );
   assert.equal(missingHref.seoCanonicalCount, 1);
   assert.equal(missingHref.seoCanonicalRaw, '');
+});
+
+test('head self + conflicting body passes with cleanup note', () => {
+  const html = `<html><head><link rel="canonical" href="${pageUrl}"></head>
+<body><link rel="canonical" href="https://www.alanranger.com/blog-on-photography/other"></body></html>`;
+  const extracted = extractHtmlCanonicalFromHtml(html, pageUrl);
+  assert.equal(extracted.seoCanonicalCount, 1);
+  assert.equal(extracted.seoCanonicalBodyCount, 1);
+  assert.match(extracted.seoCanonicalBodyHref, /blog-on-photography\/other/);
+
+  const result = evaluateTraditionalSeoCanonicalRule({
+    pageUrl,
+    extractSignal: { requestOk: true, ...extracted }
+  });
+  assert.equal(result.status, 'pass');
+  assert.equal(result.code, 'self_canonical');
+  assert.match(result.note, /Misplaced body/);
+  assert.match(result.note, /head only/i);
+});
+
+test('head self + identical body passes with cleanup note', () => {
+  const html = `<html><head><link rel="canonical" href="${pageUrl}"></head>
+<body><link rel="canonical" href="${pageUrl}"></body></html>`;
+  const extracted = extractHtmlCanonicalFromHtml(html, pageUrl);
+  assert.equal(extracted.seoCanonicalBodyCount, 1);
+  const result = evaluateTraditionalSeoCanonicalRule({
+    pageUrl,
+    extractSignal: { requestOk: true, ...extracted }
+  });
+  assert.equal(result.status, 'pass');
+  assert.equal(result.code, 'self_canonical');
+  assert.match(result.note, /Misplaced body/);
+});
+
+test('multiple conflicting head canonicals warn', () => {
+  const html = `<html><head>
+<link rel="canonical" href="${pageUrl}">
+<link rel="canonical" href="https://www.alanranger.com/other-page">
+</head><body></body></html>`;
+  const extracted = extractHtmlCanonicalFromHtml(html, pageUrl);
+  assert.equal(extracted.seoCanonicalCount, 2);
+  const result = evaluateTraditionalSeoCanonicalRule({
+    pageUrl,
+    extractSignal: { requestOk: true, ...extracted }
+  });
+  assert.equal(result.status, 'warn');
+  assert.equal(result.code, 'multiple_canonical');
+});
+
+test('comment and script faux tags are ignored', () => {
+  const html = `<html><head>
+<!-- <link rel="canonical" href="https://evil.example/from-comment"> -->
+<script>var x = '<link rel="canonical" href="https://evil.example/from-script">';</script>
+<link rel="canonical" href="${pageUrl}">
+</head><body>
+<style>.x { content: '<link rel="canonical" href="https://evil.example/from-style">'; }</style>
+</body></html>`;
+  const extracted = extractHtmlCanonicalFromHtml(html, pageUrl);
+  assert.equal(extracted.seoCanonicalCount, 1);
+  assert.equal(extracted.seoCanonicalHref, pageUrl);
+  assert.equal(extracted.seoCanonicalBodyCount, 0);
+});
+
+test('missing head canonical fails even if body has one', () => {
+  const html = `<html><head></head><body>
+<link rel="canonical" href="${pageUrl}">
+</body></html>`;
+  const extracted = extractHtmlCanonicalFromHtml(html, pageUrl);
+  assert.equal(extracted.seoCanonicalCount, 0);
+  assert.equal(extracted.seoCanonicalBodyCount, 1);
+  const result = evaluateTraditionalSeoCanonicalRule({
+    pageUrl,
+    extractSignal: { requestOk: true, ...extracted }
+  });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.code, 'missing_canonical');
+  assert.match(result.note, /in <head>/);
+  assert.match(result.note, /Misplaced body/);
 });
 
 test('valid self canonical + schema missing_id must not affect this rule', () => {
@@ -91,6 +175,7 @@ test('valid self canonical + schema missing_id must not affect this rule', () =>
   assert.equal(result.status, 'pass');
   assert.equal(result.code, 'self_canonical');
   assert.doesNotMatch(result.note, /missing_id/);
+  assert.doesNotMatch(result.note, /Misplaced body/);
 });
 
 test('missing canonical fails', () => {
@@ -173,8 +258,13 @@ test('canonical compare preserves protocol, port, and query; www alias ok', () =
   assert.match(portKey, /:8443/);
 });
 
-test('dashboard VM helpers match lib on malformed/missing/unknown/alternative/query/protocol', () => {
+test('dashboard VM helpers match lib on head/body/malformed/missing/unknown/alternative', () => {
   const dash = loadDashboardCanonicalFns();
+  const selfBody = extractHtmlCanonicalFromHtml(
+    `<html><head><link rel="canonical" href="${pageUrl}"></head>
+<body><link rel="canonical" href="https://www.alanranger.com/other"></body></html>`,
+    pageUrl
+  );
   const cases = [
     {
       pageUrl,
@@ -221,6 +311,11 @@ test('dashboard VM helpers match lib on malformed/missing/unknown/alternative/qu
         seoCanonicalRaw: 'http://alanranger.com/page',
         seoCanonicalCount: 1
       }
+    },
+    { pageUrl, extractSignal: { requestOk: true, ...selfBody } },
+    {
+      pageUrl,
+      extractSignal: { requestOk: true, seoH1Count: 1 }
     }
   ];
 
@@ -229,6 +324,7 @@ test('dashboard VM helpers match lib on malformed/missing/unknown/alternative/qu
     const dashResult = dash.evaluate(sample.pageUrl, sample.extractSignal);
     assert.equal(dashResult.status, libResult.status, `status ${libResult.code}`);
     assert.equal(dashResult.code, libResult.code);
+    assert.equal(dashResult.note, libResult.note, `note ${libResult.code}`);
     assert.equal(
       dash.normalize(sample.pageUrl),
       normalizeUrlForCanonicalCompare(sample.pageUrl)
