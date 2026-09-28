@@ -3,17 +3,26 @@ import assert from 'node:assert/strict';
 import {
   isIncompleteSerpCrawl,
   resolveSerpCaptureStatus,
+  resolveCaptureQualityKind,
   isFailedSerpCapture,
+  isFailedCaptureQuality,
   isCompleteSerpNoMatch,
+  isMeasurableForRollup,
+  summarizeSerpCaptureCoverage,
+  formatCaptureCoverageLine,
+  isPreGeoMethodBreakDate,
   buildSerpCaptureFeatures,
   attachLastGoodFromPrevious,
   CAPTURE_STATUS,
+  CAPTURE_LEGACY_UNVERIFIED,
   SERP_CRAWL_INCOMPLETE_ERROR,
   EMPTY_SERP_STUB_ERROR,
+  GEO_METHOD_BREAK_DATE,
   organicDepthLabel,
 } from '../lib/keyword-ranking/dfs-serp-quality.js';
 import { buildCombinedRows } from '../lib/keyword-ranking/refresh-core.js';
 import { applyTrackedEmptySerpStubs, buildTrackedEmptySerpStub } from '../lib/keyword-ranking/empty-serp-stub.js';
+import { computeTopOfPageRollup } from '../lib/audit/topOfPage.js';
 
 test('full depth-50 crawl is complete', () => {
   assert.equal(isIncompleteSerpCrawl({
@@ -180,4 +189,78 @@ test('organicDepthLabel defaults to 50', () => {
   assert.equal(organicDepthLabel({}), 50);
   assert.equal(organicDepthLabel({ serp_depth: 50 }), 50);
   assert.equal(organicDepthLabel({ serp_features: { serp_depth_requested: 50 } }), 50);
+});
+
+test('quality kind: legacy unverified vs known complete vs empty stub', () => {
+  assert.equal(resolveCaptureQualityKind({
+    best_rank_group: 22,
+    serp_surface_stack: [{ type: 'organic' }],
+  }), CAPTURE_LEGACY_UNVERIFIED);
+  assert.equal(resolveCaptureQualityKind({
+    best_rank_group: 1,
+    serp_surface_stack: [{ type: 'organic' }],
+    serp_features: { capture_status: 'complete_ranked' },
+  }), CAPTURE_STATUS.COMPLETE_RANKED);
+  assert.equal(resolveCaptureQualityKind({
+    best_rank_group: null,
+    serp_surface_stack: null,
+    serp_features: { stub: true, fetch_error: EMPTY_SERP_STUB_ERROR },
+  }), CAPTURE_STATUS.EMPTY);
+  assert.equal(isFailedCaptureQuality({
+    serp_features: { stub: true, fetch_error: EMPTY_SERP_STUB_ERROR },
+  }), true);
+  assert.equal(isMeasurableForRollup({
+    best_rank_group: 22,
+    serp_surface_stack: [{ type: 'organic' }],
+  }), true);
+  assert.equal(isMeasurableForRollup({
+    serp_features: { capture_status: 'empty', stub: true },
+  }), false);
+});
+
+test('coverage summary + geo break date', () => {
+  const cov = summarizeSerpCaptureCoverage([
+    { keyword: 'a', best_rank_group: 1, serp_surface_stack: [{ type: 'organic' }], serp_features: { capture_status: 'complete_ranked' } },
+    { keyword: 'b', best_rank_group: 22, serp_surface_stack: [{ type: 'organic' }] },
+    { keyword: 'c', serp_features: { stub: true, fetch_error: EMPTY_SERP_STUB_ERROR }, best_rank_group: null, serp_surface_stack: null },
+    { keyword: 'd', crawl_incomplete: true, best_rank_group: null, serp_surface_stack: [{ type: 'organic' }], serp_features: { capture_status: 'incomplete' } },
+  ]);
+  assert.equal(cov.tracked, 4);
+  assert.equal(cov.measurable, 2);
+  assert.equal(cov.known_complete, 1);
+  assert.equal(cov.legacy_unverified, 1);
+  assert.equal(cov.failed, 2);
+  assert.equal(cov.provisional, true);
+  assert.match(formatCaptureCoverageLine(cov), /2 measured of 4 tracked/);
+  assert.equal(isPreGeoMethodBreakDate('2026-09-14'), true);
+  assert.equal(isPreGeoMethodBreakDate(GEO_METHOD_BREAK_DATE), false);
+  assert.equal(isPreGeoMethodBreakDate('2026-09-28'), false);
+});
+
+test('Top-of-Page rollup excludes empty/incomplete from mean and keeps coverage', () => {
+  const rollup = computeTopOfPageRollup([
+    {
+      keyword: 'photography gift card',
+      keyword_class: 'national-money',
+      search_volume: 50,
+      best_rank_group: 1,
+      serp_surface_stack: [{ type: 'organic', slot: 1, ours: true, our_position: 1 }],
+      serp_features: { capture_status: 'complete_ranked' },
+    },
+    {
+      keyword: 'beginners photography courses coventry',
+      keyword_class: 'local-money',
+      search_volume: 70,
+      best_rank_group: null,
+      serp_surface_stack: null,
+      serp_features: { capture_status: 'empty', stub: true, fetch_error: EMPTY_SERP_STUB_ERROR },
+    },
+  ]);
+  assert.equal(rollup.coverage.tracked, 2);
+  assert.equal(rollup.coverage.measurable, 1);
+  assert.equal(rollup.coverage.failed, 1);
+  assert.equal(rollup.provisional, true);
+  assert.equal(rollup.perKeyword.length, 1);
+  assert.equal(rollup.perKeyword[0].keyword, 'photography gift card');
+  assert.ok(rollup.overall > 0);
 });

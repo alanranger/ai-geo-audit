@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-28] - Ranking: quality-aware Top-of-Page / census / movement display
+
+**Change:** Finish display/rollup accuracy after live UI review of `a6b17e4`. Top-10 distribution splits **positions 21–50** vs **complete no-match** (no longer “complete miss or 21+”). Top-of-Page hero/per-class/census/movement/insights exclude incomplete/empty/error as real zeros or losses; show measured/tracked + incomplete + legacy-unverified counts with provisional status; do not invent proven-complete for legacy rows missing `capture_status`. Historical headline deltas and Map movement vs pre-`2026-09-28` baselines are withheld/qualified (pin→city geo break). No new paid DFS.
+
+**Files:** `lib/keyword-ranking/dfs-serp-quality.js`, `lib/audit/topOfPage.js`, `audit-dashboard.html`, `test/dfs-serp-quality.test.js`
+
+---
+
 ## [2026-09-28] - Ranking: persist DFS capture quality (incomplete ≠ unranked)
 
 **Change:** Thin/empty/error DFS SERP captures now keep a durable `serp_features.capture_status` (plus organic_count, dfs_cost, depth, geo_method, optional dated `last_good_*`). Shared path covers `serp-rank-test` retries → `buildCombinedRows` → save-keyword-batch → dashboard Run ranking / Refresh filtered / Monday `dashboard-parity-tick`. Failed checks stay null-ranked (unknown), are excluded from Top-10 coverage denominators, and UI copy uses depth **50** (not top 100). Local geography stays Coventry city-code (no pin); historical pin vs city break is flagged.

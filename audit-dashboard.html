@@ -5717,6 +5717,22 @@
       color: #1e293b;
       margin-top: 0.35rem;
     }
+    .ranking-ai-hero .hero-coverage {
+      font-size: 0.78rem;
+      line-height: 1.35;
+      color: #92400e;
+      background: #fffbeb;
+      border: 1px solid #fcd34d;
+      border-radius: 6px;
+      padding: 0.4rem 0.55rem;
+      margin-top: 0.45rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .ranking-ai-hero .hero-coverage[data-provisional="0"] {
+      color: #334155;
+      background: #f8fafc;
+      border-color: #cbd5e1;
+    }
     .ranking-ai-hero .hero-delta {
       font-size: 0.85rem;
       color: #334155;
@@ -15036,6 +15052,7 @@
               <div class="hero-score-max">/ 100</div>
             </div>
             <div class="hero-status" id="ranking-ai-hero-status">–</div>
+            <div class="hero-coverage" id="ranking-ai-hero-coverage" hidden></div>
             <p class="hero-redefinition" id="ranking-ai-hero-redefinition">
               How close you get to the top of Google's page, on any surface. Score redefined (v3) — 151-kw comparator floor 2026-07-18.
             </p>
@@ -66819,9 +66836,82 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       return 'complete_ranked';
     }
 
+    /** Rollup/UI kind — does not invent complete_* for legacy rows missing capture_status. */
+    function rankingCaptureQualityKind(row) {
+      const feats = row?.serp_features;
+      if (feats?.capture_status) return String(feats.capture_status);
+      if (row?.crawl_incomplete === true) return 'incomplete';
+      if (feats?.stub === true || feats?.fetch_error === EMPTY_SERP_STUB_ERROR) return 'empty';
+      const err = row?.error ? String(row.error) : '';
+      if (/incomplete crawl/i.test(err) || err.includes('DFS incomplete crawl')) return 'incomplete';
+      if (err === EMPTY_SERP_STUB_ERROR) return 'empty';
+      if (err && /empty SERP|request failed|Unexpected server|timed out|Aborted after fatal/i.test(err)) return 'error';
+      const stack = row?.serp_surface_stack;
+      const emptyStack = !Array.isArray(stack) || stack.length === 0;
+      const noRank = row?.best_rank_group == null && row?.best_rank_absolute == null;
+      if (emptyStack && noRank) return 'empty';
+      return 'legacy_unverified';
+    }
+
     function rankingCaptureFailed(row) {
-      const s = rankingCaptureStatus(row);
+      const s = rankingCaptureQualityKind(row);
       return s === 'incomplete' || s === 'empty' || s === 'error';
+    }
+
+    function rankingIsMeasurable(row) {
+      return !rankingCaptureFailed(row);
+    }
+
+    const GEO_METHOD_BREAK_DATE = '2026-09-28';
+    const GEO_METHOD_BREAK_NOTE =
+      'Local geo method changed pin→city on 2026-09-28 — historical Local deltas are not comparable.';
+
+    function rankingIsPreGeoBreak(dateStr) {
+      if (!dateStr) return false;
+      return String(dateStr).slice(0, 10) < GEO_METHOD_BREAK_DATE;
+    }
+
+    function summarizeRankingCaptureCoverage(rows) {
+      let tracked = 0;
+      let measurable = 0;
+      let knownComplete = 0;
+      let legacy = 0;
+      let incomplete = 0;
+      let empty = 0;
+      let error = 0;
+      for (const row of rows || []) {
+        if (!row) continue;
+        tracked += 1;
+        const kind = rankingCaptureQualityKind(row);
+        if (kind === 'incomplete') { incomplete += 1; continue; }
+        if (kind === 'empty') { empty += 1; continue; }
+        if (kind === 'error') { error += 1; continue; }
+        measurable += 1;
+        if (kind === 'legacy_unverified') legacy += 1;
+        else if (kind === 'complete_ranked' || kind === 'complete_no_match') knownComplete += 1;
+        else legacy += 1;
+      }
+      const failed = incomplete + empty + error;
+      return {
+        tracked,
+        measurable,
+        known_complete: knownComplete,
+        legacy_unverified: legacy,
+        incomplete,
+        empty,
+        error,
+        failed,
+        provisional: failed > 0 || legacy > 0 || measurable < tracked,
+      };
+    }
+
+    function formatRankingCaptureCoverageLine(cov) {
+      const parts = [`${cov.measurable || 0} measured of ${cov.tracked || 0} tracked`];
+      if ((cov.failed || 0) > 0) parts.push(`${cov.failed} incomplete/empty/error`);
+      if ((cov.legacy_unverified || 0) > 0) parts.push(`${cov.legacy_unverified} legacy quality unavailable`);
+      if (cov.provisional) parts.push('provisional — not all checks known-complete');
+      parts.push('tracked denominator kept (excluding unknowns does not inflate the score)');
+      return parts.join(' · ');
     }
 
     function rankingOrganicDepth(row) {
@@ -67399,14 +67489,18 @@ Composite of four inputs — not the Surface Visibility dial score.`;
     }
 
     function computeSurfaceOwnershipCensus(rows) {
-      const list = Array.isArray(rows) ? rows : [];
+      const all = Array.isArray(rows) ? rows : [];
+      const list = all.filter(rankingIsMeasurable);
       const n = list.length;
       const packPos = list.map((r) => r.local_pack_position).filter((p) => p != null && Number.isFinite(Number(p)));
       const avgPack = packPos.length
         ? Math.round((packPos.reduce((s, p) => s + Number(p), 0) / packPos.length) * 10) / 10
         : null;
+      const coverage = summarizeRankingCaptureCoverage(all);
       return {
-        tracked: n,
+        tracked: all.length,
+        measurable: n,
+        coverage,
         organic: {
           served: n,
           owned: list.filter((r) => r.best_rank_group != null && r.best_rank_group <= 10).length
@@ -67518,13 +67612,18 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         return (r.keyword_class || 'national-money') === cls;
       });
       const c = computeSurfaceOwnershipCensus(rows);
-      if (countEl) countEl.textContent = c.tracked + ' keyword' + (c.tracked === 1 ? '' : 's');
+      if (countEl) {
+        const cov = c.coverage || {};
+        countEl.textContent = `${c.measurable || 0} measured of ${c.tracked} tracked`
+          + ((cov.failed || 0) > 0 ? ` · ${cov.failed} incomplete/empty` : '')
+          + ((cov.legacy_unverified || 0) > 0 ? ` · ${cov.legacy_unverified} legacy unverified` : '');
+      }
       const rowHtml = (label, served, owned, extra) =>
         '<tr><td>' + label + '</td><td>' + served +
         '</td><td class="soc-owned">' + owned +
         '</td><td>' + (extra || '—') + '</td></tr>';
       const typ = (t) => {
-        const slot = computeTypicalServedSlot(rows, t);
+        const slot = computeTypicalServedSlot(rows.filter(rankingIsMeasurable), t);
         return slot != null ? 'typical slot ' + slot : '—';
       };
       const packNote = c.pack.avgPosition != null ? ('avg pack pos ' + c.pack.avgPosition) : typ('local_pack');
@@ -67538,9 +67637,10 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         rowHtml('Featured snippet', c.fs.served, c.fs.owned, typ('featured_snippet')) +
         rowHtml('Google AI Mode', c.aimode.served, c.aimode.owned, 'diagnostic product') +
         '</tbody></table>' +
-        '<p class="soc-footnote">Served/owned for PAA, featured snippet and AI Overview are stack-gated ' +
-        '(same definition as Surface Outcomes). Google AI Mode uses the separate ai_engines product slot. ' +
-        'Typical position = median stack slot. Scope = class filter above (not money-only unless filtered).</p>';
+        '<p class="soc-footnote">Served/owned use measurable checks only (incomplete/empty/error excluded — unknowns are not zeros). ' +
+        'PAA, featured snippet and AI Overview are stack-gated (same definition as Surface Outcomes). Google AI Mode uses the separate ai_engines product slot. ' +
+        'Typical position = median stack slot. Scope = class filter above (not money-only unless filtered). ' +
+        formatRankingCaptureCoverageLine(c.coverage || {}) + '</p>';
       try { updateGoogleAioCaptionFromRows(allRows); } catch (_e) { /* optional */ }
     }
 
@@ -68841,6 +68941,13 @@ Composite of four inputs — not the Surface Visibility dial score.`;
 
     function resolveTopOfPageRollupForHero(rows, demandWeighted) {
       const list = applyConfigClassificationToRows(filterTrackedRankingRows(Array.isArray(rows) ? rows : []));
+      const coverage = summarizeRankingCaptureCoverage(list);
+      // Incomplete/empty must not sit in the mean as zeros — score live when any failed exist.
+      if (coverage.failed > 0) {
+        const computed = enrichTopOfPageRollup(computeTopOfPageRollup(list));
+        setStoredTopOfPage(computed, list);
+        return computed;
+      }
       // Prefer server-canonical rollup from get-latest-audit (lib/audit/topOfPage.js) when it
       // matches the rows on screen. Live client recompute is a fallback only.
       try {
@@ -68854,7 +68961,9 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           && Number(serverTop.overall) > 0) {
           setStoredTopOfPage(serverTop, list);
           const regrouped = recomputeTopOfPageByClassFromStored(serverTop, list, demandWeighted);
-          if (regrouped && Number(regrouped.overall) > 0) return enrichTopOfPageRollup(regrouped);
+          if (regrouped && Number(regrouped.overall) > 0) {
+            return enrichTopOfPageRollup({ ...regrouped, coverage, provisional: coverage.provisional });
+          }
         }
       } catch (_e) { /* non-fatal */ }
 
@@ -68878,7 +68987,9 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       const stored = hydrateStoredTopOfPageFromSources(list) || getCurrentStoredTopOfPageObject();
       if (stored && storedTopOfPageMatchesRows(stored, list) && Number(stored.overall) > 0) {
         const regrouped = recomputeTopOfPageByClassFromStored(stored, list, demandWeighted);
-        if (regrouped) return enrichTopOfPageRollup(regrouped);
+        if (regrouped) {
+          return enrichTopOfPageRollup({ ...regrouped, coverage, provisional: coverage.provisional });
+        }
       }
       const computed = enrichTopOfPageRollup(computeTopOfPageRollup(list));
       setStoredTopOfPage(computed, list);
@@ -69396,9 +69507,11 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       return surfaceRoundScore(sSum / wSum);
     }
     function computeTopOfPageRollup(rows) {
+      const coverage = summarizeRankingCaptureCoverage(rows);
       const perKeyword = [];
       const byClass = { 'local-money': [], 'regional-money': [], 'national-money': [], brand: [], education: [] };
       for (const row of rows || []) {
+        if (!rankingIsMeasurable(row)) continue;
         const top = computeKeywordTopOfPageScore(row);
         const entry = { row, top, score: top.score, keyword: row.keyword };
         perKeyword.push(entry);
@@ -69416,6 +69529,8 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           return c === 'local-money' || c === 'national-money';
         })),
         byClass: dials,
+        coverage,
+        provisional: coverage.provisional,
         perKeyword: perKeyword.map((p) => ({
           keyword: p.keyword, score: p.score, best_surface: p.top.best_surface,
           best_slot: p.top.best_slot, stack_summary: p.top.stack_summary,
@@ -70599,6 +70714,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
     function renderHeroScoreAndStatus(composite) {
       const scoreEl = document.getElementById('ranking-ai-hero-score');
       const statusEl = document.getElementById('ranking-ai-hero-status');
+      const coverageEl = document.getElementById('ranking-ai-hero-coverage');
       if (scoreEl) {
         scoreEl.textContent = composite.score;
         scoreEl.setAttribute('data-rag', compositeRagClass(composite.score));
@@ -70609,7 +70725,20 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           : ((composite.schemaVersion >= 2)
             ? ' · Surface Visibility'
             : (composite.demandWeighted ? ' · demand-weighted' : ''));
-        statusEl.textContent = compositeStatusLabel(composite.score) + modeLabel;
+        const provisionalBit = composite.provisional ? ' · provisional' : '';
+        statusEl.textContent = compositeStatusLabel(composite.score) + modeLabel + provisionalBit;
+      }
+      if (coverageEl) {
+        const cov = composite.coverage;
+        if (cov && cov.tracked > 0) {
+          coverageEl.hidden = false;
+          coverageEl.setAttribute('data-provisional', cov.provisional ? '1' : '0');
+          coverageEl.textContent = formatRankingCaptureCoverageLine(cov);
+          coverageEl.title = 'Score mean uses measurable keywords only. Tracked count stays visible; removing unknowns from the denominator does not inflate the score.';
+        } else {
+          coverageEl.hidden = true;
+          coverageEl.textContent = '';
+        }
       }
     }
 
@@ -70624,6 +70753,14 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         deltaEl.setAttribute('data-dir', 'flat');
         return;
       }
+      if (opts && opts.suppressGeoBreak) {
+        deltaEl.hidden = false;
+        deltaEl.textContent = opts.geoBreakNote
+          || `${GEO_METHOD_BREAK_NOTE} Snapshot comparison vs ${String(previousAuditDate || '').slice(0, 10) || 'earlier audit'} withheld.`;
+        deltaEl.setAttribute('data-dir', 'flat');
+        deltaEl.title = 'Pin→city Local method break on 2026-09-28. Headline delta is not a real ranking movement.';
+        return;
+      }
       if (typeof previousScore !== 'number') {
         deltaEl.hidden = true;
         deltaEl.textContent = '';
@@ -70634,9 +70771,12 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       const dir = diff > 0 ? 'up' : (diff < 0 ? 'down' : 'flat');
       const sign = diff > 0 ? '+' : '';
       const dateLabel = previousAuditDate ? String(previousAuditDate).slice(0, 10) : 'previous audit';
+      const qualify = (opts && opts.provisional)
+        ? ' · provisional (incomplete/legacy cohorts — not a verified like-for-like loss/gain)'
+        : '';
       deltaEl.hidden = false;
-      deltaEl.textContent = `${sign}${diff} vs ${dateLabel} (was ${previousScore})`;
-      deltaEl.setAttribute('data-dir', dir);
+      deltaEl.textContent = `${sign}${diff} vs ${dateLabel} (was ${previousScore})${qualify}`;
+      deltaEl.setAttribute('data-dir', qualify ? 'flat' : dir);
     }
 
     function renderHeroContributionBar(composite) {
@@ -71234,7 +71374,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           `<div class="hero-class-dial" title="${label} Top-of-Page score (${weightLabel})">` +
             `<div class="hero-class-dial-label">${label}</div>` +
             `<div class="hero-class-dial-score" data-rag="${rag}">${d.count ? `${d.score}<small>/100</small>` : '–'}</div>` +
-            `<div class="hero-class-dial-sub">${d.count} keyword${d.count === 1 ? '' : 's'}</div>` +
+            `<div class="hero-class-dial-sub">${d.count} measured</div>` +
           `</div>`
         );
       }).join('');
@@ -71243,7 +71383,8 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         if (rollup?.weakestClass && rollup.byClass?.[rollup.weakestClass]) {
           const w = rollup.byClass[rollup.weakestClass];
           const label = SURFACE_CLASS_LABELS[rollup.weakestClass] || rollup.weakestClass;
-          weakEl.textContent = `Weakest class (Top-of-Page): ${label} (${w.score}/100)`;
+          const covBit = rollup.provisional ? ' · provisional' : '';
+          weakEl.textContent = `Weakest class (Top-of-Page): ${label} (${w.score}/100)${covBit}`;
         } else {
           weakEl.textContent = 'Weakest class (Top-of-Page): –';
         }
@@ -71262,10 +71403,14 @@ Composite of four inputs — not the Surface Visibility dial score.`;
 
     function computeWhatMovesHeroLine(stored, rows) {
       const pk = Array.isArray(stored?.perKeyword) ? stored.perKeyword : [];
-      const list = Array.isArray(rows) ? rows : [];
+      const list = (Array.isArray(rows) ? rows : []).filter(rankingIsMeasurable);
       if (!pk.length) return null;
-      const strong = pk.filter((p) => Number(p.score) >= 70);
-      const zero = pk.filter((p) => Number(p.score) === 0);
+      const measurableKeys = new Set(
+        list.map((r) => String(r?.keyword || '').trim().toLowerCase()).filter(Boolean)
+      );
+      const pkMeasurable = pk.filter((p) => measurableKeys.has(String(p?.keyword || '').trim().toLowerCase()));
+      const strong = pkMeasurable.filter((p) => Number(p.score) >= 70);
+      const zero = pkMeasurable.filter((p) => Number(p.score) === 0);
       const surfaceCounts = {};
       for (const p of strong) {
         const bs = p.best_surface || 'organic';
@@ -71328,10 +71473,14 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         && Number(bestGap.medianSlot) < Number(alanMedianOwned);
       const phrase = above ? 'sits above you' : "appears and doesn't include you";
       const volStr = `~${Math.round(bestGap.vol).toLocaleString('en-GB')}`;
+      const failedSkip = (Array.isArray(rows) ? rows : []).length - list.length;
+      const skipNote = failedSkip > 0
+        ? ` Incomplete/empty checks (${failedSkip}) are excluded — not real “own nothing” zeros.`
+        : '';
       return (
         `you're at or near the top on ${strong.length} searches (mostly via ${topSurfacePlain}) ` +
         `and own nothing on ${zero.length}. The biggest lever is the ${bestGap.count} searches where ` +
-        `${bestGap.plain} ${phrase} — worth ${volStr} searches/mo.`
+        `${bestGap.plain} ${phrase} — worth ${volStr} searches/mo.${skipNote}`
       );
     }
 
@@ -71392,12 +71541,14 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       const surfaceHero = {
         score: rollup.overall,
         demandWeighted,
-        schemaVersion: TOP_OF_PAGE_SCHEMA_VERSION
+        schemaVersion: TOP_OF_PAGE_SCHEMA_VERSION,
+        coverage: rollup.coverage || summarizeRankingCaptureCoverage(list),
+        provisional: !!(rollup.provisional || rollup.coverage?.provisional),
       };
       renderHeroScoreAndStatus(surfaceHero);
       renderSurfaceClassDials(rollup);
       const stored = getCurrentStoredTopOfPageObject();
-      renderWhatMovesHeroLine(stored, list);
+      renderWhatMovesHeroLine(stored || rollup, list);
       renderLegacyCitationDiagnostics(list);
       // Opportunity panel retired 2026-07-14 — do not render.
 
@@ -71405,11 +71556,20 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       const prevComposite = computePrevCompositeFromStoredScores(deltaState.previous, list);
       const prevVer = prevComposite?.schemaVersion || getStoredPillarSchemaVersion(deltaState.previous);
       const suppressCrossSchema = !!(deltaState.previous && prevVer < TOP_OF_PAGE_SCHEMA_VERSION);
+      const suppressGeoBreak = rankingIsPreGeoBreak(deltaState.previousAuditDate);
       renderHeroDelta(
         surfaceHero.score,
-        suppressCrossSchema ? null : (prevComposite ? prevComposite.score : null),
+        suppressCrossSchema || suppressGeoBreak ? null : (prevComposite ? prevComposite.score : null),
         deltaState.previousAuditDate,
-        { suppressCrossSchema, schemaVersion: TOP_OF_PAGE_SCHEMA_VERSION }
+        {
+          suppressCrossSchema,
+          suppressGeoBreak,
+          geoBreakNote: suppressGeoBreak
+            ? `${GEO_METHOD_BREAK_NOTE} Headline snapshot vs ${String(deltaState.previousAuditDate || '').slice(0, 10)} withheld.`
+            : null,
+          provisional: surfaceHero.provisional,
+          schemaVersion: TOP_OF_PAGE_SCHEMA_VERSION,
+        }
       );
 
       const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
@@ -76095,10 +76255,14 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         const scoredRows = rowsToUse.filter((r) => !rankingCaptureFailed(r));
         const scoredCount = scoredRows.length;
         const incompleteCount = rowsToUse.length - scoredCount;
+        const legacyUnverified = scoredRows.filter((r) => rankingCaptureQualityKind(r) === 'legacy_unverified').length;
+        const knownComplete = scoredRows.length - legacyUnverified;
         const top3 = scoredRows.filter(r => r.best_rank_group != null && r.best_rank_group <= 3).length;
         const top3Pct = scoredCount > 0 ? Math.round((top3 / scoredCount) * 100) : 0;
         const rank11to20 = scoredRows.filter(r => r.best_rank_group != null && r.best_rank_group >= 11 && r.best_rank_group <= 20).length;
-        const notRanked = scoredRows.filter(r => r.best_rank_group == null || r.best_rank_group > 20).length;
+        const rank21to50 = scoredRows.filter(r => r.best_rank_group != null && r.best_rank_group >= 21 && r.best_rank_group <= 50).length;
+        const completeNoMatch = scoredRows.filter(r => r.best_rank_group == null).length;
+        const beyondDepth = scoredRows.filter(r => r.best_rank_group != null && r.best_rank_group > 50).length;
         const top10 = scoredRows.filter(r => r.best_rank_group != null && r.best_rank_group <= 10).length;
         const top10Pct = scoredCount > 0 ? Math.round((top10 / scoredCount) * 100) : 0;
         if (valueEl) valueEl.textContent = `${top10}/${scoredCount} (${top10Pct}%)`;
@@ -76115,14 +76279,16 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         const top10Only = top10 - top3;
         const pctTop10Only = scoredCount > 0 ? Math.round((top10Only / scoredCount) * 100) : 0;
         const pct11to20 = scoredCount > 0 ? Math.round((rank11to20 / scoredCount) * 100) : 0;
-        const pctNotRanked = scoredCount > 0 ? Math.round((notRanked / scoredCount) * 100) : 0;
+        const pct21to50 = scoredCount > 0 ? Math.round((rank21to50 / scoredCount) * 100) : 0;
+        const pctNoMatch = scoredCount > 0 ? Math.round((completeNoMatch / scoredCount) * 100) : 0;
         const depthHint = 50;
         
         // Update details
         if (detailsEl) {
           detailsEl.innerHTML = `
             <p class="tile-details-title">
-              Distribution of best classic (blue-link) rankings across tracked keywords with a <strong>complete</strong> depth-${depthHint} check.
+              Distribution of best classic (blue-link) rankings across tracked keywords with a measurable depth-${depthHint} check
+              (${knownComplete} known-complete · ${legacyUnverified} legacy quality unavailable · tracked ${rowsToUse.length}).
             </p>
             <ul class="tile-details-list">
               <li>
@@ -76135,14 +76301,20 @@ Composite of four inputs — not the Surface Visibility dial score.`;
                 <strong>Positions 11–20:</strong> ${rank11to20}/${scoredCount} (${pct11to20}%)
               </li>
               <li>
-                <strong>Not in top ${depthHint} (complete miss or 21+):</strong> ${notRanked}/${scoredCount} (${pctNotRanked}%)
+                <strong>Positions 21–50:</strong> ${rank21to50}/${scoredCount} (${pct21to50}%)
               </li>
+              <li>
+                <strong>Not in top ${depthHint} (complete no-match):</strong> ${completeNoMatch}/${scoredCount} (${pctNoMatch}%)
+              </li>
+              ${beyondDepth > 0 ? `<li><strong>Beyond depth ${depthHint}:</strong> ${beyondDepth}/${scoredCount}</li>` : ''}
               <li>
                 <strong>Incomplete / empty checks (excluded):</strong> ${incompleteCount}
               </li>
             </ul>
             <p class="tile-details-footnote">
-              "Top 3" and "4–10" together make up Top-10 coverage. Failed DFS captures are excluded from both numerator and denominator so coverage is not inflated or treated as a real ranking loss.
+              "Top 3" and "4–10" together make up Top-10 coverage. Positions 21–50 are known ranks inside depth ${depthHint} — not absent.
+              Complete no-match = null organic within depth on a measurable check (legacy rows without capture_status are not labelled proven-complete).
+              Failed DFS captures are excluded from both numerator and denominator so coverage is not inflated or treated as a real ranking loss.
             </p>
           `;
         }
@@ -76795,12 +76967,13 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       const timeEl = document.createElement('span');
       timeEl.className = 'kw-last-checked-time';
       timeEl.dataset.source = source;
-      const status = rankingCaptureStatus(row);
+      const status = rankingCaptureQualityKind(row);
       const depth = rankingOrganicDepth(row);
       let statusBit = '';
       if (status === 'incomplete') statusBit = ' · incomplete';
       else if (status === 'empty') statusBit = ' · empty check';
       else if (status === 'error') statusBit = ' · check error';
+      else if (status === 'legacy_unverified') statusBit = ' · legacy quality unavailable';
       else if (status === 'complete_no_match') statusBit = ` · not in top ${depth}`;
       timeEl.textContent = (source === 'refresh'
         ? formatRelativeTime(iso)
@@ -76818,7 +76991,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         tipParts.push(`Last good organic #${feats.last_good_rank_group} (${when}) — not current`);
       }
       timeEl.title = tipParts.join(' · ');
-      if (rankingCaptureFailed(row)) timeEl.style.color = '#b45309';
+      if (rankingCaptureFailed(row) || status === 'legacy_unverified') timeEl.style.color = '#b45309';
       wrap.appendChild(timeEl);
 
       const btn = document.createElement('button');
@@ -77210,6 +77383,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       };
       if (!Array.isArray(rows)) return surfaces;
       for (const row of rows) {
+        if (rankingCaptureFailed(row)) continue;
         const key = String(row?.keyword || '').trim();
         if (!key) continue;
         if (movementRowOwnsSurface(row, 'ai_overview')) surfaces.ai_answer.add(key);
@@ -77414,25 +77588,78 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       return `${band} · shown on <b>${served}</b> of your searches`;
     }
 
+    function filterMovementDiffForQuality(diff, currentRows, previousRows) {
+      const failedKeys = new Set();
+      for (const row of [...(currentRows || []), ...(previousRows || [])]) {
+        if (!rankingCaptureFailed(row)) continue;
+        const key = String(row?.keyword || '').trim();
+        if (key) failedKeys.add(key);
+      }
+      const keep = (k) => !failedKeys.has(String(k || '').trim());
+      const gained = (diff.gained || []).filter(keep);
+      const lost = (diff.lost || []).filter(keep);
+      return {
+        ...diff,
+        gained,
+        lost,
+        suppressed_unknown: ((diff.gained?.length || 0) - gained.length) + ((diff.lost?.length || 0) - lost.length),
+      };
+    }
+
     function computeCitationMovement(currentSnapshot, baselineSnapshot) {
       if (!currentSnapshot?.rows || !baselineSnapshot?.rows) return null;
       const currCite = buildCitationIndexFromRows(currentSnapshot.rows);
       const prevCite = buildCitationIndexFromRows(baselineSnapshot.rows);
       const currSurf = buildSurfaceOwnershipIndex(currentSnapshot.rows);
       const prevSurf = buildSurfaceOwnershipIndex(baselineSnapshot.rows);
-      const observed = computeSurfaceObservedImportance(currentSnapshot.rows);
+      const observed = computeSurfaceObservedImportance(
+        (currentSnapshot.rows || []).filter(rankingIsMeasurable)
+      );
       const volumeMap = buildKeywordVolumeMap([currentSnapshot.rows, baselineSnapshot.rows]);
+      const qualifyGeo = rankingIsPreGeoBreak(baselineSnapshot.audit_date);
+      const surfaces = {
+        ai_answer: filterMovementDiffForQuality(
+          diffStringSets(currSurf.ai_answer, prevSurf.ai_answer),
+          currentSnapshot.rows, baselineSnapshot.rows
+        ),
+        map: filterMovementDiffForQuality(
+          diffStringSets(currSurf.map, prevSurf.map),
+          currentSnapshot.rows, baselineSnapshot.rows
+        ),
+        paa: filterMovementDiffForQuality(
+          diffStringSets(currSurf.paa, prevSurf.paa),
+          currentSnapshot.rows, baselineSnapshot.rows
+        ),
+        answer_box: filterMovementDiffForQuality(
+          diffStringSets(currSurf.answer_box, prevSurf.answer_box),
+          currentSnapshot.rows, baselineSnapshot.rows
+        ),
+        blue_links: filterMovementDiffForQuality(
+          diffStringSets(currSurf.blue_links, prevSurf.blue_links),
+          currentSnapshot.rows, baselineSnapshot.rows
+        ),
+        knowledge_panel: filterMovementDiffForQuality(
+          diffStringSets(currSurf.knowledge_panel, prevSurf.knowledge_panel),
+          currentSnapshot.rows, baselineSnapshot.rows
+        ),
+      };
+      if (qualifyGeo) {
+        // Pin→city break: do not present Map gains/losses as real rank movement.
+        surfaces.map = {
+          gained: [],
+          lost: [],
+          current: currSurf.map.size,
+          previous: prevSurf.map.size,
+          withheld: true,
+          withhold_reason: GEO_METHOD_BREAK_NOTE,
+        };
+      }
       const movement = {
         current_date: currentSnapshot.audit_date,
         baseline_date: baselineSnapshot.audit_date,
-        surfaces: {
-          ai_answer: diffStringSets(currSurf.ai_answer, prevSurf.ai_answer),
-          map: diffStringSets(currSurf.map, prevSurf.map),
-          paa: diffStringSets(currSurf.paa, prevSurf.paa),
-          answer_box: diffStringSets(currSurf.answer_box, prevSurf.answer_box),
-          blue_links: diffStringSets(currSurf.blue_links, prevSurf.blue_links),
-          knowledge_panel: diffStringSets(currSurf.knowledge_panel, prevSurf.knowledge_panel),
-        },
+        surfaces,
+        geo_method_break: qualifyGeo,
+        geo_method_break_note: qualifyGeo ? GEO_METHOD_BREAK_NOTE : null,
         keywords: diffStringSets(currCite.keywords, prevCite.keywords),
         urls: diffUrlMaps(currCite.urls, prevCite.urls),
         moneyUrls: diffUrlMaps(currCite.moneyUrls, prevCite.moneyUrls),
@@ -77537,9 +77764,17 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       if (statusEl) statusEl.textContent = statusLabel;
 
       if (detailsEl) {
-        const line = (label, d) => `<li><strong>${label}:</strong> +${d?.gained?.length || 0} / −${d?.lost?.length || 0} (was ${d?.previous ?? 0} → now ${d?.current ?? 0})</li>`;
+        const line = (label, d) => {
+          if (d?.withheld) {
+            return `<li><strong>${label}:</strong> comparison withheld — ${escapeHtml(d.withhold_reason || GEO_METHOD_BREAK_NOTE)}</li>`;
+          }
+          return `<li><strong>${label}:</strong> +${d?.gained?.length || 0} / −${d?.lost?.length || 0} (was ${d?.previous ?? 0} → now ${d?.current ?? 0})</li>`;
+        };
+        const geoNote = movement.geo_method_break
+          ? `<p class="tile-details-footnote" style="color:#92400e;">${escapeHtml(movement.geo_method_break_note || GEO_METHOD_BREAK_NOTE)}</p>`
+          : '';
         detailsEl.innerHTML = `
-          <p class="tile-details-title">Ownership changes since ${escapeHtml(baselineLabel)}${movement.baseline_date ? ` (${escapeHtml(movement.baseline_date)})` : ''}.</p>
+          <p class="tile-details-title">Ownership changes since ${escapeHtml(baselineLabel)}${movement.baseline_date ? ` (${escapeHtml(movement.baseline_date)})` : ''}. Incomplete/empty keywords are not counted as real gains/losses.</p>
           <ul class="tile-details-list">
             ${line("Google's AI answer", surf.ai_answer)}
             ${line('Map results', surf.map)}
@@ -77548,6 +77783,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
             ${line('Blue links (top 10)', surf.blue_links)}
             ${line('Knowledge panel', surf.knowledge_panel)}
           </ul>
+          ${geoNote}
           <p class="tile-details-footnote">Full keyword lists are in the Surface ownership movement card below.</p>
         `;
       }
@@ -77669,6 +77905,17 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       const kwCol = (def) => {
         const d = surf[def.key];
         const w = worth[def.key] || {};
+        if (d?.withheld) {
+          return `
+            <div class="card ranking-cm-column" style="padding:14px; background:#fffbeb; border:1px solid #fcd34d;">
+              <h4>${escapeHtml(def.title)}</h4>
+              <div class="ranking-cm-net">${d.previous ?? 0} → ${d.current ?? 0}</div>
+              <p style="margin:8px 0 0; font-size:0.82rem; color:#92400e; line-height:1.4;">
+                ${escapeHtml(d.withhold_reason || GEO_METHOD_BREAK_NOTE)}
+              </p>
+            </div>
+          `;
+        }
         return renderMovementColumnHtml({
           title: def.title,
           gained: (d?.gained || []).map((k) => ({ primary: k })),
@@ -77681,7 +77928,11 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         });
       };
       const surfaceCols = SURFACE_MOVEMENT_TYPES.map(kwCol);
+      const geoBanner = movement.geo_method_break
+        ? `<p style="margin:0 0 12px; padding:0.55rem 0.7rem; background:#fffbeb; border:1px solid #fcd34d; border-radius:6px; color:#92400e; font-size:0.85rem; line-height:1.4;">${escapeHtml(movement.geo_method_break_note || GEO_METHOD_BREAK_NOTE)} Incomplete/empty checks are also excluded from gained/lost lists.</p>`
+        : `<p style="margin:0 0 12px; color:#64748b; font-size:0.82rem;">Incomplete/empty checks are excluded from gained/lost — unknown captures are not real ownership losses.</p>`;
       return `
+        ${geoBanner}
         <div class="ranking-citation-movement-grid ranking-citation-movement-grid--surfaces">
           ${surfaceCols.join('')}
         </div>
