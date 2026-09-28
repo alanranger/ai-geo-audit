@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-28] - Ranking: persist DFS capture quality (incomplete ≠ unranked)
+
+**Change:** Thin/empty/error DFS SERP captures now keep a durable `serp_features.capture_status` (plus organic_count, dfs_cost, depth, geo_method, optional dated `last_good_*`). Shared path covers `serp-rank-test` retries → `buildCombinedRows` → save-keyword-batch → dashboard Run ranking / Refresh filtered / Monday `dashboard-parity-tick`. Failed checks stay null-ranked (unknown), are excluded from Top-10 coverage denominators, and UI copy uses depth **50** (not top 100). Local geography stays Coventry city-code (no pin); historical pin vs city break is flagged.
+
+**Files:** `lib/keyword-ranking/dfs-serp-quality.js`, `empty-serp-stub.js`, `refresh-core.js`, `api/aigeo/serp-rank-test.js`, `api/supabase/save-keyword-batch.js`, `audit-dashboard.html`, `test/dfs-serp-quality.test.js`
+
+---
+
 ## [2026-09-28] - Canonical rule: score head only; body tags are hygiene notes
 
 **Change:** Extractability now parses real `<head>` `<link rel="canonical">` (ignores comment/script/style lookalikes) and counts body tags separately. `Canonical is valid` passes when head is self-referencing even if a misplaced body tag exists — note asks for source cleanup. Real missing/invalid/multiple head and old-cache unknown states unchanged. `/home` not exempted.

@@ -66802,6 +66802,33 @@ Composite of four inputs — not the Surface Visibility dial score.`;
     // stop the scan instead of firing the next paid DFS batch.
     const EMPTY_SERP_STUB_ERROR = 'empty_serp_surface_stack';
 
+    function rankingCaptureStatus(row) {
+      const feats = row?.serp_features;
+      if (feats?.capture_status) return String(feats.capture_status);
+      if (row?.crawl_incomplete === true) return 'incomplete';
+      if (feats?.stub === true || feats?.fetch_error === EMPTY_SERP_STUB_ERROR) return 'empty';
+      const err = row?.error ? String(row.error) : '';
+      if (/incomplete crawl/i.test(err)) return 'incomplete';
+      if (err === EMPTY_SERP_STUB_ERROR) return 'empty';
+      if (err && /empty SERP|request failed|Unexpected server|timed out|Aborted after fatal/i.test(err)) return 'error';
+      const stack = row?.serp_surface_stack;
+      const emptyStack = !Array.isArray(stack) || stack.length === 0;
+      const noRank = row?.best_rank_group == null && row?.best_rank_absolute == null;
+      if (emptyStack && noRank) return 'empty';
+      if (noRank) return 'complete_no_match';
+      return 'complete_ranked';
+    }
+
+    function rankingCaptureFailed(row) {
+      const s = rankingCaptureStatus(row);
+      return s === 'incomplete' || s === 'empty' || s === 'error';
+    }
+
+    function rankingOrganicDepth(row) {
+      const d = Number(row?.serp_depth ?? row?.serp_features?.serp_depth_requested ?? 50);
+      return Number.isFinite(d) && d > 0 ? d : 50;
+    }
+
     function isClientTrackedKeyword(keyword) {
       const key = String(keyword || '').trim().toLowerCase();
       if (!key) return false;
@@ -66832,6 +66859,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       return (batchRows || []).map((row) => {
         if (!row) return row;
         if (row.error === EMPTY_SERP_STUB_ERROR || row?.serp_features?.stub === true) return row;
+        if (rankingCaptureFailed(row) && rankingCaptureStatus(row) === 'incomplete') return row;
         const stack = row.serp_surface_stack;
         const emptyStack = Array.isArray(stack) ? stack.length === 0 : true;
         const noRank = row.best_rank_absolute == null && row.best_rank_group == null;
@@ -66844,8 +66872,9 @@ Composite of four inputs — not the Surface Visibility dial score.`;
 
     function rankingRowLooksEmpty(row) {
       if (!row) return true;
-      // Tracked empty-SERP stubs are intentionally saveable.
+      // Tracked empty-SERP stubs / incomplete diagnostics are intentionally saveable.
       if (row.error === EMPTY_SERP_STUB_ERROR || row?.serp_features?.stub === true) return false;
+      if (rankingCaptureFailed(row)) return false;
       if (row.error) return true;
       const stack = row.serp_surface_stack;
       const emptyStack = Array.isArray(stack) ? stack.length === 0 : true;
@@ -68109,7 +68138,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
     function anatomyPillLabel(el) {
       return formatStackElementStrip(el);
     }
-    function anatomyPillTitle(el) {
+    function anatomyPillTitle(el, row) {
       if (el.type === 'ai_overview') {
         return el.ours === true
           ? "Google's AI answer — shown, and you're a source"
@@ -68131,9 +68160,12 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           : "Answer box — shown, you're not in it";
       }
       if (el.type === 'organic') {
+        const depth = rankingOrganicDepth(row);
         return el.our_position != null
           ? `Blue links — your best link is #${el.our_position}`
-          : "Blue links — you're not in the top 100";
+          : (rankingCaptureFailed(row)
+            ? `Blue links — check incomplete/empty (not a confirmed miss within top ${depth})`
+            : `Blue links — you're not in the top ${depth}`);
       }
       return surfaceTypeFullLabel(el.type, true);
     }
@@ -68189,7 +68221,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         const owned = el.ours === true || el.our_position != null;
         pill.className = 'ranking-anat-pill ' + (owned ? 'ranking-anat-pill--own' : 'ranking-anat-pill--miss');
         pill.textContent = anatomyPillLabel(el);
-        pill.title = anatomyPillTitle(el);
+        pill.title = anatomyPillTitle(el, row);
         wrap.appendChild(pill);
       }
       if (summary.pills.length) {
@@ -72479,8 +72511,52 @@ Composite of four inputs — not the Surface Visibility dial score.`;
                 serp_depth: row.serp_depth ?? serpJson?.summary?.depth ?? null,
                 serp_surface_stack: Array.isArray(row.serp_surface_stack) ? row.serp_surface_stack : null,
                 error: row.error || null,
+                crawl_incomplete: row.crawl_incomplete === true,
+                organic_count: row.organic_count != null ? Number(row.organic_count) : null,
+                dfs_cost: row.dfs_cost != null ? Number(row.dfs_cost) : null,
+                se_results_count: row.se_results_count != null ? Number(row.se_results_count) : null,
                 demand_share: 0 // Will be recalculated after all batches
               };
+            }).map((mapped) => {
+              // Mirror server capture_status into serp_features for incremental save/UI.
+              const feats = (mapped.serp_features && typeof mapped.serp_features === 'object')
+                ? { ...mapped.serp_features }
+                : {};
+              const emptyStack = !Array.isArray(mapped.serp_surface_stack) || mapped.serp_surface_stack.length === 0;
+              let captureStatus = feats.capture_status || null;
+              if (!captureStatus) {
+                if (mapped.crawl_incomplete || (mapped.error && /incomplete crawl/i.test(String(mapped.error)))) {
+                  captureStatus = emptyStack ? 'empty' : 'incomplete';
+                } else if (mapped.error && emptyStack) {
+                  captureStatus = 'empty';
+                } else if (mapped.best_rank_group == null) {
+                  captureStatus = emptyStack ? 'empty' : 'complete_no_match';
+                } else {
+                  captureStatus = 'complete_ranked';
+                }
+              }
+              feats.capture_status = captureStatus;
+              feats.crawl_incomplete = mapped.crawl_incomplete === true || captureStatus === 'incomplete' || captureStatus === 'empty';
+              if (mapped.organic_count != null) feats.organic_count = mapped.organic_count;
+              if (mapped.dfs_cost != null) feats.dfs_cost = mapped.dfs_cost;
+              if (mapped.se_results_count != null) feats.se_results_count = mapped.se_results_count;
+              feats.serp_depth_requested = mapped.serp_depth != null ? Number(mapped.serp_depth) : 50;
+              if (Number(mapped.location_code) === 9215523 && !mapped.location_coordinate) {
+                feats.geo_method = 'coventry_city_code';
+              } else if (Number(mapped.location_code) === 2826) {
+                feats.geo_method = 'uk_national';
+              }
+              if (captureStatus === 'empty') {
+                feats.stub = true;
+                feats.fetch_error = feats.fetch_error || mapped.error || 'empty_serp_surface_stack';
+              }
+              if (captureStatus === 'incomplete' || captureStatus === 'empty' || captureStatus === 'error') {
+                mapped.best_rank_group = null;
+                mapped.best_rank_absolute = null;
+                mapped.best_url = null;
+              }
+              mapped.serp_features = feats;
+              return mapped;
             });
             
             // Save batch incrementally
@@ -73364,11 +73440,21 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       D = Math.min(Math.max(D, 0), 1);
 
       // 2.2 Rank component R (0-1)
+      // Failed/incomplete DFS captures are unknown — do not score as "not ranked".
+      if (rankingCaptureFailed(row)) {
+        return {
+          score: null,
+          demandComponent: D,
+          rankComponent: null,
+          aiComponent: null,
+          captureFailed: true,
+        };
+      }
       const rank = row.best_rank_group ?? row.best_rank_absolute ?? null;
       let R;
       
       if (rank == null) {
-        R = 0.2;          // effectively not ranked
+        R = 0.2;          // complete crawl, not in requested depth
       } else if (rank <= 3) {
         R = 0.2;          // already very strong; little upside
       } else if (rank <= 10) {
@@ -74783,13 +74869,28 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       if (row && row.location_unmapped) return 'UK (unmapped)';
       const name = row && row.location_name ? String(row.location_name) : '';
       const kw = row && row.keyword ? String(row.keyword).toLowerCase() : '';
-      if (/coventry/i.test(name)) return 'Coventry';
+      if (/coventry/i.test(name) || Number(row?.location_code) === 9215523) return 'Coventry';
       if (name && /united kingdom/i.test(name)) {
         if (/\bworkshop/.test(kw) && /\bnear me\b/.test(kw)) return 'UK ⚠';
         return 'UK';
       }
       if (!name) return '—';
       return name.length > 18 ? name.slice(0, 16) + '…' : name;
+    }
+
+    function rankingTrackLocTitle(row) {
+      const geo = row?.serp_features?.geo_method;
+      const cityNote = 'Local ranks use Coventry city location_code only (no GBP pin). Do not compare to older pin-based Local ranks.';
+      if (row?.location_unmapped) {
+        return 'Not in the locked tracking-location map — defaulted to United Kingdom. Classify it in keyword-tracking-locations-LOCKED.csv.';
+      }
+      if (geo === 'coventry_city_code' || Number(row?.location_code) === 9215523) {
+        return `Tracked from: ${row.location_name || 'Coventry'} — ${cityNote}`;
+      }
+      if (row?.location_name) {
+        return `Tracked from: ${row.location_name}${rankingTrackLocLabel(row) === 'UK ⚠' ? ' — workshops near me is national (proximity-noisy); interpret with caution.' : ''}`;
+      }
+      return 'Legacy row (no location stored) — treat as national UK.';
     }
 
     function rankingAiExportOptimisationLabel(row) {
@@ -75988,15 +76089,19 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         const valueEl = top10Card.querySelector(".metric-pill-value[data-field='value']");
         const statusEl = top10Card.querySelector(".metric-pill-status[data-field='status']");
         const detailsEl = top10Card.querySelector(".metric-pill-details");
-        if (valueEl) valueEl.textContent = `${top10}/${countToUse} (${top10Pct}%)`;
         
-        // Calculate rank buckets
-        const top3 = rowsToUse.filter(r => r.best_rank_group != null && r.best_rank_group <= 3).length;
-        const top3Pct = countToUse > 0 ? Math.round((top3 / countToUse) * 100) : 0;
-        const rank11to20 = rowsToUse.filter(r => r.best_rank_group != null && r.best_rank_group >= 11 && r.best_rank_group <= 20).length;
-        const rank11to20Pct = countToUse > 0 ? Math.round((rank11to20 / countToUse) * 100) : 0;
-        const notRanked = rowsToUse.filter(r => r.best_rank_group == null || r.best_rank_group > 20).length;
-        const notRankedPct = countToUse > 0 ? Math.round((notRanked / countToUse) * 100) : 0;
+        // Calculate rank buckets — exclude failed/incomplete captures from
+        // coverage denominators (do not inflate % by dropping only failures).
+        const scoredRows = rowsToUse.filter((r) => !rankingCaptureFailed(r));
+        const scoredCount = scoredRows.length;
+        const incompleteCount = rowsToUse.length - scoredCount;
+        const top3 = scoredRows.filter(r => r.best_rank_group != null && r.best_rank_group <= 3).length;
+        const top3Pct = scoredCount > 0 ? Math.round((top3 / scoredCount) * 100) : 0;
+        const rank11to20 = scoredRows.filter(r => r.best_rank_group != null && r.best_rank_group >= 11 && r.best_rank_group <= 20).length;
+        const notRanked = scoredRows.filter(r => r.best_rank_group == null || r.best_rank_group > 20).length;
+        const top10 = scoredRows.filter(r => r.best_rank_group != null && r.best_rank_group <= 10).length;
+        const top10Pct = scoredCount > 0 ? Math.round((top10 / scoredCount) * 100) : 0;
+        if (valueEl) valueEl.textContent = `${top10}/${scoredCount} (${top10Pct}%)`;
         
         let ragClass = 'red';
         let statusLabel = 'Weak';
@@ -76008,32 +76113,36 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         
         // Calculate top10Only (positions 4-10)
         const top10Only = top10 - top3;
-        const pctTop10Only = countToUse > 0 ? Math.round((top10Only / countToUse) * 100) : 0;
-        const pct11to20 = countToUse > 0 ? Math.round((rank11to20 / countToUse) * 100) : 0;
-        const pctNotRanked = countToUse > 0 ? Math.round((notRanked / countToUse) * 100) : 0;
+        const pctTop10Only = scoredCount > 0 ? Math.round((top10Only / scoredCount) * 100) : 0;
+        const pct11to20 = scoredCount > 0 ? Math.round((rank11to20 / scoredCount) * 100) : 0;
+        const pctNotRanked = scoredCount > 0 ? Math.round((notRanked / scoredCount) * 100) : 0;
+        const depthHint = 50;
         
         // Update details
         if (detailsEl) {
           detailsEl.innerHTML = `
             <p class="tile-details-title">
-              Distribution of best classic (blue-link) rankings across your tracked keywords.
+              Distribution of best classic (blue-link) rankings across tracked keywords with a <strong>complete</strong> depth-${depthHint} check.
             </p>
             <ul class="tile-details-list">
               <li>
-                <strong>Top 3 (positions 1–3):</strong> ${top3}/${countToUse} (${top3Pct}%)
+                <strong>Top 3 (positions 1–3):</strong> ${top3}/${scoredCount} (${top3Pct}%)
               </li>
               <li>
-                <strong>Positions 4–10:</strong> ${top10Only}/${countToUse} (${pctTop10Only}%)
+                <strong>Positions 4–10:</strong> ${top10Only}/${scoredCount} (${pctTop10Only}%)
               </li>
               <li>
-                <strong>Positions 11–20:</strong> ${rank11to20}/${countToUse} (${pct11to20}%)
+                <strong>Positions 11–20:</strong> ${rank11to20}/${scoredCount} (${pct11to20}%)
               </li>
               <li>
-                <strong>Not ranked (21+):</strong> ${notRanked}/${countToUse} (${pctNotRanked}%)
+                <strong>Not in top ${depthHint} (complete miss or 21+):</strong> ${notRanked}/${scoredCount} (${pctNotRanked}%)
+              </li>
+              <li>
+                <strong>Incomplete / empty checks (excluded):</strong> ${incompleteCount}
               </li>
             </ul>
             <p class="tile-details-footnote">
-              "Top 3" and "4–10" together make up your total Top-10 coverage.
+              "Top 3" and "4–10" together make up Top-10 coverage. Failed DFS captures are excluded from both numerator and denominator so coverage is not inflated or treated as a real ranking loss.
             </p>
           `;
         }
@@ -76041,11 +76150,11 @@ Composite of four inputs — not the Surface Visibility dial score.`;
 
       // 2026-06-24: Top-10 + Striking-distance (11–20) ranked-keyword list tiles.
       renderRankedKeywordListTile('ranking-card-top10-keywords',
-        rowsToUse.filter(r => r.best_rank_group != null && r.best_rank_group <= 10),
-        { statusLabel: 'Wins', title: 'Keywords where you rank in Google’s top 10 (positions 1–10).' });
+        rowsToUse.filter(r => !rankingCaptureFailed(r) && r.best_rank_group != null && r.best_rank_group <= 10),
+        { statusLabel: 'Wins', title: 'Keywords where you rank in Google’s top 10 (positions 1–10). Incomplete checks excluded.' });
       renderRankedKeywordListTile('ranking-card-rank11to20-keywords',
-        rowsToUse.filter(r => r.best_rank_group != null && r.best_rank_group >= 11 && r.best_rank_group <= 20),
-        { statusLabel: 'Striking distance', title: 'Keywords ranking 11–20 — just off page 1 and prime optimisation targets.' });
+        rowsToUse.filter(r => !rankingCaptureFailed(r) && r.best_rank_group != null && r.best_rank_group >= 11 && r.best_rank_group <= 20),
+        { statusLabel: 'Striking distance', title: 'Keywords ranking 11–20 — just off page 1 and prime optimisation targets. Incomplete checks excluded.' });
 
       // SERP feature coverage
       const serpFeaturesCard = document.getElementById("ranking-card-serp-features");
@@ -76686,11 +76795,30 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       const timeEl = document.createElement('span');
       timeEl.className = 'kw-last-checked-time';
       timeEl.dataset.source = source;
-      timeEl.textContent = source === 'refresh'
-        ? formatRelativeTime(iso)                                    // e.g. "2m ago" (live pull)
-        : source === 'audit' ? `audit · ${formatRelativeTime(iso)}`  // e.g. "audit · 3h ago"
-        : 'never';
-      if (iso) timeEl.title = new Date(iso).toLocaleString();
+      const status = rankingCaptureStatus(row);
+      const depth = rankingOrganicDepth(row);
+      let statusBit = '';
+      if (status === 'incomplete') statusBit = ' · incomplete';
+      else if (status === 'empty') statusBit = ' · empty check';
+      else if (status === 'error') statusBit = ' · check error';
+      else if (status === 'complete_no_match') statusBit = ` · not in top ${depth}`;
+      timeEl.textContent = (source === 'refresh'
+        ? formatRelativeTime(iso)
+        : source === 'audit' ? `audit · ${formatRelativeTime(iso)}`
+        : 'never') + statusBit;
+      const feats = row?.serp_features || {};
+      const tipParts = [];
+      if (iso) tipParts.push(new Date(iso).toLocaleString());
+      tipParts.push(`Capture: ${status}`);
+      tipParts.push(`Depth requested: ${depth}`);
+      if (feats.organic_count != null) tipParts.push(`Organics returned: ${feats.organic_count}`);
+      if (feats.dfs_cost != null) tipParts.push(`DFS cost: $${feats.dfs_cost}`);
+      if (feats.last_good_rank_group != null) {
+        const when = feats.last_good_at ? new Date(feats.last_good_at).toLocaleString() : 'prior';
+        tipParts.push(`Last good organic #${feats.last_good_rank_group} (${when}) — not current`);
+      }
+      timeEl.title = tipParts.join(' · ');
+      if (rankingCaptureFailed(row)) timeEl.style.color = '#b45309';
       wrap.appendChild(timeEl);
 
       const btn = document.createElement('button');
@@ -77922,11 +78050,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         const tdLoc = document.createElement("td");
         const locLabel = rankingTrackLocLabel(row);
         tdLoc.textContent = locLabel;
-        tdLoc.title = row.location_unmapped
-          ? 'Not in the locked tracking-location map — defaulted to United Kingdom. Classify it in keyword-tracking-locations-LOCKED.csv.'
-          : (row.location_name
-            ? `Tracked from: ${row.location_name}${locLabel === 'UK ⚠' ? ' — workshops near me is national (proximity-noisy); interpret with caution.' : ''}`
-            : 'Legacy row (no location stored) — treat as national UK.');
+        tdLoc.title = rankingTrackLocTitle(row);
         if (locLabel === 'UK ⚠' || locLabel === 'UK (unmapped)') tdLoc.style.color = '#b45309';
         else if (locLabel === 'Coventry') tdLoc.style.color = '#0369a1';
         else if (locLabel === '—') tdLoc.style.color = '#94a3b8';
@@ -78043,6 +78167,20 @@ Composite of four inputs — not the Surface Visibility dial score.`;
           a.rel = "noopener noreferrer";
           a.textContent = row.best_title || row.best_url;
           tdUrl.appendChild(a);
+        } else if (rankingCaptureFailed(row)) {
+          const depth = rankingOrganicDepth(row);
+          const feats = row.serp_features || {};
+          tdUrl.textContent = rankingCaptureStatus(row) === 'empty' ? 'Check empty' : 'Check incomplete';
+          tdUrl.style.color = '#b45309';
+          let tip = `DFS capture ${rankingCaptureStatus(row)} — not a confirmed miss within top ${depth}.`;
+          if (feats.last_good_rank_group != null) {
+            tip += ` Last good #${feats.last_good_rank_group}${feats.last_good_at ? ` on ${new Date(feats.last_good_at).toLocaleString()}` : ''} (not current).`;
+          }
+          tdUrl.title = tip;
+        } else if (rankingCaptureStatus(row) === 'complete_no_match') {
+          tdUrl.textContent = `Not in top ${rankingOrganicDepth(row)}`;
+          tdUrl.style.color = '#94a3b8';
+          tdUrl.title = `Complete depth-${rankingOrganicDepth(row)} crawl — alanranger.com not in organic results.`;
         } else {
           tdUrl.textContent = "—";
         }

@@ -8,6 +8,13 @@ import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js
 import { applyTrackedEmptySerpStubs } from '../../lib/keyword-ranking/empty-serp-stub.js';
 import { coalesceSearchVolume } from '../../lib/keyword-ranking/ke-search-volumes.js';
 import { stampLocalCaptureOnRow } from '../../lib/keyword-ranking/local-capture-preflight.js';
+import {
+  attachLastGoodFromPrevious,
+  buildSerpCaptureFeatures,
+  isFailedSerpCapture,
+  resolveSerpCaptureStatus,
+  CAPTURE_STATUS,
+} from '../../lib/keyword-ranking/dfs-serp-quality.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
@@ -76,7 +83,10 @@ export default async function handler(req, res) {
 
       const stack = row.serp_surface_stack;
       const hasStack = Array.isArray(stack) && stack.length > 0;
-      if (!hasStack && !row.error) {
+      const failedCapture = isFailedSerpCapture(row)
+        || row.crawl_incomplete === true
+        || row?.serp_features?.stub === true;
+      if (!hasStack && !row.error && !failedCapture) {
         errors.push(`Refusing empty serp_surface_stack for "${row.keyword}" (no error field)`);
         continue;
       }
@@ -87,7 +97,7 @@ export default async function handler(req, res) {
         row.location_name = loc.location_name;
         row.location_unmapped = loc.unmapped === true;
       }
-      // Local-tier: always persist Coventry code + GBP pin (dashboard save once omitted these).
+      // Local-tier: always persist Coventry code (city-level — no GBP pin).
       stampLocalCaptureOnRow(row);
       // Always stamp locked class (lookup-only).
       if (!row.keyword_class) {
@@ -97,9 +107,70 @@ export default async function handler(req, res) {
       }
       row.search_volume = coalesceSearchVolume(row.keyword, row.search_volume ?? null);
 
-      // `error` is a request-body gate only — keyword_rankings has no error column.
-      const { error: _stubError, pageType, opportunityScore, ...dbRow } = row;
+      // Persist capture diagnostics on serp_features (compatible JSON).
+      const captureStatus = resolveSerpCaptureStatus(row);
+      row.serp_features = buildSerpCaptureFeatures(row.serp_features, {
+        capture_status: captureStatus,
+        crawl_incomplete: row.crawl_incomplete === true || captureStatus === CAPTURE_STATUS.INCOMPLETE,
+        organic_count: row.organic_count ?? row.serp_features?.organic_count ?? null,
+        dfs_cost: row.dfs_cost ?? row.serp_features?.dfs_cost ?? null,
+        se_results_count: row.se_results_count ?? row.serp_features?.se_results_count ?? null,
+        serp_depth: row.serp_depth ?? 50,
+        location_code: row.location_code,
+        location_coordinate: row.location_coordinate,
+        error: row.error || row.serp_features?.fetch_error || null,
+        checked_at: new Date().toISOString(),
+        best_rank_group: row.best_rank_group,
+        best_rank_absolute: row.best_rank_absolute,
+        serp_surface_stack: row.serp_surface_stack,
+      });
+
+      // If this observation failed, stash prior good rank (dated) — never as current.
+      if (isFailedSerpCapture(row) || row.best_rank_group == null) {
+        try {
+          const priorUrl = `${supabaseUrl}/rest/v1/keyword_rankings?${new URLSearchParams({
+            audit_date: `eq.${row.audit_date}`,
+            property_url: `eq.${row.property_url}`,
+            keyword: `eq.${row.keyword}`,
+            select: 'best_rank_group,best_rank_absolute,best_url,last_refreshed_at,updated_at,serp_features',
+            limit: '1',
+          })}`;
+          const priorRes = await fetch(priorUrl, {
+            headers: {
+              apikey: supabaseKey,
+              Authorization: `Bearer ${supabaseKey}`,
+            },
+          });
+          if (priorRes.ok) {
+            const priorRows = await priorRes.json();
+            const prior = Array.isArray(priorRows) ? priorRows[0] : null;
+            if (prior && isFailedSerpCapture(row)) {
+              row.serp_features = attachLastGoodFromPrevious(row.serp_features, prior);
+            }
+          }
+        } catch (_e) {
+          /* non-fatal — save without last_good */
+        }
+      }
+
+      // Strip non-column request fields before DB write.
+      const {
+        error: _stubError,
+        pageType,
+        opportunityScore,
+        crawl_incomplete: _ci,
+        organic_count: _oc,
+        dfs_cost: _dc,
+        se_results_count: _se,
+        ...dbRow
+      } = row;
       if (!hasStack) dbRow.serp_surface_stack = null;
+      // Failed captures stay null-ranked (unknown) — never invent current rank from last_good.
+      if (isFailedSerpCapture(row)) {
+        dbRow.best_rank_group = null;
+        dbRow.best_rank_absolute = null;
+        dbRow.best_url = null;
+      }
 
       // Try to update existing row first using PATCH
       const filterParams = new URLSearchParams({

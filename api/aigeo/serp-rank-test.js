@@ -25,6 +25,8 @@ import { preflightLocalCapture } from '../../lib/keyword-ranking/local-capture-p
 import {
   isIncompleteSerpCrawl,
   SERP_CRAWL_INCOMPLETE_ERROR,
+  buildSerpCaptureFeatures,
+  CAPTURE_STATUS,
 } from '../../lib/keyword-ranking/dfs-serp-quality.js';
 import { extractSerpSurfaces } from '../../lib/keyword-ranking/serp-surface-extract.js';
 import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
@@ -342,6 +344,8 @@ function buildEmptySerpResult(keyword, depth, errorMessage, errorCode, locationN
   const classInfo = resolveKeywordClass(keyword);
   const loc = resolveTrackingLocation(keyword);
   const isLocal = loc.tier === 'L';
+  const errMsg = errorMessage || 'DataForSEO request failed';
+  const emptyStatus = /empty SERP/i.test(errMsg) ? CAPTURE_STATUS.EMPTY : CAPTURE_STATUS.ERROR;
   return {
     keyword,
     location_name: locationName || loc.location_name,
@@ -354,11 +358,23 @@ function buildEmptySerpResult(keyword, depth, errorMessage, errorCode, locationN
     best_url: null,
     best_title: null,
     has_ai_overview: false,
-    serp_features: {
+    serp_features: buildSerpCaptureFeatures({
       local_pack: false,
       featured_snippet: false,
       people_also_ask: false,
-    },
+    }, {
+      capture_status: emptyStatus,
+      crawl_incomplete: true,
+      organic_count: 0,
+      serp_depth: depth,
+      location_code: loc.location_code,
+      location_coordinate: null,
+      error: errMsg,
+      checked_at: new Date().toISOString(),
+      best_rank_group: null,
+      best_rank_absolute: null,
+      serp_surface_stack: [],
+    }),
     ai_overview_present_any: false,
     local_pack_present_any: false,
     paa_present_any: false,
@@ -377,7 +393,7 @@ function buildEmptySerpResult(keyword, depth, errorMessage, errorCode, locationN
     dfs_cost: null,
     se_results_count: null,
     crawl_incomplete: true,
-    error: errorMessage || "DataForSEO request failed",
+    error: errMsg,
     error_code: errorCode ?? null,
   };
 }
@@ -553,6 +569,29 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
       serpResult.crawl_incomplete = true;
       serpResult.error = SERP_CRAWL_INCOMPLETE_ERROR;
     }
+    serpResult.serp_features = buildSerpCaptureFeatures(serpFeatures, {
+      capture_status: serpResult.crawl_incomplete
+        ? CAPTURE_STATUS.INCOMPLETE
+        : (bestRankGroup != null ? CAPTURE_STATUS.COMPLETE_RANKED : CAPTURE_STATUS.COMPLETE_NO_MATCH),
+      crawl_incomplete: serpResult.crawl_incomplete === true,
+      organic_count: organicCount,
+      dfs_cost: taskCost,
+      se_results_count: seResultsCount,
+      serp_depth: depth,
+      location_code: locationCode,
+      location_coordinate: locationCoordinate,
+      error: serpResult.error || null,
+      checked_at: new Date().toISOString(),
+      best_rank_group: bestRankGroup,
+      best_rank_absolute: bestRankAbsolute,
+      serp_surface_stack: serpSurfaceStack,
+      dfs_task_id: task?.id || null,
+    });
+    // Keep legacy serp_features keys used by older UI readers.
+    serpResult.serp_features.local_pack = local_pack_present_any;
+    serpResult.serp_features.featured_snippet = featured_snippet_present_any;
+    serpResult.serp_features.people_also_ask = paa_present_any;
+    Object.assign(serpResult.serp_features, surfaces.serp_features_extra || {});
     // Release 2: attach Surface Visibility for single-keyword verification
     try {
       serpResult.surface_visibility = computeKeywordSurfaceScore({
@@ -757,11 +796,27 @@ export default async function handler(req, res) {
     )) {
       result.crawl_incomplete = true;
       result.error = result.error || SERP_CRAWL_INCOMPLETE_ERROR;
-      // Do not present thin crawls as confident unranked.
+      // Do not present thin/empty crawls as confident unranked.
       result.best_rank_group = null;
       result.best_rank_absolute = null;
       result.best_url = null;
       result.best_title = null;
+      const emptyStack = !Array.isArray(result.serp_surface_stack) || result.serp_surface_stack.length === 0;
+      result.serp_features = buildSerpCaptureFeatures(result.serp_features, {
+        capture_status: emptyStack ? CAPTURE_STATUS.EMPTY : CAPTURE_STATUS.INCOMPLETE,
+        crawl_incomplete: true,
+        organic_count: result.organic_count ?? 0,
+        dfs_cost: result.dfs_cost ?? null,
+        se_results_count: result.se_results_count ?? null,
+        serp_depth: depth,
+        location_code: result.location_code,
+        location_coordinate: result.location_coordinate,
+        error: result.error,
+        checked_at: new Date().toISOString(),
+        best_rank_group: null,
+        best_rank_absolute: null,
+        serp_surface_stack: result.serp_surface_stack,
+      });
     }
     return result;
   };

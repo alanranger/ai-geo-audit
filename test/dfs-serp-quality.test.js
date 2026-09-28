@@ -1,6 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isIncompleteSerpCrawl } from '../lib/keyword-ranking/dfs-serp-quality.js';
+import {
+  isIncompleteSerpCrawl,
+  resolveSerpCaptureStatus,
+  isFailedSerpCapture,
+  isCompleteSerpNoMatch,
+  buildSerpCaptureFeatures,
+  attachLastGoodFromPrevious,
+  CAPTURE_STATUS,
+  SERP_CRAWL_INCOMPLETE_ERROR,
+  EMPTY_SERP_STUB_ERROR,
+  organicDepthLabel,
+} from '../lib/keyword-ranking/dfs-serp-quality.js';
+import { buildCombinedRows } from '../lib/keyword-ranking/refresh-core.js';
+import { applyTrackedEmptySerpStubs, buildTrackedEmptySerpStub } from '../lib/keyword-ranking/empty-serp-stub.js';
 
 test('full depth-50 crawl is complete', () => {
   assert.equal(isIncompleteSerpCrawl({
@@ -34,4 +47,137 @@ test('shallow depth-10 with ~9 organic is not treated as depth-50 thin', () => {
     seResultsCount: 192,
     cost: 0.002,
   }), false);
+});
+
+test('capture status: complete ranked vs complete no-match vs incomplete vs empty', () => {
+  assert.equal(resolveSerpCaptureStatus({
+    best_rank_group: 1,
+    serp_surface_stack: [{ type: 'organic' }],
+  }), CAPTURE_STATUS.COMPLETE_RANKED);
+
+  assert.equal(resolveSerpCaptureStatus({
+    best_rank_group: null,
+    serp_surface_stack: [{ type: 'organic' }, { type: 'local_pack' }],
+  }), CAPTURE_STATUS.COMPLETE_NO_MATCH);
+  assert.equal(isCompleteSerpNoMatch({
+    best_rank_group: null,
+    serp_surface_stack: [{ type: 'organic' }],
+  }), true);
+
+  assert.equal(resolveSerpCaptureStatus({
+    crawl_incomplete: true,
+    best_rank_group: null,
+    serp_surface_stack: [{ type: 'organic' }],
+    error: SERP_CRAWL_INCOMPLETE_ERROR,
+  }), CAPTURE_STATUS.INCOMPLETE);
+  assert.equal(isFailedSerpCapture({ crawl_incomplete: true }), true);
+
+  assert.equal(resolveSerpCaptureStatus({
+    serp_features: { stub: true, fetch_error: EMPTY_SERP_STUB_ERROR },
+    best_rank_group: null,
+    serp_surface_stack: null,
+  }), CAPTURE_STATUS.EMPTY);
+});
+
+test('buildSerpCaptureFeatures persists diagnostics and geo method', () => {
+  const feats = buildSerpCaptureFeatures({ local_pack: true }, {
+    capture_status: CAPTURE_STATUS.INCOMPLETE,
+    crawl_incomplete: true,
+    organic_count: 6,
+    dfs_cost: 0.002,
+    se_results_count: 6,
+    serp_depth: 50,
+    location_code: 9215523,
+    location_coordinate: null,
+    error: SERP_CRAWL_INCOMPLETE_ERROR,
+  });
+  assert.equal(feats.capture_status, 'incomplete');
+  assert.equal(feats.organic_count, 6);
+  assert.equal(feats.dfs_cost, 0.002);
+  assert.equal(feats.serp_depth_requested, 50);
+  assert.equal(feats.geo_method, 'coventry_city_code');
+  assert.equal(feats.local_pack, true);
+});
+
+test('attachLastGoodFromPrevious never invents current rank fields', () => {
+  const feats = attachLastGoodFromPrevious({}, {
+    best_rank_group: 1,
+    best_rank_absolute: 2,
+    best_url: 'https://www.alanranger.com/x',
+    last_refreshed_at: '2026-09-28T10:00:00.000Z',
+    serp_features: { capture_status: 'complete_ranked' },
+  });
+  assert.equal(feats.last_good_rank_group, 1);
+  assert.equal(feats.last_good_url, 'https://www.alanranger.com/x');
+  assert.ok(feats.last_good_at);
+  assert.equal(feats.best_rank_group, undefined);
+});
+
+test('buildCombinedRows drops failed ranks and keeps capture diagnostics', () => {
+  const rows = buildCombinedRows([
+    {
+      keyword: 'photography gift card',
+      best_rank_group: 1,
+      best_rank_absolute: 1,
+      best_url: 'https://www.alanranger.com/gift',
+      crawl_incomplete: true,
+      organic_count: 6,
+      dfs_cost: 0.002,
+      se_results_count: 6,
+      serp_depth: 50,
+      location_code: 2826,
+      serp_surface_stack: [{ type: 'organic', owners: [] }],
+      error: SERP_CRAWL_INCOMPLETE_ERROR,
+      serp_features: { local_pack: false },
+    },
+    {
+      keyword: 'free photography classes near me',
+      best_rank_group: null,
+      best_rank_absolute: null,
+      best_url: null,
+      crawl_incomplete: false,
+      organic_count: 49,
+      dfs_cost: 0.008,
+      serp_depth: 50,
+      location_code: 9215523,
+      local_pack_position: 1,
+      serp_surface_stack: [{ type: 'organic' }, { type: 'local_pack' }],
+      serp_features: { local_pack: true },
+    },
+  ], []);
+
+  assert.equal(rows[0].best_rank_group, null);
+  assert.equal(rows[0].serp_features.capture_status, 'incomplete');
+  assert.equal(rows[0].serp_features.organic_count, 6);
+  assert.equal(rows[0].crawl_incomplete, true);
+
+  assert.equal(rows[1].best_rank_group, null);
+  assert.equal(rows[1].serp_features.capture_status, 'complete_no_match');
+  assert.equal(rows[1].local_pack_position, 1);
+  assert.equal(isFailedSerpCapture(rows[1]), false);
+});
+
+test('empty stub marks capture_status empty and is saveable marker', () => {
+  const stub = buildTrackedEmptySerpStub({
+    keyword: 'beginners photography courses coventry',
+    best_rank_group: null,
+    serp_surface_stack: [],
+    location_code: 9215523,
+  });
+  assert.equal(stub.serp_features.capture_status, 'empty');
+  assert.equal(stub.serp_features.stub, true);
+  assert.equal(stub.error, EMPTY_SERP_STUB_ERROR);
+  const applied = applyTrackedEmptySerpStubs([{
+    keyword: 'beginners photography courses coventry',
+    best_rank_group: null,
+    serp_surface_stack: [],
+    class_unmapped: false,
+  }]);
+  assert.equal(applied[0].serp_features.capture_status, 'empty');
+});
+
+test('organicDepthLabel defaults to 50', () => {
+  assert.equal(organicDepthLabel({}), 50);
+  assert.equal(organicDepthLabel({ serp_depth: 50 }), 50);
+  assert.equal(organicDepthLabel({ serp_features: { serp_depth_requested: 50 } }), 50);
 });
