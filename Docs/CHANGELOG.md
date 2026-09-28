@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-28] - Ranking: reject thin DFS crawls + Coventry city (no pin)
+
+**Change:** DataForSEO Live Advanced sometimes returns a page-1 / degraded SERP (status 20000, ~$0.002, ~6–8 organics) despite `depth: 50`, which Ranking saved as false “unranked.” Detect incomplete crawls and auto-retry up to 2 times before persisting; do not treat remaining thin crawls as confident unranked. Local-tier ranking now uses Coventry `location_code` only (no GBP `location_coordinate` pin), which was adding extra SERP noise.
+
+**Files:** `lib/keyword-ranking/dfs-serp-quality.js`, `lib/keyword-ranking/local-capture-preflight.js`, `api/aigeo/serp-rank-test.js`, `lib/keyword-ranking/refresh-core.js`, `scripts/keyword-audit-gates.mjs`, `test/dfs-serp-quality.test.js`
+
+---
+
 ## [2026-09-28] - Monday Full Refresh: finish before CEO email (no deadline skip)
 
 **Change:** Removed 04:15 UTC jump-to-email and multi-tick abort. Cron runs every 15 min **all Monday** until every Full step completes; CEO email is last only. Ranking finalize now writes **Surface / Top of Page** to `audit_results` (same as dashboard). Backup email moved to 20:00 UTC and **waits** until Full Refresh `email_sent` — no more early email with stale dials.
