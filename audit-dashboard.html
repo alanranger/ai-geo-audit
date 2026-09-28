@@ -90823,7 +90823,7 @@ Confidence: ${c}`;
       { rule_key: 'keyword_in_h1', rule_name: 'K3 — Keyword in H1', description: 'All meaningful words in primary H1 plain text (longest H1; Extract HTML).', category: 'keywords', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.25, sort_order: 38 },
       { rule_key: 'keyword_slug_tokens', rule_name: 'K4 — Slug token alignment', description: 'Final path segment tokens (hyphen split): ≥1 meaningful keyword token appears in slug (stopwords ignored).', category: 'keywords', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 39 },
       { rule_key: 'keyword_in_intro', rule_name: 'K5 — Keyword in intro', description: 'All meaningful words appear in first ~150 words of visible body text (snippet-enriched HTML).', category: 'keywords', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 40 },
-      { rule_key: 'canonical_self_or_valid', rule_name: 'Canonical is valid', description: 'Canonical/URL identity checks from Schema QA gate when present.', category: 'technical', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 45 },
+      { rule_key: 'canonical_self_or_valid', rule_name: 'Canonical is valid', description: 'HTML <link rel="canonical"> from Extractability: pass when self-referencing; warn when evidence is missing/unknown or points elsewhere (unverified); fail when missing or malformed. Schema @id / missing_id is not this rule.', category: 'technical', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 45 },
       { rule_key: 'url_slug_word_count', rule_name: 'URL slug word count (3–6)', description: 'Final path segment (after splitting on -/_) should be 3–6 words. Homepage root passes.', category: 'technical', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 50 },
       { rule_key: 'indexable_status', rule_name: 'Indexable status', description: 'Technical indexability (HTTP + noindex). Utility/login URLs excluded from this list.', category: 'indexation', severity: 'critical', scope: 'page', current_status: 'pass', enabled: true, weight: 2.0, sort_order: 55 },
       { rule_key: 'google_gsc_visible', rule_name: 'Seen in Google (GSC 90d)', description: 'When Technical Foundation includes GSC signals: fail if URL had no impressions/clicks in last 90d window.', category: 'indexation', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.6, sort_order: 60 },
@@ -95118,9 +95118,11 @@ Confidence: ${c}`;
         if (String(row?.tier || '').toLowerCase() === 'sitewide') {
           row.status = raw;
           row.bypassed = false;
+          row.bypass_intent = false;
           return;
         }
         const bypass = traditionalSeoHasRuleBypass(row.url, row.rule_key);
+        row.bypass_intent = bypass === true;
         row.status = bypass ? 'pass' : raw;
         row.bypassed = bypass && String(raw || '').toLowerCase() !== 'pass';
       });
@@ -95934,6 +95936,115 @@ Confidence: ${c}`;
       return st;
     }
 
+    function traditionalSeoHasForbiddenCanonicalChars(raw) {
+      return /[\s\u0000-\u001F\u007F]/.test(String(raw || ''));
+    }
+
+    function traditionalSeoNormalizeCanonicalCompareKey(raw, baseUrl = '') {
+      const original = String(raw || '');
+      if (!original.trim()) return null;
+      if (traditionalSeoHasForbiddenCanonicalChars(original)) return null;
+      try {
+        const u = baseUrl ? new URL(original.trim(), baseUrl) : new URL(original.trim());
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+        const host = u.hostname.toLowerCase().replace(/^www\./, '');
+        const port = u.port ? `:${u.port}` : '';
+        const path = u.pathname || '/';
+        const query = u.search || '';
+        return `${u.protocol}//${host}${port}${path}${query}`;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    /**
+     * HTML <link rel="canonical"> only — mirrors lib/traditional-seo-canonical-rule.js.
+     * Never maps schema missing_id / @id to this rule.
+     */
+    function traditionalSeoEvaluateCanonicalRule(pageUrl, extractSignal) {
+      if (extractSignal?.excludedFromAudit === true) {
+        return { status: 'pass', code: 'excluded', note: 'Page excluded from Traditional SEO audit — canonical check skipped.' };
+      }
+      if (!extractSignal || extractSignal.requestOk === false) {
+        return {
+          status: 'warn',
+          code: 'unknown_canonical',
+          note: 'HTML canonical evidence unavailable. Re-run Extractability. Schema @id is not used here.'
+        };
+      }
+      const hasField = Object.prototype.hasOwnProperty.call(extractSignal, 'seoCanonicalHref')
+        || Object.prototype.hasOwnProperty.call(extractSignal, 'seoCanonicalCount');
+      if (!hasField) {
+        return {
+          status: 'warn',
+          code: 'unknown_canonical',
+          note: 'Canonical link has not been checked yet. Refresh the page audit to collect it.'
+        };
+      }
+      const count = Number(extractSignal.seoCanonicalCount);
+      const rawOriginal = String(extractSignal.seoCanonicalRaw ?? extractSignal.seoCanonicalHref ?? '');
+      const raw = rawOriginal.trim();
+      const href = String(extractSignal.seoCanonicalHref || '').trim();
+      if (Number.isFinite(count) && count > 0 && !raw && !href) {
+        return {
+          status: 'fail',
+          code: 'missing_canonical',
+          note: 'Canonical link tag found but href is missing.'
+        };
+      }
+      if (!raw && !href) {
+        return {
+          status: 'fail',
+          code: 'missing_canonical',
+          note: 'No HTML <link rel="canonical"> found.'
+        };
+      }
+      if (traditionalSeoHasForbiddenCanonicalChars(rawOriginal)
+        || (href && traditionalSeoHasForbiddenCanonicalChars(String(extractSignal.seoCanonicalHref || '')))) {
+        return {
+          status: 'fail',
+          code: 'malformed_canonical',
+          note: `HTML canonical is malformed (whitespace/control): ${raw || href}.`
+        };
+      }
+      const pageKey = traditionalSeoNormalizeCanonicalCompareKey(pageUrl);
+      const canKey = traditionalSeoNormalizeCanonicalCompareKey(href || raw, pageUrl);
+      const display = href || raw;
+      if (!canKey) {
+        return {
+          status: 'fail',
+          code: 'malformed_canonical',
+          note: `HTML canonical is malformed or non-http(s): ${display}.`
+        };
+      }
+      if (Number.isFinite(count) && count > 1) {
+        if (pageKey && canKey === pageKey) {
+          return {
+            status: 'warn',
+            code: 'multiple_canonical',
+            note: `Multiple HTML canonical tags (${count}); first matches page: ${display}.`
+          };
+        }
+        return {
+          status: 'warn',
+          code: 'multiple_canonical',
+          note: `Multiple HTML canonical tags (${count}); first is unverified alternative: ${display}.`
+        };
+      }
+      if (pageKey && canKey === pageKey) {
+        return {
+          status: 'pass',
+          code: 'self_canonical',
+          note: `HTML canonical matches page URL: ${display}.`
+        };
+      }
+      return {
+        status: 'warn',
+        code: 'alternative_canonical',
+        note: `HTML canonical points elsewhere (unverified): ${display}.`
+      };
+    }
+
     function traditionalSeoRuleStatusForUrl(rule, url, tier, metric, context) {
       const key = String(rule?.rule_key || '').toLowerCase();
       const propertyUrl = String(context?.propertyUrl || '').trim();
@@ -96060,9 +96171,7 @@ Confidence: ${c}`;
         return inbound != null && Number(inbound) > 0 ? 'pass' : 'warn';
       }
       if (key === 'canonical_self_or_valid') {
-        if (qaIssueText.includes('invalid_id') || qaIssueText.includes('missing_id')) return 'warn';
-        if (String(url).includes('?')) return 'warn';
-        return 'pass';
+        return traditionalSeoEvaluateCanonicalRule(url, extractSignal).status;
       }
       if (key === 'url_slug_word_count') {
         try {
@@ -97218,25 +97327,35 @@ Confidence: ${c}`;
         }
         return 'No page updated/published date detected in HTML/meta or sitemap lastmod.';
       }
+      if (rk === 'canonical_self_or_valid') {
+        return traditionalSeoEvaluateCanonicalRule(pageUrl, ex).note;
+      }
       if (rk === 'schema_qa_gate_page') {
         const qa = traditionalSeoSignalMapGetWithUrlAliases(maps.qaGate, pageUrl, prop);
         if (!qa || typeof qa !== 'object') {
-          return 'URL not in the cached Implementation QA payload (likely a transient schema-crawl miss — the live page is unaffected). Click Re-audit page above, or refresh the schema audit to re-evaluate.';
+          return 'No saved schema check is available for this page. Re-audit the page to check it.';
         }
         const st = traditionalSeoQaGateRowStatus(qa) || 'unknown';
         const sm = String(qa.summary || '').trim();
-        const codes = Array.isArray(qa.issueCodes) && qa.issueCodes.length
-          ? ` Issue codes: ${qa.issueCodes.slice(0, 8).join(', ')}${qa.issueCodes.length > 8 ? '…' : ''}.`
+        const details = Array.isArray(qa.issueDetails) ? qa.issueDetails : [];
+        const messages = details.map((issue) => {
+          const level = issue.severity === 'block_deploy' ? 'Fail' : 'Warning';
+          if (issue.typeName === 'Service' && issue.code === 'missing_required_field' && issue.fieldPath === 'name') {
+            return 'Fail: a Service schema entry is missing its name.';
+          }
+          if (issue.typeName === 'Service' && issue.code === 'missing_id') {
+            return 'Warning: a Service schema entry is missing its identifier (@id).';
+          }
+          return `${level}: ${String(issue.detail || issue.code || '').trim()}`;
+        });
+        const serviceScope = details.some((issue) => issue.typeName === 'Service')
+          ? ' Service checks apply to workshop/service pages and product pages. Other page types skip these checks.'
           : '';
-        let det = '';
-        if (Array.isArray(qa.issueDetails) && qa.issueDetails.length) {
-          const d0 = qa.issueDetails[0];
-          const line = String(d0?.detail || d0?.code || '').trim();
-          if (line) det = ` Detail: ${line.length > 240 ? `${line.slice(0, 240)}…` : line}.`;
-        }
-        const head = `Derived QA: ${st}.`;
-        const body = sm ? ` ${sm}` : '';
-        return `${head}${body}${codes}${det}`;
+        const skipped = Array.isArray(qa.notEvaluated) && qa.notEvaluated.length
+          ? ` Skipped scope: ${qa.notEvaluated.map((item) => String(item?.reason || item?.typeName || '').trim()).filter(Boolean).slice(0, 2).join(' | ')}.`
+          : '';
+        const body = messages.length ? [...new Set(messages)].join(' ') : (sm || `Schema check: ${st}.`);
+        return `${body}${serviceScope}${skipped}`;
       }
       if (rk === 'schema_present_core') {
         const types = Array.isArray(sc?.schemaTypes)
@@ -99336,6 +99455,7 @@ Confidence: ${c}`;
               status,
               raw_status: rawStatus,
               bypassed: bypass && String(rawStatus || '').toLowerCase() !== 'pass',
+              bypass_intent: bypass === true,
               rule_weight: Math.max(0, traditionalSeoToNum(rule.weight, 1)),
               clicks: metric.clicks || 0,
               impressions: metric.impressions || 0,
@@ -99776,6 +99896,7 @@ Confidence: ${c}`;
               status,
               raw_status: rawStatus,
               bypassed: bypass && String(rawStatus || '').toLowerCase() !== 'pass',
+              bypass_intent: bypass === true,
               rule_weight: Math.max(0, traditionalSeoToNum(rule.weight, 1)),
               clicks: metric.clicks || 0,
               impressions: metric.impressions || 0,

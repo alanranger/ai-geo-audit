@@ -59,6 +59,24 @@ const statusFromQa = (qaStatus) => {
   return 'warn';
 };
 
+/**
+ * Preserve admin bypass intent across QA syncs even when raw later passes.
+ * bypass_intent stays true once set; bypassed is only true while raw is not pass.
+ */
+function patchSchemaQaEvalRow(row, qaStatus) {
+  const raw = statusFromQa(qaStatus);
+  const bypassIntent = row?.bypassed === true || row?.bypass_intent === true;
+  const nextStatus = bypassIntent ? 'pass' : raw;
+  const nextBypassed = bypassIntent && raw !== 'pass';
+  return {
+    ...row,
+    raw_status: raw,
+    status: nextStatus,
+    bypassed: nextBypassed,
+    bypass_intent: bypassIntent
+  };
+}
+
 async function loadQaSnapshot(supabase, propertyUrl) {
   for (const key of propertyKeyCandidates(propertyUrl)) {
     const { data, error } = await supabase
@@ -138,10 +156,17 @@ export default async function handler(req, res) {
       const uk = normalizeUrlKey(row?.url || row?.page_url);
       const qa = qaByUrl.get(uk);
       if (!qa) return row;
-      const status = statusFromQa(qa.status);
-      if (row.status === status) return row;
+      const updated = patchSchemaQaEvalRow(row, qa.status);
+      if (
+        row.status === updated.status
+        && row.raw_status === updated.raw_status
+        && Boolean(row.bypassed) === Boolean(updated.bypassed)
+        && Boolean(row.bypass_intent) === Boolean(updated.bypass_intent)
+      ) {
+        return row;
+      }
       patched += 1;
-      return { ...row, status };
+      return updated;
     });
 
     if (!patched) {
@@ -179,3 +204,5 @@ export default async function handler(req, res) {
     });
   }
 }
+
+export { statusFromQa, patchSchemaQaEvalRow };

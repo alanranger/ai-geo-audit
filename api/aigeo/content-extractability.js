@@ -1,5 +1,6 @@
 import { safeJsonParse } from './utils.js';
 import { fetchCanonicalSiteUrlList } from './canonical-site-urls.js';
+import { extractHtmlCanonicalFromHtml } from '../../lib/traditional-seo-canonical-rule.js';
 import {
   fetchTierSegmentationEntries,
   normalizeTierInput as normalizeSharedTierInput,
@@ -761,6 +762,7 @@ function buildTraditionalSeoSignalsFromHtml(html, htmlForChecks, pageUrl = '') {
     extOutboundCount: seoMerged.extOutboundCount,
     extMissingTargetBlank: seoMerged.extMissingTargetBlank
   };
+  const canonical = extractHtmlCanonicalFromHtml(String(html || ''), pageUrl);
   return {
     seoH1Count: seo.h1Count,
     seoFirstH1Length: seo.firstH1PlainLength,
@@ -777,7 +779,10 @@ function buildTraditionalSeoSignalsFromHtml(html, htmlForChecks, pageUrl = '') {
     seoInternalLinks: seo.internalLinkCount,
     seoInternalLinkTargets: Array.isArray(seo.internalLinkTargets) ? seo.internalLinkTargets : [],
     seoExtOutbound: seo.extOutboundCount,
-    seoExtMissingTargetBlank: seo.extMissingTargetBlank
+    seoExtMissingTargetBlank: seo.extMissingTargetBlank,
+    seoCanonicalHref: canonical.seoCanonicalHref || '',
+    seoCanonicalRaw: canonical.seoCanonicalRaw || '',
+    seoCanonicalCount: Number(canonical.seoCanonicalCount) || 0
   };
 }
 
@@ -798,7 +803,10 @@ async function checkUrl(url, tierLookup = null, sitemapLastmodMap = null) {
     seoInternalLinks: 0,
     seoInternalLinkTargets: [],
     seoExtOutbound: 0,
-    seoExtMissingTargetBlank: 0
+    seoExtMissingTargetBlank: 0,
+    seoCanonicalHref: '',
+    seoCanonicalRaw: '',
+    seoCanonicalCount: 0
   };
   const pageTier = getTierForUrl(url, tierLookup);
   const preflightExclusionReason = getPreflightExclusionReason(url);

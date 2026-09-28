@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-28] - Schema QA: Service per-entity checks + HTML canonical rule
+
+**Change:** Traditional SEO `canonical_self_or_valid` now scores HTML `<link rel="canonical">` from Extractability (not schema `@id` / `missing_id`). Schema QA checks each full **Service** entity (skips `@id`-only refs); other types keep prior type-group behaviour. Clearer Service name (block) / `@id` (warning) notes; sync preserves admin bypass intent.
+
+**Files:** `lib/schema-qa-gate.js`, `lib/traditional-seo-canonical-rule.js`, `api/schema-audit.js`, `api/aigeo/content-extractability.js`, `api/aigeo/traditional-seo-sync-schema-qa.js`, `audit-dashboard.html`, `test/schema-qa-gate.test.js`, `test/traditional-seo-canonical-rule.test.js`
+
+---
+
 ## [2026-09-28] - Full refresh: Schema QA + citation/mentions; cron Trad SEO syncs QA
 
 **Change:** Dashboard **Full refresh** and Monday overnight Full catalog now both run:
