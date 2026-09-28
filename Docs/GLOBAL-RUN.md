@@ -1,6 +1,6 @@
 # Global Run — tiered refresh architecture
 
-**Last updated:** 2026-05-20
+**Last updated:** 2026-09-28
 **Status:** Live. Supersedes the "Run All Audits & Updates" documentation in `Docs/ALL-AUDIT-SCAN-PROCESSES.md`.
 
 ---
@@ -24,25 +24,37 @@ The dashboard now exposes **three tiers** so each run matches its purpose, cost,
 | Step key | Label | Quick | Standard | Full | Depends on |
 |---|---|:---:|:---:|:---:|---|
 | `sync_csv` | Sync CSV (portfolio + keyword seed) | ✓ | ✓ | ✓ | — |
-| `audit_scan` | GSC & Backlink Audit (reads cached backlinks) | ✓ | ✓ | ✓ | — |
-| `ranking_ai` | Ranking & AI scan (84 keywords, DFS SERP + AI engines) |  | ✓ | ✓ | — |
+| `audit_scan` | GSC & Backlink Audit (reads cached backlinks; also crawls schema for pillars) | ✓ | ✓ | ✓ | — |
+| `schema_qa` | Schema QA gate (whole site → `impl_audit_snapshots` qa) |  |  | ✓ | — |
+| `dfs_full_index` | DataForSEO backlink full index |  |  | ✓ | — |
 | `revenue_sync` | Revenue sync (Squarespace + Stripe; 28d quick/standard, 13mo full) | ✓ | ✓ | ✓ | — |
 | `ga4_sync` | GA4 enquiry metrics (28d) |  |  | ✓ | — |
 | `rf_summary` | Revenue Funnel summary refresh | ✓ | ✓ | ✓ | — |
 | `rf_trust_loop` | Revenue Funnel trust loop | ✓ | ✓ | ✓ | `audit_scan` |
 | `rf_seasonality` | Revenue Funnel seasonality bands |  | ✓ | ✓ | — |
+| `ranking_ai` | Ranking & AI scan (tracked keywords, DFS SERP + AI engines) |  | ✓ | ✓ | — |
+| `llm_visibility` | ChatGPT / LLM visibility |  |  | ✓ | `ranking_ai` |
 | `scenario_auto_optimise` | Scenario Planning Auto-Optimise |  | ✓ | ✓ | `audit_scan` |
 | `scenario_cockpit` | Scenario Planning cockpit refresh | ✓ | ✓ | ✓ | — |
 | `money_pages` | Reload Money Pages view from Supabase | ✓ | ✓ | ✓ | `audit_scan` |
 | `trad_seo_rescore` | Traditional SEO rescore (uses cached extractability) |  | ✓ |  | `audit_scan` |
-| `trad_seo_full` | Traditional SEO + full extractability refresh (per-URL HTML refetch) |  |  | ✓ | `audit_scan` |
+| `trad_seo_full` | Traditional SEO + full extractability refresh |  |  | ✓ | `audit_scan`, `schema_qa` |
+| `citation_consistency` | Citation consistency refresh |  |  | ✓ | — |
+| `mentions_baseline` | Mentions baseline refresh |  |  | ✓ | — |
 | `ke_topup` | Keywords Everywhere top-up for stale / missing rows only |  | ✓ | ✓ | — |
-| `dfs_full_index` | DataForSEO backlink full index |  |  | ✓ | — |
 | `gsc_url_inspection` | Google Search Console URL Inspection refresh |  |  | ✓ | `audit_scan` |
 | `domain_strength` | Domain Strength snapshot — loops all remaining batches |  |  | ✓ | — |
+| `acquisition_channels` | Acquisition channels (AI mentions + YouTube + GA4) |  | ✓ | ✓ | — |
 | `update_tasks` | Update all tasks with latest measurements | ✓ | ✓ | ✓ | `audit_scan` |
+| `ceo_weekly_email` | CEO weekly HTML email |  |  | ✓ | — |
 
 A ✓ means the step runs in that tier. A blank means it is intentionally **not** run.
+
+### Monday overnight cron = same Full keys
+
+`api/cron/ceo-weekly-full-refresh.js` walks `lib/ceo-weekly/dashboard-full-catalog.js` → `buildDashboardFullSteps()`, which must stay key-aligned with `globalRunStepCatalog()` Full tier.
+
+**Known server vs browser difference (still):** UI `trad_seo_full` runs full client `runTraditionalSeoEvaluation`. Cron `trad_seo_full` refreshes extractability **and** patches `schema_qa_gate_page` rows via `/api/aigeo/traditional-seo-sync-schema-qa`. It does **not** recompute every other Trad SEO rule in the browser.
 
 ### Step counts
 
@@ -152,7 +164,8 @@ If you forget, the global run will mark the step `Failed` with the message `myNe
 
 ## Known gaps (future work)
 
-- **Per-step "last ran" timestamps in the dashboard header.** The next iteration should add a freshness panel so the user can see, at a glance, when each audit kind was last updated. Candidate endpoint: a single `GET /api/supabase/audit-freshness?propertyUrl=…` aggregating max timestamps from `audit_results`, `keyword_rankings`, `dfs_domain_backlink_rows`, `domain_strength_snapshots`, `keyword_target_metrics_cache`, `traditional_seo_evaluation_cache`, `gsc_url_inspection_cache`.
-- **Smart-delta Ranking & AI in Quick.** Today `ranking_ai` always re-runs the full 84 keywords; Quick therefore excludes it rather than pay the DFS cost. A future "changed-keywords only" mode (re-use the per-keyword refresh from the keyword table) would let Quick include a cheap ranking refresh.
-- **Mentions / citation-consistency / implementation snapshots.** These APIs still have no button at all; they are currently only refreshed by their own widgets. If they become part of the "refresh everything" expectation, add new catalog entries rather than shoe-horning them into an existing runner.
-- **Portfolio snapshot on demand.** Cron runs `monthly-portfolio-snapshot`; the UI has no equivalent button. If users want to trigger it mid-month, add it as a new step in the Full tier.
+- **Per-step "last ran" timestamps in the dashboard header.** Candidate endpoint: aggregate max timestamps from `audit_results`, `keyword_rankings`, `dfs_domain_backlink_rows`, `domain_strength_snapshots`, `keyword_target_metrics_cache`, `traditional_seo_evaluation_cache`, `gsc_url_inspection_cache`, `impl_audit_snapshots`.
+- **Smart-delta Ranking & AI in Quick.** Today `ranking_ai` always re-runs the full tracked set; Quick excludes it rather than pay DFS.
+- **Full client Trad SEO on Monday cron.** Cron patches Schema QA gate statuses into the evaluation cache; other Trad SEO rules still need a browser Full `trad_seo_full` (or a future server-side evaluator) for a complete matrix rewrite.
+- **Implementation tech / local / service widgets.** Still separate Implementation-tab buttons — not Full steps.
+- **Portfolio snapshot on demand.** Cron runs `monthly-portfolio-snapshot`; UI Full has no equivalent yet.

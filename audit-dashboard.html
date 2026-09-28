@@ -89448,6 +89448,7 @@ Confidence: ${c}`;
         return [
           { key: 'sync_csv', label: 'Sync CSV', tiers: ['quick','standard','full'], dependsOn: [], runner: runGlobalStepSyncCsv },
           { key: 'audit_scan', label: 'GSC & Backlink Audit', tiers: ['quick','standard','full'], dependsOn: [], runner: runGlobalStepAuditScan },
+          { key: 'schema_qa', label: 'Schema QA gate (whole site)', tiers: ['full'], dependsOn: [], runner: runGlobalStepSchemaQa },
           { key: 'dfs_full_index', label: 'DataForSEO backlink full index', tiers: ['full'], dependsOn: [], runner: runGlobalStepDfsFullIndex },
           { key: 'revenue_sync', label: 'Revenue sync (Squarespace + Stripe)', tiers: ['quick','standard','full'], dependsOn: [], runner: runGlobalStepRevenueSync },
           { key: 'ga4_sync', label: 'GA4 enquiry metrics (28d)', tiers: ['full'], dependsOn: [], runner: runGlobalStepGa4Sync },
@@ -89460,7 +89461,9 @@ Confidence: ${c}`;
           { key: 'scenario_cockpit', label: 'Scenario Planning cockpit refresh', tiers: ['quick','standard','full'], dependsOn: [], runner: runGlobalStepScenarioCockpit },
           { key: 'money_pages', label: 'Reload Money Pages view', tiers: ['quick','standard','full'], dependsOn: ['audit_scan'], runner: runGlobalStepMoneyPages },
           { key: 'trad_seo_rescore', label: 'Traditional SEO rescore (cached extractability)', tiers: ['standard'], dependsOn: ['audit_scan'], runner: runGlobalStepTradSeoRescore },
-          { key: 'trad_seo_full', label: 'Traditional SEO + full extractability refresh', tiers: ['full'], dependsOn: ['audit_scan'], runner: runGlobalStepTradSeoFull },
+          { key: 'trad_seo_full', label: 'Traditional SEO + full extractability refresh', tiers: ['full'], dependsOn: ['audit_scan', 'schema_qa'], runner: runGlobalStepTradSeoFull },
+          { key: 'citation_consistency', label: 'Citation consistency refresh', tiers: ['full'], dependsOn: [], runner: runGlobalStepCitationConsistency },
+          { key: 'mentions_baseline', label: 'Mentions baseline refresh', tiers: ['full'], dependsOn: [], runner: runGlobalStepMentionsBaseline },
           { key: 'ke_topup', label: 'Keywords Everywhere top-up (stale rows only)', tiers: ['standard','full'], dependsOn: [], runner: runGlobalStepKeTopup },
           { key: 'gsc_url_inspection', label: 'GSC URL Inspection refresh', tiers: ['full'], dependsOn: ['audit_scan'], runner: runGlobalStepGscUrlInspection },
           { key: 'domain_strength', label: 'Domain Strength snapshot (all batches)', tiers: ['full'], dependsOn: [], runner: runGlobalStepDomainStrength },
@@ -89697,6 +89700,16 @@ Confidence: ${c}`;
         debugLog('[Global Run] [Scenario cockpit] Done', 'success');
       }
 
+      async function runGlobalStepSchemaQa() {
+        debugLog('[Global Run] [Schema QA gate] Starting whole-site…', 'info');
+        if (typeof window.runImplSchemaQaGateAudit !== 'function') {
+          throw new Error('runImplSchemaQaGateAudit function not available');
+        }
+        const result = await window.runImplSchemaQaGateAudit('full');
+        debugLog('[Global Run] [Schema QA gate] ✓ Completed', 'success');
+        return result;
+      }
+
       async function runGlobalStepTradSeoRescore() {
         debugLog('[Global Run] [Traditional SEO rescore] Starting (cached extractability)...', 'info');
         if (typeof window.runTraditionalSeoEvaluation !== 'function') throw new Error('runTraditionalSeoEvaluation function not available');
@@ -89711,6 +89724,29 @@ Confidence: ${c}`;
         const result = await window.runTraditionalSeoEvaluation({ refreshAudit: false, refreshExtractability: true });
         debugLog('[Global Run] [Traditional SEO full extractability] ✓ Completed', 'success');
         return result;
+      }
+
+      async function runGlobalStepCitationConsistency() {
+        debugLog('[Global Run] [Citation consistency] Starting...', 'info');
+        const domains = 'trustpilot.com,yell.com,yelp.co.uk,yelp.com,bark.com,tripadvisor.com,facebook.com,linkedin.com';
+        const res = await fetch(apiUrl(`/api/aigeo/citation-consistency?persist=1&domainsRaw=${encodeURIComponent(domains)}`));
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json?.status === 'error') {
+          throw new Error(json?.message || json?.error || `HTTP ${res.status}`);
+        }
+        debugLog('[Global Run] [Citation consistency] ✓ Completed', 'success');
+        return json;
+      }
+
+      async function runGlobalStepMentionsBaseline() {
+        debugLog('[Global Run] [Mentions baseline] Starting...', 'info');
+        const res = await fetch(apiUrl('/api/aigeo/mentions-ingestion?persist=1&maxKeywords=30&perQueryLimit=3'));
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json?.status === 'error') {
+          throw new Error(json?.message || json?.error || `HTTP ${res.status}`);
+        }
+        debugLog('[Global Run] [Mentions baseline] ✓ Completed', 'success');
+        return json;
       }
 
       async function runGlobalStepKeTopup() {
@@ -89869,7 +89905,7 @@ Confidence: ${c}`;
 
       async function confirmFullTierIfNeeded(tier) {
         if (tier !== 'full') return true;
-        const msg = 'Full refresh runs DFS backlink full index, Domain Strength (all batches), GSC URL Inspection, full Traditional SEO extractability refresh, 13-month Squarespace/Stripe revenue sync, and GA4 enquiry metrics.\n\nThis can take 15+ minutes and will consume DataForSEO credits.\n\nContinue?';
+        const msg = 'Full refresh runs Schema QA (whole site), DFS backlink full index, Domain Strength, GSC URL Inspection, Traditional SEO + extractability, citation/mentions refresh, 13-month Squarespace/Stripe revenue sync, and GA4 enquiry metrics.\n\nThis can take 30+ minutes and will consume DataForSEO credits.\n\nContinue?';
         return window.confirm(msg);
       }
 

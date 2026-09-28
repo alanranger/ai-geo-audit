@@ -2,6 +2,19 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-28] - Full refresh: Schema QA + citation/mentions; cron Trad SEO syncs QA
+
+**Change:** Dashboard **Full refresh** and Monday overnight Full catalog now both run:
+- `schema_qa` — whole-site Schema QA gate → `impl_audit_snapshots` (qa)
+- `citation_consistency` + `mentions_baseline` (Implementation widgets that were Full-orphaned)
+- Monday `trad_seo_full` no longer stops at extractability only — also patches `traditional_seo_evaluation_cache` `schema_qa_gate_page` from the QA snapshot (`/api/aigeo/traditional-seo-sync-schema-qa`)
+
+**Still not in Full (honest):** Portfolio monthly snapshot (cron-only); Implementation tech/local/service sample widgets (separate Implementation buttons).
+
+**Files:** `audit-dashboard.html`, `lib/ceo-weekly/dashboard-full-catalog.js`, `api/aigeo/traditional-seo-sync-schema-qa.js`, `Docs/GLOBAL-RUN.md`, `Docs/RUNS-CHEATSHEET.md`
+
+---
+
 ## [2026-09-28] - Trad SEO: treat LinkedIn + Acuity as first-party for external blank rule
 
 **Change:** `external_links_new_tab` no longer counts LinkedIn or Acuity booking hosts (`*.as.me`, `acuityscheduling.com`) as outbound — same exempt path as YouTube/maps/CDN — so owned LinkedIn articles and schedule-me CTAs do not fail for missing `target=_blank`.

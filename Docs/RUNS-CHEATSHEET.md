@@ -1,7 +1,8 @@
 # Runs cheatsheet — what each button does
 
-**Last updated:** 2026-05-20  
+**Last updated:** 2026-09-28  
 **Authoritative step list (code):** `audit-dashboard.html` → `globalRunStepCatalog()`  
+**Monday overnight:** same Full keys via `lib/ceo-weekly/dashboard-full-catalog.js`  
 **Full architecture:** [`GLOBAL-RUN.md`](./GLOBAL-RUN.md)  
 **Per-process deep dives:** [`ALL-AUDIT-SCAN-PROCESSES.md`](./ALL-AUDIT-SCAN-PROCESSES.md) (individual audits; superseded for “one button runs everything”)
 
@@ -17,7 +18,7 @@
 | **Which cron touches which data** | **Configuration & Reporting** → Audit Coverage Map |
 | **Revenue-only full sync** | **Revenue Funnel** → **Sync everything & refresh page** (Booking Sheet + 13mo + GA4) |
 
-The green **status bar** at the top shows **per-feed** freshness (GSC audit, Ranking & AI, Squarespace, Stripe, GA4, etc.).  
+The green **status bar** at the top shows **per-feed** freshness (GSC audit, Ranking & AI, Squarespace, Stripe, GA4, Schema audit, etc.).  
 **Last global run** on the Dashboard is only the last time you clicked Quick / Standard / Full — it does not replace those feed timestamps.
 
 ---
@@ -30,51 +31,51 @@ Use for: “Is everything basically alive?” before a meeting.
 
 | Runs | Does **not** run |
 |------|------------------|
-| Sync CSV | Ranking & AI (84 keywords — costs DFS) |
-| GSC & Backlink audit (backlinks = **cached** read, not full DFS re-index) | Traditional SEO rescoring |
+| Sync CSV | Ranking & AI |
+| GSC & Backlink audit (backlinks = **cached** read, not full DFS re-index) | Traditional SEO |
 | Squarespace + Stripe revenue (**last 28 days**) | Keywords Everywhere top-up |
 | Revenue Funnel summary + trust loop | Auto-Optimise scenarios |
 | Scenario cockpit refresh (charts only) | GA4 sync |
-| Reload Money Pages view | Domain Strength |
-| Update all optimisation tasks | DFS backlink **full** index |
-| | GSC URL Inspection refresh |
-| | Trad SEO full HTML extractability |
-| | Booking Sheet upload |
+| Reload Money Pages view | Domain Strength / DFS full index |
+| Update all optimisation tasks | Schema QA / citation / mentions |
+| | GSC URL Inspection / Booking Sheet |
 
 ---
 
 ### Standard run (~4–6 min, small DFS spend)
 
-Use for: **weekly** refresh.
+Use for: **weekly** light refresh from the UI.
 
 Everything in **Quick**, plus:
 
 | Also runs | Still does **not** run |
 |-----------|------------------------|
-| Ranking & AI scan (84 keywords) | GA4 sync |
-| Traditional SEO rescore (cached extractability) | 13-month revenue (still 28d) |
-| Keywords Everywhere top-up (stale rows only) | DFS backlink full index |
-| Revenue Funnel seasonality bands | Domain Strength |
-| **Run Auto-Optimise** (Easy / Medium / Hard paths) | GSC URL Inspection |
-| | Trad SEO full HTML refetch |
-| | Booking Sheet upload |
+| Ranking & AI scan | GA4 sync / 13-month revenue |
+| Traditional SEO rescore (cached extractability) | DFS backlink full index |
+| Keywords Everywhere top-up (stale rows only) | Domain Strength / GSC URL Inspection |
+| Revenue Funnel seasonality bands | Schema QA / citation / mentions |
+| **Run Auto-Optimise** | Trad SEO full HTML refetch |
+| Acquisition channels | Booking Sheet upload |
 
 ---
 
-### Full refresh (15+ min, significant DFS + GSC quota)
+### Full refresh (30+ min, significant DFS + GSC quota)
 
-Use for: **monthly** deep refresh. Confirms before starting.
+Use for: **deep refresh** (Dashboard button **or** Monday overnight cron). Confirms before starting in the UI.
 
 Everything in **Standard**, plus:
 
-| Also runs | Still manual only |
-|-----------|-------------------|
-| Squarespace + Stripe (**last 13 months**) | Booking Sheet `.xlsm` (file picker) |
-| GA4 enquiry metrics (28d) | Revenue Funnel “Sync everything” if you want one-click Booking+GA4 without Full |
-| DFS backlink **full** index | Per-tab one-off buttons (Backlinks fetch, Trad SEO page tools, etc.) |
-| Domain Strength snapshot (all batches) | Portfolio monthly snapshot (cron only today) |
-| Traditional SEO **full** extractability (HTML refetch per URL) | |
+| Also runs | Still manual / separate |
+|-----------|-------------------------|
+| **Schema QA gate (whole site)** | Booking Sheet `.xlsm` |
+| Squarespace + Stripe (**last 13 months**) | Implementation tech/local/service sample widgets |
+| GA4 enquiry metrics (28d) | Portfolio monthly snapshot (cron-only today) |
+| DFS backlink **full** index | |
+| Domain Strength snapshot (all batches) | |
+| Traditional SEO **full** extractability (+ Schema QA statuses in eval cache overnight) | |
 | GSC URL Inspection refresh | |
+| Citation consistency + mentions baseline | |
+| CEO weekly HTML email (end of run) | |
 
 ---
 
@@ -86,21 +87,21 @@ Everything in **Standard**, plus:
 | **Sync everything & refresh page** | Revenue Funnel | Booking Sheet (optional) + Squarespace + Stripe + **GA4** + reload tables — **independent** of Dashboard tier |
 | **Sync GA4** | Revenue Funnel | GA4 only, then reload funnel |
 
-If you ran **Standard** today but not **Full**, GA4 and 13-month revenue may still be stale until you run **Full** or use Revenue Funnel sync buttons.
+If you ran **Standard** today but not **Full**, GA4, Schema QA, and 13-month revenue may still be stale until you run **Full** or use the dedicated tab buttons.
 
 ---
 
-## Nightly cron (unattended)
+## Nightly / Monday cron
 
-Roughly: CSV sync → GSC audit → Ranking & AI → Domain Strength → tasks → portfolio snapshot.  
-**Not the same** as any single Dashboard tier — see `api/cron/global-run.js` and **Configuration → Audit Coverage Map → Cron Jobs**.
+- **Monday overnight** `ceo-weekly-full-refresh` = Dashboard **Full** step keys (server runners).
+- Other nightly jobs (citation, mentions, GSC) may still run on their own schedules — Full now also covers citation/mentions so Monday is not blind to them.
 
 ---
 
 ## Failure behaviour
 
 Steps are **isolated**: if Ranking & AI fails, task updates and Revenue Funnel refresh can still complete.  
-Dependent steps show **Skipped** (e.g. Money Pages if GSC audit failed).
+Dependent steps show **Skipped** (e.g. Money Pages if GSC audit failed; Trad SEO full if Schema QA failed).
 
 After any tier finishes, open the run modal summary for **Done / Failed / Skipped** per step.
 
@@ -111,6 +112,6 @@ After any tier finishes, open the run modal summary for **Done / Failed / Skippe
 ## Doc map for agents
 
 1. **This file** — plain English for Alan  
-2. **`GLOBAL-RUN.md`** — tier matrix, dependencies, code entry points  
+2. **`GLOBAL-RUN.md`** — tier matrix, dependencies, code entry points, remaining gaps  
 3. **`ALL-AUDIT-SCAN-PROCESSES.md`** — what each underlying API/process does  
 4. **`CHANGELOG.md`** — what changed when  
