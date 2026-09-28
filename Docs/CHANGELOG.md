@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-28] - Trad SEO: treat LinkedIn + Acuity as first-party for external blank rule
+
+**Change:** `external_links_new_tab` no longer counts LinkedIn or Acuity booking hosts (`*.as.me`, `acuityscheduling.com`) as outbound — same exempt path as YouTube/maps/CDN — so owned LinkedIn articles and schedule-me CTAs do not fail for missing `target=_blank`.
+
+**Files:** `api/aigeo/content-extractability.js`, `test/external-link-blank-exempt.test.js`
+
+---
+
 ## [2026-09-28] - Ranking: reject thin DFS crawls + Coventry city (no pin)
 
 **Change:** DataForSEO Live Advanced sometimes returns a page-1 / degraded SERP (status 20000, ~$0.002, ~6–8 organics) despite `depth: 50`, which Ranking saved as false “unranked.” Detect incomplete crawls and auto-retry up to 2 times before persisting; do not treat remaining thin crawls as confident unranked. Local-tier ranking now uses Coventry `location_code` only (no GBP `location_coordinate` pin), which was adding extra SERP noise.

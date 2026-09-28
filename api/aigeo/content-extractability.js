@@ -595,8 +595,8 @@ function isLikelySameSiteHostname(pageHost, linkHost) {
 }
 
 /**
- * Calendar / maps / embed hosts often omit target=_blank; counting them inflates false fails.
- * Still http(s) outbound, but we do not require _blank for pass/fail on this rule.
+ * First-party / owned / embed hosts: not scored as “external needs target=_blank”.
+ * Calendar (Acuity *.as.me), LinkedIn profile/articles, maps, YouTube, CDN, etc.
  */
 function isExternalLinkTargetBlankExemptHost(host) {
   const h = String(host || '').toLowerCase().replace(/^www\./, '');
@@ -608,6 +608,11 @@ function isExternalLinkTargetBlankExemptHost(host) {
   if (h === 'goo.gl' || h.endsWith('.goo.gl')) return true;
   if (h.endsWith('squarespace-cdn.com') || h.endsWith('.squarespace-cdn.com')) return true;
   if (h.endsWith('sqspcdn.com') || h.endsWith('.sqspcdn.com')) return true;
+  // Owned LinkedIn — treat as first-party for this rule (not “external”).
+  if (h === 'linkedin.com' || h.endsWith('.linkedin.com')) return true;
+  // Acuity booking (schedule-me-*.as.me) — treat as first-party for this rule.
+  if (h === 'as.me' || h.endsWith('.as.me')) return true;
+  if (h === 'acuityscheduling.com' || h.endsWith('.acuityscheduling.com')) return true;
   return false;
 }
 
@@ -1181,4 +1186,4 @@ export default async function handler(req, res) {
   }
 }
 
-export { checkUrl };
+export { checkUrl, isExternalLinkTargetBlankExemptHost };
