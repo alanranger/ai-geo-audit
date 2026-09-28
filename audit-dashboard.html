@@ -20,7 +20,7 @@
       if (window.__fetchDedupInstalled) return;
       window.__fetchDedupInstalled = true;
       const origFetch = window.fetch.bind(window);
-      const DEDUP_RE = /\/api\/supabase\/(get-latest-audit|get-audit-history|get-portfolio-segment-metrics|money-pages-[a-z]+|gsc-timeseries-banner)|06-site-urls\.csv/i;
+      const DEDUP_RE = /\/api\/supabase\/(get-latest-audit|get-audit-history|get-portfolio-segment-metrics|money-pages-[a-z]+|gsc-timeseries-banner)/i;
       const TTL = 120000;
       const inflight = new Map();
       const cache = new Map();
@@ -48752,180 +48752,104 @@
       }
     }
 
-    // Fetch and parse site-urls.csv
+    // Fetch and parse site-urls.csv — GitHub first (SoT). schema-tools often returns SPA HTML.
     async function fetchAndParseSiteUrlsCsvUncached() {
-      const PRIMARY_CSV_URL = "https://schema-tools-six.vercel.app/06-site-urls.csv";
-      const FALLBACK_CSV_URL = "https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/06-site-urls.csv";
-      
-      try {
-        // Try primary source first to avoid noisy 404s
-        const cacheBust = `cb=${Date.now()}`;
-        const primaryUrl = PRIMARY_CSV_URL.includes('?')
-          ? `${PRIMARY_CSV_URL}&${cacheBust}`
-          : `${PRIMARY_CSV_URL}?${cacheBust}`;
-        const csvSig =
-          typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
-            ? AbortSignal.timeout(20000)
-            : undefined;
-        const res = await fetch(primaryUrl, { cache: 'no-store', ...(csvSig ? { signal: csvSig } : {}) });
-        if (!res.ok) throw new Error(`Primary fetch failed: HTTP ${res.status}`);
-        const csvText = await res.text();
-        
-        // Parse CSV - extract URLs from url column
-        const lines = csvText.split('\n').filter(line => line.trim());
-        const headerLine = lines[0] ? lines[0].trim() : '';
-        // Guard: primary URL sometimes returns HTML (not CSV)
-        if (!headerLine || headerLine.toLowerCase().startsWith('<!doctype') || headerLine.toLowerCase().startsWith('<html')) {
-          throw new Error('Primary CSV response looks like HTML, falling back');
+      const sources = [
+        'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/06-site-urls.csv',
+        'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/06-site-urls.csv',
+        'https://schema-tools-six.vercel.app/06-site-urls.csv'
+      ];
+
+      function parseCsvLine(line) {
+        const columns = [];
+        let current = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          const nextChar = line[i + 1];
+          if (char === '"') {
+            if (inQuotes && nextChar === '"') {
+              current += '"';
+              i++;
+            } else {
+              inQuotes = !inQuotes;
+            }
+          } else if (char === ',' && !inQuotes) {
+            columns.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        columns.push(current.trim());
+        return columns;
+      }
+
+      function parseUrlsFromCsvText(csvText) {
+        const lines = String(csvText || '').split(/\r?\n/).filter((line) => line.trim());
+        if (!lines.length) throw new Error('empty_csv');
+        const headerLine = lines[0].trim();
+        const low = headerLine.toLowerCase();
+        if (low.startsWith('<!doctype') || low.startsWith('<html') || low.includes('<head')) {
+          throw new Error('html_not_csv');
+        }
+        const headers = parseCsvLine(headerLine);
+        let urlColumnIndex = headers.findIndex((h) => h.toLowerCase() === 'url');
+        let startRow = 1;
+        if (urlColumnIndex < 0) {
+          // Headerless / first-column URL style
+          if (!/^https?:\/\//i.test(headers[0] || '')) throw new Error('missing_url_header');
+          urlColumnIndex = 0;
+          startRow = 0;
         }
         const urls = [];
-        
-        // Parse header row to find URL column index
-        let urlColumnIndex = 0;
-        if (lines.length > 0) {
-          const headers = parseCsvLine(headerLine);
-          const urlHeaderIndex = headers.findIndex(h => h.toLowerCase() === 'url');
-          if (urlHeaderIndex !== -1) {
-            urlColumnIndex = urlHeaderIndex;
-          } else {
-            throw new Error('Primary CSV missing url header, falling back');
-          }
-        }
-        
-        // Helper function to parse CSV line with proper quote handling
-        function parseCsvLine(line) {
-          const columns = [];
-          let current = '';
-          let inQuotes = false;
-          
-          for (let i = 0; i < line.length; i++) {
-            const char = line[i];
-            const nextChar = line[i + 1];
-            
-            if (char === '"') {
-              if (inQuotes && nextChar === '"') {
-                current += '"';
-                i++;
-              } else {
-                inQuotes = !inQuotes;
-              }
-            } else if (char === ',' && !inQuotes) {
-              columns.push(current.trim());
-              current = '';
-            } else {
-              current += char;
-            }
-          }
-          columns.push(current.trim());
-          return columns;
-        }
-        
-        // Parse data rows (skip header)
-        for (let i = 1; i < lines.length; i++) {
+        for (let i = startRow; i < lines.length; i++) {
           const columns = parseCsvLine(lines[i]);
-          if (columns[urlColumnIndex]) {
-            const url = columns[urlColumnIndex].trim();
-            if (url) {
-              // Accept URLs starting with http/https, or relative URLs starting with /
-              // Also accept full URLs without protocol (will be normalized)
-              if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')) {
-                urls.push(url);
-              } else if (url.includes('.') && !url.includes(' ')) {
-                // Likely a URL without protocol - add https://
-                urls.push(url.startsWith('//') ? `https:${url}` : `https://${url}`);
-              }
-            }
+          const url = String(columns[urlColumnIndex] || '').trim();
+          if (!url) continue;
+          if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')) {
+            urls.push(url);
+          } else if (url.includes('.') && !url.includes(' ')) {
+            urls.push(url.startsWith('//') ? `https:${url}` : `https://${url}`);
           }
         }
-        
+        if (urls.length < 50) throw new Error(`too_few_urls:${urls.length}`);
         return urls;
-      } catch (githubErr) {
-        // Try fallback
+      }
+
+      let lastErr = null;
+      for (const base of sources) {
         try {
-          const fbSig =
+          const sep = base.includes('?') ? '&' : '?';
+          const reqUrl = `${base}${sep}cb=${Date.now()}`;
+          const sig =
             typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
               ? AbortSignal.timeout(20000)
               : undefined;
-          const fallbackCsvUrl = FALLBACK_CSV_URL.includes('?')
-            ? `${FALLBACK_CSV_URL}&cb=${Date.now()}`
-            : `${FALLBACK_CSV_URL}?cb=${Date.now()}`;
-          const fallbackRes = await fetch(fallbackCsvUrl, {
-            cache: 'no-store',
-            ...(fbSig ? { signal: fbSig } : {})
-          });
-          if (!fallbackRes.ok) throw new Error(`Fallback fetch failed: HTTP ${fallbackRes.status}`);
-          const csvText = await fallbackRes.text();
-          
-          // Same parsing logic as above
-          const lines = csvText.split('\n').filter(line => line.trim());
-          const urls = [];
-          let urlColumnIndex = 0;
-          
-          if (lines.length > 0) {
-            const headerLine = lines[0].trim();
-            const headers = parseCsvLine(headerLine);
-            const urlHeaderIndex = headers.findIndex(h => h.toLowerCase() === 'url');
-            if (urlHeaderIndex !== -1) {
-              urlColumnIndex = urlHeaderIndex;
-            }
-          }
-          
-          function parseCsvLine(line) {
-            const columns = [];
-            let current = '';
-            let inQuotes = false;
-            for (let i = 0; i < line.length; i++) {
-              const char = line[i];
-              const nextChar = line[i + 1];
-              if (char === '"') {
-                if (inQuotes && nextChar === '"') {
-                  current += '"';
-                  i++;
-                } else {
-                  inQuotes = !inQuotes;
-                }
-              } else if (char === ',' && !inQuotes) {
-                columns.push(current.trim());
-                current = '';
-              } else {
-                current += char;
-              }
-            }
-            columns.push(current.trim());
-            return columns;
-          }
-          
-          for (let i = 1; i < lines.length; i++) {
-            const columns = parseCsvLine(lines[i]);
-            if (columns[urlColumnIndex]) {
-              const url = columns[urlColumnIndex].trim();
-              if (url) {
-                // Accept URLs starting with http/https, or relative URLs starting with /
-                // Also accept full URLs without protocol (will be normalized)
-                if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')) {
-                  urls.push(url);
-                } else if (url.includes('.') && !url.includes(' ')) {
-                  // Likely a URL without protocol - add https://
-                  urls.push(url.startsWith('//') ? `https:${url}` : `https://${url}`);
-                }
-              }
-            }
-          }
-          
-          return urls;
-        } catch (fallbackErr) {
-          throw new Error(`Unable to load site URLs CSV: ${githubErr.message}`);
+          const res = await fetch(reqUrl, { cache: 'no-store', ...(sig ? { signal: sig } : {}) });
+          if (!res.ok) throw new Error(`http_${res.status}`);
+          return parseUrlsFromCsvText(await res.text());
+        } catch (err) {
+          lastErr = err;
         }
       }
+      throw new Error(`Unable to load site URLs CSV: ${lastErr?.message || lastErr || 'all_sources_failed'}`);
     }
 
-    // Session cache for the canonical URL CSV. The primary source can return ~1.2MB of HTML
-    // before falling back to GitHub; without caching this was re-downloaded on every Money
-    // Pages render. Cache the parsed result for a few minutes. See diagnosis 2026-05-31.
+    // Short TTL — new blogs land in GitHub often; stale list drops them from Trad SEO.
     let __siteUrlsCsvPromise = null;
     let __siteUrlsCsvCachedAt = 0;
-    const SITE_URLS_CSV_TTL_MS = 5 * 60 * 1000;
-    async function fetchAndParseSiteUrlsCsv() {
+    const SITE_URLS_CSV_TTL_MS = 60 * 1000;
+    function bustSiteUrlsCsvCache() {
+      __siteUrlsCsvPromise = null;
+      __siteUrlsCsvCachedAt = 0;
+      if (typeof window.bustFetchDedup === 'function') {
+        window.bustFetchDedup(/06-site-urls\.csv/i);
+      }
+    }
+    window.bustSiteUrlsCsvCache = bustSiteUrlsCsvCache;
+    async function fetchAndParseSiteUrlsCsv(forceRefresh = false) {
+      if (forceRefresh) bustSiteUrlsCsvCache();
       const now = Date.now();
       if (__siteUrlsCsvPromise && (now - __siteUrlsCsvCachedAt) < SITE_URLS_CSV_TTL_MS) {
         return __siteUrlsCsvPromise;
@@ -95441,7 +95365,8 @@ Confidence: ${c}`;
 
       if (typeof fetchAndParseSiteUrlsCsv === 'function') {
         try {
-          const siteUrls = await fetchAndParseSiteUrlsCsv();
+          // Always re-fetch for Trad SEO so new blogs in GitHub 06 are not skipped
+          const siteUrls = await fetchAndParseSiteUrlsCsv(true);
           (Array.isArray(siteUrls) ? siteUrls : []).forEach((url) => {
             addCanonicalUrl(url);
           });
