@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-28] - Monday Full Refresh: finish before CEO email (no deadline skip)
+
+**Change:** Removed 04:15 UTC jump-to-email and multi-tick abort. Cron runs every 15 min **all Monday** until every Full step completes; CEO email is last only. Ranking finalize now writes **Surface / Top of Page** to `audit_results` (same as dashboard). Backup email moved to 20:00 UTC and **waits** until Full Refresh `email_sent` — no more early email with stale dials.
+
+**Files:** `api/cron/ceo-weekly-full-refresh.js`, `api/cron/ceo-weekly-report.js`, `lib/keyword-ranking/dashboard-parity-tick.js`, `vercel.json`
+
+---
+
 ## [2026-09-28] - Trad SEO: load 06-site-urls from GitHub first
 
 **Change:** Scoring was missing brand-new blogs (e.g. photography-composition-framework) because the browser preferred schema-tools `06-site-urls.csv`, which often returns SPA HTML / stale lists. **GitHub alan-shared-resources is now primary**; schema-tools last. Trad SEO always force-refreshes the CSV on collect. Dropped `06-site-urls.csv` from fetch-dedup so HTML 200s are not sticky-cached.

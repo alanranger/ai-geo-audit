@@ -2,10 +2,11 @@
  * Unattended Monday Full Refresh — same Full-tier steps as the dashboard
  * Full Refresh button (globalRunStepCatalog Full), including CEO HTML email.
  *
- * Ranking AI uses dashboard-parity batched ticks (SERP 20 / AI 10 / depth 50),
- * not the old /api/cron/keyword-ranking-ai monolith.
+ * Ranking AI uses dashboard-parity batched ticks (SERP 20 / AI 10 / depth 50).
+ * No wall-clock deadline: cron keeps ticking every 15 min on Monday until every
+ * step finishes; CEO email is the last step only.
  *
- * Schedule: every 15 min Mon 00:00–04:45 UTC (before 05:45 UTC backup report).
+ * Schedule: every 15 min all day Monday UTC (`*/15 * * * 1`).
  */
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -18,43 +19,11 @@ import {
 } from '../../lib/ceo-weekly/dashboard-full-catalog.js';
 
 const FLAG_KEY = 'ceo_monday_full_refresh';
-/** UTC hour:minute — after this, skip remaining data steps and send CEO email. */
-const EMAIL_DEADLINE_UTC_MIN = 4 * 60 + 15; // 04:15 UTC (before 05:45 backup)
-/** Max continue-ticks for ranking / domain_strength before force-skip. */
-const MAX_MULTI_TICKS = 12;
 
 function need(key) {
   const v = process.env[key];
   if (!v || !String(v).trim()) throw new Error(`missing_env:${key}`);
   return v;
-}
-
-function utcMinutesNow() {
-  const d = new Date();
-  return d.getUTCHours() * 60 + d.getUTCMinutes();
-}
-
-function pastEmailDeadline() {
-  return utcMinutesNow() >= EMAIL_DEADLINE_UTC_MIN;
-}
-
-/** Jump cursor to CEO email. Do NOT mark audit/ranking failed — still send numbers. */
-function jumpToEmail(progress, allSteps, reason) {
-  const emailIdx = allSteps.findIndex((s) => s.key === 'ceo_weekly_email' || s.kind === 'email');
-  if (emailIdx < 0) return;
-  while (progress.step_index < emailIdx) {
-    const step = allSteps[progress.step_index];
-    progress.steps.push({
-      key: step.key,
-      ok: true,
-      status: 200,
-      ms: 0,
-      error: `deadline_skip:${reason}`,
-      at: new Date().toISOString()
-    });
-    progress.step_index += 1;
-  }
-  progress.deadline_skipped = reason;
 }
 
 function baseUrl(req) {
@@ -143,11 +112,6 @@ export default async function handler(req, res) {
       progress.steps = (progress.steps || []).filter((s) => s.key !== 'ceo_weekly_email');
     }
 
-    // Guarantee CEO email inside the Monday window even if Ranking/DFS stalls
-    if (!progress.email_sent && pastEmailDeadline()) {
-      jumpToEmail(progress, allSteps, 'past_0415_utc');
-    }
-
     await saveState(sb, {
       state: 'running',
       started_at: progress.step_index === 0
@@ -178,6 +142,7 @@ export default async function handler(req, res) {
           error: `Skipped — ${skipDeps} failed`
         };
       } else if (step.kind === 'email') {
+        // Only reached after every prior step completes (no deadline jump).
         const criticalFailed = progress.failed_keys.includes('audit_scan')
           || progress.failed_keys.includes('ranking_ai');
         const partial = progress.failed_keys.length > 0;
@@ -219,25 +184,9 @@ export default async function handler(req, res) {
       if (result.ranking) progress.ranking = result.ranking;
       if (result.domain_strength) progress.domain_strength = result.domain_strength;
 
-      let stepDone = result.done !== false;
-      if (!stepDone && (step.kind === 'ranking_parity' || step.kind === 'domain_strength')) {
-        progress.multi_ticks = (progress.multi_ticks || 0) + 1;
-        if (progress.multi_ticks >= MAX_MULTI_TICKS || pastEmailDeadline()) {
-          result = {
-            ok: true,
-            done: true,
-            status: 200,
-            ms: result.ms,
-            body: result.body,
-            error: pastEmailDeadline() ? 'deadline_abort_multi_tick' : `max_multi_ticks_${MAX_MULTI_TICKS}`
-          };
-          stepDone = true;
-        }
-      } else if (stepDone) {
-        progress.multi_ticks = 0;
-      }
-
+      const stepDone = result.done !== false;
       if (stepDone) {
+        progress.multi_ticks = 0;
         progress.steps.push({
           key: step.key,
           ok: !!result.ok,
@@ -247,7 +196,7 @@ export default async function handler(req, res) {
           at: new Date().toISOString()
         });
         const err = String(result.error || '');
-        if (!result.ok && !err.startsWith('Skipped') && !err.startsWith('deadline') && !err.startsWith('max_multi')) {
+        if (!result.ok && !err.startsWith('Skipped')) {
           progress.failed_keys.push(step.key);
         }
         if (step.key === 'ranking_ai') progress.ranking = null;
@@ -255,6 +204,7 @@ export default async function handler(req, res) {
         progress.step_index += 1;
         ran += 1;
       } else {
+        progress.multi_ticks = (progress.multi_ticks || 0) + 1;
         await saveState(sb, { state: 'running', last_details: progress, last_error: null });
         return sendJson(res, 200, {
           ok: true,
