@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-28] - Trad SEO: load 06-site-urls from GitHub first
+
+**Change:** Scoring was missing brand-new blogs (e.g. photography-composition-framework) because the browser preferred schema-tools `06-site-urls.csv`, which often returns SPA HTML / stale lists. **GitHub alan-shared-resources is now primary**; schema-tools last. Trad SEO always force-refreshes the CSV on collect. Dropped `06-site-urls.csv` from fetch-dedup so HTML 200s are not sticky-cached.
+
+**Files:** `audit-dashboard.html`
+
+---
+
 ## [2026-09-28] - Full Refresh: DFS before Ranking (CEO backlinks were stale)
 
 **Change:** Mon 28 overnight ran `sync_csv` + `audit_scan`, then Ranking burned until the 04:15 UTC email deadline and **deadline-skipped `dfs_full_index`** — DFS banner stayed on 14 Sep; CEO §D showed → 0. Reordered Full catalog (dashboard + Monday cron): **DFS full index + revenue/GA4/RF before Ranking**. GSC & Backlink Audit ≠ DFS index.
