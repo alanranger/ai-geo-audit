@@ -22,6 +22,9 @@ import {
   resolveGeoMethod,
   buildSerpCaptureFeatures,
   CAPTURE_STATUS,
+  isMeasurableForRollup,
+  isUnverifiedAbsence,
+  summarizeSerpCaptureCoverage,
 } from '../lib/keyword-ranking/dfs-serp-quality.js';
 import {
   isSignificantWorsening,
@@ -402,8 +405,37 @@ test('shared confirmation coverage summary for Ranking/Health/CEO', () => {
 test('defaults for spend limits are conservative and visible', () => {
   const limits = getDfsSpendLimits();
   assert.equal(limits.run_cost_cap_usd, 2);
-  assert.equal(limits.confirm_max_per_run, 12);
+  assert.equal(limits.confirm_max_per_run, 40);
   assert.equal(limits.confirm_max_per_keyword, 1);
   assert.equal(limits.thin_max_attempts, 3);
   assert.ok(limits.run_attempt_cap <= 180);
+});
+
+test('exhausted/unconfirmed no-match is not measurable absence for rollups', () => {
+  const exhaustedNull = {
+    best_rank_group: null,
+    serp_features: {
+      capture_status: CAPTURE_STATUS.COMPLETE_NO_MATCH,
+      confirmation_state: CONFIRM_STATE.EXHAUSTED_BUDGET,
+      geo_method: GEO_METHOD_GBP_PIN,
+    },
+    serp_surface_stack: [{ type: 'organic' }],
+  };
+  const confirmedNull = {
+    best_rank_group: null,
+    serp_features: {
+      capture_status: CAPTURE_STATUS.COMPLETE_NO_MATCH,
+      confirmation_state: CONFIRM_STATE.CONFIRMED_CHANGE,
+      geo_method: GEO_METHOD_GBP_PIN,
+    },
+    serp_surface_stack: [{ type: 'organic' }],
+  };
+  assert.equal(isUnverifiedAbsence(exhaustedNull), true);
+  assert.equal(isMeasurableForRollup(exhaustedNull), false);
+  assert.equal(isUnverifiedAbsence(confirmedNull), false);
+  assert.equal(isMeasurableForRollup(confirmedNull), true);
+  const cov = summarizeSerpCaptureCoverage([exhaustedNull, confirmedNull]);
+  assert.equal(cov.unverified_absence, 1);
+  assert.equal(cov.measurable, 1);
+  assert.equal(cov.provisional, true);
 });
