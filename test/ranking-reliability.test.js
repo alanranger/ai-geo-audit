@@ -237,6 +237,28 @@ test('reserveAttempt prevents concurrent canAttempt overshoot', () => {
   else process.env.DFS_RUN_ATTEMPT_CAP = prev;
 });
 
+test('settleAttempt retains reservation when actual cost missing (null/blank/NaN)', () => {
+  const spend = createDfsSpendTracker(getDfsSpendLimits());
+  const gate = spend.reserveAttempt(0.008);
+  assert.equal(gate.ok, true);
+  const reservedCost = spend.snapshot().cost_usd_used;
+  assert.ok(reservedCost > 0);
+  // Number(null)===0 must NOT wipe the reservation.
+  spend.settleAttempt(gate.reserved, null);
+  assert.equal(spend.snapshot().cost_usd_used, reservedCost);
+  spend.settleAttempt(gate.reserved, undefined);
+  assert.equal(spend.snapshot().cost_usd_used, reservedCost);
+  spend.settleAttempt(gate.reserved, '');
+  assert.equal(spend.snapshot().cost_usd_used, reservedCost);
+  spend.settleAttempt(gate.reserved, Number.NaN);
+  assert.equal(spend.snapshot().cost_usd_used, reservedCost);
+  spend.settleAttempt(gate.reserved, -1);
+  assert.equal(spend.snapshot().cost_usd_used, reservedCost);
+  // Finite non-negative actual replaces reservation.
+  spend.settleAttempt(gate.reserved, 0.003);
+  assert.equal(spend.snapshot().cost_usd_used, 0.003);
+});
+
 test('spend tracker hydrates prior snapshot across logical-run batches', () => {
   const first = createDfsSpendTracker(getDfsSpendLimits());
   first.reserveAttempt(0.008);
@@ -325,6 +347,17 @@ test('geo break: only city-only day withheld; pre-Sep28 pin history comparable a
     currentGeoMethod: GEO_METHOD_CITY_CODE,
   });
   assert.equal(methodMismatch.withhold, true);
+  // Partial method (later city / unknown peer) → conservative withhold.
+  const partialCity = qualifyHistoricalScoreDelta('2026-09-14', {
+    currentDate: '2026-09-29',
+    currentGeoMethod: GEO_METHOD_CITY_CODE,
+  });
+  assert.equal(partialCity.withhold, true);
+  // Date-only path without methods: non-Sep28 stays allowed (later city undetectable from dates).
+  const dateOnlyLater = qualifyHistoricalScoreDelta('2026-09-14', {
+    currentDate: '2026-09-29',
+  });
+  assert.equal(dateOnlyLater.withhold, false);
   // Brand metric ignores geo break.
   const brandOk = qualifyHistoricalScoreDelta('2026-09-28', { metric: 'brand' });
   assert.equal(brandOk.withhold, false);

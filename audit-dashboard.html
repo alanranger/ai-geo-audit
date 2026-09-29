@@ -69975,13 +69975,24 @@ Composite of four inputs — not the Surface Visibility dial score.`;
     }
 
     function qualifyHeroDeltaAgainstPrior(priorDate, coverage, opts = {}) {
-      // Geo break is SERP Local only — Brand (GBP+GSC) must keep genuine prior-month deltas.
+      // Date-only Surface/Top gate (audit history has no geo_method). Brand keeps real deltas.
+      // Later city / mixed cohorts need geo_method opts — without them only Sep28 island is detectable.
       const applyGeoBreak = opts.applyGeoBreak !== false;
       const currentDate = opts.currentDate || null;
       if (applyGeoBreak && (rankingIsPreGeoBreak(priorDate) || rankingIsPreGeoBreak(currentDate))) {
         return {
           withheld: true,
           note: `${GEO_METHOD_BREAK_NOTE} vs ${String(priorDate || '').slice(0, 10)} withheld.`,
+          priorDate: priorDate ? String(priorDate).slice(0, 10) : null,
+        };
+      }
+      // Conservative: partial method evidence without a matching peer → withhold.
+      const priorM = opts.priorGeoMethod || null;
+      const curM = opts.currentGeoMethod || null;
+      if (applyGeoBreak && (priorM || curM) && !(priorM && curM && priorM === curM)) {
+        return {
+          withheld: true,
+          note: `${GEO_METHOD_BREAK_NOTE} (cohort not proven comparable).`,
           priorDate: priorDate ? String(priorDate).slice(0, 10) : null,
         };
       }

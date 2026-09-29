@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-29] - Ranking reliability final review corrections
+
+**Change:** Last bounded correction pass after Codex fixture review on `d8d3e46`. (1) `settleAttempt` retains reservation when actual cost is null/undefined/blank/non-finite (`Number(null)===0` no longer zeros spend). (2) Geo helper withholds on partial/mismatched methods; dashboard/CEO remain **date-only** for Monopoly/chips (Sep28 either-side) — later city needs geo_method opts; Brand untouched. (3) Baseline fetch limitation documented (~6 newest rows/kw, not paginated). (4) Spend caps documented as estimated SERP-path soft gate only (not account $, not AI Mode/volume; AIO 0.025 unverified estimate; transport can drop spend_state). Handover corrected: original report exists under Codex outputs.
+
+**Files:** `dfs-spend-limits.js`, `heroScoreComparability.js`, `load-rank-baselines.js`, `tabMetrics.js`, `audit-dashboard.html`, `test/ranking-reliability.test.js`, handover copies, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-09-29] - Ranking reliability gap patch (spend / baselines / geo / provisional)
 
 **Change:** Minimal verify+patch of four root-review gaps on top of `9cf4702` (no ranking reimplementation, no paid DFS, no Sep28 rewrite, no broad collapse). (1) Shared logical-run DFS spend budget now hydrates across dashboard full/filtered/single batches and Monday ticks via `spend_state`; `reserveAttempt`/`reserveConfirm` before concurrent calls; unknown cost kept conservative; AIO expand uses `DFS_AIO_EXPAND_COST_EST_USD` default **0.025** (not unsafe 0.008). (2) `fetchRankBaselines` filters requested keywords server-side (chunked `.in`) and excludes pending/unconfirmed from confirmed baseline. (3) Historical Surface/Top comparison checks **current and prior** city-only dates + method mismatch (Brand untouched); pin vs city stay separate series. (4) Confirmation pending/provisional folded into Surface/Top rollups and CEO email chips (not tooltip-only). Fixture tests only.
