@@ -30,7 +30,7 @@ import {
   summarizeConfirmationCoverage,
   CONFIRM_STATE,
 } from '../lib/keyword-ranking/rank-confirmation.js';
-import { createDfsSpendTracker, getDfsSpendLimits } from '../lib/keyword-ranking/dfs-spend-limits.js';
+import { createDfsSpendTracker, getDfsSpendLimits, estimateDfsCallCost } from '../lib/keyword-ranking/dfs-spend-limits.js';
 import { buildBaselinesMap } from '../lib/keyword-ranking/load-rank-baselines.js';
 import { qualifyHistoricalScoreDelta } from '../lib/audit/heroScoreComparability.js';
 
@@ -219,6 +219,42 @@ test('capped confirmation — per-run and per-keyword bounds', () => {
   else process.env.DFS_CONFIRM_MAX_PER_KEYWORD = prevKw;
 });
 
+test('reserveAttempt prevents concurrent canAttempt overshoot', () => {
+  const prev = process.env.DFS_RUN_ATTEMPT_CAP;
+  process.env.DFS_RUN_ATTEMPT_CAP = '2';
+  const spend = createDfsSpendTracker(getDfsSpendLimits());
+  const a = spend.reserveAttempt(0.008);
+  const b = spend.reserveAttempt(0.008);
+  const c = spend.reserveAttempt(0.008);
+  assert.equal(a.ok, true);
+  assert.equal(b.ok, true);
+  assert.equal(c.ok, false);
+  assert.equal(c.reason, 'run_attempt_cap');
+  assert.equal(spend.snapshot().attempts_used, 2);
+  spend.settleAttempt(a.reserved, 0.002);
+  assert.ok(spend.snapshot().cost_usd_used < 0.02);
+  if (prev == null) delete process.env.DFS_RUN_ATTEMPT_CAP;
+  else process.env.DFS_RUN_ATTEMPT_CAP = prev;
+});
+
+test('spend tracker hydrates prior snapshot across logical-run batches', () => {
+  const first = createDfsSpendTracker(getDfsSpendLimits());
+  first.reserveAttempt(0.008);
+  first.reserveAttempt(0.008);
+  const snap = first.snapshot();
+  const second = createDfsSpendTracker(getDfsSpendLimits(), snap);
+  assert.equal(second.snapshot().attempts_used, 2);
+  assert.ok(second.snapshot().cost_usd_used > 0);
+});
+
+test('AIO expand estimate is not unsafe 0.008', () => {
+  const limits = getDfsSpendLimits();
+  assert.ok(limits.aio_expand_cost_est_usd >= 0.02);
+  assert.notEqual(limits.aio_expand_cost_est_usd, limits.unit_cost_est_usd);
+  assert.equal(estimateDfsCallCost(limits, { expandAiOverview: true }), limits.aio_expand_cost_est_usd);
+  assert.equal(estimateDfsCallCost(limits, {}), limits.unit_cost_est_usd);
+});
+
 test('exhausted budget state when significant but no confirmation run', () => {
   const baseline = pinRow(1);
   const primary = pinRow(null);
@@ -276,6 +312,35 @@ test('geo break: only city-only day withheld; pre-Sep28 pin history comparable a
     coverage: { provisional: false, tracked: 10, measurable: 10, failed: 0, legacy_unverified: 0 },
   });
   assert.equal(allow.withhold, false);
+  // Current city-only day vs older pin prior must also withhold (not prior-only check).
+  const currentCity = qualifyHistoricalScoreDelta('2026-09-14', {
+    currentDate: '2026-09-28',
+    coverage: { provisional: false, tracked: 10, measurable: 10, failed: 0, legacy_unverified: 0 },
+  });
+  assert.equal(currentCity.withhold, true);
+  // Explicit method mismatch (later city vs pin) remains separate.
+  const methodMismatch = qualifyHistoricalScoreDelta('2026-09-14', {
+    currentDate: '2026-09-29',
+    priorGeoMethod: GEO_METHOD_GBP_PIN,
+    currentGeoMethod: GEO_METHOD_CITY_CODE,
+  });
+  assert.equal(methodMismatch.withhold, true);
+  // Brand metric ignores geo break.
+  const brandOk = qualifyHistoricalScoreDelta('2026-09-28', { metric: 'brand' });
+  assert.equal(brandOk.withhold, false);
+});
+
+test('baselines exclude pending/unconfirmed observations', () => {
+  const pending = pinRow(1, {
+    feats: { confirmation_state: CONFIRM_STATE.UNCONFIRMED_UNSTABLE },
+  });
+  const confirmed = pinRow(2, {
+    audit_date: '2026-09-14',
+    feats: { confirmation_state: CONFIRM_STATE.AGREEMENT },
+  });
+  const map = buildBaselinesMap([pending, confirmed], { preferGeoMethod: GEO_METHOD_GBP_PIN });
+  assert.equal(map['photography classes'].best_rank_group, 2);
+  assert.equal(map['photography classes'].audit_date, '2026-09-14');
 });
 
 test('shared confirmation coverage summary for Ranking/Health/CEO', () => {

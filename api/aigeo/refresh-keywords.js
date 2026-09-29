@@ -50,7 +50,7 @@ const sendJson = (res, status, body) => {
 
 const parseRequestBody = (body) => {
   if (!body || typeof body !== 'object') return { error: 'Request body must be a JSON object' };
-  const { keywords, propertyUrl, auditDate, depth } = body;
+  const { keywords, propertyUrl, auditDate, depth, spend_state: spendState } = body;
   if (!Array.isArray(keywords) || keywords.length === 0) {
     return { error: 'keywords must be a non-empty array' };
   }
@@ -81,7 +81,8 @@ const parseRequestBody = (body) => {
     keywords: cleanKeywords,
     propertyUrl: propertyUrl.trim(),
     auditDate,
-    depth: Number.isFinite(Number(depth)) ? Math.round(Number(depth)) : DEFAULT_REFRESH_DEPTH
+    depth: Number.isFinite(Number(depth)) ? Math.round(Number(depth)) : DEFAULT_REFRESH_DEPTH,
+    spendState: (spendState && typeof spendState === 'object') ? spendState : null,
   };
 };
 
@@ -96,15 +97,17 @@ export default async function handler(req, res) {
     return sendJson(res, 400, { status: 'error', message: parsed.error });
   }
 
-  const { keywords, propertyUrl, auditDate, depth } = parsed;
+  const { keywords, propertyUrl, auditDate, depth, spendState } = parsed;
   const startedAt = Date.now();
 
   try {
     const baseUrl = resolveBaseUrl(req);
+    const spendBudget = { state: spendState || null };
 
     // Fetch SERP + AI Mode in parallel. For 1..N keywords with N<=MAX_BATCH
     // a single batch is always enough, so concurrency=1 / batchSize=MAX_BATCH
-    // keeps the call profile predictable.
+    // keeps the call profile predictable. spendBudget chains run caps across
+    // filtered/single refresh calls when the client passes spend_state.
     const [serpRows, aiRows] = await Promise.all([
       fetchSerpRows(baseUrl, keywords, {
         batchSize: MAX_BATCH,
@@ -112,6 +115,7 @@ export default async function handler(req, res) {
         depth,
         propertyUrl,
         auditDate,
+        spendBudget,
       }),
       fetchAiRows(baseUrl, keywords, { batchSize: MAX_BATCH, concurrency: 1 })
     ]);
@@ -138,6 +142,7 @@ export default async function handler(req, res) {
       status: 'ok',
       refreshed_at: refreshedAt,
       rows: responseRows,
+      spend_limits: spendBudget.state || null,
       meta: {
         durationMs: Date.now() - startedAt,
         keyword_count: keywordRows.length,

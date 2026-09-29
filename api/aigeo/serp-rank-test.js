@@ -31,7 +31,7 @@ import {
   buildSerpCaptureFeatures,
   CAPTURE_STATUS,
 } from '../../lib/keyword-ranking/dfs-serp-quality.js';
-import { createDfsSpendTracker } from '../../lib/keyword-ranking/dfs-spend-limits.js';
+import { createDfsSpendTracker, getDfsSpendLimits, estimateDfsCallCost } from '../../lib/keyword-ranking/dfs-spend-limits.js';
 import {
   isSignificantWorsening,
   resolveConfirmationState,
@@ -771,7 +771,12 @@ export default async function handler(req, res) {
   const baselinesIn = (body?.baselines && typeof body.baselines === 'object')
     ? body.baselines
     : {};
-  const spend = createDfsSpendTracker();
+  // Continue shared logical-run budget across dashboard/Monday HTTP batches.
+  const spend = createDfsSpendTracker(
+    getDfsSpendLimits(),
+    (body?.spend_state && typeof body.spend_state === 'object') ? body.spend_state : null
+  );
+  const callCostEst = estimateDfsCallCost(spend.limits, { expandAiOverview });
 
   // Declared outside try so mergeVolume can close over it (const inside try is block-scoped).
   let volumeByKeyword = {};
@@ -849,7 +854,7 @@ export default async function handler(req, res) {
     const maxThin = spend.limits.thin_max_attempts;
     let result = null;
     for (let attempt = 1; attempt <= maxThin; attempt++) {
-      const gate = spend.canAttempt();
+      const gate = spend.reserveAttempt(callCostEst);
       if (!gate.ok) {
         if (!result) {
           result = buildEmptySerpResult(
@@ -863,7 +868,7 @@ export default async function handler(req, res) {
         break;
       }
       result = await fetchSerpForKeyword(keyword, auth, targetRoot, depth, opts);
-      spend.recordAttempt(result?.dfs_cost);
+      spend.settleAttempt(gate.reserved, result?.dfs_cost);
       if (result?.fatal) break;
       const incomplete = result?.crawl_incomplete === true
         || !Array.isArray(result?.serp_surface_stack)
@@ -891,12 +896,11 @@ export default async function handler(req, res) {
     let confirmation = null;
     let confirmCount = 0;
     if (baselineRaw && result && !result.fatal && isSignificantWorsening(baselineRaw, result)) {
-      const gate = spend.canConfirm(confirmCount);
+      const gate = spend.reserveConfirm(confirmCount, callCostEst);
       if (gate.ok) {
-        spend.recordConfirm();
         confirmCount += 1;
         confirmation = await fetchSerpForKeyword(keyword, auth, targetRoot, depth, opts);
-        spend.recordAttempt(confirmation?.dfs_cost);
+        spend.settleAttempt(gate.reserved, confirmation?.dfs_cost);
         confirmation = markIncompleteResult(confirmation);
       }
     }

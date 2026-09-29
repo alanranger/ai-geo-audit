@@ -69977,7 +69977,8 @@ Composite of four inputs — not the Surface Visibility dial score.`;
     function qualifyHeroDeltaAgainstPrior(priorDate, coverage, opts = {}) {
       // Geo break is SERP Local only — Brand (GBP+GSC) must keep genuine prior-month deltas.
       const applyGeoBreak = opts.applyGeoBreak !== false;
-      if (applyGeoBreak && rankingIsPreGeoBreak(priorDate)) {
+      const currentDate = opts.currentDate || null;
+      if (applyGeoBreak && (rankingIsPreGeoBreak(priorDate) || rankingIsPreGeoBreak(currentDate))) {
         return {
           withheld: true,
           note: `${GEO_METHOD_BREAK_NOTE} vs ${String(priorDate || '').slice(0, 10)} withheld.`,
@@ -70066,7 +70067,10 @@ Composite of four inputs — not the Surface Visibility dial score.`;
 
         const mk = (cur, prior, coverage, qualifyOpts = {}) => {
           if (cur == null || !prior) return hero28dBaseliningChip(availableFrom);
-          const q = qualifyHeroDeltaAgainstPrior(prior.date, coverage, qualifyOpts);
+          const q = qualifyHeroDeltaAgainstPrior(prior.date, coverage, {
+            ...qualifyOpts,
+            currentDate: latestDate,
+          });
           if (q?.withheld) {
             return { withheld: true, note: q.note, prior: prior.score, priorDate: prior.date };
           }
@@ -71632,7 +71636,11 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       const prevComposite = computePrevCompositeFromStoredScores(deltaState.previous, list);
       const prevVer = prevComposite?.schemaVersion || getStoredPillarSchemaVersion(deltaState.previous);
       const suppressCrossSchema = !!(deltaState.previous && prevVer < TOP_OF_PAGE_SCHEMA_VERSION);
-      const suppressGeoBreak = rankingIsPreGeoBreak(deltaState.previousAuditDate);
+      const currentHeroDate = (typeof window.__overviewHeroAuditDate === 'string')
+        ? window.__overviewHeroAuditDate
+        : (deltaState.currentAuditDate || null);
+      const suppressGeoBreak = rankingIsPreGeoBreak(deltaState.previousAuditDate)
+        || rankingIsPreGeoBreak(currentHeroDate);
       renderHeroDelta(
         surfaceHero.score,
         suppressCrossSchema || suppressGeoBreak ? null : (prevComposite ? prevComposite.score : null),
@@ -72602,6 +72610,11 @@ Composite of four inputs — not the Surface Visibility dial score.`;
             }
             for (const row of priorRows) {
               if (!row?.keyword || row.best_rank_group == null) continue;
+              const confState = row?.serp_features?.confirmation_state;
+              if (confState === 'unconfirmed_unstable' || confState === 'partial_failure'
+                || confState === 'exhausted_budget' || confState === 'unknown') {
+                continue;
+              }
               const geo = row?.serp_features?.geo_method
                 || (row.location_coordinate ? 'gbp_pin'
                   : (Number(row.location_code) === 2826 ? 'uk_national' : null));
@@ -72641,6 +72654,8 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         
         // Accumulate combined rows for final summary calculation
         let allCombinedRows = [];
+        // Shared logical-run DFS spend budget across SERP batches (server enforces caps).
+        let rankingSpendState = null;
         
         for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
           // Check if scan was aborted
@@ -72665,6 +72680,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
               body: JSON.stringify({
                 keywords: batch,
                 depth: 50,
+                spend_state: rankingSpendState || undefined,
                 baselines: Object.keys(rankingBaselines).length ? (() => {
                   const subset = {};
                   for (const kw of batch) {
@@ -72723,6 +72739,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
             }
             
             const serpJson = await serpRes.json();
+            if (serpJson?.spend_limits) rankingSpendState = serpJson.spend_limits;
             const batchResults = serpJson.per_keyword || [];
             allSerpResults.push(...batchResults);
 
@@ -77167,12 +77184,11 @@ Composite of four inputs — not the Surface Visibility dial score.`;
     }
 
     // refresh-keywords fans out to two more serverless functions (serp-rank-test
-    // depth 100 + ai-mode-serp-batch-test) and waits for both, so even 5 keywords
-    // in one request exceeded the 60s gateway limit → HTTP 504. We now send ONE
-    // keyword per request (identical to the proven single-row ↻ path) and run a
-    // small pool of them in parallel so the total still completes quickly.
+    // depth 50 + ai-mode-serp-batch-test) and waits for both. Chunk size 1 keeps
+    // each call under the gateway limit. Concurrency is 1 so shared DFS spend
+    // caps chain across the logical filtered/single run (no concurrent overshoot).
     const REFRESH_CHUNK_SIZE = 1;
-    const REFRESH_CONCURRENCY = 4;
+    const REFRESH_CONCURRENCY = 1;
 
     function showKwRefreshModal(total, scope) {
       const modal = document.getElementById('kw-refresh-progress-modal');
@@ -77201,17 +77217,26 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       modal.setAttribute('aria-hidden', 'true');
     }
 
-    async function postRefreshChunk(keywords, propertyUrl, auditDate) {
+    async function postRefreshChunk(keywords, propertyUrl, auditDate, spendState = null) {
       const resp = await fetch(window.apiUrl('/api/aigeo/refresh-keywords'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keywords, propertyUrl, auditDate })
+        body: JSON.stringify({
+          keywords,
+          propertyUrl,
+          auditDate,
+          spend_state: spendState || undefined,
+        })
       });
       const json = await resp.json().catch(() => ({}));
       if (!resp.ok || json?.status !== 'ok') {
         throw new Error(json?.message || `Refresh failed (HTTP ${resp.status})`);
       }
-      return { rows: json.rows || [], refreshed_at: json.refreshed_at };
+      return {
+        rows: json.rows || [],
+        refreshed_at: json.refreshed_at,
+        spend_limits: json.spend_limits || null,
+      };
     }
 
     async function refreshKeywordsViaApi(keywords, onProgress) {
@@ -77221,15 +77246,28 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       for (let i = 0; i < keywords.length; i += REFRESH_CHUNK_SIZE) {
         chunks.push(keywords.slice(i, i + REFRESH_CHUNK_SIZE));
       }
-      const state = { allRows: [], refreshedAt: null, done: 0, next: 0, error: null };
+      const state = {
+        allRows: [],
+        refreshedAt: null,
+        done: 0,
+        next: 0,
+        error: null,
+        spendState: null,
+      };
 
       const worker = async () => {
         while (state.next < chunks.length && !state.error) {
           const chunk = chunks[state.next++];
           try {
-            const { rows, refreshed_at } = await postRefreshChunk(chunk, propertyUrl, auditDate);
+            const { rows, refreshed_at, spend_limits } = await postRefreshChunk(
+              chunk,
+              propertyUrl,
+              auditDate,
+              state.spendState
+            );
             state.allRows.push(...rows);
             if (refreshed_at) state.refreshedAt = refreshed_at;
+            if (spend_limits) state.spendState = spend_limits;
             state.done += chunk.length;
             if (typeof onProgress === 'function') onProgress(state.done, keywords.length);
           } catch (err) {
@@ -77765,7 +77803,8 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         (currentSnapshot.rows || []).filter(rankingIsMeasurable)
       );
       const volumeMap = buildKeywordVolumeMap([currentSnapshot.rows, baselineSnapshot.rows]);
-      const qualifyGeo = rankingIsPreGeoBreak(baselineSnapshot.audit_date);
+      const qualifyGeo = rankingIsPreGeoBreak(baselineSnapshot.audit_date)
+        || rankingIsPreGeoBreak(currentSnapshot.audit_date);
       const surfaces = {
         ai_answer: filterMovementDiffForQuality(
           diffStringSets(currSurf.ai_answer, prevSurf.ai_answer),

@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-09-29] - Ranking reliability gap patch (spend / baselines / geo / provisional)
+
+**Change:** Minimal verify+patch of four root-review gaps on top of `9cf4702` (no ranking reimplementation, no paid DFS, no Sep28 rewrite, no broad collapse). (1) Shared logical-run DFS spend budget now hydrates across dashboard full/filtered/single batches and Monday ticks via `spend_state`; `reserveAttempt`/`reserveConfirm` before concurrent calls; unknown cost kept conservative; AIO expand uses `DFS_AIO_EXPAND_COST_EST_USD` default **0.025** (not unsafe 0.008). (2) `fetchRankBaselines` filters requested keywords server-side (chunked `.in`) and excludes pending/unconfirmed from confirmed baseline. (3) Historical Surface/Top comparison checks **current and prior** city-only dates + method mismatch (Brand untouched); pin vs city stay separate series. (4) Confirmation pending/provisional folded into Surface/Top rollups and CEO email chips (not tooltip-only). Fixture tests only.
+
+**Files:** `lib/keyword-ranking/dfs-spend-limits.js`, `load-rank-baselines.js`, `refresh-core.js`, `dashboard-parity-tick.js`, `rank-confirmation.js` (unchanged API), `api/aigeo/serp-rank-test.js`, `refresh-keywords.js`, `lib/audit/heroScoreComparability.js`, `surfaceScores.js`, `topOfPage.js`, `lib/ceo-weekly/tabMetrics.js`, `email.js`, `audit-dashboard.html`, `test/ranking-reliability.test.js`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-09-28] - Ranking reliability: restore GBP-pin series + bounded confirmation
 
 **Change:** Local weekly series restored to verified Coventry **GBP pin** (`52.3991769,-1.5937149,14z` + code 9215523) so history is comparable again. City-code-only remains a **separate** method (`coventry_city_code` / `local_city_code_v1`) — Sep28 city observations are never relabelled as pin. Observations store explicit `geo_method` + `method_version`. Significant worsenings from a comparable strong prior get **one** capped confirmation (not a full re-audit); conflicting results → `unconfirmed_unstable`, failed → `unknown`, with dated `last_confirmed_*` kept separate from current. Global per-run DFS attempt/cost caps + per-keyword confirm bound (env-configurable; defaults conservative). Shared across Ranking UI, Site AI Health presentation, Monday `dashboard-parity-tick`, refresh-keywords/cron, and CEO geo-withhold (city-only day only). **No paid DFS during this implement/test.** Fixture tests in `test/ranking-reliability.test.js`.
