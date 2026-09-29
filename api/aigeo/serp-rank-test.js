@@ -37,6 +37,7 @@ import {
   resolveConfirmationState,
   buildConfirmationFeatures,
 } from '../../lib/keyword-ranking/rank-confirmation.js';
+import { fetchRankBaselines } from '../../lib/keyword-ranking/load-rank-baselines.js';
 import { extractSerpSurfaces } from '../../lib/keyword-ranking/serp-surface-extract.js';
 import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
 // Grid PARKED (Alan 2026-07-16): do not import fetchLocalGridSerp into production refresh.
@@ -767,10 +768,26 @@ export default async function handler(req, res) {
     };
   };
 
-  // Optional comparable baselines for confirmation (keyword → prior row).
-  const baselinesIn = (body?.baselines && typeof body.baselines === 'object')
-    ? body.baselines
+  // Comparable baselines for confirmation (keyword → prior row).
+  // If the client omitted them (or UI parsed the wrong API shape), fetch server-side
+  // so batch runs cannot silently skip every second-look and save DFS noise as truth.
+  let baselinesIn = (body?.baselines && typeof body.baselines === 'object')
+    ? { ...body.baselines }
     : {};
+  if (Object.keys(baselinesIn).length === 0 && keywords.length) {
+    const propertyForBaselines = String(
+      body?.propertyUrl || body?.property_url || process.env.CRON_PROPERTY_URL || 'https://www.alanranger.com'
+    ).trim().replace(/\/+$/, '');
+    try {
+      baselinesIn = await fetchRankBaselines({
+        propertyUrl: propertyForBaselines,
+        keywords,
+        preferGeoMethod: 'gbp_pin',
+      }) || {};
+    } catch (_e) {
+      baselinesIn = {};
+    }
+  }
   // Continue shared logical-run budget across dashboard/Monday HTTP batches.
   const spend = createDfsSpendTracker(
     getDfsSpendLimits(),

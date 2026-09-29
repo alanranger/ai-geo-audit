@@ -6115,6 +6115,23 @@
     .surface-ownership-census .soc-footnote { margin: 0.65rem 0 0; font-size: 0.78rem; color: #64748b; }
 
     /* Phase 2 — AI Health surface outcomes (match Ranking census / standings language) */
+    /* Site AI Health: keep dial | detail cards side-by-side on desktop.
+       flex-wrap was dropping the Local/National cards under the dial and
+       leaving empty space on the right whenever the content pane was tight. */
+    .site-ai-health-top {
+      display: grid;
+      grid-template-columns: minmax(520px, auto) minmax(360px, 1fr);
+      gap: 2rem 3rem;
+      align-items: start;
+      justify-content: center;
+      margin-bottom: 2rem;
+    }
+    @media (max-width: 1100px) {
+      .site-ai-health-top {
+        grid-template-columns: 1fr;
+        justify-items: center;
+      }
+    }
     .ai-health-surface-outcomes {
       margin: 1.5rem 0 0;
       padding: 1rem 1.15rem;
@@ -49821,7 +49838,7 @@
         <div style="background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 2rem;">
           <!-- GAIO Health Top Card -->
           <div style="text-align: center; margin-bottom: 3rem; padding: 2rem 0; border-bottom: 2px solid #e2e8f0;">
-            <div style="display: flex; align-items: flex-start; justify-content: center; gap: 4rem; margin-bottom: 2rem; flex-wrap: wrap;">
+            <div class="site-ai-health-top">
               <!-- Dial Section with Title -->
               <div style="display: flex; flex-direction: column; align-items: center;">
                 <!-- Section Title - Centered over dial -->
@@ -72614,9 +72631,11 @@ Composite of four inputs — not the Surface Visibility dial score.`;
                 { cache: 'no-store' }
               );
               const baseJson = await baseRes.json().catch(() => ({}));
-              const rows = Array.isArray(baseJson?.data) ? baseJson.data
-                : (Array.isArray(baseJson?.keywords) ? baseJson.keywords
-                  : (Array.isArray(baseJson?.rows) ? baseJson.rows : []));
+              // API shape is { data: { keywords: [...] } } — not data as an array.
+              const rows = Array.isArray(baseJson?.data?.keywords) ? baseJson.data.keywords
+                : (Array.isArray(baseJson?.data) ? baseJson.data
+                  : (Array.isArray(baseJson?.keywords) ? baseJson.keywords
+                    : (Array.isArray(baseJson?.rows) ? baseJson.rows : [])));
               if (rows.length) { priorRows = rows; break; }
             }
             for (const row of priorRows) {

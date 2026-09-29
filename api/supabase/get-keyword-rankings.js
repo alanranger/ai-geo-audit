@@ -19,6 +19,43 @@ const sendJSON = (res, status, obj) => {
   res.status(status).send(JSON.stringify(obj));
 };
 
+/** keyword_rankings stores https://www.alanranger.com (no slash); UI often sends trailing /. */
+function propertyUrlCandidates(propertyUrl) {
+  const raw = String(propertyUrl || '').trim();
+  if (!raw) return [];
+  const noSlash = raw.replace(/\/+$/, '');
+  const withSlash = `${noSlash}/`;
+  return [...new Set([raw, noSlash, withSlash].filter(Boolean))];
+}
+
+async function queryKeywordsForProperty(supabase, auditDate, propertyUrl) {
+  for (const candidate of propertyUrlCandidates(propertyUrl)) {
+    const { data: keywords, error } = await supabase
+      .from('keyword_rankings')
+      .select('*')
+      .eq('audit_date', auditDate)
+      .eq('property_url', candidate);
+    if (error) throw error;
+    if (keywords?.length) return keywords;
+  }
+  return [];
+}
+
+/** Resolve which stored property_url variant actually has ranking rows. */
+async function resolveStoredPropertyUrl(supabase, propertyUrl) {
+  for (const candidate of propertyUrlCandidates(propertyUrl)) {
+    const { data, error } = await supabase
+      .from('keyword_rankings')
+      .select('property_url')
+      .eq('property_url', candidate)
+      .limit(1)
+      .maybeSingle();
+    if (error && error.code !== 'PGRST116') throw error;
+    if (data?.property_url) return data.property_url;
+  }
+  return String(propertyUrl || '').trim().replace(/\/+$/, '') || propertyUrl;
+}
+
 /**
  * Return the single most-recent `keyword_rankings` row for a given keyword,
  * ordered by `last_refreshed_at` (ad-hoc refresh stamp) then `audit_date`
@@ -69,17 +106,22 @@ export default async function handler(req, res) {
     // Single-keyword lookup: return the freshest `keyword_rankings` row,
     // preferring `last_refreshed_at` over `audit_date` so ad-hoc refreshes win.
     if (keyword) {
-      const row = await fetchMostRecentKeywordRow(supabase, propertyUrl, keyword);
+      let row = null;
+      for (const candidate of propertyUrlCandidates(propertyUrl)) {
+        row = await fetchMostRecentKeywordRow(supabase, candidate, keyword);
+        if (row) break;
+      }
       return sendJSON(res, 200, { status: 'ok', data: { row } });
     }
 
     // If latestOnly=true, return the latest audit_date AND timestamp from audit_results
     if (latestOnly === 'true') {
+      const storedPropertyUrl = await resolveStoredPropertyUrl(supabase, propertyUrl);
       // Get latest audit_date from keyword_rankings
       const { data: latestRow, error } = await supabase
         .from('keyword_rankings')
         .select('audit_date')
-        .eq('property_url', propertyUrl)
+        .eq('property_url', storedPropertyUrl)
         .order('audit_date', { ascending: false })
         .limit(1)
         .single();
@@ -95,7 +137,7 @@ export default async function handler(req, res) {
         const { data: refreshRow } = await supabase
           .from('keyword_rankings')
           .select('last_refreshed_at, audit_date')
-          .eq('property_url', propertyUrl)
+          .eq('property_url', storedPropertyUrl)
           .not('last_refreshed_at', 'is', null)
           .order('last_refreshed_at', { ascending: false })
           .limit(1)
@@ -113,7 +155,7 @@ export default async function handler(req, res) {
           const { data: auditWithRanking } = await supabase
             .from('audit_results')
             .select('timestamp, created_at, ranking_ai_data')
-            .eq('property_url', propertyUrl)
+            .eq('property_url', storedPropertyUrl)
             .not('ranking_ai_data', 'is', null)
             .order('created_at', { ascending: false })
             .limit(5);
@@ -137,7 +179,7 @@ export default async function handler(req, res) {
         const { data: latestRankingRow } = await supabase
           .from('keyword_rankings')
           .select('updated_at, created_at, audit_date')
-          .eq('property_url', propertyUrl)
+          .eq('property_url', storedPropertyUrl)
           .order('updated_at', { ascending: false })
           .order('created_at', { ascending: false })
           .limit(1)
@@ -158,7 +200,7 @@ export default async function handler(req, res) {
         let { data: auditResult, error: auditError } = await supabase
           .from('audit_results')
           .select('timestamp, audit_date, ranking_ai_data')
-          .eq('property_url', propertyUrl)
+          .eq('property_url', storedPropertyUrl)
           .eq('audit_date', latestRow.audit_date)
           .not('ranking_ai_data', 'is', null)
           .order('timestamp', { ascending: false })
@@ -188,7 +230,7 @@ export default async function handler(req, res) {
           const { data: anyAuditResult, error: anyError } = await supabase
             .from('audit_results')
             .select('timestamp, audit_date, ranking_ai_data')
-            .eq('property_url', propertyUrl)
+            .eq('property_url', storedPropertyUrl)
             .not('ranking_ai_data', 'is', null)
             .order('timestamp', { ascending: false })
             .limit(1)
@@ -236,7 +278,7 @@ export default async function handler(req, res) {
         const { data: recentResult, error: recentErr } = await supabase
           .from('audit_results')
           .select('timestamp, audit_date')
-          .eq('property_url', propertyUrl)
+          .eq('property_url', storedPropertyUrl)
           .not('timestamp', 'is', null)
           .order('timestamp', { ascending: false })
           .limit(1)
@@ -263,15 +305,7 @@ export default async function handler(req, res) {
       return sendJSON(res, 400, { error: 'auditDate is required when latestOnly is not true' });
     }
 
-    const { data: keywords, error } = await supabase
-      .from('keyword_rankings')
-      .select('*')
-      .eq('audit_date', auditDate)
-      .eq('property_url', propertyUrl);
-
-    if (error) {
-      throw error;
-    }
+    const keywords = await queryKeywordsForProperty(supabase, auditDate, propertyUrl);
 
     return sendJSON(res, 200, {
       status: 'ok',
