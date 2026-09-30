@@ -61,15 +61,17 @@ function deltaKeyFor(includeJlr, window) {
 function renderTierChartTable(monthlyAll, cfg, keys) {
   const monthly = filterByVisible(monthlyAll, keys);
   const rows = monthly.map((m) => {
-    const colour = m.isPartial ? BAND_COLOURS.partial : (BAND_COLOURS[m.band] || '#64748b');
+    const colour = BAND_COLOURS[m.band] || BAND_COLOURS.below_survival;
+    const target = Number(m.monthTarget) || 0;
+    const pct = target > 0 ? `${Math.round((m.headlineRevenue / target) * 100)}%` : '—';
     const partial = m.isPartial ? ' <span class="rt-pill partial">in progress</span>' : '';
-    return `<tr><td>${monthLabel(m.year, m.month)}${partial}</td><td style="font-weight:700;">${fmt(m.headlineRevenue, 2)}</td><td>${BAND_LABEL[m.band] || m.band || '—'}</td><td><span class="rt-bar-swatch" style="background:${colour}"></span></td></tr>`;
+    return `<tr><td>${monthLabel(m.year, m.month)}${partial}</td><td style="font-weight:700;">${fmt(m.headlineRevenue, 2)}</td><td>${fmt(target, 2)}</td><td>${pct}</td><td>${BAND_LABEL[m.band] || m.band || '—'}</td><td><span class="rt-bar-swatch" style="background:${colour}"></span></td></tr>`;
   }).join('');
   const legend = ['thrive', 'comfortable', 'survival', 'below_survival'].map((b) =>
     `<span><span class="swatch" style="background:${BAND_COLOURS[b]}"></span>${BAND_LABEL[b]}</span>`
-  ).join('') + `<span><span class="swatch" style="background:${BAND_COLOURS.partial}"></span>Month in progress</span>`;
-  const note = `Showing rolling ${monthly.length} months. Chart.js bar chart in live dashboard; table below is the same data.`;
-  return `<p class="rt-sub">${note}</p><div class="chart-placeholder">[Section 1 — Chart.js tier band chart placeholder]</div><div class="rt-table-scroll"><table class="rt-table"><thead><tr><th>Month</th><th>Headline £</th><th>Band</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="rt-tier-legend">${legend}</div>`;
+  ).join('') + `<span><span class="swatch" style="background:${BAND_COLOURS.survival};opacity:0.45;"></span>Booking Sheet monthly target</span>`;
+  const note = 'Left = actual (RAG vs that month’s Booking Sheet target). Right = monthly target.';
+  return `<p class="rt-sub">${note}</p><div class="chart-placeholder">[Section 1 — actual vs Booking Sheet target]</div><div class="rt-table-scroll"><table class="rt-table"><thead><tr><th>Month</th><th>Actual £</th><th>Target £</th><th>%</th><th>Band</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="rt-tier-legend">${legend}</div>`;
 }
 
 function renderHeadlineStrip(strip, cfg) {

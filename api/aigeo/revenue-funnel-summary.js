@@ -132,9 +132,11 @@ const MONEY_PAGE_TIERS = [
 ];
 
 // Seasonal monthly TOTAL targets (sum across all tiers) from Booking Sheet 2026.
-// Index 0 = January … 11 = December. Annual total = £60,556.
-const SEASONAL_MONTHLY_TARGETS = [4555, 3674, 2422, 4985, 5833, 6277, 4725, 3592, 5633, 7352, 6050, 5457];
-const ANNUAL_REVENUE_TARGET = SEASONAL_MONTHLY_TARGETS.reduce((a, b) => a + b, 0);
+// Index 0 = January … 11 = December. Annual total = £58,556.
+import {
+  SEASONAL_MONTHLY_TARGETS_2026 as SEASONAL_MONTHLY_TARGETS,
+  ANNUAL_REVENUE_TARGET_2026 as ANNUAL_REVENUE_TARGET
+} from '../../lib/booking-sheet-monthly-targets.mjs';
 const FLAT_MONTHLY_TIER_TOTAL = MONEY_PAGE_TIERS.reduce((s, t) => s + t.monthlyTarget, 0);
 
 // Industry baselines used for the funnel KPI RAG indicators.

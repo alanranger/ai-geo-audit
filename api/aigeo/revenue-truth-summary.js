@@ -47,6 +47,7 @@ import {
 import { buildHeadlineReconciliation } from '../../lib/revenue-truth-headline-reconciliation.mjs';
 import { parseIncludeJlr } from '../../lib/parse-include-jlr.mjs';
 import { DEFAULT_TIER_BANDS } from '../../lib/revenue-truth-ui-core.mjs';
+import { bookingSheetMonthTarget, classifyVsMonthTarget } from '../../lib/booking-sheet-monthly-targets.mjs';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
@@ -247,18 +248,21 @@ function annotateMonthly(wideRows, cfg) {
     const mm = r.month ?? Number(String(r.period_start).slice(5, 7));
     const headline = Number(r.revenue_amount) || 0;
     const partial = yy === cfg.now.year && mm === cfg.now.month;
+    const monthTarget = bookingSheetMonthTarget(mm);
     out.push({
       year: yy,
       month: mm,
       period_start: r.period_start,
       headlineRevenue: round2(headline),
+      monthTarget,
       operationalRevenue: round2(Number(r.operational_revenue) || 0),
       adjustmentNet: round2(Number(r.adjustment_net) || 0),
       d2c: round2(Number(r.d2c_revenue) || 0),
       b2b: round2(Number(r.b2b_revenue) || 0),
       isPartial: partial,
       isClosed: !partial && isInPast(yy, mm, cfg.now),
-      band: classifyBand(headline)
+      band: classifyVsMonthTarget(headline, monthTarget),
+      bandAbsolute: classifyBand(headline)
     });
   }
   return out;
