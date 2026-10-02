@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-02] - Broken links probe reliability (warn flood fix)
+
+**Change:** Do not seed failed extractability rows as permanent `unknown`; only skip live probe when status is already ok/broken. Hardened `check-url-status` (browser UA, trust HEAD 404, retry) and dashboard batching with a second pass for unresolved targets. Fixes mass WARN instead of FAIL for real 404s (e.g. `/blog-page`).
+
+**Files:** `lib/traditional-seo-broken-links.js`, `api/aigeo/check-url-status.js`, `audit-dashboard.html`, `test/traditional-seo-broken-links.test.js`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-02] - Traditional SEO: Broken links (404) rule live
 
 **Change:** Enabled reserved rule `broken_links_no_404`. During **② Score Traditional SEO** / **① Full audit + Traditional SEO** (and single-rule re-audit), same-site outbound targets from extractability are checked: known crawl HTTP status first, then batch `POST /api/aigeo/check-url-status` for unknowns. **404/410 = fail**; unresolved probes = warn; clean targets = pass. Shared helpers in `lib/traditional-seo-broken-links.js`. SQL upsert: `sql/20261002_traditional_seo_broken_links_enable.sql`.

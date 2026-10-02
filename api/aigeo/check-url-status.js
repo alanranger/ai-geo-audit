@@ -6,8 +6,8 @@ import {
   probeUrlHttpStatus
 } from '../../lib/traditional-seo-broken-links.js';
 
-const MAX_URLS = 40;
-const CONCURRENCY = 6;
+const MAX_URLS = 25;
+const CONCURRENCY = 4;
 
 const sendJson = (res, status, body) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');

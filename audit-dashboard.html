@@ -94990,10 +94990,13 @@ Confidence: ${c}`;
         const url = String(row?.url || '').trim();
         if (!url) return;
         const code = Number(row?.statusCode);
-        let kind = 'unknown';
+        // Only seed definitive ok/broken. Failed extract rows must be live-probed
+        // (otherwise they stay "unknown" forever and flood WARN instead of FAIL).
+        let kind = '';
         if (Number.isFinite(code) && (code === 404 || code === 410)) kind = 'broken';
         else if (Number.isFinite(code) && code >= 200 && code < 400) kind = 'ok';
         else if (row?.requestOk === true) kind = 'ok';
+        if (!kind) return;
         const payload = {
           kind,
           statusCode: Number.isFinite(code) ? code : null,
@@ -95004,6 +95007,42 @@ Confidence: ${c}`;
         });
       });
       return statusByKey;
+    }
+
+    function traditionalSeoApplyBrokenLinkProbeRows(rows, propertyUrl, statusByKey) {
+      const prop = propertyUrl || '';
+      (Array.isArray(rows) ? rows : []).forEach((row) => {
+        const url = String(row?.url || '').trim();
+        if (!url) return;
+        const kindRaw = String(row?.kind || 'unknown').toLowerCase();
+        const kind = kindRaw === 'broken' || kindRaw === 'ok' ? kindRaw : 'unknown';
+        const code = Number(row?.statusCode);
+        const payloadRow = {
+          kind,
+          statusCode: Number.isFinite(code) ? code : null,
+          url
+        };
+        traditionalSeoInternalLinkTargetKeys(url, prop).forEach((key) => {
+          if (!key) return;
+          const prev = statusByKey.get(key);
+          // Prefer definitive results over unknown.
+          if (prev && (prev.kind === 'ok' || prev.kind === 'broken') && kind === 'unknown') return;
+          statusByKey.set(key, payloadRow);
+        });
+      });
+    }
+
+    async function traditionalSeoProbeBrokenLinkUrlChunk(urls) {
+      const chunk = Array.isArray(urls) ? urls.filter((u) => /^https?:\/\//i.test(String(u || ''))) : [];
+      if (!chunk.length) return [];
+      const res = await fetch(traditionalSeoApiPath('/api/aigeo/check-url-status'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls: chunk })
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.message || `check-url-status HTTP ${res.status}`);
+      return Array.isArray(payload?.results) ? payload.results : [];
     }
 
     async function traditionalSeoEnsureBrokenLinkStatuses(signalMaps, propertyUrl, onProgress) {
@@ -95018,7 +95057,10 @@ Confidence: ${c}`;
           targets.forEach((target) => {
             const raw = String(target || '').trim();
             if (!/^https?:\/\//i.test(raw)) return;
-            if (traditionalSeoBrokenLinkStatusForTarget(raw, prop, statusByKey)) return;
+            const hit = traditionalSeoBrokenLinkStatusForTarget(raw, prop, statusByKey);
+            const kind = String(hit?.kind || '').toLowerCase();
+            // Only skip live probe when we already have a definitive ok/broken.
+            if (kind === 'ok' || kind === 'broken') return;
             const dedupe = traditionalSeoSignalMapKey(raw, prop)
               || traditionalSeoToComparableUrl(raw, prop)
               || raw.toLowerCase();
@@ -95029,38 +95071,38 @@ Confidence: ${c}`;
         });
       }
 
-      const chunkSize = 30;
-      for (let i = 0; i < need.length; i += chunkSize) {
-        const chunk = need.slice(i, i + chunkSize);
-        if (typeof onProgress === 'function') {
-          onProgress({ done: Math.min(i + chunk.length, need.length), total: need.length });
-        }
-        try {
-          const res = await fetch(traditionalSeoApiPath('/api/aigeo/check-url-status'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ urls: chunk })
-          });
-          const payload = await res.json().catch(() => ({}));
-          const rows = Array.isArray(payload?.results) ? payload.results : [];
-          rows.forEach((row) => {
-            const url = String(row?.url || '').trim();
-            if (!url) return;
-            const kindRaw = String(row?.kind || 'unknown').toLowerCase();
-            const kind = kindRaw === 'broken' || kindRaw === 'ok' ? kindRaw : 'unknown';
-            const code = Number(row?.statusCode);
-            const payloadRow = {
-              kind,
-              statusCode: Number.isFinite(code) ? code : null,
-              url
-            };
-            traditionalSeoInternalLinkTargetKeys(url, prop).forEach((key) => {
-              if (key) statusByKey.set(key, payloadRow);
+      const chunkSize = 12;
+      const probePass = async (queue, passLabel) => {
+        const unresolved = [];
+        for (let i = 0; i < queue.length; i += chunkSize) {
+          const chunk = queue.slice(i, i + chunkSize);
+          if (typeof onProgress === 'function') {
+            onProgress({
+              done: Math.min(i + chunk.length, queue.length),
+              total: queue.length,
+              pass: passLabel
             });
-          });
-        } catch (err) {
-          traditionalSeoDbg(`broken-link probe batch failed: ${err?.message || err}`, 'warn');
+          }
+          try {
+            const rows = await traditionalSeoProbeBrokenLinkUrlChunk(chunk);
+            traditionalSeoApplyBrokenLinkProbeRows(rows, prop, statusByKey);
+            chunk.forEach((url) => {
+              const hit = traditionalSeoBrokenLinkStatusForTarget(url, prop, statusByKey);
+              const kind = String(hit?.kind || '').toLowerCase();
+              if (kind !== 'ok' && kind !== 'broken') unresolved.push(url);
+            });
+          } catch (err) {
+            traditionalSeoDbg(`broken-link probe batch failed: ${err?.message || err}`, 'warn');
+            unresolved.push(...chunk);
+          }
         }
+        return unresolved;
+      };
+
+      const firstPassLeft = await probePass(need, 1);
+      if (firstPassLeft.length) {
+        traditionalSeoDbg(`broken-link retry ${firstPassLeft.length} unresolved target(s)`, 'info');
+        await probePass(firstPassLeft, 2);
       }
       if (typeof onProgress === 'function' && !need.length) onProgress({ done: 0, total: 0 });
       TRADITIONAL_SEO_STATE.brokenLinkStatusByKey = statusByKey;

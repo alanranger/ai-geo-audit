@@ -53,6 +53,18 @@ test('evaluatePageBrokenLinks pass and warn', () => {
   assert.equal(warn.status, 'warn');
 });
 
+test('probeUrlHttpStatus trusts HEAD 404 without GET', async () => {
+  const calls = [];
+  const fetchImpl = async (url, opts) => {
+    calls.push(opts.method);
+    return { status: 404 };
+  };
+  const out = await probeUrlHttpStatus('https://example.com/gone', fetchImpl, 2000);
+  assert.deepEqual(calls, ['HEAD']);
+  assert.equal(out.kind, 'broken');
+  assert.equal(out.statusCode, 404);
+});
+
 test('probeUrlHttpStatus uses HEAD then GET on 405', async () => {
   const calls = [];
   const fetchImpl = async (url, opts) => {
