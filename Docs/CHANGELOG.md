@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-02] - Traditional SEO: Broken links (404) rule live
+
+**Change:** Enabled reserved rule `broken_links_no_404`. During **② Score Traditional SEO** / **① Full audit + Traditional SEO** (and single-rule re-audit), same-site outbound targets from extractability are checked: known crawl HTTP status first, then batch `POST /api/aigeo/check-url-status` for unknowns. **404/410 = fail**; unresolved probes = warn; clean targets = pass. Shared helpers in `lib/traditional-seo-broken-links.js`. SQL upsert: `sql/20261002_traditional_seo_broken_links_enable.sql`.
+
+**Files:** `lib/traditional-seo-broken-links.js`, `api/aigeo/check-url-status.js`, `audit-dashboard.html`, `sql/20261002_traditional_seo_broken_links_enable.sql`, `test/traditional-seo-broken-links.test.js`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-09-29] - Ranking reliability final review corrections
 
 **Change:** Last bounded correction pass after Codex fixture review on `d8d3e46`. (1) `settleAttempt` retains reservation when actual cost is null/undefined/blank/non-finite (`Number(null)===0` no longer zeros spend). (2) Geo helper withholds on partial/mismatched methods; dashboard/CEO remain **date-only** for Monopoly/chips (Sep28 either-side) — later city needs geo_method opts; Brand untouched. (3) Baseline fetch limitation documented (~6 newest rows/kw, not paginated). (4) Spend caps documented as estimated SERP-path soft gate only (not account $, not AI Mode/volume; AIO 0.025 unverified estimate; transport can drop spend_state). Handover corrected: original report exists under Codex outputs.

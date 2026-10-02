@@ -14086,7 +14086,7 @@
             <div style="font-weight: 700;">Traditional SEO — run controls</div>
           </div>
           <p class="traditional-seo-run-sequence-hint" id="traditional-seo-run-sequence-hint">
-            <strong>② (green)</strong> = quick rescore: saved audit + <strong>full extractability refresh</strong> for <em>every</em> URL (deduped), in <strong>batches of 25</strong>, then Traditional SEO scoring. Uses the <strong>GSC URL Inspection cache</strong> (Supabase + browser) for indexation — <strong>no</strong> live Search Console inspect API during ② (keeps runs fast).
+            <strong>② (green)</strong> = quick rescore: saved audit + <strong>full extractability refresh</strong> for <em>every</em> URL (deduped), in <strong>batches of 25</strong>, then Traditional SEO scoring (including <strong>Broken links (404)</strong> checks on same-site outbound targets). Uses the <strong>GSC URL Inspection cache</strong> (Supabase + browser) for indexation — <strong>no</strong> live Search Console inspect API during ② (keeps runs fast).
             <strong>① (amber)</strong> = full site audit refresh, <em>then</em> Traditional SEO in one go — same extract + scoring behaviour as <strong>②</strong> after the crawl — use after big site/schema changes. For fresh indexation data, run <strong>Refresh GSC URL Inspection</strong> separately.
             After <strong>①</strong>, you do <strong>not</strong> need to click <strong>②</strong>.
             <strong>Page reload</strong> restores the saved Traditional SEO matrix from the server/local cache only — it does <strong>not</strong> re-run extractability (use <strong>②</strong> when you need fresh HTML for every URL).
@@ -91275,6 +91275,8 @@ Confidence: ${c}`;
       keywordMetricsLastNote: '',
       /** Map: traditionalSeoSignalMapKey(url, property) → last GSC URL Inspection payload (browser + localStorage). */
       gscIndexByUrlKey: null,
+      /** Map: signal key → { kind: ok|broken|unknown, statusCode, url } for broken_links_no_404. */
+      brokenLinkStatusByKey: null,
       /** Domain-level KE cache row (Moz DA + referring domains sample) from keyword-target-metrics API. */
       keDomainMetrics: null,
       /** Domain-level DataForSEO backlinks/summary/live cache (Supabase via API). */
@@ -91474,7 +91476,7 @@ Confidence: ${c}`;
       { rule_key: 'content_freshness_last_updated', rule_name: 'Updated within 12 months', description: 'Pages should have a page date signal from HTML/meta or sitemap lastmod, and it should be within the last 12 months. Use manual bypass for utility pages you want excluded.', category: 'content', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 118 },
       { rule_key: 'image_alt_coverage', rule_name: 'Image alt attributes', description: 'All img tags should have a non-empty alt (Extractability HTML parse). Zero images on the page passes.', category: 'content', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 125 },
       { rule_key: 'external_links_new_tab', rule_name: 'External links open in new tab', description: 'Outbound links to other hosts should use target=_blank (parsed from Extractability HTML).', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 130 },
-      { rule_key: 'broken_links_no_404', rule_name: 'Broken links (404)', description: 'Reserved: full-site link crawl not wired yet — keep disabled until checker ships.', category: 'crawlability', severity: 'high', scope: 'page', current_status: 'pass', enabled: false, weight: 1.2, sort_order: 135 }
+      { rule_key: 'broken_links_no_404', rule_name: 'Broken links (404)', description: 'Each page’s same-site outbound links (from Extractability HTML) must not resolve to HTTP 404/410. Fail when any target is broken; warn when status cannot be confirmed. Checked during ② / ① Traditional SEO runs.', category: 'crawlability', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 135 }
     ];
 
     function traditionalSeoApiPath(path) {
@@ -94969,6 +94971,102 @@ Confidence: ${c}`;
       return sourceKeys.size;
     }
 
+    function traditionalSeoBrokenLinkStatusForTarget(targetUrl, propertyUrl, statusMap) {
+      const map = statusMap instanceof Map ? statusMap : TRADITIONAL_SEO_STATE.brokenLinkStatusByKey;
+      if (!(map instanceof Map) || !map.size) return null;
+      const prop = propertyUrl || traditionalSeoEffectivePropertyUrl();
+      const keys = traditionalSeoInternalLinkTargetKeys(targetUrl, prop);
+      for (const key of keys) {
+        if (map.has(key)) return map.get(key);
+      }
+      return null;
+    }
+
+    function traditionalSeoSeedBrokenLinkStatusFromExtractability(extractMap, propertyUrl) {
+      const statusByKey = new Map();
+      const prop = propertyUrl || '';
+      if (!extractMap || typeof extractMap.forEach !== 'function') return statusByKey;
+      extractMap.forEach((row) => {
+        const url = String(row?.url || '').trim();
+        if (!url) return;
+        const code = Number(row?.statusCode);
+        let kind = 'unknown';
+        if (Number.isFinite(code) && (code === 404 || code === 410)) kind = 'broken';
+        else if (Number.isFinite(code) && code >= 200 && code < 400) kind = 'ok';
+        else if (row?.requestOk === true) kind = 'ok';
+        const payload = {
+          kind,
+          statusCode: Number.isFinite(code) ? code : null,
+          url
+        };
+        traditionalSeoInternalLinkTargetKeys(url, prop).forEach((key) => {
+          if (key) statusByKey.set(key, payload);
+        });
+      });
+      return statusByKey;
+    }
+
+    async function traditionalSeoEnsureBrokenLinkStatuses(signalMaps, propertyUrl, onProgress) {
+      const prop = String(propertyUrl || traditionalSeoEffectivePropertyUrl() || '').trim();
+      const extractMap = signalMaps?.extractability;
+      const statusByKey = traditionalSeoSeedBrokenLinkStatusFromExtractability(extractMap, prop);
+      const need = [];
+      const seen = new Set();
+      if (extractMap && typeof extractMap.forEach === 'function') {
+        extractMap.forEach((row) => {
+          const targets = Array.isArray(row?.seoInternalLinkTargets) ? row.seoInternalLinkTargets : [];
+          targets.forEach((target) => {
+            const raw = String(target || '').trim();
+            if (!/^https?:\/\//i.test(raw)) return;
+            if (traditionalSeoBrokenLinkStatusForTarget(raw, prop, statusByKey)) return;
+            const dedupe = traditionalSeoSignalMapKey(raw, prop)
+              || traditionalSeoToComparableUrl(raw, prop)
+              || raw.toLowerCase();
+            if (!dedupe || seen.has(dedupe)) return;
+            seen.add(dedupe);
+            need.push(raw);
+          });
+        });
+      }
+
+      const chunkSize = 30;
+      for (let i = 0; i < need.length; i += chunkSize) {
+        const chunk = need.slice(i, i + chunkSize);
+        if (typeof onProgress === 'function') {
+          onProgress({ done: Math.min(i + chunk.length, need.length), total: need.length });
+        }
+        try {
+          const res = await fetch(traditionalSeoApiPath('/api/aigeo/check-url-status'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ urls: chunk })
+          });
+          const payload = await res.json().catch(() => ({}));
+          const rows = Array.isArray(payload?.results) ? payload.results : [];
+          rows.forEach((row) => {
+            const url = String(row?.url || '').trim();
+            if (!url) return;
+            const kindRaw = String(row?.kind || 'unknown').toLowerCase();
+            const kind = kindRaw === 'broken' || kindRaw === 'ok' ? kindRaw : 'unknown';
+            const code = Number(row?.statusCode);
+            const payloadRow = {
+              kind,
+              statusCode: Number.isFinite(code) ? code : null,
+              url
+            };
+            traditionalSeoInternalLinkTargetKeys(url, prop).forEach((key) => {
+              if (key) statusByKey.set(key, payloadRow);
+            });
+          });
+        } catch (err) {
+          traditionalSeoDbg(`broken-link probe batch failed: ${err?.message || err}`, 'warn');
+        }
+      }
+      if (typeof onProgress === 'function' && !need.length) onProgress({ done: 0, total: 0 });
+      TRADITIONAL_SEO_STATE.brokenLinkStatusByKey = statusByKey;
+      return statusByKey;
+    }
+
     function traditionalSeoExternalBacklinksNumberForUrl(urlRaw) {
       const dfs = traditionalSeoDfsPageBlDisplayNumberForUrl(urlRaw);
       if (dfs != null && Number.isFinite(Number(dfs))) return Math.round(Number(dfs));
@@ -95184,11 +95282,15 @@ Confidence: ${c}`;
           'keyword_slug_tokens',
           'keyword_in_intro',
           'internal_links_minimum',
-          'content_freshness_last_updated'
+          'content_freshness_last_updated',
+          'broken_links_no_404'
         ]);
         if (canonicalRuleCopy.has(merged.rule_key)) {
           merged.rule_name = baseRule.rule_name;
           merged.description = baseRule.description;
+        }
+        if (merged.rule_key === 'broken_links_no_404') {
+          merged.enabled = baseRule.enabled;
         }
         return merged;
       });
@@ -96978,7 +97080,26 @@ Confidence: ${c}`;
         return bad === 0 ? 'pass' : 'fail';
       }
       if (key === 'broken_links_no_404') {
-        return 'warn';
+        if (traditionalSeoShouldExcludeUrlFromTraditionalAudit(url)) return 'pass';
+        if (extractSignal?.excludedFromAudit === true) return 'pass';
+        if (!extractSignal || extractSignal.requestOk === false) return 'warn';
+        const targets = Array.isArray(extractSignal.seoInternalLinkTargets)
+          ? extractSignal.seoInternalLinkTargets
+          : [];
+        if (!targets.length) return 'pass';
+        const map = TRADITIONAL_SEO_STATE.brokenLinkStatusByKey;
+        if (!(map instanceof Map) || !map.size) return 'warn';
+        let broken = 0;
+        let unknown = 0;
+        targets.forEach((target) => {
+          const hit = traditionalSeoBrokenLinkStatusForTarget(target, propertyUrl);
+          const kind = String(hit?.kind || 'unknown').toLowerCase();
+          if (kind === 'broken') broken += 1;
+          else if (kind !== 'ok') unknown += 1;
+        });
+        if (broken > 0) return 'fail';
+        if (unknown > 0) return 'warn';
+        return 'pass';
       }
       return String(rule?.current_status || 'warn').toLowerCase();
     }
@@ -97944,6 +98065,34 @@ Confidence: ${c}`;
         const bad = traditionalSeoToNum(ex.seoExtMissingTargetBlank, 0);
         if (out < 0) return base;
         return `External links: ${out}; missing target=_blank: ${bad}.`;
+      }
+      if (rk === 'broken_links_no_404') {
+        if (!ex || ex.requestOk === false) {
+          return 'Extractability row missing or fetch failed — run ② or Re-audit page.';
+        }
+        const targets = Array.isArray(ex.seoInternalLinkTargets) ? ex.seoInternalLinkTargets : [];
+        if (!targets.length) return 'No same-site outbound links on this page.';
+        const map = TRADITIONAL_SEO_STATE.brokenLinkStatusByKey;
+        if (!(map instanceof Map) || !map.size) {
+          return 'Broken-link status map not built yet — re-run ② or ①.';
+        }
+        const brokenUrls = [];
+        let unknown = 0;
+        targets.forEach((target) => {
+          const hit = traditionalSeoBrokenLinkStatusForTarget(target, prop);
+          const kind = String(hit?.kind || 'unknown').toLowerCase();
+          if (kind === 'broken') brokenUrls.push(String(target || '').trim());
+          else if (kind !== 'ok') unknown += 1;
+        });
+        if (brokenUrls.length) {
+          const sample = brokenUrls.slice(0, 5).join(' · ');
+          const more = brokenUrls.length > 5 ? ` (+${brokenUrls.length - 5} more)` : '';
+          return `Broken same-site link(s) (404/410): ${brokenUrls.length}. ${sample}${more}`;
+        }
+        if (unknown) {
+          return `Could not confirm ${unknown} same-site link(s) (timeout/blocked/non-404 error).`;
+        }
+        return `All ${targets.length} same-site outbound link(s) resolve (no 404/410).`;
       }
       if (rk === 'image_alt_coverage') {
         if (!ex || ex.requestOk === false) return base;
@@ -99969,6 +100118,8 @@ Confidence: ${c}`;
         || k === 'content_freshness_last_updated'
         || k === 'image_alt_coverage'
         || k === 'external_links_new_tab'
+        || k === 'broken_links_no_404'
+        || k === 'internal_links_minimum'
       );
     }
 
@@ -100045,6 +100196,17 @@ Confidence: ${c}`;
         TRADITIONAL_SEO_STATE.lastSignalMaps = signalMaps;
         if (propertyUrl) TRADITIONAL_SEO_STATE.lastPropertyUrl = propertyUrl;
         await traditionalSeoEnsureRuleOverridesLoaded();
+
+        if (String(ruleKey || '') === 'broken_links_no_404') {
+          traditionalSeoEvalProgressStage('Checking same-site outbound links for 404/410…', 82);
+          await traditionalSeoEnsureBrokenLinkStatuses(signalMaps, propertyUrl, (ev) => {
+            if (!ev || !ev.total) return;
+            traditionalSeoEvalProgressStage(
+              `Checking broken links ${ev.done}/${ev.total} unknown targets…`,
+              82 + Math.floor((6 * ev.done) / Math.max(1, ev.total))
+            );
+          });
+        }
 
         const techFoundation = traditionalSeoReadTechFoundation(implPayloads.tech);
         const context = {
@@ -100506,6 +100668,16 @@ Confidence: ${c}`;
         TRADITIONAL_SEO_STATE.sourceParity = sourceParity;
         renderTraditionalSeoSourceParity(sourceParity);
         const rules = collectTraditionalSeoRulesFromTable().filter((rule) => rule.enabled !== false);
+        if (rules.some((r) => String(r.rule_key) === 'broken_links_no_404')) {
+          traditionalSeoEvalProgressStage('Checking same-site outbound links for 404/410…', 86);
+          await traditionalSeoEnsureBrokenLinkStatuses(signalMaps, propertyUrl, (ev) => {
+            if (!ev || !ev.total) return;
+            traditionalSeoEvalProgressStage(
+              `Checking broken links ${ev.done}/${ev.total} unknown targets…`,
+              86 + Math.floor((3 * ev.done) / Math.max(1, ev.total))
+            );
+          });
+        }
         const techFoundation = traditionalSeoReadTechFoundation(implPayloads.tech);
         const context = {
           techScore: traditionalSeoToNum(audit?.scores?.technicalBasics?.score ?? audit?.scores?.technical?.score, 70),
