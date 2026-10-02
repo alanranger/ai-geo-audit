@@ -94099,18 +94099,16 @@ Confidence: ${c}`;
           ? loadImplementationAuditCacheAnyAge(key)
           : null;
         const remoteCache = await traditionalSeoFetchExtractabilityPayloadFromSupabase(prop);
-        const localRows = Array.isArray(localCache?.data?.rows) ? localCache.data.rows : [];
-        const remoteRows = Array.isArray(remoteCache?.data?.rows) ? remoteCache.data.rows : [];
-        const cache = remoteRows.length > localRows.length ? remoteCache : localCache;
-        const merged = traditionalSeoMergeExtractabilityCacheMutate(cache, prop, freshRows);
-        const mergedRows = Array.isArray(merged?.data?.rows) ? merged.data.rows : [];
-        const hasFullContext = mergedRows.length > freshRows.length;
-        if (!hasFullContext) {
-          if (typeof saveImplementationAuditCache === 'function') {
-            saveImplementationAuditCache(key, merged, { syncRemote: false });
-          }
-          return true;
-        }
+        const memoryCache = (typeof implLatestAuditPayloads === 'object' && implLatestAuditPayloads)
+          ? implLatestAuditPayloads.extractability
+          : null;
+        const rowCount = (payload) => (Array.isArray(payload?.data?.rows) ? payload.data.rows.length : 0);
+        // Prefer the largest existing extractability set so a single-page refresh never
+        // replaces a full-site cache, and always write back into memory used by scoring.
+        let base = localCache;
+        if (rowCount(remoteCache) > rowCount(base)) base = remoteCache;
+        if (rowCount(memoryCache) > rowCount(base)) base = memoryCache;
+        const merged = traditionalSeoMergeExtractabilityCacheMutate(base, prop, freshRows);
         if (typeof saveImplementationAuditCache === 'function') {
           saveImplementationAuditCache(key, merged);
         }
@@ -95951,6 +95949,16 @@ Confidence: ${c}`;
         const hit2 = map.get(legacy);
         if (hit2) return hit2;
       }
+      // Homepage /www /trailing-slash aliases (extract rows and scored URLs often differ).
+      const variants = traditionalSeoLandingComparableVariants(rawUrl, propertyUrl);
+      for (let i = 0; i < variants.length; i += 1) {
+        const vk = traditionalSeoSignalMapKey(variants[i], propertyUrl)
+          || traditionalSeoToComparableUrl(variants[i], propertyUrl)
+          || String(variants[i] || '').trim();
+        if (!vk || vk === primary || vk === legacy) continue;
+        const hit3 = map.get(vk);
+        if (hit3) return hit3;
+      }
       return null;
     }
 
@@ -96329,6 +96337,7 @@ Confidence: ${c}`;
       };
     }
 
+
     async function traditionalSeoLoadImplementationPayloadsWithRemoteExtractability(propertyUrl) {
       const payloads = traditionalSeoLoadImplementationPayloads();
       const remote = await traditionalSeoFetchExtractabilityPayloadFromSupabase(propertyUrl);
@@ -96336,14 +96345,22 @@ Confidence: ${c}`;
         ? payloads.extractability.data.rows.length
         : 0;
       const remoteRows = Array.isArray(remote?.data?.rows) ? remote.data.rows.length : 0;
-      if (remoteRows <= localRows) return payloads;
+      if (!remoteRows || remoteRows <= localRows) return payloads;
+      // Remote has more pages: use it as base, then overlay local so a fresh single-page
+      // reaudit row is never discarded.
+      const overlay = Array.isArray(payloads?.extractability?.data?.rows)
+        ? payloads.extractability.data.rows
+        : [];
+      const merged = overlay.length
+        ? traditionalSeoMergeExtractabilityCacheMutate(remote, propertyUrl, overlay)
+        : remote;
       if (typeof saveImplementationAuditCache === 'function' && IMPL_AUDIT_CACHE_KEYS?.extractability) {
-        saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.extractability, remote, { syncRemote: false });
+        saveImplementationAuditCache(IMPL_AUDIT_CACHE_KEYS.extractability, merged, { syncRemote: false });
       }
       if (typeof implLatestAuditPayloads === 'object' && implLatestAuditPayloads) {
-        implLatestAuditPayloads.extractability = remote;
+        implLatestAuditPayloads.extractability = merged;
       }
-      return { ...payloads, extractability: remote };
+      return { ...payloads, extractability: merged };
     }
 
     async function traditionalSeoHydrateSignalMapsFromSavedPayloads(audit) {
@@ -96570,6 +96587,10 @@ Confidence: ${c}`;
         const key = toKey(row?.url);
         if (!key) return;
         maps.extractability.set(key, row);
+        traditionalSeoLandingComparableVariants(row?.url, propertyUrl).forEach((variant) => {
+          const vk = toKey(variant);
+          if (vk) maps.extractability.set(vk, row);
+        });
       });
 
       const qaRows = Array.isArray(payloads?.qa?.data?.qaGate?.rows)
@@ -98416,6 +98437,43 @@ Confidence: ${c}`;
         return String(a.rule_name || '').localeCompare(String(b.rule_name || ''));
       });
       await traditionalSeoLazyEnsureGscForPageModal(target, propModal);
+      // Keep extractability maps warm so Canonical / H1 notes match live HTML evidence.
+      try {
+        if (!traditionalSeoSignalMapGet(TRADITIONAL_SEO_STATE.lastSignalMaps?.extractability, target, propModal)) {
+          await traditionalSeoHydrateSignalMapsFromSavedPayloads(null);
+        }
+      } catch (errHydrate) { /* non-fatal */ }
+      const canonRk = 'canonical_self_or_valid';
+      const canonRow = byRuleKey.get(canonRk);
+      if (canonRow) {
+        const canonRule = (meta.get(canonRk) || { rule_key: canonRk });
+        const liveCanon = traditionalSeoRuleStatusForUrl(
+          canonRule,
+          target,
+          canonRow.tier,
+          { clicks: traditionalSeoToNum(canonRow.clicks, 0), impressions: traditionalSeoToNum(canonRow.impressions, 0) },
+          {
+            propertyUrl: propModal,
+            signalMaps: TRADITIONAL_SEO_STATE.lastSignalMaps || {},
+            techScore: 70,
+            schemaScore: 70,
+            payloads: {},
+            evaluatedUrls: [target],
+            targetKeywordByUrl: window.__traditionalSeoKeywordLookup instanceof Map
+              ? window.__traditionalSeoKeywordLookup
+              : new Map()
+          }
+        );
+        const canonBypass = traditionalSeoHasRuleBypass(target, canonRk);
+        canonRow.raw_status = liveCanon;
+        canonRow.status = canonBypass ? 'pass' : liveCanon;
+        canonRow.bypassed = canonBypass && String(liveCanon || '').toLowerCase() !== 'pass';
+        requestAnimationFrame(() => {
+          traditionalSeoReapplyBypassesToAllRows();
+          traditionalSeoRefreshRulesSummaryFromEvaluationRows();
+          renderTraditionalSeoResultsTable();
+        });
+      }
       const gscRk = 'gsc_url_indexed';
       const gscRow = byRuleKey.get(gscRk);
       if (gscRow && propModal) {
