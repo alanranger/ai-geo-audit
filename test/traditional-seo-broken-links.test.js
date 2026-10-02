@@ -2,10 +2,36 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   classifyLinkHttpStatus,
+  collectBrokenLinkProbeTargets,
   evaluatePageBrokenLinks,
   isBrokenHttpStatus,
   probeUrlHttpStatus
 } from '../lib/traditional-seo-broken-links.js';
+
+test('collectBrokenLinkProbeTargets scopes to one page only', () => {
+  const many = Array.from({ length: 600 }, (_, i) => `https://www.alanranger.com/other-${i}`);
+  const rows = [
+    {
+      url: 'https://www.alanranger.com/photography-services-near-me/2hr-private-photography-classes-2hr',
+      seoInternalLinkTargets: [
+        'https://www.alanranger.com/a',
+        'https://www.alanranger.com/b',
+        'https://alanranger.com/c'
+      ]
+    },
+    {
+      url: 'https://www.alanranger.com/blog-on-photography/tripods-gitzo-vs-benro-review',
+      seoInternalLinkTargets: many
+    }
+  ];
+  const scoped = collectBrokenLinkProbeTargets(rows, [
+    'https://alanranger.com/photography-services-near-me/2hr-private-photography-classes-2hr'
+  ]);
+  assert.equal(scoped.length, 3);
+  assert.ok(scoped.length < 20);
+  const all = collectBrokenLinkProbeTargets(rows, []);
+  assert.ok(all.length >= 600);
+});
 
 test('isBrokenHttpStatus only 404/410', () => {
   assert.equal(isBrokenHttpStatus(404), true);
@@ -36,6 +62,28 @@ test('evaluatePageBrokenLinks fail on 404', () => {
   assert.match(out.note, /404\/410/);
 });
 
+test('evaluatePageBrokenLinks pass when some links unconfirmed', () => {
+  const status = {
+    'https://www.alanranger.com/ok': { kind: 'ok' },
+    'https://www.alanranger.com/slow': { kind: 'unknown' }
+  };
+  const out = evaluatePageBrokenLinks(
+    ['https://www.alanranger.com/ok', 'https://www.alanranger.com/slow'],
+    (url) => status[url]
+  );
+  assert.equal(out.status, 'pass');
+  assert.equal(out.unknownCount, 1);
+  assert.match(out.note, /unconfirmed/);
+});
+
+test('evaluatePageBrokenLinks warn only when every link unconfirmed', () => {
+  const out = evaluatePageBrokenLinks(
+    ['https://www.alanranger.com/a', 'https://www.alanranger.com/b'],
+    () => ({ kind: 'unknown' })
+  );
+  assert.equal(out.status, 'warn');
+});
+
 test('evaluatePageBrokenLinks pass and warn', () => {
   const pass = evaluatePageBrokenLinks(
     ['https://www.alanranger.com/a'],
@@ -45,12 +93,6 @@ test('evaluatePageBrokenLinks pass and warn', () => {
 
   const empty = evaluatePageBrokenLinks([], () => ({ kind: 'ok' }));
   assert.equal(empty.status, 'pass');
-
-  const warn = evaluatePageBrokenLinks(
-    ['https://www.alanranger.com/x'],
-    () => ({ kind: 'unknown' })
-  );
-  assert.equal(warn.status, 'warn');
 });
 
 test('probeUrlHttpStatus trusts HEAD 404 without GET', async () => {

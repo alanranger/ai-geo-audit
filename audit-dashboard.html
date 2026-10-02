@@ -95045,30 +95045,50 @@ Confidence: ${c}`;
       return Array.isArray(payload?.results) ? payload.results : [];
     }
 
-    async function traditionalSeoEnsureBrokenLinkStatuses(signalMaps, propertyUrl, onProgress) {
+    async function traditionalSeoEnsureBrokenLinkStatuses(signalMaps, propertyUrl, onProgress, options = {}) {
       const prop = String(propertyUrl || traditionalSeoEffectivePropertyUrl() || '').trim();
       const extractMap = signalMaps?.extractability;
       const statusByKey = traditionalSeoSeedBrokenLinkStatusFromExtractability(extractMap, prop);
+      const onlyPages = Array.isArray(options?.onlyPageUrls)
+        ? options.onlyPageUrls.map((u) => String(u || '').trim()).filter((u) => /^https?:\/\//i.test(u))
+        : [];
+      // Simple www/trailing-slash key so single-page scope cannot miss and fall back to site-wide.
+      const brokenLinkSimpleKey = (raw) => {
+        try {
+          const u = new URL(String(raw || '').trim());
+          if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+          const host = u.hostname.replace(/^www\./i, '').toLowerCase();
+          const path = (u.pathname || '/').replace(/\/+$/, '') || '/';
+          return `${u.protocol}//${host}${path}`;
+        } catch (err) {
+          return '';
+        }
+      };
+      const onlyKeys = new Set(onlyPages.map((u) => brokenLinkSimpleKey(u)).filter(Boolean));
+      const scoped = onlyKeys.size > 0;
       const need = [];
       const seen = new Set();
       if (extractMap && typeof extractMap.forEach === 'function') {
         extractMap.forEach((row) => {
+          const sourceUrl = String(row?.url || '').trim();
+          const sourceKey = brokenLinkSimpleKey(sourceUrl);
+          if (scoped && (!sourceKey || !onlyKeys.has(sourceKey))) return;
           const targets = Array.isArray(row?.seoInternalLinkTargets) ? row.seoInternalLinkTargets : [];
           targets.forEach((target) => {
             const raw = String(target || '').trim();
             if (!/^https?:\/\//i.test(raw)) return;
             const hit = traditionalSeoBrokenLinkStatusForTarget(raw, prop, statusByKey);
             const kind = String(hit?.kind || '').toLowerCase();
-            // Only skip live probe when we already have a definitive ok/broken.
             if (kind === 'ok' || kind === 'broken') return;
-            const dedupe = traditionalSeoSignalMapKey(raw, prop)
-              || traditionalSeoToComparableUrl(raw, prop)
-              || raw.toLowerCase();
+            const dedupe = brokenLinkSimpleKey(raw) || raw.toLowerCase();
             if (!dedupe || seen.has(dedupe)) return;
             seen.add(dedupe);
             need.push(raw);
           });
         });
+      }
+      if (scoped) {
+        traditionalSeoDbg(`broken-link single-page scope: ${onlyPages.length} page(s), ${need.length} outbound target(s) to probe`);
       }
 
       const chunkSize = 12;
@@ -97133,14 +97153,17 @@ Confidence: ${c}`;
         if (!(map instanceof Map) || !map.size) return 'warn';
         let broken = 0;
         let unknown = 0;
+        let ok = 0;
         targets.forEach((target) => {
           const hit = traditionalSeoBrokenLinkStatusForTarget(target, propertyUrl);
           const kind = String(hit?.kind || 'unknown').toLowerCase();
           if (kind === 'broken') broken += 1;
-          else if (kind !== 'ok') unknown += 1;
+          else if (kind === 'ok') ok += 1;
+          else unknown += 1;
         });
         if (broken > 0) return 'fail';
-        if (unknown > 0) return 'warn';
+        // Unconfirmed probes are not fails and must not flood WARN (only all-unknown warns).
+        if (unknown > 0 && ok === 0) return 'warn';
         return 'pass';
       }
       return String(rule?.current_status || 'warn').toLowerCase();
@@ -100244,10 +100267,10 @@ Confidence: ${c}`;
           await traditionalSeoEnsureBrokenLinkStatuses(signalMaps, propertyUrl, (ev) => {
             if (!ev || !ev.total) return;
             traditionalSeoEvalProgressStage(
-              `Checking broken links ${ev.done}/${ev.total} unknown targets…`,
+              `Checking outbound internal links ${ev.done}/${ev.total}…`,
               82 + Math.floor((6 * ev.done) / Math.max(1, ev.total))
             );
-          });
+          }, { onlyPageUrls: urls });
         }
 
         const techFoundation = traditionalSeoReadTechFoundation(implPayloads.tech);
@@ -100712,13 +100735,18 @@ Confidence: ${c}`;
         const rules = collectTraditionalSeoRulesFromTable().filter((rule) => rule.enabled !== false);
         if (rules.some((r) => String(r.rule_key) === 'broken_links_no_404')) {
           traditionalSeoEvalProgressStage('Checking same-site outbound links for 404/410…', 86);
-          await traditionalSeoEnsureBrokenLinkStatuses(signalMaps, propertyUrl, (ev) => {
-            if (!ev || !ev.total) return;
-            traditionalSeoEvalProgressStage(
-              `Checking broken links ${ev.done}/${ev.total} unknown targets…`,
-              86 + Math.floor((3 * ev.done) / Math.max(1, ev.total))
-            );
-          });
+          await traditionalSeoEnsureBrokenLinkStatuses(
+            signalMaps,
+            propertyUrl,
+            (ev) => {
+              if (!ev || !ev.total) return;
+              traditionalSeoEvalProgressStage(
+                `Checking outbound internal links ${ev.done}/${ev.total}…`,
+                86 + Math.floor((3 * ev.done) / Math.max(1, ev.total))
+              );
+            },
+            isPartialPageRescore ? { onlyPageUrls: partialPageUrls } : undefined
+          );
         }
         const techFoundation = traditionalSeoReadTechFoundation(implPayloads.tech);
         const context = {

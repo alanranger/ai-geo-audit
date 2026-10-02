@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-02] - Broken links: single-page scope + no warn flood
+
+**Change:** Single-page / partial Traditional SEO reaudit now probes **only that page's outbound internal links** (not 600+ site-wide unknowns). Unconfirmed probes no longer WARN when any link is confirmed OK — only confirmed 404/410 fails. Live + unit tests cover Ahrefs-style broken destinations and single-page target scoping.
+
+**Files:** lib/traditional-seo-broken-links.js, udit-dashboard.html, 	est/traditional-seo-broken-links.test.js, 	est/traditional-seo-broken-links.live.test.js, Docs/CHANGELOG.md.
+
+---
+
 ## [2026-10-02] - Broken links probe reliability (warn flood fix)
 
 **Change:** Do not seed failed extractability rows as permanent `unknown`; only skip live probe when status is already ok/broken. Hardened `check-url-status` (browser UA, trust HEAD 404, retry) and dashboard batching with a second pass for unresolved targets. Fixes mass WARN instead of FAIL for real 404s (e.g. `/blog-page`).
