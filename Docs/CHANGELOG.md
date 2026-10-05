@@ -2,6 +2,13 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-05] - GA4 channel sessions additive backfill (2024–2026-05)
+
+**Change:** `collectGa4Channels` accepts absolute `startDate`/`endDate` and `additiveOnly` (ON CONFLICT DO NOTHING). Cron exposes the same query params. Used for Claude handoff backfill so CEO 6‑month audit has 2024–2025 traffic without touching existing rows.
+
+**Files:** `lib/acquisition/ga4-channels.js`, `api/cron/ga4-channels-sync.js`, `scripts/ga4-channels-backfill-2024.mjs`, `scripts/ga4-channels-probe-earliest.mjs`, `Docs/CHANGELOG.md`.
+
+---
 ## [2026-10-05] - CEO weekly email: PDF attachment
 
 **Change:** Every CEO weekly send (full report and fail-safe) attaches a formatted PDF (`CEO-weekly-health-YYYY-MM-DD.pdf`) generated from the same HTML as the email body (Chromium print, A4).

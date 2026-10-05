@@ -9,8 +9,10 @@
  * POST                                — dashboard audit button / full refresh
  * ?dryRun=true                        — fetch and report without writing
  * ?days=90                            — window / backfill depth
+ * ?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD — absolute range (overrides days)
+ * ?additiveOnly=true                  — insert missing keys only (no updates)
  */
-export const config = { runtime: 'nodejs', maxDuration: 120 };
+export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 import { collectGa4Channels } from '../../lib/acquisition/ga4-channels.js';
 import { detectTriggerSource, isRequestAuthorized, startRun, finishRun } from '../../lib/acquisition/sync-runs.js';
@@ -31,23 +33,40 @@ function requestedDays(req) {
   return Math.min(Math.round(raw), MAX_DAYS);
 }
 
+function ymd(v) {
+  const s = String(v || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return send(res, 204, {});
   if (!isRequestAuthorized(req)) return send(res, 401, { ok: false, error: 'unauthorized' });
 
   const dryRun = ['true', '1', 'yes'].includes(String(req.query?.dryRun || '').toLowerCase());
+  const additiveOnly = ['true', '1', 'yes'].includes(String(req.query?.additiveOnly || '').toLowerCase());
+  const startDate = ymd(req.query?.startDate);
+  const endDate = ymd(req.query?.endDate);
   const days = requestedDays(req);
   const triggerSource = detectTriggerSource(req);
   const runId = dryRun ? null : await startRun(JOB, triggerSource);
 
   try {
-    const result = await collectGa4Channels({ persist: !dryRun, days });
+    const result = await collectGa4Channels({
+      persist: !dryRun,
+      days,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+      additiveOnly
+    });
     await finishRun(runId, {
       status: result.configured ? 'ok' : 'skipped',
       rows_written: result.rows_written,
       error_message: result.configured ? null : `awaiting_setup: ${result.missing.join(', ')}`,
       meta: {
         days: result.days || days,
+        startDate: result.startDate || startDate,
+        endDate: result.endDate || endDate,
+        additive_only: additiveOnly,
         attributed_sessions: result.attributed_sessions ?? null,
         unattributed_sessions: result.unattributed_sessions ?? null,
       },
