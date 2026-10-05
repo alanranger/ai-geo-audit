@@ -2,7 +2,13 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
-## [2026-10-05] - GP survival tiers single-source + CEO Section G levers
+## [2026-10-06] - Section G sales fix + full lever rows
+
+**Change:** Direct sales excl. JLR now matches spec (full month = category grid - JLR; MTD/SPLY = transactions including Gift Vouchers Out negatives). All 11 Section G rows compute live. Path normalise for GSC commercial clicks. `asOf` passed through CEO report builder.
+
+**Files:** `lib/ceo-weekly/sectionG.js`, `lib/ceo-weekly/report.js`, `Docs/CHANGELOG.md`.
+
+---## [2026-10-05] - GP survival tiers single-source + CEO Section G levers
 
 **Change:** Alan-approved Survival / Stretch1 / Stretch2 are **GP** (£3,700 / £4,000 / £4,700 mo). New `business_targets` table (+ admin ensure endpoint). Derived sales = GP ÷ rolling 3-closed-month margin. Revenue Truth / CEO / Scenario wired off that source; £4,450 / £5,000 sales survival constants retired. DEFCON GP band edges stored as **proposed** only until Alan approves. CEO brief gains live **Section G Profit levers scorecard**. Booking Sheet upload also imports Workshops → `booking_sheet_workshop_attendees`.
 
