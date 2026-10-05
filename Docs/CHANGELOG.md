@@ -2,6 +2,15 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-05] - Monday Ranking: durable batches + 90m abort (stop DFS re-buy loop)
+
+**Root cause:** Dashboard Ranking is one long browser loop. Monday cron is serverless (300s). Batches of 20 could die mid-batch after DFS spend but before progress save; next `*/15` tick re-bought the same work. No wall-clock stop.
+
+**Fix:** Cron Ranking now uses SERP/AI batch size **5**, checkpoints slim progress after **every paid batch**, hard-aborts Ranking after **~90 min** or **10 continue ticks**, and supports `?cancel=true` / cancelled state halt (no silent resume).
+
+**Files:** `api/cron/ceo-weekly-full-refresh.js`, `lib/ceo-weekly/monday-ranking-guards.js`, `lib/ceo-weekly/dashboard-full-catalog.js`, `lib/keyword-ranking/dashboard-parity-tick.js`, `test/monday-ranking-guards.test.js`, `Docs/CHANGELOG.md`.
+
+---
 ## [2026-10-05] - Dashboard Full Refresh: Academy step before CEO email
 
 **Change:** Manual **Full refresh** on the dashboard now runs `academy_refresh` (POST `/api/aigeo/academy-weekly-refresh`) immediately before `ceo_weekly_email`, matching the Monday cron catalog. Soft-fails so the CEO email still sends if Academy refresh errors.

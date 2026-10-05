@@ -1,12 +1,14 @@
 /**
  * Unattended Monday Full Refresh — same Full-tier steps as the dashboard
- * Full Refresh button (globalRunStepCatalog Full), including CEO HTML email.
+ * Full Refresh button, including CEO HTML email.
  *
- * Ranking AI uses dashboard-parity batched ticks (SERP 20 / AI 10 / depth 50).
- * No wall-clock deadline: cron keeps ticking every 15 min on Monday until every
- * step finishes; CEO email is the last step only.
+ * Ranking uses the same endpoints/depth as dashboard loadRankingAiData, but
+ * serverless cannot keep a 90‑min browser loop. Each cron tick:
+ *  - runs small SERP/AI batches (5) that fit under Vercel maxDuration
+ *  - checkpoints progress after every paid batch (no re-buy on timeout)
+ *  - hard-aborts Ranking after ~90 min (dashboard-like ceiling) or too many ticks
  *
-  * Schedule: every 15 min all day Monday UTC (vercel cron every-15-min Mondays).
+ * Schedule: every 15 min Monday UTC.
  */
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -17,6 +19,15 @@ import {
   buildDashboardFullSteps,
   runFullStep
 } from '../../lib/ceo-weekly/dashboard-full-catalog.js';
+import {
+  CRON_AI_BATCH_SIZE,
+  CRON_SERP_BATCH_SIZE,
+  CRON_TICK_BUDGET_MS,
+  isHaltRequested,
+  rankingTicksExceeded,
+  rankingWallExceeded,
+  slimRankingForPersist
+} from '../../lib/ceo-weekly/monday-ranking-guards.js';
 
 const FLAG_KEY = 'ceo_monday_full_refresh';
 
@@ -49,8 +60,11 @@ function emptyProgress(weekStart) {
     steps: [],
     failed_keys: [],
     email_sent: false,
+    cancelled: false,
     ranking: null,
-    domain_strength: null
+    ranking_started_at: null,
+    domain_strength: null,
+    multi_ticks: 0
   };
 }
 
@@ -83,6 +97,18 @@ function depsFailed(step, failedKeys) {
   return bad.length ? bad.join(', ') : null;
 }
 
+function abortRankingResult(reason) {
+  return {
+    ok: false,
+    done: true,
+    status: 200,
+    ms: 0,
+    body: { aborted: true, reason },
+    error: reason,
+    ranking: null
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return sendJson(res, 200, { ok: true });
   if (!['GET', 'POST'].includes(req.method)) return sendJson(res, 405, { error: 'method_not_allowed' });
@@ -95,6 +121,7 @@ export default async function handler(req, res) {
   const headers = cronHeaders();
   const allSteps = buildDashboardFullSteps(propertyUrl);
   const forceRestart = String(req.query?.restart || '').toLowerCase() === 'true';
+  const cancelQuery = String(req.query?.cancel || '').toLowerCase() === 'true';
 
   try {
     const state = await loadState(sb);
@@ -103,8 +130,25 @@ export default async function handler(req, res) {
       : (readProgress(state, weekStart) || emptyProgress(weekStart));
     if (!Array.isArray(progress.failed_keys)) progress.failed_keys = [];
 
-    if (!forceRestart && progress.email_sent && state?.state === 'done') {
-      return sendJson(res, 200, { ok: true, status: 'already_done', weekStart, progress });
+    if (cancelQuery) {
+      progress.cancelled = true;
+      progress.ranking = null;
+      await saveState(sb, {
+        state: 'cancelled',
+        finished_at: new Date().toISOString(),
+        last_error: 'cancelled_via_query',
+        last_details: progress
+      });
+      return sendJson(res, 200, { ok: true, status: 'cancelled', weekStart, progress });
+    }
+
+    if (isHaltRequested(state, progress, { forceRestart, cancelQuery: false })) {
+      return sendJson(res, 200, {
+        ok: true,
+        status: progress.cancelled ? 'cancelled' : 'already_done',
+        weekStart,
+        progress
+      });
     }
 
     if (!forceRestart && progress.step_index >= allSteps.length && !progress.email_sent) {
@@ -141,8 +185,11 @@ export default async function handler(req, res) {
           body: null,
           error: `Skipped — ${skipDeps} failed`
         };
+      } else if (step.key === 'ranking_ai' && rankingWallExceeded(progress)) {
+        result = abortRankingResult('ranking_aborted_wall_clock_90m');
+      } else if (step.key === 'ranking_ai' && rankingTicksExceeded(progress)) {
+        result = abortRankingResult('ranking_aborted_max_ticks');
       } else if (step.kind === 'email') {
-        // Only reached after every prior step completes (no deadline jump).
         const criticalFailed = progress.failed_keys.includes('audit_scan')
           || progress.failed_keys.includes('ranking_ai');
         const partial = progress.failed_keys.length > 0;
@@ -150,7 +197,6 @@ export default async function handler(req, res) {
           weekStart,
           propertyUrl,
           skipGate: true,
-          // true: after Full Refresh finishes, send the real brief (replaces any early rescue send)
           forceResend: true,
           forceFailSafe: criticalFailed,
           failReason: criticalFailed
@@ -179,10 +225,29 @@ export default async function handler(req, res) {
         };
         if (ok) progress.email_sent = true;
       } else {
-        result = await runFullStep(step, { base, headers, propertyUrl, progress });
+        if (step.key === 'ranking_ai' && !progress.ranking_started_at) {
+          progress.ranking_started_at = new Date().toISOString();
+        }
+        result = await runFullStep(step, {
+          base,
+          headers,
+          propertyUrl,
+          progress,
+          rankingBudgetMs: CRON_TICK_BUDGET_MS,
+          rankingSerpBatchSize: CRON_SERP_BATCH_SIZE,
+          rankingAiBatchSize: CRON_AI_BATCH_SIZE,
+          onRankingProgress: async (rankingState) => {
+            progress.ranking = slimRankingForPersist(rankingState);
+            await saveState(sb, {
+              state: 'running',
+              last_details: progress,
+              last_error: null
+            });
+          }
+        });
       }
 
-      if (result.ranking) progress.ranking = result.ranking;
+      if (result.ranking) progress.ranking = slimRankingForPersist(result.ranking);
       if (result.domain_strength) progress.domain_strength = result.domain_strength;
 
       const stepDone = result.done !== false;
@@ -200,7 +265,10 @@ export default async function handler(req, res) {
         if (!result.ok && !err.startsWith('Skipped')) {
           progress.failed_keys.push(step.key);
         }
-        if (step.key === 'ranking_ai') progress.ranking = null;
+        if (step.key === 'ranking_ai') {
+          progress.ranking = null;
+          progress.ranking_started_at = null;
+        }
         if (step.key === 'domain_strength') progress.domain_strength = null;
         progress.step_index += 1;
         ran += 1;
