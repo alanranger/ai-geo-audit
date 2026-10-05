@@ -90104,6 +90104,7 @@ Confidence: ${c}`;
           { key: 'domain_strength', label: 'Domain Strength snapshot (all batches)', tiers: ['full'], dependsOn: [], runner: runGlobalStepDomainStrength },
           { key: 'acquisition_channels', label: 'Acquisition channels (AI mentions + YouTube + GA4)', tiers: ['standard','full'], dependsOn: [], runner: runGlobalStepAcquisitionChannels },
           { key: 'update_tasks', label: 'Update all tasks with latest data', tiers: ['quick','standard','full'], dependsOn: ['audit_scan'], runner: runGlobalStepUpdateTasks },
+          { key: 'academy_refresh', label: 'Academy refresh (Memberstack + weekly metrics)', tiers: ['full'], dependsOn: [], runner: runGlobalStepAcademyRefresh },
           { key: 'ceo_weekly_email', label: 'CEO weekly HTML email', tiers: ['full'], dependsOn: [], runner: runGlobalStepCeoWeeklyEmail }
         ];
       }
@@ -90478,6 +90479,27 @@ Confidence: ${c}`;
         try { await window.loadAllOptimisationTasks({ forceRefresh: true }); } catch (_e) { /* best-effort reload */ }
       }
 
+      async function runGlobalStepAcademyRefresh() {
+        debugLog('[Global Run] [Academy refresh] Starting...', 'info');
+        const res = await fetch(apiUrl('/api/aigeo/academy-weekly-refresh'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshCache: true })
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          // Soft-fail: CEO email can still send with last Academy DB state.
+          debugLog(`[Global Run] [Academy refresh] Soft-fail: ${body?.message || body?.error || res.status}`, 'warn');
+          return body;
+        }
+        const a = body?.academy || {};
+        debugLog(
+          `[Global Run] [Academy refresh] OK — trials ${a.current_trials ?? '—'} / paid ${a.current_annual ?? '—'} · active 7d ${a.active_users_7d ?? '—'}`,
+          'success'
+        );
+        return body;
+      }
+
       async function runGlobalStepCeoWeeklyEmail(ctx = {}) {
         debugLog('[Global Run] [CEO weekly email] Starting (last Full Refresh step)...', 'info');
         const failedKeys = ctx.failedKeys instanceof Set ? ctx.failedKeys : new Set();
@@ -90540,7 +90562,7 @@ Confidence: ${c}`;
 
       async function confirmFullTierIfNeeded(tier) {
         if (tier !== 'full') return true;
-        const msg = 'Full refresh runs Schema QA (whole site), DFS backlink full index, Domain Strength, GSC URL Inspection, Traditional SEO + extractability, citation/mentions refresh, 13-month Squarespace/Stripe revenue sync, and GA4 enquiry metrics.\n\nThis can take 30+ minutes and will consume DataForSEO credits.\n\nContinue?';
+        const msg = 'Full refresh runs Schema QA (whole site), DFS backlink full index, Domain Strength, GSC URL Inspection, Traditional SEO + extractability, citation/mentions refresh, 13-month Squarespace/Stripe revenue sync, GA4 enquiry metrics, and Academy weekly metrics.\n\nThis can take 30+ minutes and will consume DataForSEO credits.\n\nContinue?';
         return window.confirm(msg);
       }
 

@@ -2,6 +2,13 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-05] - Dashboard Full Refresh: Academy step before CEO email
+
+**Change:** Manual **Full refresh** on the dashboard now runs `academy_refresh` (POST `/api/aigeo/academy-weekly-refresh`) immediately before `ceo_weekly_email`, matching the Monday cron catalog. Soft-fails so the CEO email still sends if Academy refresh errors.
+
+**Files:** `audit-dashboard.html`, `Docs/CHANGELOG.md`.
+
+---
 ## [2026-10-05] - CEO email: Academy weekly section
 
 **Change:** Monday CEO brief adds **The Academy** (exec card + deeper section D): new/converted/lost trials (7d), current trials + paid, unique active users, estimated avg session length, unique modules + exam attempts — each with prior-7d WoW. Monday Full Refresh runs `academy_refresh` before the email (Memberstack cache refresh best-effort, then Academy Supabase metrics).
