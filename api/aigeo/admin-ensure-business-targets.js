@@ -15,12 +15,35 @@ function authOk(req) {
   return key && got && key === got;
 }
 
-function connString() {
-  const pass = process.env.SUPABASE_DB_PASSWORD;
+function connConfig() {
+  const rw = process.env.SUPABASE_PG_RW_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL;
+  const dbPass = process.env.SUPABASE_DB_PASSWORD;
+  if (rw) {
+    const m = rw.match(/^postgres(?:ql)?:\/\/([^:]+):([^@]+)@([^:/]+)(?::(\d+))?\/([^?]+)/i);
+    if (!m) throw new Error('SUPABASE_PG_RW_URL parse failed');
+    return {
+      user: decodeURIComponent(m[1]),
+      password: dbPass || decodeURIComponent(m[2]),
+      host: m[3],
+      port: Number(m[4] || 5432),
+      database: decodeURIComponent(m[5]),
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 20000
+    };
+  }
+  const pass = dbPass || process.env.SUPABASE_DB_PASSWORD;
   const url = process.env.SUPABASE_URL;
-  if (!pass || !url) throw new Error('SUPABASE_DB_PASSWORD or SUPABASE_URL missing');
+  if (!pass || !url) throw new Error('SUPABASE_PG_RW_URL (or SUPABASE_DB_PASSWORD+SUPABASE_URL) missing');
   const ref = new URL(url).hostname.split('.')[0];
-  return `postgresql://postgres.${ref}:${encodeURIComponent(pass)}@aws-0-eu-west-2.pooler.supabase.com:6543/postgres`;
+  return {
+    user: `postgres.${ref}`,
+    password: pass,
+    host: 'aws-1-eu-west-2.pooler.supabase.com',
+    port: 5432,
+    database: 'postgres',
+    ssl: { rejectUnauthorized: false },
+    connectionTimeoutMillis: 20000
+  };
 }
 
 export default async function handler(req, res) {
@@ -35,11 +58,7 @@ export default async function handler(req, res) {
   try {
     const sqlPath = path.join(process.cwd(), 'migrations', '20261005_business_targets_gp_tiers.sql');
     const sql = fs.readFileSync(sqlPath, 'utf8');
-    const client = new pg.Client({
-      connectionString: connString(),
-      ssl: { rejectUnauthorized: false },
-      connectionTimeoutMillis: 20000
-    });
+    const client = new pg.Client(connConfig());
     await client.connect();
     await client.query(sql);
     const { rows } = await client.query(
