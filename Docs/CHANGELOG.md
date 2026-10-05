@@ -2,6 +2,13 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-05] - CEO email label = audit run date
+
+**Agreed rule:** Banner + subject use the London date/time the audit report was generated (`as of 5 Oct 2026`), not a made-up week-end. Backup cron waits for Monday Full Refresh; only 20:00 UTC may rescue if still missing.
+
+**Files:** `lib/ceo-weekly/{email,metrics,report}.js`, `api/cron/ceo-weekly-report.js`, `vercel.json`, `Docs/CHANGELOG.md`.
+
+---
 ## [2026-10-05] - CEO email: `week of Mon–Sun` not `week to Sunday`
 
 **Change:** Monday brief banner said `week to 11 Oct` on Mon 5 Oct, which reads as a future end-date. Now `week of 5 Oct–11 Oct 2026`.

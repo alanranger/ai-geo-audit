@@ -1,8 +1,7 @@
 /**
  * CEO weekly email cron — safety net only.
- * Primary send is the last step of ceo-weekly-full-refresh.
- * This job sends if this week's email has not already gone out
- * (so a crashed/stuck Full Refresh cannot silence Monday forever).
+ * Primary send is the last step of ceo-weekly-full-refresh (after audit finishes).
+ * Morning/early backup waits. Late Monday (20:00 UTC) may send if still missing.
  */
 export const config = { runtime: 'nodejs', maxDuration: 120 };
 
@@ -22,7 +21,6 @@ function need(key) {
   return v;
 }
 
-/** True when this London week already has a real send (snapshot or full-refresh flag). */
 async function mondayEmailAlreadySent(weekStart) {
   const sb = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
   const { data: snap } = await sb
@@ -36,12 +34,29 @@ async function mondayEmailAlreadySent(weekStart) {
 
   const { data } = await sb
     .from('system_maintenance_state')
+    .select('last_details')
+    .eq('key', 'ceo_monday_full_refresh')
+    .maybeSingle();
+  const details = data?.last_details;
+  return !!(details && details.week_start === weekStart && details.email_sent === true);
+}
+
+async function mondayFullRefreshFinished(weekStart) {
+  const sb = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
+  const { data } = await sb
+    .from('system_maintenance_state')
     .select('state, last_details')
     .eq('key', 'ceo_monday_full_refresh')
     .maybeSingle();
   const details = data?.last_details;
   if (!details || details.week_start !== weekStart) return false;
-  return details.email_sent === true;
+  return details.email_sent === true || data?.state === 'done' || data?.state === 'failed';
+}
+
+/** After 20:00 UTC Monday, allow a last-resort send even if Full Refresh stalled. */
+function lateMondayRescueWindow(now = new Date()) {
+  if (now.getUTCDay() !== 1) return false;
+  return now.getUTCHours() >= 20;
 }
 
 export default async function handler(req, res) {
@@ -55,13 +70,21 @@ export default async function handler(req, res) {
     const force = flag(req, 'forceResend') || flag(req, 'force');
 
     if (!fromFull && !force && !flag(req, 'dryRun')) {
-      const already = await mondayEmailAlreadySent(weekStart);
-      if (already) {
+      if (await mondayEmailAlreadySent(weekStart)) {
         return sendJson(res, 200, {
           ok: true,
           status: 'already_sent',
           weekStart,
           message: 'CEO weekly email already sent for this week'
+        });
+      }
+      const finished = await mondayFullRefreshFinished(weekStart);
+      if (!finished && !lateMondayRescueWindow()) {
+        return sendJson(res, 200, {
+          ok: true,
+          status: 'waiting_for_full_refresh',
+          weekStart,
+          message: 'Monday Full Refresh still running — email sends when that audit finishes'
         });
       }
     }
@@ -71,7 +94,7 @@ export default async function handler(req, res) {
       dryRun: flag(req, 'dryRun'),
       forceFailSafe: flag(req, 'forceFailSafe'),
       skipGate: true,
-      forceResend: force || fromFull,
+      forceResend: force || fromFull || lateMondayRescueWindow(),
       failReason: req.query?.failReason || req.body?.failReason || undefined,
       refreshLog: req.body?.refreshLog || null
     });

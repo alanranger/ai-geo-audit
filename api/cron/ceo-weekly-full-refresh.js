@@ -150,8 +150,8 @@ export default async function handler(req, res) {
           weekStart,
           propertyUrl,
           skipGate: true,
-          // false: skip if backup/manual already sent this week; still sends if missing
-          forceResend: false,
+          // true: after Full Refresh finishes, send the real brief (replaces any early rescue send)
+          forceResend: true,
           forceFailSafe: criticalFailed,
           failReason: criticalFailed
             ? `monday_full_deps_failed:${progress.failed_keys.join(',')}`
