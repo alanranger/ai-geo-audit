@@ -66,6 +66,7 @@ import {
   readWorkbookFromBuffer,
   parseBookingSheetTruth
 } from '../../lib/booking-sheet-truth-parser.mjs';
+import { parseWorkshopsTab, persistWorkshopAttendees } from '../../lib/booking-sheet-workshops.mjs';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE;
@@ -164,6 +165,14 @@ export default async function handler(req, res) {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
     const written = await persistBookingSheetTruth(supabase, property, parsed);
 
+    let workshops = { written: 0, sheet: null, multiDayEvents: [], error: null };
+    try {
+      const parsedWs = parseWorkshopsTab(wb, { propertyUrl: property, sourceFile: filename || null });
+      workshops = await persistWorkshopAttendees(supabase, property, parsedWs);
+    } catch (wsErr) {
+      workshops = { written: 0, sheet: null, multiDayEvents: [], error: wsErr.message || String(wsErr) };
+    }
+
     // The Booking Sheet is the input to the Revenue Truth findings + diagnosis
     // payload cache, so drop the cached rows; the next tab load recomputes fresh
     // (and re-warms via write-through), and the nightly cron re-warms all combos.
@@ -180,6 +189,10 @@ export default async function handler(req, res) {
       category_rows_written: written.category_rows_written,
       gp_rows_written: written.gp_rows_written,
       transaction_rows_written: written.transaction_rows_written,
+      workshop_rows_written: workshops.written,
+      workshop_sheet: workshops.sheet,
+      workshop_multi_day_events: workshops.multiDayEvents,
+      workshop_error: workshops.error,
       totals_by_year: totalsByYear(parsed.monthlyPerCategory),
       warnings: written.warnings
     });

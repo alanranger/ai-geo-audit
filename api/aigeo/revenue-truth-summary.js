@@ -48,13 +48,12 @@ import { buildHeadlineReconciliation } from '../../lib/revenue-truth-headline-re
 import { parseIncludeJlr } from '../../lib/parse-include-jlr.mjs';
 import { DEFAULT_TIER_BANDS } from '../../lib/revenue-truth-ui-core.mjs';
 import { bookingSheetMonthTarget, classifyVsMonthTarget } from '../../lib/booking-sheet-monthly-targets.mjs';
+import { resolveGpTargetsBundle } from '../../lib/business-targets.mjs';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
-// Three monthly revenue bands (config constants -- edit here, not inline in
-// the UI). Compared against revenue_amount (the spreadsheet number), per the
-// Phase L1 headline rule.
-const TIER_BANDS = DEFAULT_TIER_BANDS;
+// Mutated per-request from business_targets + derived sales (see buildPayload).
+let ACTIVE_TIER_BANDS = { ...DEFAULT_TIER_BANDS };
 
 // Payment fee rates verbatim from the Booking Sheet "Payment Fees" note
 // (Stripe 1.8%, PayPal 2.9% + £0.30). Bank transfers + voucher redemptions
@@ -98,15 +97,17 @@ function createSupabase() {
 }
 
 async function buildPayload(supabase, propertyUrl, includeJlr) {
-  const [wide, categories, gp, transactions, marketMap, canonicalProducts] = await Promise.all([
+  const [wide, categories, gp, transactions, marketMap, canonicalProducts, gpBundle] = await Promise.all([
     fetchMonthlyWide(supabase, propertyUrl),
     fetchMonthlyCategory(supabase, propertyUrl),
     fetchGp(supabase, propertyUrl),
     fetchTransactions(supabase, propertyUrl),
     fetchMarketMap(supabase, propertyUrl),
-    fetchCanonicalProducts(supabase)
+    fetchCanonicalProducts(supabase),
+    resolveGpTargetsBundle(supabase, propertyUrl)
   ]);
-  const cfg = buildConfig(includeJlr);
+  ACTIVE_TIER_BANDS = { ...(gpBundle?.tierBands || DEFAULT_TIER_BANDS) };
+  const cfg = buildConfig(includeJlr, gpBundle);
   const seasonalityByProduct = buildSeasonalityByProduct(canonicalProducts);
   const jlrByMonth = includeJlr ? new Map() : buildJlrByMonth(transactions);
   const jlrByCatMonth = includeJlr ? new Map() : buildJlrByCatMonth(transactions);
@@ -126,6 +127,20 @@ async function buildPayload(supabase, propertyUrl, includeJlr) {
   return {
     asOf: new Date().toISOString(),
     config: cfg,
+    businessTargets: {
+      gp_tiers: {
+        survival: Number(gpBundle.targets.survival_gp_monthly),
+        stretch1: Number(gpBundle.targets.stretch1_gp_monthly),
+        stretch2: Number(gpBundle.targets.stretch2_gp_monthly)
+      },
+      annual_gp: gpBundle.annualTargets,
+      derived_sales: gpBundle.derived,
+      margin: gpBundle.margin,
+      survival_threshold_label: gpBundle.survival_threshold_label,
+      defcon_edges_proposed: gpBundle.targets.defcon_edges_proposed || null,
+      defcon_live_approved: gpBundle.defcon_live_approved,
+      source: gpBundle.targets.source
+    },
     monthly,
     yearTotals,
     currentMonthPulse,
@@ -227,10 +242,14 @@ async function fetchMarketMap(supabase, _propertyUrl) {
 // Annotation + shaping helpers (each one small)
 // ----------------------------------------------------------------------
 
-function buildConfig(includeJlr) {
+function buildConfig(includeJlr, gpBundle) {
   const now = new Date();
+  const tierBands = gpBundle?.tierBands || DEFAULT_TIER_BANDS;
   return {
-    tierBands: TIER_BANDS,
+    tierBands,
+    annualGpTargets: gpBundle?.annualTargets || null,
+    survivalThresholdLabel: gpBundle?.survival_threshold_label || null,
+    derivedSales: gpBundle?.derived || null,
     feeRules: FEE_RULES,
     includeJlr: includeJlr !== false,
     now: {
@@ -310,15 +329,15 @@ function ytdContext(monthly, cfg) {
   const inYear = monthly.filter(m => m.year === year);
   const ytdRevenue = round2(inYear.reduce((s, m) => s + m.headlineRevenue, 0));
   const dayOfYear = dayOfYearUtc(new Date(cfg.now.iso));
-  const yearTarget = TIER_BANDS.comfortable * 12;
+  const yearTarget = (cfg.annualGpTargets?.comfortable) || (ACTIVE_TIER_BANDS.comfortable * 12);
   const proRata = round2((yearTarget * dayOfYear) / 365);
   return { year, ytdRevenue, proRataTarget: proRata, yearTarget };
 }
 
 function classifyBand(amount) {
-  if (amount >= TIER_BANDS.thrive) return 'thrive';
-  if (amount >= TIER_BANDS.comfortable) return 'comfortable';
-  if (amount >= TIER_BANDS.survival) return 'survival';
+  if (amount >= ACTIVE_TIER_BANDS.thrive) return 'thrive';
+  if (amount >= ACTIVE_TIER_BANDS.comfortable) return 'comfortable';
+  if (amount >= ACTIVE_TIER_BANDS.survival) return 'survival';
   return 'below_survival';
 }
 
@@ -444,7 +463,7 @@ function buildForecast(monthly, cfg) {
   const trailing3 = closedThisYear.slice(-3);
   const { avg, min, max } = trailingStats(trailing3);
   const monthsRemaining = Math.max(0, 12 - closedThisYear.length);
-  const annualTarget = TIER_BANDS.comfortable * 12;
+  const annualTarget = (cfg.annualGpTargets?.comfortable) || (ACTIVE_TIER_BANDS.comfortable * 12);
   const forecastCentral = round2(ytdActual + avg * monthsRemaining);
   const forecastLow = round2(ytdActual + min * monthsRemaining);
   const forecastHigh = round2(ytdActual + max * monthsRemaining);
@@ -472,9 +491,9 @@ function buildForecast(monthly, cfg) {
     forecastInclCurrentDelta: round2(forecastInclCurrent - forecastCentral),
     partialMonthProjected: projectedPartial,
     annualTarget,
-    monthlyTarget: TIER_BANDS.comfortable,
+    monthlyTarget: ACTIVE_TIER_BANDS.comfortable,
     varianceToAnnualTarget: round2(forecastCentral - annualTarget),
-    varianceToMonthlyTarget: round2(avg - TIER_BANDS.comfortable),
+    varianceToMonthlyTarget: round2(avg - ACTIVE_TIER_BANDS.comfortable),
     formula: 'forecast = YTD actual + (trailing-3-closed-month average × months remaining)',
     caveat: 'Simple run-rate projection — does not model seasonality; revenue is seasonal (see the tier band chart).'
   };

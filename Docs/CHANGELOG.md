@@ -2,6 +2,13 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-05] - GP survival tiers single-source + CEO Section G levers
+
+**Change:** Alan-approved Survival / Stretch1 / Stretch2 are **GP** (£3,700 / £4,000 / £4,700 mo). New `business_targets` table (+ admin ensure endpoint). Derived sales = GP ÷ rolling 3-closed-month margin. Revenue Truth / CEO / Scenario wired off that source; £4,450 / £5,000 sales survival constants retired. DEFCON GP band edges stored as **proposed** only until Alan approves. CEO brief gains live **Section G Profit levers scorecard**. Booking Sheet upload also imports Workshops → `booking_sheet_workshop_attendees`.
+
+**Files:** `lib/business-targets.mjs`, `lib/ceo-weekly/sectionG.js`, `lib/booking-sheet-workshops.mjs`, `lib/revenue-truth-ui-core.mjs`, `api/aigeo/revenue-truth-summary.js`, `api/aigeo/booking-sheet-upload.js`, `api/aigeo/admin-ensure-business-targets.js`, `migrations/20261005_business_targets_gp_tiers.sql`, `lib/ceo-weekly/metrics.js`, `email.js`, `test/business-targets.test.js`, `Docs/CHANGELOG.md`.
+
+---
 ## [2026-10-05] - Ranking incomplete guard (>10% null stacks)
 
 **Change:** After Ranking finalize, mark `audit_results.ranking_incomplete` / `ranking_quality` when >10% of `keyword_rankings` rows lack `serp_surface_stack` (or empty/incomplete captures). Incomplete days are skipped as “latest” for dials / Site AI Health WoW / CEO surfaces (fall back to last complete date). Finalize no longer re-saves slimmed rows that would wipe stacks when `organic_count>0`. Empty-stub path no longer treats organics-without-stack as `empty`.
