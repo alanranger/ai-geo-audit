@@ -3,7 +3,7 @@
  * Primary send is the last step of ceo-weekly-full-refresh (after audit finishes).
  * Morning/early backup waits. Late Monday (20:00 UTC) may send if still missing.
  */
-export const config = { runtime: 'nodejs', maxDuration: 120 };
+export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 import { createClient } from '@supabase/supabase-js';
 import { authoriseCron, sendJson, londonWeekStartYmd } from '../../lib/ceo-weekly/shared.js';

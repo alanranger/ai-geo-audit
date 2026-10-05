@@ -2,6 +2,13 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-05] - CEO weekly email: PDF attachment
+
+**Change:** Every CEO weekly send (full report and fail-safe) attaches a formatted PDF (`CEO-weekly-health-YYYY-MM-DD.pdf`) generated from the same HTML as the email body (Chromium print, A4).
+
+**Files:** `lib/ceo-weekly/html-to-pdf.js`, `email.js`, `report.js`, `api/cron/ceo-weekly-report.js`, `package.json`, `test/ceo-weekly-pdf.test.js`, `Docs/CHANGELOG.md`.
+
+---
 ## [2026-10-05] - Fix CEO Top-of-page=0: score dials from keyword_rankings
 
 **Bug:** Monday Ranking slimmed cron progress dropped `serp_surface_stack`. Finalize then wrote **Top of page = 0** (and a slightly low Surface) into `audit_results`, so the CEO brief disagreed with Site AI Health.
