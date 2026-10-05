@@ -1,8 +1,8 @@
 /**
  * CEO weekly email cron — safety net only.
  * Primary send is the last step of ceo-weekly-full-refresh.
- * This job waits until Monday Full Refresh has finished (email_sent);
- * it does not send early with incomplete/stale Surface/Top scores.
+ * This job sends if this week's email has not already gone out
+ * (so a crashed/stuck Full Refresh cannot silence Monday forever).
  */
 export const config = { runtime: 'nodejs', maxDuration: 120 };
 
@@ -22,8 +22,18 @@ function need(key) {
   return v;
 }
 
-async function mondayFullRefreshDone(weekStart) {
+/** True when this London week already has a real send (snapshot or full-refresh flag). */
+async function mondayEmailAlreadySent(weekStart) {
   const sb = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
+  const { data: snap } = await sb
+    .from('ceo_weekly_report_snapshots')
+    .select('id')
+    .eq('week_start', weekStart)
+    .eq('send_status', 'sent')
+    .limit(1)
+    .maybeSingle();
+  if (snap?.id) return true;
+
   const { data } = await sb
     .from('system_maintenance_state')
     .select('state, last_details')
@@ -31,7 +41,7 @@ async function mondayFullRefreshDone(weekStart) {
     .maybeSingle();
   const details = data?.last_details;
   if (!details || details.week_start !== weekStart) return false;
-  return details.email_sent === true || data?.state === 'done';
+  return details.email_sent === true;
 }
 
 export default async function handler(req, res) {
@@ -44,15 +54,14 @@ export default async function handler(req, res) {
     const fromFull = flag(req, 'fromFullRefresh');
     const force = flag(req, 'forceResend') || flag(req, 'force');
 
-    // Backup cron must not fire before Full Refresh finishes (Alan: complete first, then email).
     if (!fromFull && !force && !flag(req, 'dryRun')) {
-      const done = await mondayFullRefreshDone(weekStart);
-      if (!done) {
+      const already = await mondayEmailAlreadySent(weekStart);
+      if (already) {
         return sendJson(res, 200, {
           ok: true,
-          status: 'waiting_for_full_refresh',
+          status: 'already_sent',
           weekStart,
-          message: 'Monday Full Refresh still running — CEO email sends as its last step'
+          message: 'CEO weekly email already sent for this week'
         });
       }
     }

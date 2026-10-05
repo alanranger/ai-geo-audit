@@ -2,6 +2,13 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-05] - Monday CEO cron: silent 500 from block-comment `*/15`
+
+**Change:** Unattended Monday Full Refresh never started this week - every `/api/cron/ceo-weekly-full-refresh` invoke returned **500** because a JS block comment contained the cron glob `*/15`, which terminates the comment early and makes the file unparseable. Fixed the comment; backup `ceo-weekly-report` now **sends if this week's email is missing** (was incorrectly waiting for `email_sent`, so it could never rescue a crashed Full Refresh); schedule `0 6,20 * * 1` UTC; added parse guard test.
+
+**Files:** `api/cron/ceo-weekly-full-refresh.js`, `api/cron/ceo-weekly-report.js`, `vercel.json`, `test/ceo-weekly-cron-syntax.test.js`, `Docs/CHANGELOG.md`.
+
+---
 ## [2026-10-02] - Homepage Canonical warn after reaudit (extractability join)
 
 **Change:** Single-page Re-audit could leave Canonical as warn ("HTML canonical evidence unavailable") even when live extractability returned a valid self-canonical. Fix: always merge fresh extract rows into the in-memory payload used for scoring; index/lookup homepage www/slash aliases; when remote extractability has more rows, overlay local fresh rows instead of replacing them; modal re-hydrates extract maps and live-refreshes Canonical status.

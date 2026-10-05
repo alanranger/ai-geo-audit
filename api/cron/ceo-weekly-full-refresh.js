@@ -6,7 +6,7 @@
  * No wall-clock deadline: cron keeps ticking every 15 min on Monday until every
  * step finishes; CEO email is the last step only.
  *
- * Schedule: every 15 min all day Monday UTC (`*/15 * * * 1`).
+  * Schedule: every 15 min all day Monday UTC (vercel cron every-15-min Mondays).
  */
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
