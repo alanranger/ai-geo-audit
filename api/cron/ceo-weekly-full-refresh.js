@@ -266,8 +266,15 @@ export default async function handler(req, res) {
           progress.failed_keys.push(step.key);
         }
         if (step.key === 'ranking_ai') {
-          progress.ranking = null;
-          progress.ranking_started_at = null;
+          // Incomplete ranking must not clear as a clean success — leave failed_keys marked.
+          if (result.ok) {
+            progress.ranking = null;
+            progress.ranking_started_at = null;
+          } else if (String(result.error || '').startsWith('ranking_incomplete')) {
+            progress.ranking = null;
+            progress.ranking_started_at = null;
+            progress.ranking_incomplete = true;
+          }
         }
         if (step.key === 'domain_strength') progress.domain_strength = null;
         progress.step_index += 1;

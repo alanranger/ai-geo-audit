@@ -824,13 +824,18 @@ export default async function handler(req, res) {
     }
     result.crawl_incomplete = true;
     result.error = result.error || SERP_CRAWL_INCOMPLETE_ERROR;
-    result.best_rank_group = null;
-    result.best_rank_absolute = null;
-    result.best_url = null;
-    result.best_title = null;
     const emptyStack = !Array.isArray(result.serp_surface_stack) || result.serp_surface_stack.length === 0;
+    const org = Number(result.organic_count || 0);
+    // Organics present + empty stack = incomplete (keep ranks for retry), not empty stub.
+    const asEmpty = emptyStack && org <= 0;
+    if (asEmpty) {
+      result.best_rank_group = null;
+      result.best_rank_absolute = null;
+      result.best_url = null;
+      result.best_title = null;
+    }
     result.serp_features = buildSerpCaptureFeatures(result.serp_features, {
-      capture_status: emptyStack ? CAPTURE_STATUS.EMPTY : CAPTURE_STATUS.INCOMPLETE,
+      capture_status: asEmpty ? CAPTURE_STATUS.EMPTY : CAPTURE_STATUS.INCOMPLETE,
       crawl_incomplete: true,
       organic_count: result.organic_count ?? 0,
       dfs_cost: result.dfs_cost ?? null,
@@ -842,8 +847,8 @@ export default async function handler(req, res) {
       method_version: result.serp_features?.method_version || null,
       error: result.error,
       checked_at: new Date().toISOString(),
-      best_rank_group: null,
-      best_rank_absolute: null,
+      best_rank_group: result.best_rank_group,
+      best_rank_absolute: result.best_rank_absolute,
       serp_surface_stack: result.serp_surface_stack,
     });
     return result;

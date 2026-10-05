@@ -126,9 +126,13 @@ export default async function handler(req, res) {
         const partialFilter = requireGscAudits
           ? '&gsc_timeseries=not.is.null&visibility_score=not.is.null'
           : (includePartialAudits ? '' : '&is_partial=eq.false');
+        // Skip ranking-incomplete days unless caller asks for partials / preferRecent ranking stubs.
+        const rankingCompleteFilter = (includePartialAudits || preferRecentAudits)
+          ? ''
+          : '&or=(ranking_incomplete.is.null,ranking_incomplete.eq.false)';
         const schemaFilter = (includeSchemaDetailFilter && !preferRecentAudits && !requireGscAudits)
-          ? `&schema_pages_detail=not.is.null${partialFilter}`
-          : partialFilter;
+          ? `&schema_pages_detail=not.is.null${partialFilter}${rankingCompleteFilter}`
+          : `${partialFilter}${rankingCompleteFilter}`;
         if (isMinimalRequest) {
           const selectFields = [
             'audit_date',

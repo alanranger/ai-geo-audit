@@ -2,6 +2,13 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-05] - Ranking incomplete guard (>10% null stacks)
+
+**Change:** After Ranking finalize, mark `audit_results.ranking_incomplete` / `ranking_quality` when >10% of `keyword_rankings` rows lack `serp_surface_stack` (or empty/incomplete captures). Incomplete days are skipped as “latest” for dials / Site AI Health WoW / CEO surfaces (fall back to last complete date). Finalize no longer re-saves slimmed rows that would wipe stacks when `organic_count>0`. Empty-stub path no longer treats organics-without-stack as `empty`.
+
+**Files:** `lib/keyword-ranking/ranking-completeness.js`, `empty-serp-stub.js`, `dashboard-parity-tick.js`, `ranking-dial-scores.js`, `api/aigeo/serp-rank-test.js`, `api/supabase/get-latest-audit.js`, `api/cron/ceo-weekly-full-refresh.js`, `lib/ceo-weekly/tabMetrics.js`, `migrations/20261005_ranking_incomplete_guard.sql`, `test/ranking-completeness.test.js`, `Docs/CHANGELOG.md`.
+
+---
 ## [2026-10-05] - GA4 channel sessions additive backfill (2024–2026-05)
 
 **Change:** `collectGa4Channels` accepts absolute `startDate`/`endDate` and `additiveOnly` (ON CONFLICT DO NOTHING). Cron exposes the same query params. Used for Claude handoff backfill so CEO 6‑month audit has 2024–2025 traffic without touching existing rows.
