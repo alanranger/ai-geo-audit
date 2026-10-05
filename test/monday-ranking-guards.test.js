@@ -9,6 +9,8 @@ import {
   MAX_RANKING_MULTI_TICKS,
   CRON_SERP_BATCH_SIZE
 } from '../lib/ceo-weekly/monday-ranking-guards.js';
+import { scoreSurfaceAndTop } from '../lib/keyword-ranking/ranking-dial-scores.js';
+import { computeTopOfPageRollup } from '../lib/audit/topOfPage.js';
 
 test('halt when cancelled or done+email_sent', () => {
   assert.equal(isHaltRequested({ state: 'cancelled' }, {}), true);
@@ -34,19 +36,33 @@ test('cron SERP batches are smaller than dashboard 20', () => {
   assert.equal(CRON_SERP_BATCH_SIZE, 5);
 });
 
-test('slimRankingForPersist drops bulk but keeps resume fields', () => {
+test('slimRankingForPersist keeps serp_surface_stack for Top dial', () => {
   const slim = slimRankingForPersist({
     phase: 'serp',
     auditDate: '2026-10-05',
-    keywords: ['a', 'b'],
-    serpBatchIndex: 3,
+    keywords: ['a'],
+    serpBatchIndex: 1,
     aiBatchIndex: 0,
     spendState: { attempts_used: 4 },
-    serpRows: [{ keyword: 'a', best_rank_group: 1, huge: 'x'.repeat(1000) }],
+    serpRows: [{
+      keyword: 'photography courses coventry',
+      keyword_class: 'local-money',
+      best_rank_group: 1,
+      search_volume: 100,
+      huge: 'x'.repeat(1000),
+      serp_surface_stack: [{ type: 'organic', slot: 1, ours: true, our_position: 1 }]
+    }],
     aiRows: []
   });
-  assert.equal(slim.serpBatchIndex, 3);
-  assert.equal(slim.serpRows[0].keyword, 'a');
   assert.equal(slim.serpRows[0].huge, undefined);
-  assert.equal(slim.spendState.attempts_used, 4);
+  assert.ok(Array.isArray(slim.serpRows[0].serp_surface_stack));
+  assert.equal(slim.serpRows[0].serp_surface_stack[0].type, 'organic');
+  const top = computeTopOfPageRollup(slim.serpRows).overall;
+  assert.ok(top > 0, `expected top>0 from slimmed stack, got ${top}`);
+});
+
+test('scoreSurfaceAndTop returns nulls for empty', () => {
+  const empty = scoreSurfaceAndTop([]);
+  assert.equal(empty.surface, null);
+  assert.equal(empty.top, null);
 });

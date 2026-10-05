@@ -2,6 +2,15 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-05] - Fix CEO Top-of-page=0: score dials from keyword_rankings
+
+**Bug:** Monday Ranking slimmed cron progress dropped `serp_surface_stack`. Finalize then wrote **Top of page = 0** (and a slightly low Surface) into `audit_results`, so the CEO brief disagreed with Site AI Health.
+
+**Fix:** Keep stack fields in slim checkpoints; finalize/repair dials from full `keyword_rankings` rows (dashboard truth). Repair endpoint: `POST /api/aigeo/repair-ranking-dials`.
+
+**Files:** `lib/keyword-ranking/ranking-dial-scores.js`, `dashboard-parity-tick.js`, `lib/ceo-weekly/monday-ranking-guards.js`, `api/aigeo/repair-ranking-dials.js`, `test/monday-ranking-guards.test.js`, `Docs/CHANGELOG.md`.
+
+---
 ## [2026-10-05] - Monday Ranking: durable batches + 90m abort (stop DFS re-buy loop)
 
 **Root cause:** Dashboard Ranking is one long browser loop. Monday cron is serverless (300s). Batches of 20 could die mid-batch after DFS spend but before progress save; next `*/15` tick re-bought the same work. No wall-clock stop.
