@@ -2,6 +2,13 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-05] - CEO email: `week of Mon–Sun` not `week to Sunday`
+
+**Change:** Monday brief banner said `week to 11 Oct` on Mon 5 Oct, which reads as a future end-date. Now `week of 5 Oct–11 Oct 2026`.
+
+**Files:** `lib/ceo-weekly/email.js`, `Docs/CHANGELOG.md`.
+
+---
 ## [2026-10-05] - Monday CEO cron: silent 500 from block-comment `*/15`
 
 **Change:** Unattended Monday Full Refresh never started this week - every `/api/cron/ceo-weekly-full-refresh` invoke returned **500** because a JS block comment contained the cron glob `*/15`, which terminates the comment early and makes the file unparseable. Fixed the comment; backup `ceo-weekly-report` now **sends if this week's email is missing** (was incorrectly waiting for `email_sent`, so it could never rescue a crashed Full Refresh); schedule `0 6,20 * * 1` UTC; added parse guard test.
