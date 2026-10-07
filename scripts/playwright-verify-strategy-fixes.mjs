@@ -51,8 +51,10 @@ const progress = await page.locator('.qcard.is-current .st-progress').first().in
 if (!/\d+ of \d+ done/.test(progress)) throw new Error('bad progress: ' + progress);
 
 await page.reload({ waitUntil: 'domcontentloaded' });
+await page.waitForSelector('.aigeo-nav-item[data-panel="strategy"]', { timeout: 60000 });
 await page.click('.aigeo-nav-item[data-panel="strategy"]');
-await page.waitForSelector(`li[data-id="${id}"].st-done`, { timeout: 90000 });
+await page.waitForSelector('#strategy-root .qcard', { timeout: 90000 });
+await page.waitForSelector(`#strategy-root li[data-id="${id}"].st-done`, { timeout: 30000 });
 
 await page.route('**/api/aigeo/strategy-actions', async (route) => {
   if (route.request().method() === 'PATCH') {
