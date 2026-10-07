@@ -208,6 +208,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script src="/keyword-tracking-class-LOCKED.js"></script>
   <script src="/lib/competitor-analysis-tab.js?v=ca-prog-20260719a"></script>
+  <script src="/lib/strategy-tab.js?v=st-20261007a"></script>
   <script>
     // CRITICAL: Set up error capture IMMEDIATELY, before any other code runs
     // This must be the very first script to execute
@@ -7736,6 +7737,10 @@
         <span class="aigeo-nav-icon">🎯</span>
         <span>Scenario Planning</span>
       </button>
+      <button class="aigeo-nav-item" data-panel="strategy" title="Strategy &amp; KPIs — 2026–27 operating scorecard, quarter actions, fill, plans and beginners conversion.">
+        <span class="aigeo-nav-icon">🧭</span>
+        <span>Strategy &amp; KPIs</span>
+      </button>
       <button class="aigeo-nav-item" data-panel="optimisation" title="Optimisation Tracking — active / done / paused tasks pulled from the Priority Action Plan, with cycles and objective status.">
         <span class="aigeo-nav-icon">✅</span>
         <span>Optimisation Tracking</span>
@@ -7874,7 +7879,8 @@
         'portfolio':       { label: 'Loading Portfolio',              sub: 'Segment charts + monthly tracker from Supabase\u2026 (first load can take 15\u201330s)' },
         'backlinks':       { label: 'Loading Backlinks',              sub: 'DataForSEO domain index from Supabase\u2026' },
         'implementation-progress': { label: 'Loading Implementation Progress', sub: 'Task status from Supabase\u2026' },
-        'acquisition':     { label: 'Loading Acquisition \u2014 channels', sub: 'GSC, GA4 channels, AI mentions, YouTube + Academy signups from Supabase\u2026' }
+        'acquisition':     { label: 'Loading Acquisition \u2014 channels', sub: 'GSC, GA4 channels, AI mentions, YouTube + Academy signups from Supabase\u2026' },
+        'strategy':        { label: 'Loading Strategy &amp; KPIs',         sub: 'Booking Sheet plans, courses, GP and quarter actions from Supabase\u2026' }
       };
 
       var LOADER_SEL = '.rt-loading, .trend-chart-loading, .spinner, #money-pages-refresh-overlay';
@@ -17492,6 +17498,52 @@
       <!-- Local & Reviews Panel -->
       <section class="aigeo-panel" data-panel="local">
         <!-- Local entity, GBP, reviews content will be inserted here by JS -->
+      </section>
+
+      <!-- Strategy & KPIs Panel (Planning & Optimisation) — dark RT styling -->
+      <section class="aigeo-panel" data-panel="strategy" hidden>
+        <style>
+          section[data-panel="strategy"] {
+            background: var(--dark-bg) !important;
+            min-height: calc(100vh - 4rem);
+            color: var(--dark-text) !important;
+            width: calc(100vw - 260px);
+            margin-left: calc(-50vw + 50% + 130px);
+            margin-right: calc(-50vw + 50% - 130px);
+            padding: 2rem;
+            box-sizing: border-box;
+          }
+          section[data-panel="strategy"] h2 { color: var(--dark-brand) !important; margin: 0; font-size: 1.75rem; font-weight: 800; }
+          section[data-panel="strategy"] h3 { margin: 0 0 0.4rem; color: var(--dark-text); font-size: 1.15rem; font-weight: 800; }
+          section[data-panel="strategy"] h4 { margin: 0 0 0.35rem; color: var(--dark-text); font-size: 0.95rem; }
+          section[data-panel="strategy"] .rt-sub { color: var(--dark-text-muted); font-size: 0.94rem; margin: 0 0 1rem; line-height: 1.5; }
+          section[data-panel="strategy"] .rt-pill.ok { background: #14532d; color: #bbf7d0; }
+          section[data-panel="strategy"] .rt-pill.bad { background: #7f1d1d; color: #fecaca; }
+          section[data-panel="strategy"] .rt-pill.warn { background: #78350f; color: #fde68a; }
+          section[data-panel="strategy"] .rt-pill.current { background: #1e3a8a; color: #bfdbfe; }
+          section[data-panel="strategy"] .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); gap: 1rem; }
+          section[data-panel="strategy"] .pillars { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.75rem; }
+          section[data-panel="strategy"] .pillar { background: #0b1118; border: 1px solid var(--dark-border); border-radius: 8px; padding: 0.85rem 1rem; }
+          section[data-panel="strategy"] .pillar p { margin: 0; color: var(--dark-text-muted); font-size: 0.85rem; line-height: 1.45; }
+          section[data-panel="strategy"] .quarters { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 0.85rem; }
+          section[data-panel="strategy"] .qcard { background: #0b1118; border: 1px solid var(--dark-border); border-radius: 10px; padding: 0.85rem 1rem; }
+          section[data-panel="strategy"] .qcard.is-current { border-color: var(--dark-brand); box-shadow: 0 0 0 1px rgba(245,158,11,0.25); }
+          section[data-panel="strategy"] .qcard .obj { color: var(--dark-text-muted); font-size: 0.8rem; margin-bottom: 0.55rem; }
+          section[data-panel="strategy"] .qcard ul { list-style: none; margin: 0; padding: 0; }
+          section[data-panel="strategy"] .qcard li { display: grid; grid-template-columns: 1.4rem 1fr auto auto; gap: 0.45rem; align-items: start; padding: 0.4rem 0; border-bottom: 1px solid #1f2937; font-size: 0.82rem; }
+          section[data-panel="strategy"] .qcard li.st-overdue { background: rgba(127,29,29,0.18); margin: 0 -0.5rem; padding-left: 0.5rem; padding-right: 0.5rem; border-radius: 4px; }
+          section[data-panel="strategy"] .qcard .qmeta { margin-top: 0.55rem; font-size: 0.72rem; color: var(--dark-text-muted); }
+          section[data-panel="strategy"] .st-tick { width: 1.15rem; height: 1.15rem; border-radius: 4px; border: 2px solid #64748b; background: transparent; cursor: pointer; padding: 0; margin-top: 0.1rem; }
+          section[data-panel="strategy"] .st-tick.on { background: #22c55e; border-color: #16a34a; }
+          section[data-panel="strategy"] .st-lab { outline: none; min-width: 0; }
+          section[data-panel="strategy"] .st-lab:focus { background: #111827; border-radius: 4px; }
+          section[data-panel="strategy"] .st-due { background: #0b1118; color: var(--dark-text); border: 1px solid var(--dark-border); border-radius: 4px; font-size: 0.75rem; padding: 0.15rem 0.3rem; }
+          section[data-panel="strategy"] .rt-table td.left, section[data-panel="strategy"] .rt-table th.left { text-align: left; }
+          section[data-panel="strategy"] .card--section-header { display: none; }
+        </style>
+        <div id="strategy-root" class="strategy-panel" aria-live="polite">
+          <div class="rt-loading">Loading Strategy &amp; KPIs…</div>
+        </div>
       </section>
 
       <!-- Optimisation Tracking Panel -->
@@ -32069,6 +32121,14 @@
           setTimeout(() => {
             if (window.spScenarioLibrary?.refresh) window.spScenarioLibrary.refresh();
             if (typeof window.spRenderCockpit === 'function') window.spRenderCockpit();
+          }, 50);
+        }
+
+        if (isActive && panelId === 'strategy') {
+          setTimeout(() => {
+            if (typeof window.renderStrategyTab === 'function') {
+              window.renderStrategyTab();
+            }
           }, 50);
         }
 

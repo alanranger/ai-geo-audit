@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-07] - Strategy & KPIs tab + Monday brief scorecard
+
+**Change:** New **Strategy & KPIs** nav item (Planning & Optimisation, after Scenario Planning). Live Booking Sheet summary (GP T3, beginners fill/source, upcoming fill, plans empty-state, 11 KPIs, editable quarter actions with due weeks). Table `strategy_quarter_actions` + seed. APIs `strategy-summary` / `strategy-actions`. Monday CEO email gains Strategy Scorecard + ACTION NEEDED (overdue actions, under-filled beginners, review due, residentials ≤2).
+
+**Files:** `migrations/20261007_strategy_quarter_actions.sql`, `lib/strategy-action-seed.mjs`, `lib/strategy-summary.mjs`, `lib/ceo-weekly/strategyScorecard.js`, `api/aigeo/strategy-summary.js`, `api/aigeo/strategy-actions.js`, `public/lib/strategy-tab.js`, `audit-dashboard.html`, `lib/ceo-weekly/email.js`, `lib/ceo-weekly/metrics.js`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-06] - Section G sales fix + full lever rows
 
 **Change:** Direct sales excl. JLR now matches spec (full month = category grid - JLR; MTD/SPLY = transactions including Gift Vouchers Out negatives). All 11 Section G rows compute live. Path normalise for GSC commercial clicks. `asOf` passed through CEO report builder.
