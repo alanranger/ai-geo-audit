@@ -171,12 +171,26 @@ export default async function handler(req, res) {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
     const written = await persistBookingSheetTruth(supabase, property, parsed);
 
-    let workshops = { written: 0, sheet: null, multiDayEvents: [], error: null };
+    const dateHealth = [];
+
+    let workshops = { written: 0, sheet: null, multiDayEvents: [], error: null, dateNullPct: 0 };
     try {
       const parsedWs = parseWorkshopsTab(wb, { propertyUrl: property, sourceFile: filename || null });
       workshops = await persistWorkshopAttendees(supabase, property, parsedWs);
+      workshops.dateNullPct = parsedWs.dateNullPct || 0;
+      if ((parsedWs.dateNullPct || 0) > 10) {
+        dateHealth.push({ sheet: 'Workshops', date_null_pct: parsedWs.dateNullPct, severity: 'warn' });
+      }
+      await supabase.from('booking_sheet_sheet_presence').upsert({
+        property_url: property,
+        sheet_key: 'workshops',
+        present: !!parsedWs.sheet,
+        sheet_name: parsedWs.sheet || null,
+        row_count: Number(workshops.written) || 0,
+        seen_at: new Date().toISOString()
+      });
     } catch (wsErr) {
-      workshops = { written: 0, sheet: null, multiDayEvents: [], error: wsErr.message || String(wsErr) };
+      workshops = { written: 0, sheet: null, multiDayEvents: [], error: wsErr.message || String(wsErr), dateNullPct: 0 };
     }
 
     let plans = { written: 0, sheet: null, error: null };
@@ -195,16 +209,37 @@ export default async function handler(req, res) {
       plans = { written: 0, sheet: null, error: plansErr.message || String(plansErr) };
     }
 
-    let courses = { written: 0, sheet: null, error: null };
+    let courses = { written: 0, sheet: null, error: null, dateNullPct: 0 };
     try {
       const parsedCourses = parseCoursesClassesTab(wb, {
         propertyUrl: property,
         sourceFile: filename || null
       });
       courses = await persistCourseAttendees(supabase, property, parsedCourses);
+      if ((courses.dateNullPct || 0) > 10) {
+        dateHealth.push({ sheet: 'Courses-Classes', date_null_pct: courses.dateNullPct, severity: 'warn' });
+      }
+      await supabase.from('booking_sheet_sheet_presence').upsert({
+        property_url: property,
+        sheet_key: 'courses',
+        present: !!parsedCourses.sheet,
+        sheet_name: parsedCourses.sheet || null,
+        row_count: Number(courses.written) || 0,
+        seen_at: new Date().toISOString()
+      });
     } catch (coursesErr) {
-      courses = { written: 0, sheet: null, error: coursesErr.message || String(coursesErr) };
+      courses = { written: 0, sheet: null, error: coursesErr.message || String(coursesErr), dateNullPct: 0 };
     }
+
+    // Persist date-quality flag for Strategy / Monday brief
+    await supabase.from('booking_sheet_sheet_presence').upsert({
+      property_url: property,
+      sheet_key: 'attendee_date_health',
+      present: dateHealth.length === 0,
+      sheet_name: dateHealth.length ? dateHealth.map((d) => `${d.sheet}:${d.date_null_pct}% null`).join('; ') : 'ok',
+      row_count: dateHealth.length,
+      seen_at: new Date().toISOString()
+    });
 
     // The Booking Sheet is the input to the Revenue Truth findings + diagnosis
     // payload cache, so drop the cached rows; the next tab load recomputes fresh
@@ -232,8 +267,14 @@ export default async function handler(req, res) {
       courses_rows_written: courses.written,
       courses_sheet: courses.sheet,
       courses_error: courses.error,
+      workshop_date_null_pct: workshops.dateNullPct || 0,
+      courses_date_null_pct: courses.dateNullPct || 0,
+      attendee_date_health: dateHealth,
       totals_by_year: totalsByYear(parsed.monthlyPerCategory),
-      warnings: written.warnings
+      warnings: [
+        ...(written.warnings || []),
+        ...dateHealth.map((d) => `Attendee dates >10% null on ${d.sheet} (${d.date_null_pct}%)`)
+      ]
     });
   } catch (e) {
     return res.status(500).json({ error: e?.message || 'Unknown error parsing Booking Sheet' });

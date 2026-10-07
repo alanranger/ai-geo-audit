@@ -27,10 +27,16 @@ const s = await buildStrategySummary(sb);
 console.log(JSON.stringify({
   kpis: s.kpis.map((k) => ({ id: k.id, actual: k.actual, status: k.status, reason: k.reason || null })),
   upcoming: (s.upcoming_events || []).length,
+  upcoming_sample: (s.upcoming_events || []).slice(0, 8).map((e) => ({
+    date: e.date, name: String(e.name).slice(0, 48), booked: e.booked, left: e.places_left, type: e.type
+  })),
+  residential_avg: s.workshop_signals?.residential_avg,
+  beginners_next_8w: s.headline?.beginners_next_8w,
+  beginners_fill: s.headline?.beginners_fill_pct,
+  beginners_non_jlr: s.roadmap_now?.beginners_non_jlr,
   actions: (s.actions || []).length,
   overdue: (s.overdue_actions || []).length,
   action_needed: (s.action_needed || []).length,
   gp_t3: s.gp_t3,
-  headline: s.headline,
   plans_empty: s.plan_clients?.empty_reason || null
 }, null, 2));
