@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-07] - Fix Workshops/Courses date import + Strategy upcoming from Squarespace
+
+**Change:** Workshops importer mismatched **Event Date** into theme (`/event/`); Excel serial dates now parsed via shared `excel-date.mjs`. Re-imported attendees. Strategy upcoming/fill uses Squarespace feeds (places left + Week 1 beginners calendar) joined to sheet booked counts. Upload flags >10% NULL attendee dates. beginners_non_jlr from 2026-10-01.
+
+**Files:** `lib/excel-date.mjs`, `lib/booking-sheet-workshops.mjs`, `lib/booking-sheet-plans-courses.mjs`, `lib/squarespace-events-feed.mjs`, `lib/strategy-summary.mjs`, `api/aigeo/booking-sheet-upload.js`, `scripts/reimport-workshops-courses.mjs`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-07] - Strategy tick feedback + Plans connected + returning £ rebaseline
 
 **Change:** Tick UX (Saved ✓, done date, strikethrough + bottom of card, x of y done, revert on failure). Plans empty-state distinguishes connected/0 rows vs awaiting upload (`booking_sheet_sheet_presence`). Returning £ milestones Dec→Sep: £16k / £18k / £20k / £23k (KPI 9, roadmap, Q targets, Monday brief).
