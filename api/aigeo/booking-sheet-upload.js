@@ -183,6 +183,14 @@ export default async function handler(req, res) {
     try {
       const parsedPlans = parsePlansTab(wb, { propertyUrl: property, sourceFile: filename || null });
       plans = await persistPlans(supabase, property, parsedPlans);
+      await supabase.from('booking_sheet_sheet_presence').upsert({
+        property_url: property,
+        sheet_key: 'plans',
+        present: !!parsedPlans.sheet,
+        sheet_name: parsedPlans.sheet || null,
+        row_count: Number(plans.written) || 0,
+        seen_at: new Date().toISOString()
+      });
     } catch (plansErr) {
       plans = { written: 0, sheet: null, error: plansErr.message || String(plansErr) };
     }

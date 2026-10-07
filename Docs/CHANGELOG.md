@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-07] - Strategy tick feedback + Plans connected + returning £ rebaseline
+
+**Change:** Tick UX (Saved ✓, done date, strikethrough + bottom of card, x of y done, revert on failure). Plans empty-state distinguishes connected/0 rows vs awaiting upload (`booking_sheet_sheet_presence`). Returning £ milestones Dec→Sep: £16k / £18k / £20k / £23k (KPI 9, roadmap, Q targets, Monday brief).
+
+**Files:** `lib/strategy-tab.js`, `lib/strategy-summary.mjs`, `lib/strategy-action-seed.mjs`, `lib/ceo-weekly/strategyScorecard.js`, `api/aigeo/booking-sheet-upload.js`, `migrations/20261007_booking_sheet_sheet_presence.sql`, `audit-dashboard.html`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-07] - Strategy & KPIs tab + Monday brief scorecard
 
 **Change:** New **Strategy & KPIs** nav item (Planning & Optimisation, after Scenario Planning). Live Booking Sheet summary (GP T3, beginners fill/source, upcoming fill, plans empty-state, 11 KPIs, editable quarter actions with due weeks). Table `strategy_quarter_actions` + seed. APIs `strategy-summary` / `strategy-actions`. Monday CEO email gains Strategy Scorecard + ACTION NEEDED (overdue actions, under-filled beginners, review due, residentials ≤2).
