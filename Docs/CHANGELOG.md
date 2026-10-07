@@ -6,7 +6,7 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 
 **Change:** New **Strategy & KPIs** nav item (Planning & Optimisation, after Scenario Planning). Live Booking Sheet summary (GP T3, beginners fill/source, upcoming fill, plans empty-state, 11 KPIs, editable quarter actions with due weeks). Table `strategy_quarter_actions` + seed. APIs `strategy-summary` / `strategy-actions`. Monday CEO email gains Strategy Scorecard + ACTION NEEDED (overdue actions, under-filled beginners, review due, residentials ≤2).
 
-**Files:** `migrations/20261007_strategy_quarter_actions.sql`, `lib/strategy-action-seed.mjs`, `lib/strategy-summary.mjs`, `lib/ceo-weekly/strategyScorecard.js`, `api/aigeo/strategy-summary.js`, `api/aigeo/strategy-actions.js`, `public/lib/strategy-tab.js`, `audit-dashboard.html`, `lib/ceo-weekly/email.js`, `lib/ceo-weekly/metrics.js`, `Docs/CHANGELOG.md`.
+**Files:** `migrations/20261007_strategy_quarter_actions.sql`, `lib/strategy-action-seed.mjs`, `lib/strategy-summary.mjs`, `lib/strategy-tab.js`, `lib/ceo-weekly/strategyScorecard.js`, `api/aigeo/strategy-summary.js`, `api/aigeo/strategy-actions.js`, `audit-dashboard.html`, `lib/ceo-weekly/email.js`, `lib/ceo-weekly/metrics.js`, `Docs/CHANGELOG.md`.
 
 ---
 
