@@ -2,6 +2,11 @@ import { safeJsonParse } from './utils.js';
 import { fetchCanonicalSiteUrlList } from './canonical-site-urls.js';
 import { extractHtmlCanonicalFromHtml } from '../../lib/traditional-seo-canonical-rule.js';
 import {
+  classifyPageLifecycle,
+  normalizeUrlPathKey,
+  resolveAbsoluteUrl
+} from '../../lib/traditional-seo-page-lifecycle.js';
+import {
   fetchTierSegmentationEntries,
   normalizeTierInput as normalizeSharedTierInput,
   getTierForUrlFromLookup,
@@ -9,6 +14,50 @@ import {
   countTierEntries,
   buildTierLookupFromEntries
 } from './tier-segmentation.js';
+
+const EXTRACT_UA = 'Mozilla/5.0 (compatible; AI-GEO-Audit/1.0; +https://ai-geo-audit.vercel.app)';
+
+/** First hop manual; follow once if redirected. Records lifecycle for Trad SEO. */
+async function fetchExtractPage(url) {
+  const headers = { 'User-Agent': EXTRACT_UA };
+  const signal = AbortSignal.timeout(10000);
+  const first = await fetch(url, { redirect: 'manual', headers, signal });
+  const httpStatusFirst = Number(first.status);
+  if (httpStatusFirst === 404 || httpStatusFirst === 410) {
+    return {
+      pageLifecycle: 'gone', redirected: false, httpStatusFirst,
+      finalUrl: url, statusCode: httpStatusFirst, ok: false, html: ''
+    };
+  }
+  if (httpStatusFirst >= 300 && httpStatusFirst < 400) {
+    const loc = first.headers.get('location') || '';
+    const finalUrl = loc ? resolveAbsoluteUrl(url, loc) : url;
+    return {
+      pageLifecycle: 'redirected', redirected: true, httpStatusFirst,
+      finalUrl, statusCode: httpStatusFirst, ok: false, html: ''
+    };
+  }
+  if (!first.ok) {
+    return {
+      pageLifecycle: 'live', redirected: false, httpStatusFirst,
+      finalUrl: first.url || url, statusCode: httpStatusFirst, ok: false, html: '', response: first
+    };
+  }
+  const html = await first.text();
+  const finalUrl = first.url || url;
+  const redirected = first.redirected === true
+    || normalizeUrlPathKey(finalUrl) !== normalizeUrlPathKey(url);
+  return {
+    pageLifecycle: redirected ? 'redirected' : 'live',
+    redirected,
+    httpStatusFirst,
+    finalUrl,
+    statusCode: httpStatusFirst,
+    ok: true,
+    html,
+    response: first
+  };
+}
 
 const DEFAULT_SITE_ORIGIN = 'https://www.alanranger.com';
 const MEMBER_UTILITY_PATH_PATTERNS = [
@@ -816,23 +865,44 @@ async function checkUrl(url, tierLookup = null, sitemapLastmodMap = null) {
   };
   const pageTier = getTierForUrl(url, tierLookup);
   const preflightExclusionReason = getPreflightExclusionReason(url);
+  const lifeFields = (fetched) => ({
+    pageLifecycle: fetched.pageLifecycle,
+    redirected: !!fetched.redirected,
+    httpStatusFirst: fetched.httpStatusFirst,
+    finalUrl: fetched.finalUrl || url
+  });
   try {
-    const response = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AI-GEO-Audit/1.0; +https://ai-geo-audit.vercel.app)' },
-      signal: AbortSignal.timeout(10000)
-    });
-    if (!response.ok) {
-      let errorType = 'HTTP Error';
-      if (response.status === 429) {
-        errorType = 'Rate Limited';
-      } else if (response.status >= 500) {
-        errorType = 'Server Error';
-      }
+    const fetched = await fetchExtractPage(url);
+    if (fetched.pageLifecycle === 'gone' || fetched.pageLifecycle === 'redirected') {
       return {
         url,
         pageTier,
         requestOk: false,
-        statusCode: response.status,
+        statusCode: fetched.statusCode,
+        errorType: fetched.pageLifecycle === 'gone' ? 'Gone' : 'Redirected',
+        pass: false,
+        score: 0,
+        hasTldr: false,
+        hasDirectAnswer: false,
+        hasFaq: false,
+        hasLastUpdated: false,
+        lastUpdatedRaw: '',
+        issues: [`${fetched.pageLifecycle} → ${fetched.finalUrl || url}`],
+        excludedFromAudit: Boolean(preflightExclusionReason),
+        exclusionReason: preflightExclusionReason || '',
+        ...seoNone,
+        ...lifeFields(fetched)
+      };
+    }
+    if (!fetched.ok) {
+      let errorType = 'HTTP Error';
+      if (fetched.statusCode === 429) errorType = 'Rate Limited';
+      else if (fetched.statusCode >= 500) errorType = 'Server Error';
+      return {
+        url,
+        pageTier,
+        requestOk: false,
+        statusCode: fetched.statusCode,
         errorType,
         pass: false,
         score: 0,
@@ -841,23 +911,50 @@ async function checkUrl(url, tierLookup = null, sitemapLastmodMap = null) {
         hasFaq: false,
         hasLastUpdated: false,
         lastUpdatedRaw: '',
-        issues: [`HTTP ${response.status}: ${response.statusText}`],
+        issues: [`HTTP ${fetched.statusCode}`],
         excludedFromAudit: Boolean(preflightExclusionReason),
         exclusionReason: preflightExclusionReason || '',
-        ...seoNone
+        ...seoNone,
+        ...lifeFields(fetched)
       };
     }
-    const html = await response.text();
-    const noindexSignals = extractNoindexSignals(response, html);
+    const html = fetched.html || '';
+    const noindexSignals = extractNoindexSignals(fetched.response || { headers: { get: () => null } }, html);
     const htmlForChecks = await enrichHtmlWithSnippetLoaderContent(url, html);
     const seoSignals = buildTraditionalSeoSignalsFromHtml(html, htmlForChecks, url);
+    const lifecycle = classifyPageLifecycle({ ...fetched, ...seoSignals }, url);
+
+    if (lifecycle === 'redirected' || lifecycle === 'gone') {
+      return {
+        url,
+        pageTier,
+        requestOk: false,
+        statusCode: fetched.statusCode,
+        errorType: lifecycle === 'gone' ? 'Gone' : 'Redirected',
+        pass: false,
+        score: 0,
+        hasTldr: false,
+        hasDirectAnswer: false,
+        hasFaq: false,
+        hasLastUpdated: false,
+        lastUpdatedRaw: '',
+        issues: [`${lifecycle} (canonical/listing)`],
+        excludedFromAudit: Boolean(preflightExclusionReason),
+        exclusionReason: preflightExclusionReason || '',
+        ...seoNone,
+        pageLifecycle: lifecycle,
+        redirected: lifecycle === 'redirected',
+        httpStatusFirst: fetched.httpStatusFirst,
+        finalUrl: fetched.finalUrl || seoSignals.seoCanonicalHref || url
+      };
+    }
 
     if (preflightExclusionReason) {
       return {
         url,
         pageTier,
         requestOk: true,
-        statusCode: response.status,
+        statusCode: fetched.statusCode,
         errorType: null,
         pass: true,
         score: 100,
@@ -869,7 +966,8 @@ async function checkUrl(url, tierLookup = null, sitemapLastmodMap = null) {
         issues: [],
         excludedFromAudit: true,
         exclusionReason: preflightExclusionReason,
-        ...seoSignals
+        ...seoSignals,
+        ...lifeFields(fetched)
       };
     }
 
@@ -878,7 +976,7 @@ async function checkUrl(url, tierLookup = null, sitemapLastmodMap = null) {
         url,
         pageTier,
         requestOk: true,
-        statusCode: response.status,
+        statusCode: fetched.statusCode,
         errorType: null,
         pass: true,
         score: 100,
@@ -892,7 +990,8 @@ async function checkUrl(url, tierLookup = null, sitemapLastmodMap = null) {
         exclusionReason: 'Meta/X-Robots noindex page (excluded from actionable extractability scope)',
         xRobotsTag: noindexSignals.xRobotsTag || '',
         metaRobots: noindexSignals.metaRobots || '',
-        ...seoSignals
+        ...seoSignals,
+        ...lifeFields(fetched)
       };
     }
     const jsonLdBlocks = findJsonLdBlocks(htmlForChecks);
@@ -905,7 +1004,7 @@ async function checkUrl(url, tierLookup = null, sitemapLastmodMap = null) {
       url,
       pageTier,
       requestOk: true,
-      statusCode: response.status,
+      statusCode: fetched.statusCode,
       errorType: null,
       pass: result.pass,
       score: result.score,
@@ -919,7 +1018,8 @@ async function checkUrl(url, tierLookup = null, sitemapLastmodMap = null) {
       textLength: plainText.length,
       excludedFromAudit: false,
       exclusionReason: '',
-      ...seoSignals
+      ...seoSignals,
+      ...lifeFields(fetched)
     };
   } catch (error) {
     return {
@@ -938,6 +1038,10 @@ async function checkUrl(url, tierLookup = null, sitemapLastmodMap = null) {
       issues: [error?.message || 'Request failed'],
       excludedFromAudit: Boolean(preflightExclusionReason),
       exclusionReason: preflightExclusionReason || '',
+      pageLifecycle: 'unknown',
+      redirected: false,
+      httpStatusFirst: null,
+      finalUrl: url,
       ...seoNone
     };
   }
