@@ -67,6 +67,12 @@ import {
   parseBookingSheetTruth
 } from '../../lib/booking-sheet-truth-parser.mjs';
 import { parseWorkshopsTab, persistWorkshopAttendees } from '../../lib/booking-sheet-workshops.mjs';
+import {
+  parsePlansTab,
+  persistPlans,
+  parseCoursesClassesTab,
+  persistCourseAttendees
+} from '../../lib/booking-sheet-plans-courses.mjs';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE;
@@ -173,6 +179,25 @@ export default async function handler(req, res) {
       workshops = { written: 0, sheet: null, multiDayEvents: [], error: wsErr.message || String(wsErr) };
     }
 
+    let plans = { written: 0, sheet: null, error: null };
+    try {
+      const parsedPlans = parsePlansTab(wb, { propertyUrl: property, sourceFile: filename || null });
+      plans = await persistPlans(supabase, property, parsedPlans);
+    } catch (plansErr) {
+      plans = { written: 0, sheet: null, error: plansErr.message || String(plansErr) };
+    }
+
+    let courses = { written: 0, sheet: null, error: null };
+    try {
+      const parsedCourses = parseCoursesClassesTab(wb, {
+        propertyUrl: property,
+        sourceFile: filename || null
+      });
+      courses = await persistCourseAttendees(supabase, property, parsedCourses);
+    } catch (coursesErr) {
+      courses = { written: 0, sheet: null, error: coursesErr.message || String(coursesErr) };
+    }
+
     // The Booking Sheet is the input to the Revenue Truth findings + diagnosis
     // payload cache, so drop the cached rows; the next tab load recomputes fresh
     // (and re-warms via write-through), and the nightly cron re-warms all combos.
@@ -193,6 +218,12 @@ export default async function handler(req, res) {
       workshop_sheet: workshops.sheet,
       workshop_multi_day_events: workshops.multiDayEvents,
       workshop_error: workshops.error,
+      plans_rows_written: plans.written,
+      plans_sheet: plans.sheet,
+      plans_error: plans.error,
+      courses_rows_written: courses.written,
+      courses_sheet: courses.sheet,
+      courses_error: courses.error,
       totals_by_year: totalsByYear(parsed.monthlyPerCategory),
       warnings: written.warnings
     });
