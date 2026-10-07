@@ -20,7 +20,8 @@ export default async function handler(req, res) {
       auth: { persistSession: false }
     });
     const summary = await buildStrategySummary(supabase, propertyUrl);
-    res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
+    // no-store: quarter ticks must appear immediately after PATCH + reload
+    res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json({ ok: true, ...summary });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e?.message || String(e) });
