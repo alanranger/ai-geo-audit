@@ -3,6 +3,7 @@ import { fetchCanonicalSiteUrlList } from './canonical-site-urls.js';
 import { extractHtmlCanonicalFromHtml } from '../../lib/traditional-seo-canonical-rule.js';
 import {
   classifyPageLifecycle,
+  isInactiveLifecycle,
   normalizeUrlPathKey,
   resolveAbsoluteUrl
 } from '../../lib/traditional-seo-page-lifecycle.js';
@@ -109,13 +110,18 @@ function getPreflightExclusionReason(url) {
 function extractNoindexSignals(response, html = '') {
   const xRobotsRaw = String(response?.headers?.get?.('x-robots-tag') || '').toLowerCase();
   const hasXRobotsNoindex = /\bnoindex\b/i.test(xRobotsRaw);
-  const metaRobotsMatch = String(html || '').match(/<meta[^>]*name=["']robots["'][^>]*content=["']([^"']+)["'][^>]*>/i);
+  const htmlStr = String(html || '');
+  const metaRobotsMatch = htmlStr.match(/<meta[^>]*name=["']robots["'][^>]*content=["']([^"']+)["'][^>]*>/i)
+    || htmlStr.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']robots["'][^>]*>/i);
+  const metaGoogleMatch = htmlStr.match(/<meta[^>]*name=["']googlebot["'][^>]*content=["']([^"']+)["'][^>]*>/i)
+    || htmlStr.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']googlebot["'][^>]*>/i);
   const metaRobotsRaw = String(metaRobotsMatch?.[1] || '');
-  const hasMetaRobotsNoindex = /\bnoindex\b/i.test(metaRobotsRaw);
+  const metaGoogleRaw = String(metaGoogleMatch?.[1] || '');
+  const hasMetaRobotsNoindex = /\bnoindex\b/i.test(metaRobotsRaw) || /\bnoindex\b/i.test(metaGoogleRaw);
   return {
     hasNoindex: hasXRobotsNoindex || hasMetaRobotsNoindex,
     xRobotsTag: xRobotsRaw,
-    metaRobots: metaRobotsRaw
+    metaRobots: metaRobotsRaw || metaGoogleRaw
   };
 }
 
@@ -920,17 +926,44 @@ async function checkUrl(url, tierLookup = null, sitemapLastmodMap = null) {
     }
     const html = fetched.html || '';
     const noindexSignals = extractNoindexSignals(fetched.response || { headers: { get: () => null } }, html);
+    if (noindexSignals.hasNoindex) {
+      return {
+        url,
+        pageTier,
+        requestOk: true,
+        statusCode: fetched.statusCode,
+        errorType: 'Hidden',
+        pass: false,
+        score: 0,
+        hasTldr: false,
+        hasDirectAnswer: false,
+        hasFaq: false,
+        hasLastUpdated: false,
+        lastUpdatedRaw: '',
+        issues: ['hidden (noindex)'],
+        excludedFromAudit: true,
+        exclusionReason: preflightExclusionReason || 'Intentional noindex (hidden from search)',
+        ...seoNone,
+        pageLifecycle: 'hidden',
+        redirected: false,
+        httpStatusFirst: fetched.httpStatusFirst,
+        finalUrl: fetched.finalUrl || url,
+        hasNoindex: true,
+        metaRobots: noindexSignals.metaRobots || ''
+      };
+    }
     const htmlForChecks = await enrichHtmlWithSnippetLoaderContent(url, html);
     const seoSignals = buildTraditionalSeoSignalsFromHtml(html, htmlForChecks, url);
-    const lifecycle = classifyPageLifecycle({ ...fetched, ...seoSignals }, url);
+    const lifecycle = classifyPageLifecycle({ ...fetched, ...seoSignals, hasNoindex: noindexSignals.hasNoindex }, url);
 
-    if (lifecycle === 'redirected' || lifecycle === 'gone') {
+    if (isInactiveLifecycle(lifecycle)) {
+      const errLabel = lifecycle === 'gone' ? 'Gone' : (lifecycle === 'hidden' ? 'Hidden' : 'Redirected');
       return {
         url,
         pageTier,
         requestOk: false,
         statusCode: fetched.statusCode,
-        errorType: lifecycle === 'gone' ? 'Gone' : 'Redirected',
+        errorType: errLabel,
         pass: false,
         score: 0,
         hasTldr: false,

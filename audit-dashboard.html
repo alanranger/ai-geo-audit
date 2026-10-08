@@ -2804,7 +2804,8 @@
       color: #94a3b8;
     }
     section[data-panel="traditional-seo"] .traditional-seo-status-pill[data-status="redirected"],
-    section[data-panel="traditional-seo"] .traditional-seo-status-pill[data-status="gone"] {
+    section[data-panel="traditional-seo"] .traditional-seo-status-pill[data-status="gone"],
+    section[data-panel="traditional-seo"] .traditional-seo-status-pill[data-status="hidden"] {
       border-color: rgba(148, 163, 184, 0.4);
       background: rgba(71, 85, 105, 0.45);
       color: #cbd5e1;
@@ -14194,6 +14195,7 @@
                 <option value="fail">Fail</option>
                 <option value="redirected">Redirected</option>
                 <option value="gone">Gone</option>
+                <option value="hidden">Hidden</option>
               </select>
             </div>
             <div>
@@ -94154,7 +94156,7 @@ Confidence: ${c}`;
       const pageScoreByUrl = new Map();
       hitsByUrl.forEach((pageHits, u) => {
         const life = traditionalSeoExtractLifecycleForUrl(u, { propertyUrl: prop, signalMaps: TRADITIONAL_SEO_STATE.lastSignalMaps }).lifecycle;
-        if (life === 'redirected' || life === 'gone') return; // exclude from page score
+        if (life === 'redirected' || life === 'gone' || life === 'hidden') return; // exclude from page score
         pageScoreByUrl.set(u, traditionalSeoPageScoreDetailFromHits(pageHits).score);
       });
       const rollupBuckets = new Map();
@@ -94166,7 +94168,7 @@ Confidence: ${c}`;
       });
       rollupBuckets.forEach((allHits, disp) => {
         const life = traditionalSeoExtractLifecycleForUrl(disp, { propertyUrl: prop, signalMaps: TRADITIONAL_SEO_STATE.lastSignalMaps }).lifecycle;
-        if (life === 'redirected' || life === 'gone') return;
+        if (life === 'redirected' || life === 'gone' || life === 'hidden') return;
         const merged = traditionalSeoDedupeHitsByRuleWorst(allHits);
         pageScoreByUrl.set(disp, traditionalSeoPageScoreDetailFromHits(merged).score);
       });
@@ -95039,7 +95041,7 @@ Confidence: ${c}`;
         if (!sourceKey) return;
         // Redirected / gone pages must not seed outbound edges (stale listing HTML).
         const life = traditionalSeoPageLifecycleFromExtract(row, sourceUrl);
-        if (life === 'redirected' || life === 'gone') return;
+        if (life === 'redirected' || life === 'gone' || life === 'hidden') return;
         const outN = Number(row?.seoInternalLinks);
         if (Number.isFinite(outN) && outN >= 0) outByKey.set(sourceKey, Math.round(outN));
         const targets = Array.isArray(row?.seoInternalLinkTargets) ? row.seoInternalLinkTargets : [];
@@ -95180,7 +95182,7 @@ Confidence: ${c}`;
           if (scoped && (!sourceKey || !onlyKeys.has(sourceKey))) return;
           // Do not probe outbound targets discovered only on redirected/gone pages.
           const life = traditionalSeoPageLifecycleFromExtract(row, sourceUrl);
-          if (life === 'redirected' || life === 'gone') return;
+          if (life === 'redirected' || life === 'gone' || life === 'hidden') return;
           const targets = Array.isArray(row?.seoInternalLinkTargets) ? row.seoInternalLinkTargets : [];
           targets.forEach((target) => {
             const raw = String(target || '').trim();
@@ -95297,7 +95299,7 @@ Confidence: ${c}`;
           propertyUrl: prop,
           signalMaps: TRADITIONAL_SEO_STATE.lastSignalMaps
         }).lifecycle;
-        if (life === 'redirected' || life === 'gone') return;
+        if (life === 'redirected' || life === 'gone' || life === 'hidden') return;
         const displayUrl = traditionalSeoLandingRollupDisplayUrl(
           traditionalSeoLandingRollupGroupKey(rawUrl, prop),
           prop
@@ -95411,6 +95413,7 @@ Confidence: ${c}`;
       let label = normalized === 'na' ? 'n/a' : normalized;
       if (normalized === 'redirected') label = 'Redirected';
       if (normalized === 'gone') label = 'Gone';
+      if (normalized === 'hidden') label = 'Hidden (noindex)';
       if (extraLabel) label = `${label} ${extraLabel}`;
       return `<span class="traditional-seo-status-pill" data-status="${normalized}">${escapeHtml(label)}</span>`;
     }
@@ -95978,7 +95981,7 @@ Confidence: ${c}`;
       if (s === 'warn') return 1;
       if (s === 'pass') return 2;
       if (s === 'na') return 3;
-      if (s === 'redirected' || s === 'gone') return 4;
+      if (s === 'redirected' || s === 'gone' || s === 'hidden') return 4;
       return 5;
     }
 
@@ -96002,7 +96005,8 @@ Confidence: ${c}`;
     function traditionalSeoPageLifecycleFromExtract(signal, pageUrl) {
       if (!signal) return 'unknown';
       const explicit = String(signal.pageLifecycle || '').toLowerCase();
-      if (explicit === 'redirected' || explicit === 'gone' || explicit === 'live') return explicit;
+      if (explicit === 'redirected' || explicit === 'gone' || explicit === 'hidden' || explicit === 'live') return explicit;
+      if (signal.hasNoindex === true) return 'hidden';
       const first = Number(signal.httpStatusFirst != null ? signal.httpStatusFirst : signal.statusCode);
       if (first === 404 || first === 410) return 'gone';
       if (signal.redirected === true) return 'redirected';
@@ -97074,7 +97078,7 @@ Confidence: ${c}`;
       // Redirected / gone pages: never score content rules (listing HTML must not fail K1/H1).
       if (String(tier || '').toLowerCase() !== 'sitewide') {
         const life = traditionalSeoPageLifecycleFromExtract(extractSignal, url);
-        if (life === 'redirected' || life === 'gone') return 'na';
+        if (life === 'redirected' || life === 'gone' || life === 'hidden') return 'na';
       }
       const qaIssues = Array.isArray(qaSignal?.issues) ? qaSignal.issues : [];
       const qaDetails = Array.isArray(qaSignal?.issueDetails) ? qaSignal.issueDetails : [];
@@ -97445,7 +97449,7 @@ Confidence: ${c}`;
           propertyUrl: prop,
           signalMaps: TRADITIONAL_SEO_STATE.lastSignalMaps
         }).lifecycle;
-        if (life === 'redirected' || life === 'gone') return;
+        if (life === 'redirected' || life === 'gone' || life === 'hidden') return;
         const st = String(row?.status || 'fail').toLowerCase();
         const rank = traditionalSeoStatusRank(st);
         const prev = rankByUrl.get(u);
@@ -97488,7 +97492,7 @@ Confidence: ${c}`;
             propertyUrl: prop,
             signalMaps: TRADITIONAL_SEO_STATE.lastSignalMaps
           }).lifecycle;
-          if (life === 'redirected' || life === 'gone') return;
+          if (life === 'redirected' || life === 'gone' || life === 'hidden') return;
         }
         const k = String(row.rule_key || '');
         if (!counts.has(k)) counts.set(k, { pass: 0, warn: 0, fail: 0, na: 0, total: 0 });
@@ -97585,7 +97589,7 @@ Confidence: ${c}`;
           propertyUrl: prop,
           signalMaps: TRADITIONAL_SEO_STATE.lastSignalMaps
         }).lifecycle;
-        return life !== 'redirected' && life !== 'gone';
+        return life !== 'redirected' && life !== 'gone' && life !== 'hidden';
       };
       const liveRows = safeRows.filter(isLiveRow);
       if (!useUrlLevel) {
@@ -99053,6 +99057,7 @@ Confidence: ${c}`;
         let worst = fail > 0 ? 'fail' : warn > 0 ? 'warn' : (pass > 0 ? 'pass' : (na > 0 ? 'na' : 'pass'));
         if (lifeInfo.lifecycle === 'redirected') worst = 'redirected';
         if (lifeInfo.lifecycle === 'gone') worst = 'gone';
+        if (lifeInfo.lifecycle === 'hidden') worst = 'hidden';
         const total = pass + warn + fail + na;
         out.push({
           rule_key: '__page_summary__',
@@ -99656,7 +99661,7 @@ Confidence: ${c}`;
         return true;
       });
 
-      const statusOrder = { fail: 0, warn: 1, pass: 2, na: 3, redirected: 4, gone: 5 };
+      const statusOrder = { fail: 0, warn: 1, pass: 2, na: 3, redirected: 4, gone: 5, hidden: 6 };
       const sortKey = String(TRADITIONAL_SEO_STATE.sort?.key || 'status');
       const sortDirection = String(TRADITIONAL_SEO_STATE.sort?.direction || 'asc');
       filtered.sort((a, b) => {
@@ -100089,8 +100094,10 @@ Confidence: ${c}`;
               : escapeHtml(traditionalSeoDisplayRuleName(row));
             let statusCell = traditionalSeoStatusPill(row.status);
             const stNorm = String(row.status || '').toLowerCase();
-            if (stNorm === 'redirected' || stNorm === 'gone') {
-              const arrow = row.final_url ? `→ ${String(row.final_url).replace(/^https?:\/\/(www\.)?alanranger\.com/i, '')}` : '';
+            if (stNorm === 'redirected' || stNorm === 'gone' || stNorm === 'hidden') {
+              const arrow = (stNorm !== 'hidden' && row.final_url)
+                ? `→ ${String(row.final_url).replace(/^https?:\/\/(www\.)?alanranger\.com/i, '')}`
+                : '';
               statusCell = traditionalSeoStatusPill(stNorm, arrow);
             } else if (isSummaryRow(row)) {
               const sp = traditionalSeoToNum(row.summary_pass, 0);
