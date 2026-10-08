@@ -19,7 +19,8 @@ export default async function handler(req, res) {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: { persistSession: false }
     });
-    const summary = await buildStrategySummary(supabase, propertyUrl);
+    const noBackfill = String(req.query.noBackfill || '') === '1';
+    const summary = await buildStrategySummary(supabase, propertyUrl, { noBackfill });
     // no-store: quarter ticks must appear immediately after PATCH + reload
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json({ ok: true, ...summary });
