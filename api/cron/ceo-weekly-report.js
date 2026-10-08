@@ -89,6 +89,8 @@ export default async function handler(req, res) {
       }
     }
 
+    const subjectSuffix = String(req.query?.subjectSuffix || req.body?.subjectSuffix || '').trim() || undefined;
+    const subject = String(req.query?.subject || req.body?.subject || '').trim() || undefined;
     const result = await runCeoWeeklyReport({
       weekStart,
       dryRun: flag(req, 'dryRun'),
@@ -96,7 +98,9 @@ export default async function handler(req, res) {
       skipGate: true,
       forceResend: force || fromFull || lateMondayRescueWindow(),
       failReason: req.query?.failReason || req.body?.failReason || undefined,
-      refreshLog: req.body?.refreshLog || null
+      refreshLog: req.body?.refreshLog || null,
+      subjectSuffix,
+      subject
     });
     return sendJson(res, 200, result);
   } catch (err) {
