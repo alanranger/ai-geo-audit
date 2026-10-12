@@ -39,6 +39,15 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 **Files:** `lib/business-targets.mjs`, `lib/ceo-weekly/sectionG.js`, `lib/booking-sheet-workshops.mjs`, `lib/revenue-truth-ui-core.mjs`, `api/aigeo/revenue-truth-summary.js`, `api/aigeo/booking-sheet-upload.js`, `api/aigeo/admin-ensure-business-targets.js`, `migrations/20261005_business_targets_gp_tiers.sql`, `lib/ceo-weekly/metrics.js`, `email.js`, `test/business-targets.test.js`, `Docs/CHANGELOG.md`.
 
 ---
+## [2026-10-12] - Strategy daily snapshots: fix cron auth + catch-up
+
+**Bug:** CEO/Strategy warned “Booking snapshot missing” for 9–11 Oct even after a valid Booking Sheet upload. Upload ≠ daily pace photos. Overnight cron (`GET /api/cron/strategy-event-snapshots`) was not leaving rows (DB writes only happened via daytime POST/backfill). Live probe: unauthenticated GET → **401**; POST → **200**.
+
+**Fix:** Accept Vercel’s `Authorization: Bearer CRON_SECRET` in shared `authoriseCron`; rewrite snapshot cron to use it + record `system_maintenance_state`; evening backup cron `30 18 * * *`; write today’s snapshot (and fill missing last-7 days, tagged `backfilled`) after Booking Sheet upload; refuse empty-diary delete/replace.
+
+**Files:** `lib/ceo-weekly/shared.js`, `api/cron/strategy-event-snapshots.js`, `lib/strategy-snapshots.mjs`, `api/aigeo/booking-sheet-upload.js`, `vercel.json`, `Docs/CHANGELOG.md`.
+
+---
 ## [2026-10-12] - Monday CEO fail-safe: Ranking wall + GSC batch max 5
 
 **Symptom:** Week of 2026-10-12 CEO email was fail-safe (`monday_full_deps_failed:ranking_ai,gsc_url_inspection`) — no business numbers.

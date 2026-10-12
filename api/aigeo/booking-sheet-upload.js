@@ -257,6 +257,15 @@ export default async function handler(req, res) {
       await invalidateCache(supabase, property);
     } catch (_cacheErr) { /* best-effort: cache invalidation must not fail the upload */ }
 
+    // Same-day strategy pace photo — do not wait for the 07:15 cron.
+    let strategySnapshot = null;
+    try {
+      const { runStrategyEventSnapshots } = await import('../../lib/strategy-snapshots.mjs');
+      strategySnapshot = await runStrategyEventSnapshots(supabase, property, { fillMissingDays: true });
+    } catch (snapErr) {
+      strategySnapshot = { error: snapErr?.message || String(snapErr) };
+    }
+
     return res.status(200).json({
       ok: true,
       filename: filename || null,
@@ -280,6 +289,7 @@ export default async function handler(req, res) {
       workshop_date_null_pct: workshops.dateNullPct || 0,
       courses_date_null_pct: courses.dateNullPct || 0,
       attendee_date_health: dateHealth,
+      strategy_snapshot: strategySnapshot,
       totals_by_year: totalsByYear(parsed.monthlyPerCategory),
       warnings: [
         ...(written.warnings || []),
