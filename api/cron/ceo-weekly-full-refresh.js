@@ -6,7 +6,7 @@
  * serverless cannot keep a 90‑min browser loop. Each cron tick:
  *  - runs small SERP/AI batches (5) that fit under Vercel maxDuration
  *  - checkpoints progress after every paid batch (no re-buy on timeout)
- *  - hard-aborts Ranking after ~90 min (dashboard-like ceiling) or too many ticks
+ *  - hard-aborts Ranking after ~4.5h wall or too many continue ticks
  *
  * Schedule: every 15 min Monday UTC.
  */
@@ -64,6 +64,7 @@ function emptyProgress(weekStart) {
     ranking: null,
     ranking_started_at: null,
     domain_strength: null,
+    gsc: null,
     multi_ticks: 0
   };
 }
@@ -249,6 +250,7 @@ export default async function handler(req, res) {
 
       if (result.ranking) progress.ranking = slimRankingForPersist(result.ranking);
       if (result.domain_strength) progress.domain_strength = result.domain_strength;
+      if (result.gsc) progress.gsc = result.gsc;
 
       const stepDone = result.done !== false;
       if (stepDone) {
@@ -277,6 +279,7 @@ export default async function handler(req, res) {
           }
         }
         if (step.key === 'domain_strength') progress.domain_strength = null;
+        if (step.key === 'gsc_url_inspection') progress.gsc = null;
         progress.step_index += 1;
         ran += 1;
       } else {

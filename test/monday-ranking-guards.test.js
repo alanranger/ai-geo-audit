@@ -20,7 +20,8 @@ test('halt when cancelled or done+email_sent', () => {
   assert.equal(isHaltRequested({ state: 'done' }, { email_sent: true }, { forceRestart: true }), false);
 });
 
-test('ranking wall clock matches ~90m dashboard ceiling', () => {
+test('ranking wall clock matches cron 4.5h ceiling', () => {
+  assert.ok(RANKING_WALL_MS >= 240 * 60 * 1000, 'cron wall must exceed dashboard 90m continuous loop');
   const started = new Date(Date.now() - RANKING_WALL_MS - 1000).toISOString();
   assert.equal(rankingWallExceeded({ ranking_started_at: started }), true);
   assert.equal(rankingWallExceeded({ ranking_started_at: new Date().toISOString() }), false);

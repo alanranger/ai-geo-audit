@@ -39,6 +39,19 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 **Files:** `lib/business-targets.mjs`, `lib/ceo-weekly/sectionG.js`, `lib/booking-sheet-workshops.mjs`, `lib/revenue-truth-ui-core.mjs`, `api/aigeo/revenue-truth-summary.js`, `api/aigeo/booking-sheet-upload.js`, `api/aigeo/admin-ensure-business-targets.js`, `migrations/20261005_business_targets_gp_tiers.sql`, `lib/ceo-weekly/metrics.js`, `email.js`, `test/business-targets.test.js`, `Docs/CHANGELOG.md`.
 
 ---
+## [2026-10-12] - Monday CEO fail-safe: Ranking wall + GSC batch max 5
+
+**Symptom:** Week of 2026-10-12 CEO email was fail-safe (`monday_full_deps_failed:ranking_ai,gsc_url_inspection`) — no business numbers.
+
+**Root cause:**
+1. `ranking_ai` hard-aborted at **90m** wall mid-AI (`serpBatchIndex` 31 done, `aiBatchIndex` 12/31). Cron is 15‑min ticks with 180s budgets, not a continuous dashboard loop — 90m is too short for ~155 keywords.
+2. `gsc_url_inspection` cron posted **50 URLs** in one request; API max is **5** (`Too many URLs in one request`) — same 400 as 2026-10-05 cron. Fail-safe is only forced by `ranking_ai`/`audit_scan`, but GSC was also broken every unattended Monday.
+
+**Fix:** Raise Ranking wall to **4.5h** / max continue ticks **32**; GSC step batches of **5** with multi-tick `progress.gsc.urlIndex` until the URL list is done (or budget).
+
+**Files:** `lib/ceo-weekly/monday-ranking-guards.js`, `lib/ceo-weekly/dashboard-full-catalog.js`, `api/cron/ceo-weekly-full-refresh.js`, `test/monday-ranking-guards.test.js`, `Docs/CHANGELOG.md`.
+
+---
 ## [2026-10-05] - Ranking incomplete guard (>10% null stacks)
 
 **Change:** After Ranking finalize, mark `audit_results.ranking_incomplete` / `ranking_quality` when >10% of `keyword_rankings` rows lack `serp_surface_stack` (or empty/incomplete captures). Incomplete days are skipped as “latest” for dials / Site AI Health WoW / CEO surfaces (fall back to last complete date). Finalize no longer re-saves slimmed rows that would wipe stacks when `organic_count>0`. Empty-stub path no longer treats organics-without-stack as `empty`.
