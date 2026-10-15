@@ -95573,6 +95573,24 @@ Confidence: ${c}`;
       }
     }
 
+    /** Persist overrides with the property host (keep www). Comparable keys strip www for matching only. */
+    function traditionalSeoCanonicalStorageUrl(rawUrl, propertyUrl = '') {
+      const prop = String(propertyUrl || traditionalSeoPropertyUrl() || '').trim();
+      const normalized = traditionalSeoNormalizeUrl(rawUrl, prop);
+      if (!normalized || !URL.canParse(normalized)) return String(rawUrl || '').trim();
+      try {
+        const page = new URL(normalized);
+        const cleanPath = String(page.pathname || '/').replace(/\/+$/, '') || '/';
+        if (prop && URL.canParse(prop)) {
+          const base = new URL(prop);
+          return `${base.protocol}//${base.host}${cleanPath}`;
+        }
+        return `${page.protocol}//${page.host}${cleanPath}`;
+      } catch (err) {
+        return normalized;
+      }
+    }
+
     /** One key for schema / extract / QA maps (avoids trailing-slash vs CSV mismatches). */
     function traditionalSeoSignalMapKey(rawUrl, propertyUrl = '') {
       return traditionalSeoToComparableUrl(rawUrl, propertyUrl)
@@ -96056,7 +96074,8 @@ Confidence: ${c}`;
 
     async function traditionalSeoSavePageTargetKeyword(pageUrl, rawKeyword, options = {}) {
       const propertyUrl = String(traditionalSeoPropertyUrl() || '').trim();
-      const pageKey = traditionalSeoOverridePageKey(pageUrl);
+      // Store www (property host). Do NOT use OverridePageKey here — that strips www for matching only.
+      const pageKey = traditionalSeoCanonicalStorageUrl(pageUrl, propertyUrl);
       const targetKeyword = String(rawKeyword ?? '').trim();
       await traditionalSeoEnsureLocked151ClassMap();
       const trackedIn151 = traditionalSeoDeriveTargetClassFromKeyword(targetKeyword) === 'tracked';

@@ -29,10 +29,28 @@ async function handleGet(req, res, supabase) {
   });
 }
 
+/** Persist page_url on the property host (keep www). Matching still tolerates apex elsewhere. */
+function canonicalizeOverridePageUrl(pageUrl, propertyUrl) {
+  const raw = String(pageUrl || '').trim();
+  const prop = String(propertyUrl || '').trim();
+  if (!raw) return '';
+  try {
+    const page = new URL(raw);
+    const cleanPath = String(page.pathname || '/').replace(/\/+$/, '') || '/';
+    if (prop) {
+      const base = new URL(/^https?:\/\//i.test(prop) ? prop : `https://${prop}`);
+      return `${base.protocol}//${base.host}${cleanPath}`;
+    }
+    return `${page.protocol}//${page.host}${cleanPath}`;
+  } catch {
+    return raw;
+  }
+}
+
 async function handlePost(req, res, supabase) {
   const body = req.body || {};
   const propertyUrl = String(body?.propertyUrl || '').trim();
-  const pageUrl = String(body?.pageUrl || '').trim();
+  const pageUrl = canonicalizeOverridePageUrl(body?.pageUrl, propertyUrl);
   const targetKeyword = String(body?.targetKeyword ?? '').trim();
   const targetClass = body?.targetClass != null ? String(body.targetClass).trim() : null;
   const notes = body?.notes != null ? String(body.notes) : null;
@@ -40,25 +58,36 @@ async function handlePost(req, res, supabase) {
     return sendJson(res, 400, { status: 'error', message: 'pageUrl is required.' });
   }
 
+  // Also consider legacy apex twin (www stripped) so Save keyword doesn't fork rows.
+  let apexTwin = '';
+  try {
+    const u = new URL(pageUrl);
+    const host = u.hostname.replace(/^www\./i, '');
+    if (host && u.hostname.toLowerCase().startsWith('www.')) {
+      apexTwin = `${u.protocol}//${host}${u.pathname}`;
+    }
+  } catch { /* ignore */ }
+
   // Empty keyword with no class → delete (legacy clear). With class → upsert cleared row.
   if (!targetKeyword && !targetClass) {
     const del = await supabase
       .from('traditional_seo_target_keyword_overrides')
       .delete()
       .eq('property_url', propertyUrl)
-      .eq('page_url', pageUrl);
+      .in('page_url', apexTwin ? [pageUrl, apexTwin] : [pageUrl]);
     if (del.error) throw del.error;
   } else {
     // SAFETY: modal "Save keyword" only sends targetKeyword. Preserve curated
     // target_class + notes on update. New rows get a safe default class.
     const { data: existingRows, error: existingErr } = await supabase
       .from('traditional_seo_target_keyword_overrides')
-      .select('target_class, notes')
+      .select('page_url, target_class, notes')
       .eq('property_url', propertyUrl)
-      .eq('page_url', pageUrl)
-      .limit(1);
+      .in('page_url', apexTwin ? [pageUrl, apexTwin] : [pageUrl])
+      .limit(2);
     if (existingErr) throw existingErr;
-    const existing = Array.isArray(existingRows) && existingRows[0] ? existingRows[0] : null;
+    const list = Array.isArray(existingRows) ? existingRows : [];
+    const existing = list.find((r) => r.page_url === pageUrl) || list[0] || null;
 
     let nextClass = targetClass || existing?.target_class || null;
     if (!nextClass && targetKeyword) {
@@ -82,6 +111,14 @@ async function handlePost(req, res, supabase) {
       .upsert(row, { onConflict: 'property_url,page_url' })
       .select('*');
     if (upsert.error) throw upsert.error;
+    // Drop legacy non-www twin so inventory + overrides stay on www.
+    if (apexTwin && apexTwin !== pageUrl) {
+      await supabase
+        .from('traditional_seo_target_keyword_overrides')
+        .delete()
+        .eq('property_url', propertyUrl)
+        .eq('page_url', apexTwin);
+    }
   }
 
   let query = supabase.from('traditional_seo_target_keyword_overrides').select('*').order('updated_at', { ascending: false });
