@@ -96002,16 +96002,31 @@ Confidence: ${c}`;
     }
 
     /** live | redirected | gone | unknown — from extractability row (or stale canonical→listing). */
+    function traditionalSeoIsHostNormalizationRedirect(pageUrl, finalUrl) {
+      const final = String(finalUrl || '').trim();
+      if (!final || !pageUrl) return false;
+      try {
+        const ha = new URL(pageUrl).hostname.replace(/^www\./i, '').toLowerCase();
+        const hb = new URL(final).hostname.replace(/^www\./i, '').toLowerCase();
+        if (!ha || ha !== hb) return false;
+      } catch (_e) { return false; }
+      return traditionalSeoNormalizePathKey(final) === traditionalSeoNormalizePathKey(pageUrl);
+    }
+
     function traditionalSeoPageLifecycleFromExtract(signal, pageUrl) {
       if (!signal) return 'unknown';
       const explicit = String(signal.pageLifecycle || '').toLowerCase();
+      const finalUrl = String(signal.finalUrl || '').trim();
+      // apex↔www same path is not an inactive redirect (inventory often stores non-www).
+      if (explicit === 'redirected' && traditionalSeoIsHostNormalizationRedirect(pageUrl, finalUrl)) return 'live';
       if (explicit === 'redirected' || explicit === 'gone' || explicit === 'hidden' || explicit === 'live') return explicit;
       if (signal.hasNoindex === true) return 'hidden';
       const first = Number(signal.httpStatusFirst != null ? signal.httpStatusFirst : signal.statusCode);
       if (first === 404 || first === 410) return 'gone';
-      if (signal.redirected === true) return 'redirected';
-      if (Number.isFinite(first) && first >= 300 && first < 400) return 'redirected';
-      const finalUrl = String(signal.finalUrl || '').trim();
+      if (signal.redirected === true || (Number.isFinite(first) && first >= 300 && first < 400)) {
+        if (traditionalSeoIsHostNormalizationRedirect(pageUrl, finalUrl)) return 'live';
+        return 'redirected';
+      }
       if (finalUrl && traditionalSeoNormalizePathKey(finalUrl) !== traditionalSeoNormalizePathKey(pageUrl)) {
         try {
           if (traditionalSeoIsWorkshopListingPath(new URL(finalUrl).pathname)) return 'redirected';
@@ -98518,8 +98533,15 @@ Confidence: ${c}`;
         return parts.length ? parts.join(' · ') : base;
       }
       if (rk === 'keyword_in_title' || rk === 'keyword_in_meta' || rk === 'keyword_in_h1' || rk === 'keyword_slug_tokens' || rk === 'keyword_in_intro') {
-        if (String(row?.status || '').toLowerCase() === 'na' || traditionalSeoKeywordRulesNotApplicable(pageUrl)) {
+        if (traditionalSeoKeywordRulesNotApplicable(pageUrl)) {
           return 'Class is none_utility (utility/legal) — no TradSEO keyword target expected. K1–K5 skipped (n/a), excluded from score denominator.';
+        }
+        if (String(row?.status || '').toLowerCase() === 'na') {
+          const life = traditionalSeoExtractLifecycleForUrl(pageUrl, {}).lifecycle;
+          if (life === 'redirected' || life === 'gone' || life === 'hidden') {
+            return `Skipped (n/a): page lifecycle is ${life}. Content/keyword rules are not scored on redirected/gone/noindex URLs.`;
+          }
+          return 'Skipped (n/a) for this URL — not a none_utility class skip. Re-audit page if this looks wrong.';
         }
         const tk = String(row?.target_keyword || '').trim();
         if (!tk) return 'No target keyword mapped for this URL (GitHub CSV 07 or Supabase override). Rule scores WARN.';

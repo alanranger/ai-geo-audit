@@ -3,7 +3,10 @@ import { fetchCanonicalSiteUrlList } from './canonical-site-urls.js';
 import { extractHtmlCanonicalFromHtml } from '../../lib/traditional-seo-canonical-rule.js';
 import {
   classifyPageLifecycle,
+  isHostNormalizationRedirect,
   isInactiveLifecycle,
+  isSameSiteHost,
+  isWorkshopListingPath,
   normalizeUrlPathKey,
   resolveAbsoluteUrl
 } from '../../lib/traditional-seo-page-lifecycle.js';
@@ -18,7 +21,7 @@ import {
 
 const EXTRACT_UA = 'Mozilla/5.0 (compatible; AI-GEO-Audit/1.0; +https://ai-geo-audit.vercel.app)';
 
-/** First hop manual; follow once if redirected. Records lifecycle for Trad SEO. */
+/** First hop manual; follow once on same-site redirect (www/apex). Records lifecycle for Trad SEO. */
 async function fetchExtractPage(url) {
   const headers = { 'User-Agent': EXTRACT_UA };
   const signal = AbortSignal.timeout(10000);
@@ -33,6 +36,39 @@ async function fetchExtractPage(url) {
   if (httpStatusFirst >= 300 && httpStatusFirst < 400) {
     const loc = first.headers.get('location') || '';
     const finalUrl = loc ? resolveAbsoluteUrl(url, loc) : url;
+    // Follow one same-site hop so apex→www inventory URLs still get HTML + live scoring.
+    if (loc && isSameSiteHost(url, finalUrl)) {
+      try {
+        const pathChanged = !isHostNormalizationRedirect(url, finalUrl);
+        if (pathChanged) {
+          try {
+            if (isWorkshopListingPath(new URL(finalUrl).pathname)) {
+              return {
+                pageLifecycle: 'redirected', redirected: true, httpStatusFirst,
+                finalUrl, statusCode: httpStatusFirst, ok: false, html: ''
+              };
+            }
+          } catch { /* fall through and fetch */ }
+        }
+        const second = await fetch(finalUrl, { redirect: 'follow', headers, signal: AbortSignal.timeout(10000) });
+        const secondStatus = Number(second.status);
+        if (second.ok) {
+          const html = await second.text();
+          const landed = second.url || finalUrl;
+          const stillSoft = isHostNormalizationRedirect(url, landed);
+          return {
+            pageLifecycle: stillSoft || !pathChanged ? 'live' : 'redirected',
+            redirected: !(stillSoft || !pathChanged),
+            httpStatusFirst,
+            finalUrl: landed,
+            statusCode: secondStatus,
+            ok: stillSoft || !pathChanged,
+            html: (stillSoft || !pathChanged) ? html : '',
+            response: second
+          };
+        }
+      } catch { /* fall through to redirected stub */ }
+    }
     return {
       pageLifecycle: 'redirected', redirected: true, httpStatusFirst,
       finalUrl, statusCode: httpStatusFirst, ok: false, html: ''
@@ -47,7 +83,8 @@ async function fetchExtractPage(url) {
   const html = await first.text();
   const finalUrl = first.url || url;
   const redirected = first.redirected === true
-    || normalizeUrlPathKey(finalUrl) !== normalizeUrlPathKey(url);
+    && !isHostNormalizationRedirect(url, finalUrl)
+    && normalizeUrlPathKey(finalUrl) !== normalizeUrlPathKey(url);
   return {
     pageLifecycle: redirected ? 'redirected' : 'live',
     redirected,
