@@ -85609,6 +85609,25 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
               : { snippetReadiness: 0, visibility: visHeal, brand: null };
           }
         }
+        // Align AI Summary Likelihood with AI Health (include AI-citation rate from surface outcomes).
+        try {
+          if (rankingRows.length && typeof computeSurfaceOutcomesRollup === 'function'
+              && typeof computeAiSummaryLikelihood === 'function') {
+            const outcomes = computeSurfaceOutcomesRollup(rankingRows);
+            const aiAnswerRow = outcomes?.rows?.find((r) => r.key === 'ai_answer');
+            const cite = (aiAnswerRow?.overall?.pct != null && Number.isFinite(Number(aiAnswerRow.overall.pct)))
+              ? Number(aiAnswerRow.overall.pct)
+              : 0;
+            const snip = Number(aiSummaryComponents?.snippetReadiness) || 0;
+            const vis = aiSummaryComponents?.visibility;
+            const brand = aiSummaryComponents?.brand;
+            if (snip > 0 || vis != null || brand != null) {
+              const live = computeAiSummaryLikelihood(snip, vis ?? 0, brand ?? 0, cite);
+              if (typeof live?.score === 'number') aiSummaryScore = Math.round(live.score);
+              aiSummaryComponents = { ...(aiSummaryComponents || {}), aiCitationRate: cite };
+            }
+          }
+        } catch (_aiSumAlignErr) { /* keep prior score */ }
 
         const pillars = computePillarScoresFromAudit(audit);
         if (pillars && audit?.scores) {
@@ -89678,6 +89697,28 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
             aiSummaryComponents = { ...aiSummaryComponents, visibility: visHeal };
           }
         }
+        // Live AI Summary Likelihood (same citation-rate input as AI Health)
+        let aiSummaryScoreLive = scores.aiSummaryScore
+          || (typeof auditData.ai_summary_score === 'number' ? auditData.ai_summary_score : null);
+        try {
+          const rowsForCite = Array.isArray(rankingRows) ? rankingRows : [];
+          if (rowsForCite.length && typeof computeSurfaceOutcomesRollup === 'function'
+              && typeof computeAiSummaryLikelihood === 'function') {
+            const outcomes = computeSurfaceOutcomesRollup(rowsForCite);
+            const aiAnswerRow = outcomes?.rows?.find((r) => r.key === 'ai_answer');
+            const cite = (aiAnswerRow?.overall?.pct != null && Number.isFinite(Number(aiAnswerRow.overall.pct)))
+              ? Number(aiAnswerRow.overall.pct)
+              : 0;
+            const snip = Number(aiSummaryComponents?.snippetReadiness) || 0;
+            const vis = aiSummaryComponents?.visibility;
+            const brand = aiSummaryComponents?.brand;
+            if (snip > 0 || vis != null || brand != null) {
+              const live = computeAiSummaryLikelihood(snip, vis ?? 0, brand ?? 0, cite);
+              if (typeof live?.score === 'number') aiSummaryScoreLive = Math.round(live.score);
+              aiSummaryComponents = { ...(aiSummaryComponents || {}), aiCitationRate: cite };
+            }
+          }
+        } catch (_aiSumAlignErr) { /* keep stored */ }
         
         // Extract domain strength (needed for Domain Strength tile deltas)
         const domainStrength = auditData.domainStrength || null;
@@ -89701,11 +89742,11 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         // Extract optimisation potential clicks (needed for Optimisation tile deltas)
         const optimisationPotentialClicks = auditData.optimisationPotentialClicks ?? null;
         
-        debugLog(`[Dashboard] computeDashboardSnapshotFromAuditData: GAIO=${gaioScore}, AI Summary=${scores.aiSummaryScore || auditData.ai_summary_score || 'null'}, rankingKpis=${rankingKpis ? 'present' : 'null'}, moneySharePct=${moneySharePct ?? 'null'}, aiSummaryComponents=${aiSummaryComponents ? 'present' : 'null'}, domainStrength=${domainStrength ? 'present' : 'null'}, eeatScore=${eeatScore ?? 'null'}`, 'info');
+        debugLog(`[Dashboard] computeDashboardSnapshotFromAuditData: GAIO=${gaioScore}, AI Summary=${aiSummaryScoreLive ?? 'null'}, rankingKpis=${rankingKpis ? 'present' : 'null'}, moneySharePct=${moneySharePct ?? 'null'}, aiSummaryComponents=${aiSummaryComponents ? 'present' : 'null'}, domainStrength=${domainStrength ? 'present' : 'null'}, eeatScore=${eeatScore ?? 'null'}`, 'info');
         
         return {
           gaioScore,
-          aiSummaryScore: scores.aiSummaryScore || (typeof auditData.ai_summary_score === 'number' ? auditData.ai_summary_score : null),
+          aiSummaryScore: aiSummaryScoreLive,
           aiSummaryComponents, // Added for AI Summary radar chart deltas
           pillars,
           auditKpis: computeAuditKpisFromAudit(auditData),
