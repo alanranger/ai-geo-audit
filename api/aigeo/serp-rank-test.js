@@ -47,6 +47,16 @@ import { buildSerpSurfaceStack } from '../../lib/keyword-ranking/serp-surface-st
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
+/**
+ * Paid DFS PAA expansion (people_also_ask_click_depth) — HARD OFF.
+ * DFS does not parse AIO-in-PAA sources yet (support 2026-10-19); scoring already
+ * ignores PAA. Cron / Ranking UI / refresh-core never pass click_depth today —
+ * this guard keeps it from being re-enabled accidentally.
+ * Note: organic SERP may still *list* a people_also_ask block when Google shows
+ * one — that is not an extra fetch, just part of the normal advanced payload.
+ */
+export const PAA_DFS_EXPAND_ENABLED = false;
+
 function normalizeDomain(value) {
   if (!value) return null;
   try {
@@ -453,6 +463,11 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
     if (locationCode != null) taskPayload.location_code = locationCode;
     else taskPayload.location_name = locationName;
     if (locationCoordinate) taskPayload.location_coordinate = locationCoordinate;
+    // Never send paid PAA click-depth expansion while AIO-in-PAA sources are unsupported.
+    if (PAA_DFS_EXPAND_ENABLED && opts.people_also_ask_click_depth != null) {
+      const d = Number(opts.people_also_ask_click_depth);
+      if (Number.isFinite(d) && d > 0) taskPayload.people_also_ask_click_depth = d;
+    }
 
     const dfResponse = await fetch(endpoint, {
       method: "POST",
