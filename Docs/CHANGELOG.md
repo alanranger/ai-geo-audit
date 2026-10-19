@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Keyword tracking cull v12 (money pages only)
+
+**Change:** Culled locked tracking from **155 → 87** keywords. Keep courses/workshops/mentoring/gifts (local + national) plus a thin **local/regional-only** services set; drop brand reviews, vol-0 junk, national service heads, synonym stacks, and off-brief terms. Canonical CSV: `config/keyword-tracking-locations-and-class-LOCKED-v12.csv`. Regenerated LOCKED JSON/JS mirrors (repo + `public/`). KEEP/DROP report: `Docs/KEYWORD-CULL-KEEP-DROP-v12.md`. Rebuild: `node scripts/cull-keyword-tracking-v12.mjs` then `node scripts/load-locked-v12.mjs` (REST persist needs non-legacy Supabase keys).
+
+**Files:** `config/keyword-tracking-locations-and-class-LOCKED-v12.csv`, `*keyword-tracking-*-LOCKED.*`, `lib/keyword-ranking/locked-config-merge.js`, `scripts/cull-keyword-tracking-v12.mjs`, `scripts/load-locked-v12.mjs`, `Docs/KEYWORD-CULL-KEEP-DROP-v12.md`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - Top-of-Page v4: commercial-pool volume floors
 
 **Change:** Top-of-Page hero (the **37** dial) now uses the same commercial demand pool as Ranking pills: **national ≥50 · local/regional ≥10**, missing volume excluded (no fake weight of 10). Brand/education stay on their class dials only when vol &gt; 0. Schema version **4** — live UI recomputes when stored audits are still v3. Server + client mirrors: `lib/audit/topOfPage.js`, `audit-dashboard.html`.
