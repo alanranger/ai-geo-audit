@@ -2,6 +2,16 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - App-wide LOCKED-v12 membership (no more 155 mix)
+
+**Change:** Full gap fix so AI Health / Ranking / dials / integrity / Money / Traditional SEO / CEO weekly all use the **87** LOCKED-v12 tracked set — not raw `keyword_rankings` (155). Server filters in `get-keyword-rankings`, dial scoring, save-ranking-ai-summary, citation-movement, keyword-alignment, config integrity (CSV → v12). Client filters hero + storage + trends; fail-closed tracked membership; Money/TradSEO load LOCKED JSON not v4 CSV.
+
+**Files:** `api/supabase/get-keyword-rankings.js`, `save-ranking-ai-summary.js`, `lib/keyword-ranking/ranking-dial-scores.js`, `tracked-set-v3.js`, `lib/configIntegrity/*`, `lib/audit/moneyPageRowIntelBridge.mjs`, `audit-dashboard.html`, `api/aigeo/citation-movement.js`, `keyword-alignment-review.js`, `llm-visibility-collect.js`, `lib/ceo-weekly/metrics.js`, `scripts/export-09-url-target-keywords.mjs`, `Docs/CHANGELOG.md`.
+
+**After deploy:** hard-refresh (clear `localStorage.rankingAiData` if still wrong); re-run Keyword & config check; optional `repair-ranking-dials` for stored dial columns.
+
+---
+
 ## [2026-10-19] - tracked-keywords-fallback.json → v12 (87)
 
 **Change:** `public/tracked-keywords-fallback.json` regenerated from LOCKED-v12 (87 keywords) so `/api/keywords/get` error fallback matches the money-page cull.

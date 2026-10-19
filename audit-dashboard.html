@@ -29189,13 +29189,19 @@
         return n >= Math.min(5, rows.length);
       };
 
+      const toLockedTrackedRows = (rows) => {
+        if (typeof filterTrackedRankingRows === 'function') return filterTrackedRankingRows(rows);
+        return Array.isArray(rows) ? rows : [];
+      };
+
       const persistHeroRows = (rows) => {
-        if (!rowsHaveSurfaceStacks(rows)) return;
-        window.rankingAiData = rows;
+        const locked = toLockedTrackedRows(rows);
+        if (!rowsHaveSurfaceStacks(locked)) return;
+        window.rankingAiData = locked;
         try {
-          const auditDate = rows.find((r) => r?.audit_date)?.audit_date || null;
+          const auditDate = locked.find((r) => r?.audit_date)?.audit_date || null;
           localStorage.setItem('rankingAiData', JSON.stringify({
-            combinedRows: rows,
+            combinedRows: locked,
             audit_date: auditDate,
             timestamp: new Date().toISOString(),
             source: 'fetchLatestAuditAndCombinedRows'
@@ -29210,14 +29216,14 @@
         }
       };
 
-      // Prefer live keyword_rankings (SoT for Surface / outcomes). Audit rankingAiData can lag a day.
+      // Prefer live keyword_rankings (SoT for Surface / outcomes), then clamp to LOCKED tracked set.
       if (typeof fetchRankingRowsFromKeywordRankings === 'function') {
         try {
-          const krRows = await fetchRankingRowsFromKeywordRankings(propertyUrl);
+          const krRows = toLockedTrackedRows(await fetchRankingRowsFromKeywordRankings(propertyUrl));
           if (rowsHaveSurfaceStacks(krRows)) {
             combinedRows = krRows;
             persistHeroRows(combinedRows);
-            debugLog(`[Optimisation] Loaded ${combinedRows.length} keywords from keyword_rankings`, 'success');
+            debugLog(`[Optimisation] Loaded ${combinedRows.length} LOCKED keywords from keyword_rankings`, 'success');
           }
         } catch (krErr) {
           debugLog(`[Optimisation] keyword_rankings primary failed: ${krErr.message}`, 'warn');
@@ -29250,10 +29256,11 @@
           latestAudit = await window.fetchLatestAuditFromSupabase(propertyUrl, false);
           if (!rowsHaveSurfaceStacks(combinedRows)) {
             const rankingAiData = latestAudit?.rankingAiData || latestAudit?.ranking_ai_data;
-            if (rankingAiData?.combinedRows?.length && rowsHaveSurfaceStacks(rankingAiData.combinedRows)) {
-              combinedRows = rankingAiData.combinedRows;
+            const auditRows = toLockedTrackedRows(rankingAiData?.combinedRows || []);
+            if (auditRows.length && rowsHaveSurfaceStacks(auditRows)) {
+              combinedRows = auditRows;
               persistHeroRows(combinedRows);
-              debugLog(`[Optimisation] Loaded ${combinedRows.length} keywords from latest audit rankingAiData (fallback)`, 'success');
+              debugLog(`[Optimisation] Loaded ${combinedRows.length} LOCKED keywords from latest audit rankingAiData (fallback)`, 'success');
             }
           }
         }
@@ -29279,6 +29286,7 @@
         }
       }
 
+      combinedRows = toLockedTrackedRows(combinedRows);
       if (!rowsHaveSurfaceStacks(combinedRows)) {
         clearPoisonRankingCache();
         combinedRows = [];
@@ -49740,12 +49748,17 @@
         if (typeof window.fetchLatestAuditAndCombinedRows === 'function') {
           const heroFetch = await window.fetchLatestAuditAndCombinedRows();
           if (Array.isArray(heroFetch?.combinedRows) && heroFetch.combinedRows.length) {
-            rankingRowsForHero = heroFetch.combinedRows;
+            rankingRowsForHero = typeof filterTrackedRankingRows === 'function'
+              ? filterTrackedRankingRows(heroFetch.combinedRows)
+              : heroFetch.combinedRows;
           }
         }
       } catch (_heroRowsErr) {
         rankingRowsForHero = [];
         debugLog(`Phase 1 hero: combinedRows hydrate failed: ${_heroRowsErr?.message || _heroRowsErr}`, 'warn');
+      }
+      if (typeof filterTrackedRankingRows === 'function') {
+        rankingRowsForHero = filterTrackedRankingRows(rankingRowsForHero);
       }
       const heroRowsReady = Array.isArray(rankingRowsForHero) && rankingRowsForHero.length > 0;
       const surfaceVisibilityHero = heroRowsReady ? computeSurfaceVisibilityRollup(rankingRowsForHero) : null;
@@ -53535,7 +53548,7 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
                   <th style="text-align: left; padding: 0.5rem; font-weight: 700; color: #1e293b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.4px; white-space: normal; line-height: 1.15;" title="Assigned target keyword from DB master (Stage 1)">
                     <div>Target</div><div>keyword</div>
                   </th>
-                  <th style="text-align: left; padding: 0.5rem; font-weight: 700; color: #1e293b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.4px; white-space: normal; line-height: 1.15;" title="Fight type from 151-instrument keyword_rankings where tracked">
+                  <th style="text-align: left; padding: 0.5rem; font-weight: 700; color: #1e293b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.4px; white-space: normal; line-height: 1.15;" title="Fight type from LOCKED tracked keyword_rankings where tracked">
                     <div>Fight</div><div>type</div>
                   </th>
                   <th style="text-align: left; padding: 0.5rem; font-weight: 700; color: #1e293b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.4px; white-space: normal; line-height: 1.15;" title="Cannibalisation: Google prefers another URL, or CANNIBAL-CANDIDATE flag">
@@ -68081,18 +68094,24 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         window.__KEYWORD_LOCATION_LOCKED_BY_KEYWORD = locMap;
       } catch (_e) { /* script tag fallback */ }
     }
-    const TRACKED_SET_CHANGE_DATE = '2026-07-14';
+      const TRACKED_SET_CHANGE_DATE = '2026-10-19';
 
     function isTrackedRankingKeyword(keyword) {
       const k = String(keyword || '').trim();
       if (!k || REMOVED_FROM_TRACKING_EXACT.includes(k)) return false;
+      const key = k.toLowerCase();
       const set = window.__aigeoTrackedKeywordSet;
-      if (set && set.size > 0) return set.has(k.toLowerCase());
+      if (set && set.size > 0) return set.has(key);
       const locMap = window.__KEYWORD_LOCATION_LOCKED_BY_KEYWORD;
       if (locMap && typeof locMap === 'object' && Object.keys(locMap).length > 0) {
-        return !!locMap[k.toLowerCase()];
+        return !!locMap[key];
       }
-      return true;
+      const classMap = window.__KEYWORD_CLASS_LOCKED_BY_KEYWORD;
+      if (classMap && typeof classMap === 'object' && Object.keys(classMap).length > 0) {
+        return Object.prototype.hasOwnProperty.call(classMap, key);
+      }
+      // Fail closed: do not inflate dials with untracked historical rows.
+      return false;
     }
     function filterTrackedRankingRows(rows) {
       return (Array.isArray(rows) ? rows : []).filter((row) => isTrackedRankingKeyword(row?.keyword));
@@ -70199,7 +70218,10 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         .filter((d) => d >= baseline)
         .sort();
       for (const date of dates) {
-        const rows = await fetchRankingRowsFromKeywordRankings(propertyUrl, date);
+        const raw = await fetchRankingRowsFromKeywordRankings(propertyUrl, date);
+        const rows = typeof filterTrackedRankingRows === 'function'
+          ? filterTrackedRankingRows(raw)
+          : (raw || []);
         if (!rows?.length) continue;
         const hasStack = rows.some((r) => Array.isArray(r.serp_surface_stack) && r.serp_surface_stack.length > 0);
         if (!hasStack) continue;
@@ -84746,9 +84768,12 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
 
       function getRankingAiRowsFromStorage() {
         const local = dashboardSafeJsonParse(localStorage.getItem('rankingAiData'), null);
-        if (local && Array.isArray(local.combinedRows)) return local.combinedRows;
-        if (Array.isArray(window.rankingAiData)) return window.rankingAiData;
-        return [];
+        const raw = (local && Array.isArray(local.combinedRows))
+          ? local.combinedRows
+          : (Array.isArray(window.rankingAiData) ? window.rankingAiData : []);
+        return typeof filterTrackedRankingRows === 'function'
+          ? filterTrackedRankingRows(raw)
+          : raw;
       }
 
       function computeMoneyCitationsShareFromRankingRows(rows) {
@@ -96411,24 +96436,13 @@ Confidence: ${c}`;
       }
       const map = new Map();
       try {
-        const res = await fetch('/config/keyword-tracking-locations-and-class-LOCKED-v4.csv', { cache: 'no-store' });
-        const text = await res.text();
-        const lines = text.replace(/^\uFEFF/, '').trim().split(/\r?\n/);
-        for (let i = 1; i < lines.length; i += 1) {
-          const cols = [];
-          let cur = '';
-          let q = false;
-          const line = lines[i];
-          for (let j = 0; j < line.length; j += 1) {
-            const c = line[j];
-            if (c === '"') { q = !q; continue; }
-            if (c === ',' && !q) { cols.push(cur); cur = ''; continue; }
-            cur += c;
-          }
-          cols.push(cur);
-          const kw = String(cols[0] || '').trim().toLowerCase();
-          const cls = String(cols[3] || '').trim();
-          if (kw) map.set(kw, cls || 'tracked');
+        const res = await fetch('/keyword-tracking-locations-LOCKED.json', { cache: 'no-store' });
+        const json = await res.json();
+        for (const [kwRaw, row] of Object.entries(json?.by_keyword || {})) {
+          const kw = String(kwRaw || '').trim().toLowerCase();
+          if (!kw) continue;
+          const cls = String(row?.keyword_class || '').trim() || 'tracked';
+          map.set(kw, cls);
         }
       } catch (_e) { /* ignore */ }
       window.__traditionalSeoLocked151ClassMap = map;

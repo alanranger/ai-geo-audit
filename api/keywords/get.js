@@ -1,8 +1,8 @@
 /**
  * Get the canonical tracked keyword list for Ranking & AI scans.
  *
- * Source priority (2026-07-14):
- *   1. Locked config JSON (keyword-tracking-class-LOCKED / locations) — 98 keywords
+ * Source priority (2026-10-19 / LOCKED-v12):
+ *   1. Locked config JSON (keyword-tracking-*-LOCKED) — money-page set (~87)
  *   2. Bundled public/tracked-keywords-fallback.json
  *   3. audit_results.ranking_ai_data.targetKeywords (filtered)
  *   4. Largest keyword_rankings snapshot (filtered) — last resort only

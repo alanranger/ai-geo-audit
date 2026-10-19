@@ -13,6 +13,7 @@
 import { computeSurfaceVisibilityRollup } from '../../lib/audit/surfaceScores.js';
 import { computeTopOfPageRollup } from '../../lib/audit/topOfPage.js';
 import { summarizeSerpCaptureCoverage } from '../../lib/keyword-ranking/dfs-serp-quality.js';
+import { filterTrackedRows } from '../../lib/keyword-ranking/tracked-set-v3.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
@@ -113,11 +114,15 @@ export default async function handler(req, res) {
       });
     }
 
-    const rankingRows = await fetchRankingRows(supabaseUrl, supabaseKey, propertyUrl, auditDate);
+    const rankingRowsRaw = await fetchRankingRows(supabaseUrl, supabaseKey, propertyUrl, auditDate);
+    const rankingRows = filterTrackedRows(rankingRowsRaw);
     const { surface, top } = resolveSurfaceTopFromBodyOrRows(body, rankingRows);
     const captureCoverage = Array.isArray(rankingRows) && rankingRows.length
       ? summarizeSerpCaptureCoverage(rankingRows)
       : null;
+    if (summary && typeof summary === 'object') {
+      summary.total_keywords = rankingRows.length;
+    }
 
     // Score + pillar columns only. Never replace ranking_ai_data here — a prior
     // build wrote combinedRows:[] and wiped the audit snapshot stacks/capture_status.

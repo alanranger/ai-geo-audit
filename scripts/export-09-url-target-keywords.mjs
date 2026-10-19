@@ -1,5 +1,5 @@
 /**
- * Export 09-url-target-keywords.csv from DB SoT + LOCKED-v4.
+ * Export 09-url-target-keywords.csv from DB SoT + LOCKED-v12.
  * UTF-8 BOM for Excel. Writes shared-resources, config/, Drive outbox.
  *
  * Usage: node scripts/export-09-url-target-keywords.mjs
@@ -15,7 +15,7 @@ dotenv.config({ path: path.join(root, '.env.local') });
 dotenv.config({ path: path.join(root, '.env') });
 
 const PROPERTY = 'https://www.alanranger.com';
-const lockedPath = path.join(root, 'config/keyword-tracking-locations-and-class-LOCKED-v11.csv');
+const lockedPath = path.join(root, 'config/keyword-tracking-locations-and-class-LOCKED-v12.csv');
 const outRepo = path.join(root, '../alan-shared-resources/csv/09-url-target-keywords.csv');
 const outAudit = path.join(root, 'config/09-url-target-keywords.csv');
 const outDrive = path.join(

@@ -107,6 +107,7 @@ async function findSevenDayBaseline(supabase, propertyUrl, currentDate) {
 
 async function loadSnapshot(supabase, propertyUrl, auditDate) {
   if (!auditDate) return null;
+  const { filterTrackedRows } = await import('../../lib/keyword-ranking/tracked-set-v3.js');
   const { data, error } = await supabase
     .from('keyword_rankings')
     .select(SNAPSHOT_COLS)
@@ -116,7 +117,7 @@ async function loadSnapshot(supabase, propertyUrl, auditDate) {
   if (error) throw error;
   return {
     audit_date: auditDate,
-    rows: Array.isArray(data) ? data : [],
+    rows: filterTrackedRows(Array.isArray(data) ? data : []),
   };
 }
 

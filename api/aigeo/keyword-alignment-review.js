@@ -67,7 +67,8 @@ async function latestRankingRows(supabase, propertyUrl) {
     .eq('audit_date', auditDate)
     .limit(2000);
   if (rows.error) throw rows.error;
-  return { auditDate, rows: rows.data || [] };
+  const { filterTrackedRows } = await import('../../lib/keyword-ranking/tracked-set-v3.js');
+  return { auditDate, rows: filterTrackedRows(rows.data || []) };
 }
 
 async function loadTraditionalSources(supabase, propertyUrl) {

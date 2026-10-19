@@ -4,6 +4,7 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
+import { filterTrackedRows } from '../../lib/keyword-ranking/tracked-set-v3.js';
 
 const need = (k) => {
   const v = process.env[k];
@@ -306,11 +307,17 @@ export default async function handler(req, res) {
     }
 
     const keywords = await queryKeywordsForProperty(supabase, auditDate, propertyUrl);
+    // Default: LOCKED tracked set only (v12 cull). Pass all=1 for admin/raw dumps.
+    const includeAll = String(req.query?.all || '').trim() === '1'
+      || String(req.query?.all || '').toLowerCase() === 'true';
+    const out = includeAll ? (keywords || []) : filterTrackedRows(keywords || []);
 
     return sendJSON(res, 200, {
       status: 'ok',
       data: {
-        keywords: keywords || []
+        keywords: out,
+        tracked_filter: includeAll ? 'all' : 'locked',
+        tracked_count: out.length,
       }
     });
 
