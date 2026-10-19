@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Monday CEO Section C: LOCKED-v12 + commercial-pool demand
+
+**Change:** CEO weekly AI front now uses the same measurement as Ranking / Site AI Health: LOCKED-v12 filter on rows, surface bars = money-class won÷served, plus Rank #1 / Top-10 / Striking **commercial-pool demand %** (national ≥50 · local/regional ≥10). Email Section C shows dials + demand line + methodology note.
+
+**Files:** `lib/keyword-ranking/commercial-pool-demand.js`, `lib/ceo-weekly/tabMetrics.js`, `email.js`, `metrics.js`, `Docs/CHANGELOG.md`
+
 ## [2026-10-19] - Rank #1 header delta from prior ranks when pillar missing
 
 **Change:** Stored `ranking_ai_pillar_scores` never had `rank1Demand`, so the Rank #1 tile stayed on a flat "—" while Top-10 / Striking showed count/% deltas. When previous pillars lack `rank1Demand`, the UI now rebuilds it from the prior audit’s keyword rows (LOCKED-filtered, same pool rules) so the header badge matches the per-keyword `new`/↑↓ tags.
