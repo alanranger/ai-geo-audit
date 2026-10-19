@@ -15129,7 +15129,7 @@
             <div class="hero-status" id="ranking-ai-hero-status">–</div>
             <div class="hero-coverage" id="ranking-ai-hero-coverage" hidden></div>
             <p class="hero-redefinition" id="ranking-ai-hero-redefinition">
-              How close you get to the top of Google's page, on any surface. Score redefined (v3) — 151-kw comparator floor 2026-07-18.
+              How close you get to the top of Google's page, on any surface. Score v4 — commercial pool (national ≥50 · local/regional ≥10); same floors as Ranking demand tiles.
             </p>
             <div class="hero-delta" id="ranking-ai-hero-delta" data-dir="flat" hidden>No previous audit yet</div>
             <div class="hero-weakest" id="ranking-ai-hero-weakest">–</div>
@@ -68330,10 +68330,11 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
     }
 
     // ================================================================
-    // Top-of-Page Score (Release 0, schema_version 3) — client mirror of
+    // Top-of-Page Score (schema_version 4) — client mirror of
     // lib/audit/topOfPage.js (keep formulas in sync with that file).
+    // v4: commercial-pool volume floors (national ≥50 · local/regional ≥10).
     // ================================================================
-    const TOP_OF_PAGE_SCHEMA_VERSION = 3;
+    const TOP_OF_PAGE_SCHEMA_VERSION = 4;
     const TOP_OF_PAGE_BASELINE_DATE = '2026-07-16';
     const TOP_SLOT_VALUES = [100, 75, 55, 40, 30, 22];
     const TOP_OWNABLE_TYPES = new Set(['ai_overview', 'local_pack', 'people_also_ask', 'featured_snippet', 'organic']);
@@ -69263,7 +69264,9 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         }
       }
       const stored = hydrateStoredTopOfPageFromSources(list) || getCurrentStoredTopOfPageObject();
-      if (stored && storedTopOfPageMatchesRows(stored, list) && Number(stored.overall) > 0) {
+      // v4+ only — older stored rollups ignore commercial-pool floors.
+      if (stored && Number(stored.schema_version) >= TOP_OF_PAGE_SCHEMA_VERSION
+        && storedTopOfPageMatchesRows(stored, list) && Number(stored.overall) > 0) {
         const regrouped = recomputeTopOfPageByClassFromStored(stored, list, demandWeighted);
         if (regrouped) {
           return enrichTopOfPageRollup({ ...regrouped, coverage, provisional: coverage.provisional });
@@ -69769,13 +69772,22 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
       if (!parts.length) return 'No owned surfaces on the served page yet → 0.';
       return parts.join('. ') + '.';
     }
+    function meetsTopOfPageDemandPool(row, keywordClass) {
+      const cls = keywordClass || row?.keyword_class || 'national-money';
+      const vol = Number(row?.search_volume);
+      if (!Number.isFinite(vol) || vol <= 0) return false;
+      if (cls === 'brand' || cls === 'education') return true;
+      if (cls === 'national-money') return vol >= 50;
+      if (cls === 'local-money' || cls === 'regional-money') return vol >= 10;
+      return false;
+    }
     function topDemandWeightedMean(scoredRows) {
       let wSum = 0;
       let sSum = 0;
       for (const r of scoredRows || []) {
         const row = r.row || r;
-        const v = row?.search_volume;
-        const w = (v == null || !Number.isFinite(Number(v)) || Number(v) <= 0) ? 10 : Number(v);
+        const w = Number(row?.search_volume);
+        if (!Number.isFinite(w) || w <= 0) continue;
         const score = r.score != null ? r.score : r.top?.score;
         if (score == null) continue;
         wSum += w;
@@ -69790,8 +69802,10 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
       const byClass = { 'local-money': [], 'regional-money': [], 'national-money': [], brand: [], education: [] };
       for (const row of rows || []) {
         if (!rankingIsMeasurable(row)) continue;
-        const top = computeKeywordTopOfPageScore(row);
-        const entry = { row, top, score: top.score, keyword: row.keyword };
+        const classified = resolveClassificationAtRender(row);
+        const top = computeKeywordTopOfPageScore(classified);
+        if (!meetsTopOfPageDemandPool(classified, top.keyword_class)) continue;
+        const entry = { row: classified, top, score: top.score, keyword: classified.keyword };
         perKeyword.push(entry);
         if (byClass[top.keyword_class]) byClass[top.keyword_class].push(entry);
       }
@@ -70506,6 +70520,7 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
     }
     function getStoredPillarSchemaVersion(scores) {
       if (!scores || typeof scores !== 'object') return 1;
+      if (scores.topOfPage && Number(scores.topOfPage.schema_version) >= 4) return 4;
       if (scores.topOfPage && Number(scores.topOfPage.schema_version) >= 3) return 3;
       if (scores.surfaceVisibility && Number(scores.surfaceVisibility.schema_version) >= 2) return 2;
       if (Number(scores.schema_version) >= 2) return 2;

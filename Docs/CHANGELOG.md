@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Top-of-Page v4: commercial-pool volume floors
+
+**Change:** Top-of-Page hero (the **37** dial) now uses the same commercial demand pool as Ranking pills: **national ≥50 · local/regional ≥10**, missing volume excluded (no fake weight of 10). Brand/education stay on their class dials only when vol &gt; 0. Schema version **4** — live UI recomputes when stored audits are still v3. Server + client mirrors: `lib/audit/topOfPage.js`, `audit-dashboard.html`.
+
+**Files:** `lib/audit/topOfPage.js`, `audit-dashboard.html`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - Rank #1 tile title + keep title-first styling
 
 **Change:** #1 tile label is **Rank #1** (dropped redundant “(demand)”). RAG class updates no longer strip `metric-pill--title-first`, so Rank #1 / Top-10 demand match the same title→subtitle format as Top-10 keywords and Striking distance.
