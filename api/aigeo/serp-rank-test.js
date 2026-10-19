@@ -425,10 +425,9 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
   const endpoint =
     "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
 
-  // 2026-04-22: expand_ai_overview is the main cost driver (~3-5x per request).
-  // Default is now OFF. Callers opt in via ?ai_overview=1 on the handler, which
-  // sets expandAiOverview: true here. has_ai_overview flag (from the item list)
-  // still works without expansion — only the full citation list is skipped.
+  // expand_ai_overview is the main cost driver (~3-5x per request).
+  // Default OFF for ad-hoc calls. Monday Ranking + app full refresh / refresh-keywords
+  // pass ai_overview: true so Surface AIO ownership uses real citations.
   const expandAiOverview = Boolean(opts.expandAiOverview);
   const locationName = opts.location_name || "United Kingdom";
   const locationCode = opts.location_code != null ? opts.location_code : null;

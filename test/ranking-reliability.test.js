@@ -404,7 +404,7 @@ test('shared confirmation coverage summary for Ranking/Health/CEO', () => {
 
 test('defaults for spend limits are conservative and visible', () => {
   const limits = getDfsSpendLimits();
-  assert.equal(limits.run_cost_cap_usd, 2);
+  assert.equal(limits.run_cost_cap_usd, 6);
   assert.equal(limits.confirm_max_per_run, 40);
   assert.equal(limits.confirm_max_per_keyword, 1);
   assert.equal(limits.thin_max_attempts, 3);

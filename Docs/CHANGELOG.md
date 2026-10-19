@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Enable AI Overview citation expand on Ranking audits
+
+**Change:** Monday Ranking cron (`dashboard-parity-tick`) and app Ranking & AI full refresh now pass `ai_overview: true` to `serp-rank-test` so DFS expands classic AI Overview citations (`load_async_ai_overview` + `expand_ai_overview`). Surface AIO ownership / dial weight is grounded in citation facts, not presence-only. Soft DFS run cost cap raised **$2 → $6** (covers ~155 kw × ~$0.025 + retries). Extra cost ~$2.50–$4 per full scan. Also applies via `refresh-core` / `refresh-keywords` / `keyword-ranking-ai` cron.
+
+**Files:** `lib/keyword-ranking/refresh-core.js`, `dashboard-parity-tick.js`, `dfs-spend-limits.js`, `audit-dashboard.html`, `test/ranking-reliability.test.js`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - PAA Surface disabled until DFS parses AIO-in-PAA
 
 **Change:** Fix 3 parser ready — `domainsFromPaaExpandedElement` / `collectPaaOwnerDomains` read classic PAA domain/url and AIO-in-PAA `items[].references[]`. DFS confirmed they do **not** currently parse AI Overview sources inside People Also Ask (null/async stubs), so PAA is temporarily excluded from Surface Visibility scoring (`PAA_SURFACE_SCORING_ENABLED=false`), gap callout, dial weight redistribution, **Where you stand** gap/working chips, and surface-capture score. Census + Outcomes show *People Also Ask* in italics with `(not scored — DFS does not parse AIO-in-PAA sources yet)`. Paid DFS PAA expand (`people_also_ask_click_depth`) hard-off via `PAA_DFS_EXPAND_ENABLED=false` in `serp-rank-test.js` — Monday cron / refresh never passed it; guard blocks accidental re-enable. Organic SERP may still list a PAA block when Google shows one (not an extra fetch). Re-enable scoring + expand when DFS hydrates those references.
