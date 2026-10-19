@@ -71182,6 +71182,21 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
       };
     }
 
+    // Older ranking_ai_pillar_scores rows predate rank1Demand. Rebuild it from
+    // the same prior keyword rows used for per-keyword "new"/↑↓ badges so the
+    // Rank #1 header delta matches Top-10 / Striking distance behaviour.
+    function deriveRank1DemandPillarFromPriorRows() {
+      const raw = Array.isArray(window.__rankingPriorRankRows) ? window.__rankingPriorRankRows : null;
+      if (!raw?.length || typeof computeRank1DemandMetrics !== 'function') return null;
+      const tracked = (typeof filterTrackedRankingRows === 'function')
+        ? filterTrackedRankingRows(raw)
+        : raw;
+      const measurable = tracked.filter((r) => !rankingCaptureFailed(r));
+      if (!measurable.length) return null;
+      const m = computeRank1DemandMetrics(measurable);
+      return { count: m.count, total: m.poolSize, pct: m.demandPct };
+    }
+
     function renderRankingPillarLabelDeltas(currentScores) {
       const state = window.__rankingPillarScoreDeltaState || {};
       const curr = normalisePillarScoresShape(currentScores) || {};
@@ -71191,6 +71206,7 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
       // renderHeroDelta / Site AI Health only.
       const prev = normalisePillarScoresShape(state.previous) || {};
       const prevDate = state.previousAuditDate || null;
+      const prevRank1 = prev.rank1Demand || deriveRank1DemandPillarFromPriorRows();
       setMetricPillLabelDelta('ranking-card-ai-coverage', curr.aiCoverage, prev.aiCoverage, prevDate);
       setMetricPillLabelDelta('ranking-card-ai-citations', curr.aiCitation, prev.aiCitation, prevDate);
       setMetricPillLabelDelta('ranking-card-ai-citations-money', curr.moneyCitations, prev.moneyCitations, prevDate);
@@ -71201,7 +71217,7 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
       setMetricPillLabelDelta('ranking-card-ai-share-of-voice', curr.shareOfVoice, prev.shareOfVoice, prevDate);
       setMetricPillLabelDelta('ranking-card-top10-keywords', curr.top10Keywords, prev.top10Keywords, prevDate);
       setMetricPillLabelDelta('ranking-card-rank11to20-keywords', curr.rank11to20Keywords, prev.rank11to20Keywords, prevDate);
-      setMetricPillLabelDelta('ranking-card-rank1-demand', curr.rank1Demand, prev.rank1Demand, prevDate);
+      setMetricPillLabelDelta('ranking-card-rank1-demand', curr.rank1Demand, prevRank1, prevDate);
     }
 
     // ----------------------------------------------------------------

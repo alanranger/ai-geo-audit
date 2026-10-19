@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Rank #1 header delta from prior ranks when pillar missing
+
+**Change:** Stored `ranking_ai_pillar_scores` never had `rank1Demand`, so the Rank #1 tile stayed on a flat "—" while Top-10 / Striking showed count/% deltas. When previous pillars lack `rank1Demand`, the UI now rebuilds it from the prior audit’s keyword rows (LOCKED-filtered, same pool rules) so the header badge matches the per-keyword `new`/↑↓ tags.
+
+**Files:** `audit-dashboard.html`
+
 ## [2026-10-19] - Dashboard AI Summary Likelihood matches AI Health
 
 **Change:** Dashboard dial was computing AI Summary with **citation rate = 0** (→ 38) while AI Health used the live surface-outcomes citation rate (→ 45). Both `computeDashboardSnapshot` paths now pull AI-citation % from surface outcomes before `computeAiSummaryLikelihood`.
