@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - tracked-keywords-fallback.json → v12 (87)
+
+**Change:** `public/tracked-keywords-fallback.json` regenerated from LOCKED-v12 (87 keywords) so `/api/keywords/get` error fallback matches the money-page cull.
+
+**Files:** `public/tracked-keywords-fallback.json`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - Keyword tracking cull v12 (money pages only)
 
 **Change:** Culled locked tracking from **155 → 87** keywords. Keep courses/workshops/mentoring/gifts (local + national) plus a thin **local/regional-only** services set; drop brand reviews, vol-0 junk, national service heads, synonym stacks, and off-brief terms. Canonical CSV: `config/keyword-tracking-locations-and-class-LOCKED-v12.csv`. Regenerated LOCKED JSON/JS mirrors (repo + `public/`). Ranking membership now follows LOCKED JSON (`tracked-set-v3.js` + dashboard filter + `get-latest-audit` prefers bundled v12). KEEP/DROP report: `Docs/KEYWORD-CULL-KEEP-DROP-v12.md`. Rebuild: `node scripts/cull-keyword-tracking-v12.mjs` then `node scripts/load-locked-v12.mjs` (REST persist needs non-legacy Supabase keys).
