@@ -67015,6 +67015,23 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       return true;
     }
 
+    /** Empty/incomplete/error + unverified absences — dashboard Ranking gap-fill queue. */
+    function listRankingGapFillKeywords(rows, limit = 40) {
+      const out = [];
+      const seen = new Set();
+      for (const row of rows || []) {
+        if (!rankingCaptureFailed(row) && !rankingIsUnverifiedAbsence(row)) continue;
+        const kw = String(row?.keyword || '').trim();
+        if (!kw) continue;
+        const key = kw.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(kw);
+        if (out.length >= limit) break;
+      }
+      return out;
+    }
+
     const GEO_METHOD_BREAK_DATE = '2026-09-28';
     const GEO_METHOD_BREAK_NOTE =
       'Local pin series restored. Do not compare to 2026-09-28 city-code-only Local ranks; city-wide is a separate method.';
@@ -73112,6 +73129,96 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         
         RankingAiProgressModal.updateProgress(50, 1);
         RankingAiProgressModal.updateCounts(`✓ Retrieved SERP data for ${allSerpResults.length}/${keywords.length} keywords (saved incrementally)`);
+
+        // Gap-fill: retry empty/incomplete/error + unverified absences with a
+        // FRESH spend budget (main-run confirm-cap exhaustion must not stick).
+        const GAP_FILL_MAX_ROUNDS = 2;
+        for (let gapRound = 1; gapRound <= GAP_FILL_MAX_ROUNDS; gapRound++) {
+          if (scanAborted) throw new Error('Scan aborted by user');
+          const gapKeywords = listRankingGapFillKeywords(allSerpResults, 40);
+          if (!gapKeywords.length) break;
+          RankingAiProgressModal.updateCounts(
+            `Gap-fill round ${gapRound}: retrying ${gapKeywords.length} empty/unverified keyword(s)…`
+          );
+          debugLog(`📊 Gap-fill round ${gapRound}: ${gapKeywords.length} keywords`, 'info');
+          let gapSpendState = null; // fresh budget each round
+          for (let gi = 0; gi < gapKeywords.length; gi++) {
+            if (scanAborted) throw new Error('Scan aborted by user');
+            const gkw = gapKeywords[gi];
+            RankingAiProgressModal.updateCounts(
+              `Gap-fill ${gi + 1}/${gapKeywords.length} (round ${gapRound}): ${gkw}`
+            );
+            try {
+              const gapBaselines = {};
+              if (rankingBaselines[gkw]) gapBaselines[gkw] = rankingBaselines[gkw];
+              const gapRes = await fetch(mod.SERP_RANK_ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  keywords: [gkw],
+                  depth: 50,
+                  ai_overview: true,
+                  spend_state: gapSpendState || undefined,
+                  baselines: Object.keys(gapBaselines).length ? gapBaselines : undefined,
+                }),
+              });
+              if (!gapRes.ok) {
+                debugLog(`⚠ Gap-fill failed for "${gkw}": HTTP ${gapRes.status}`, 'warn');
+                continue;
+              }
+              const gapJson = await gapRes.json();
+              if (gapJson?.spend_limits) gapSpendState = gapJson.spend_limits;
+              const per = Array.isArray(gapJson?.per_keyword) ? gapJson.per_keyword : [];
+              if (!per.length) continue;
+              const byKey = new Map(per.map((r) => [String(r.keyword || '').trim().toLowerCase(), r]));
+              allSerpResults = allSerpResults.map((row) => {
+                const k = String(row.keyword || '').trim().toLowerCase();
+                return byKey.has(k) ? byKey.get(k) : row;
+              });
+              if (propertyUrl) {
+                const gapCombined = per.map((row) => ({
+                  keyword: row.keyword,
+                  location_name: row.location_name || null,
+                  location_code: row.location_code ?? null,
+                  location_coordinate: row.location_coordinate || null,
+                  keyword_class: row.keyword_class || null,
+                  best_rank_group: row.best_rank_group,
+                  best_rank_absolute: row.best_rank_absolute,
+                  best_url: row.best_url || null,
+                  best_title: row.best_title || '',
+                  has_ai_overview: !!row.has_ai_overview,
+                  ai_overview_present_any: row.ai_overview_present_any === true || row.has_ai_overview === true,
+                  local_pack_present_any: row.local_pack_present_any === true,
+                  paa_present_any: row.paa_present_any === true,
+                  featured_snippet_present_any: row.featured_snippet_present_any === true,
+                  local_pack_position: row.local_pack_position ?? null,
+                  kp_present: row.kp_present === true,
+                  kp_ours: row.kp_ours === true,
+                  serp_features: row.serp_features || null,
+                  serp_surface_stack: Array.isArray(row.serp_surface_stack) ? row.serp_surface_stack : null,
+                  serp_depth: row.serp_depth ?? 50,
+                  search_volume: row.search_volume ?? null,
+                  crawl_incomplete: row.crawl_incomplete === true,
+                  organic_count: row.organic_count != null ? Number(row.organic_count) : null,
+                  dfs_cost: row.dfs_cost != null ? Number(row.dfs_cost) : null,
+                  error: row.error || null,
+                  segment: 'money',
+                }));
+                await saveRankingAiDataIncremental(gapCombined, auditDate, propertyUrl);
+              }
+            } catch (gapErr) {
+              debugLog(`⚠ Gap-fill error for "${gkw}": ${gapErr.message}`, 'warn');
+            }
+          }
+        }
+        {
+          const stillGaps = listRankingGapFillKeywords(allSerpResults, 40);
+          RankingAiProgressModal.updateCounts(
+            stillGaps.length
+              ? `✓ SERP done — ${stillGaps.length} still provisional after gap-fill`
+              : `✓ SERP done — gap-fill cleared provisional rows`
+          );
+        }
         
         // Step 2: Fetch Google AI Mode (udm=50). AI Overview is already covered
         // by the SERP batch above via load_async_ai_overview + expand_ai_overview.

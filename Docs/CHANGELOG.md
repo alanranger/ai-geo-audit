@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Dashboard Ranking gap-fill covers unverified absences
+
+**Change:** App Ranking & AI full scan now runs the same end-of-SERP gap-fill as Monday parity: retries empty/incomplete/error **and** unverified absences (`exhausted_budget` / `unconfirmed_unstable` / `partial_failure`) with a **fresh** DFS spend budget so confirm-cap leftovers from the main pass get a second look. Cap raised 20 → 40 keywords × 2 rounds. Manual repair: `node scripts/gap-fill-ranking-gaps.mjs --date=YYYY-MM-DD`.
+
+**Files:** `lib/keyword-ranking/gap-fill-empty.js`, `dashboard-parity-tick.js`, `audit-dashboard.html`, `scripts/gap-fill-ranking-gaps.mjs`, `test/gap-fill-empty.test.js`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - Enable AI Overview citation expand on Ranking audits
 
 **Change:** Monday Ranking cron (`dashboard-parity-tick`) and app Ranking & AI full refresh now pass `ai_overview: true` to `serp-rank-test` so DFS expands classic AI Overview citations (`load_async_ai_overview` + `expand_ai_overview`). Surface AIO ownership / dial weight is grounded in citation facts, not presence-only. Soft DFS run cost cap raised **$2 → $6** (covers ~155 kw × ~$0.025 + retries). Extra cost ~$2.50–$4 per full scan. Also applies via `refresh-core` / `refresh-keywords` / `keyword-ranking-ai` cron.
