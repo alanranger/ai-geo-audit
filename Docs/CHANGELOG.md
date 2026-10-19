@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Monday Ranking Acceptance Gate
+
+**Change:** Post-finalize acceptance gate fails the audit day (`ranking_incomplete`) unless: stack/capture completeness, pack flag↔stack integrity (0 mismatches), ≥90% measurable, local/national class counts ≥85% of prior complete day, Surface drop+pack integrity, dials scored from DB not slim memory. CEO / get-latest already skip incomplete days; fallback banner now shows acceptance reason. Stops shipping a broken Monday dial as “latest.”
+
+**Files:** `lib/keyword-ranking/ranking-acceptance-gate.js`, `ranking-dial-scores.js`, `dashboard-parity-tick.js`, `ranking-completeness.js`, `lib/ceo-weekly/tabMetrics.js`, `test/ranking-acceptance-gate.test.js`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - Fix local_pack_present_any undercount (Surface dial)
 
 **Change:** Two layered bugs. (A) DFS `item_types` can omit `local_pack` while `items[]`/stack still have it — write path now trusts items+stack. (B) Monday multi-tick `slimRankingForPersist` dropped `local_pack_present_any` but kept stack; finalize then overwrote good batch saves with `false` (why only 2026-10-19 of recent weeks — first full multi-tick complete finalize after the Oct-5 stack-preserving filter). Slim now keeps/recovers presence flags; `buildCombinedRows` recovers pack from stack/features; Surface scoring uses `resolvePackPresence`. Oct-19 rows backfilled; dial 20→33.
