@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Position #1 demand-weighted tile + split Top-10 bands
+
+**Change:** Top-10 coverage details now use exclusive bands **Rank 1 · Ranks 2–3 · 4–10** (no double-count). New Ranking tile **Position #1 (demand-weighted)** = share of measured search demand at organic #1, with keyword list + pill delta. “Where you stand → Organic (top 3)” unchanged (podium signal).
+
+**Files:** `audit-dashboard.html`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - Ranking Wins/Striking tiles: restore deltas + per-keyword rank change
 
 **Change:** Pill label deltas on Wins / Striking distance (and other count pills) were blank because live pillar objects lack `topOfPage.schema_version` while the previous audit has schema 3 — the cross-schema gate wiped previous counts. Count deltas now always compare when previous exists. Each keyword in those list tiles shows ↑/↓ vs previous audit rank (or `new`).
