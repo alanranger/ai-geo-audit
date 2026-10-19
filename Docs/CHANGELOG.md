@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Ranking tiles: band order + AI Overview section
+
+**Change:** Metric pills now read in rank order — Where you stand → Position #1 → Top-10 demand → Top-10 keywords → Striking distance — then a separate **Google AI Overviews** section below (not mixed into the classic rank row). Top-of-Page hero score (37) is unchanged: that dial is surface ownership maths, not the commercial-pool demand pills.
+
+**Files:** `audit-dashboard.html`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - Ranking bands: commercial-pool demand (class-aware floors)
 
 **Change:** Top-10, Position #1, Wins (1–10), and Striking distance (11–20) now score over a **commercial demand pool**, not all 155 keywords equally. Floors: **national-money ≥50**, **local/regional-money ≥10**; brand/education and missing volume excluded. Headline = `N of pool · D% demand` (volume share in band). Details add **est. clicks** via a fixed CTR curve (#1 ~28%, 2–3 ~12%, 4–10 ~5%, 11–20 ~2%). Local/city terms keep a lower floor so genuine low-vol locals are not cut with weak national long-tails.

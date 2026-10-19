@@ -1635,7 +1635,7 @@
       display: flex !important;
     }
 
-    .aigeo-panel[data-panel="ranking"] > *:not(.ranking-metric-pills):not(.ranking-cards-side-by-side):not(.ranking-priority-matrix-section):not(.ranking-table-section):not(.ranking-details-grid):not(.ranking-filter-banner):not(.ranking-ai-legacy-diagnostics):not([hidden]) {
+    .aigeo-panel[data-panel="ranking"] > *:not(.ranking-metric-pills):not(.ranking-metric-section-label):not(.ranking-cards-side-by-side):not(.ranking-priority-matrix-section):not(.ranking-table-section):not(.ranking-details-grid):not(.ranking-filter-banner):not(.ranking-ai-legacy-diagnostics):not([hidden]) {
       width: 100% !important;
       display: block !important;
       clear: both !important;
@@ -1699,17 +1699,29 @@
     }
 
     /* Section B: Metric pills — uniform 3-col grid (mock-up tiles-two-rows v2).
-       Five tiles flow into six equal cells; sixth cell intentionally empty.
-       No per-tile spans or width overrides. */
+       Organic rank bands and AI Overview are separate grids so the page reads
+       #1 → top-10 → striking, then AI on its own row. */
+    .ranking-metric-section-label {
+      margin: 1.25rem 0 0.45rem;
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #475569;
+    }
+    .ranking-metric-section-label:first-child { margin-top: 1rem; }
     .ranking-metric-pills {
       display: grid !important;
       grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
       gap: 1rem;
       align-items: start;
-      margin-top: 1rem;
-      margin-bottom: 1.5rem;
+      margin-top: 0.35rem;
+      margin-bottom: 0.75rem;
       width: 100%;
       grid-auto-flow: row;
+    }
+    .ranking-metric-pills--ai {
+      margin-bottom: 1.5rem;
     }
 
     .ranking-metric-pills > .metric-pill {
@@ -15231,8 +15243,9 @@
           </button>
         </div>
 
-        <!-- Section B: Metric pills — uniform 3-col grid (mock-up tiles-two-rows v2) -->
-        <div class="ranking-metric-pills">
+        <!-- Section B: surfaces + classic rank bands (best → striking), then AI separately -->
+        <p class="ranking-metric-section-label">Surfaces &amp; classic rankings</p>
+        <div class="ranking-metric-pills ranking-metric-pills--organic">
           <div class="metric-pill metric-pill--green metric-pill--headline-rich" id="ranking-card-surface-standings">
             <div class="metric-pill-label-row">
               <div class="metric-pill-label">Where you stand on Google's page</div>
@@ -15247,17 +15260,16 @@
             <div class="metric-pill-details" id="ranking-card-surface-standings-details"></div>
           </div>
 
-          <div class="metric-pill metric-pill--amber metric-pill--headline-rich" id="ranking-card-ai-answer-diagnostics">
+          <div class="metric-pill metric-pill--amber" id="ranking-card-rank1-demand">
+            <div class="metric-pill-value" data-field="value">–</div>
             <div class="metric-pill-label-row">
-              <div class="metric-pill-label">Google AI Overviews</div>
-              <span class="metric-pill-label-delta" data-field="label-delta" id="ranking-ai-diagnostics-delta">—</span>
+              <div class="metric-pill-label">Position #1 (demand)</div>
+              <span class="metric-pill-label-delta" data-field="label-delta">—</span>
             </div>
-            <div class="metric-pill-value" data-field="value" id="ranking-ai-diagnostics-summary">–</div>
-            <div class="metric-pill-status p-gap" data-field="status" id="ranking-ai-diagnostics-status">–</div>
-            <p class="ra-tile-subtle">Google AI Overviews (the AI box inside Google SERP) — counted from pages Google serves on your tracked searches. Not ChatGPT.</p>
-            <div id="ranking-ai-answer-body"></div>
-            <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-ai-answer-diagnostics')">Show details</div>
-            <div class="metric-pill-details" id="ranking-card-ai-answer-diagnostics-details"></div>
+            <div class="metric-pill-status" data-field="status">–</div>
+            <div class="metric-pill-footer">Commercial-pool demand at Google #1 — same floors as Top-10; not additive with podium</div>
+            <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-rank1-demand')">Show details</div>
+            <div class="metric-pill-details" id="ranking-card-rank1-demand-details"></div>
           </div>
 
           <div class="metric-pill metric-pill--red" id="ranking-card-top10">
@@ -15270,18 +15282,6 @@
             <div class="metric-pill-footer">Share of commercial-pool search volume in Google top 10 (national ≥50 · local/regional ≥10)</div>
             <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-top10')">Show details</div>
             <div class="metric-pill-details" id="ranking-card-top10-details"></div>
-          </div>
-
-          <div class="metric-pill metric-pill--amber" id="ranking-card-rank1-demand">
-            <div class="metric-pill-value" data-field="value">–</div>
-            <div class="metric-pill-label-row">
-              <div class="metric-pill-label">Position #1 (demand)</div>
-              <span class="metric-pill-label-delta" data-field="label-delta">—</span>
-            </div>
-            <div class="metric-pill-status" data-field="status">–</div>
-            <div class="metric-pill-footer">Commercial-pool demand at Google #1 — same floors as Top-10; not additive with podium</div>
-            <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-rank1-demand')">Show details</div>
-            <div class="metric-pill-details" id="ranking-card-rank1-demand-details"></div>
           </div>
 
           <div class="metric-pill metric-pill--green" id="ranking-card-top10-keywords">
@@ -15307,9 +15307,23 @@
             <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-rank11to20-keywords')">Show details</div>
             <div class="metric-pill-details" id="ranking-card-rank11to20-keywords-details"></div>
           </div>
+        </div>
 
-          <!-- Tile 1: Google's AI answer (mock-up v1.1) -->
-          
+        <p class="ranking-metric-section-label">Google AI Overviews</p>
+        <div class="ranking-metric-pills ranking-metric-pills--ai">
+          <div class="metric-pill metric-pill--amber metric-pill--headline-rich" id="ranking-card-ai-answer-diagnostics">
+            <div class="metric-pill-label-row">
+              <div class="metric-pill-label">Google AI Overviews</div>
+              <span class="metric-pill-label-delta" data-field="label-delta" id="ranking-ai-diagnostics-delta">—</span>
+            </div>
+            <div class="metric-pill-value" data-field="value" id="ranking-ai-diagnostics-summary">–</div>
+            <div class="metric-pill-status p-gap" data-field="status" id="ranking-ai-diagnostics-status">–</div>
+            <p class="ra-tile-subtle">Google AI Overviews (the AI box inside Google SERP) — counted from pages Google serves on your tracked searches. Not ChatGPT. Feeds Surface / Top-of-Page; separate from the classic rank-band tiles above.</p>
+            <div id="ranking-ai-answer-body"></div>
+            <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-ai-answer-diagnostics')">Show details</div>
+            <div class="metric-pill-details" id="ranking-card-ai-answer-diagnostics-details"></div>
+          </div>
+
           <!-- 2026-04-17: AI presence tile retired — every tracked keyword
                returns an AIO/AI Mode answer so this sat at 100% and gave
                no lever. Kept the DOM node hidden so legacy code that sets
@@ -76171,31 +76185,29 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
 
     (function attachRankingPillarClicks() {
       const bind = () => {
-        const grid = document.querySelector('.ranking-metric-pills');
-        if (!grid || grid.__rankingPillClickBound) return;
-        grid.__rankingPillClickBound = true;
-        grid.addEventListener('click', (ev) => {
-          const target = ev.target;
-          if (!target || !target.closest) return;
-          if (target.closest('.metric-pill-toggle')) return;
-          if (target.closest('.metric-pill-details')) return;
-          if (target.closest('a, button, input, select, textarea')) return;
-          const pill = target.closest('.metric-pill');
-          if (!pill || !pill.id || !RANKING_PILLAR_FILTERS[pill.id]) return;
-          setRankingPillarFilter(pill.id);
-        });
-        // Keyboard access: Enter / Space toggles the filter when a pill
-        // has focus. Pills are marked role="button" / tabindex="0" in CSS
-        // setup below so they're reachable via Tab.
-        grid.addEventListener('keydown', (ev) => {
-          if (ev.key !== 'Enter' && ev.key !== ' ') return;
-          const target = ev.target;
-          if (!target || !target.closest) return;
-          const pill = target.closest('.metric-pill');
-          if (!pill || !pill.id || !RANKING_PILLAR_FILTERS[pill.id]) return;
-          if (target.closest('.metric-pill-toggle')) return;
-          ev.preventDefault();
-          setRankingPillarFilter(pill.id);
+        document.querySelectorAll('.ranking-metric-pills').forEach((grid) => {
+          if (!grid || grid.__rankingPillClickBound) return;
+          grid.__rankingPillClickBound = true;
+          grid.addEventListener('click', (ev) => {
+            const target = ev.target;
+            if (!target || !target.closest) return;
+            if (target.closest('.metric-pill-toggle')) return;
+            if (target.closest('.metric-pill-details')) return;
+            if (target.closest('a, button, input, select, textarea')) return;
+            const pill = target.closest('.metric-pill');
+            if (!pill || !pill.id || !RANKING_PILLAR_FILTERS[pill.id]) return;
+            setRankingPillarFilter(pill.id);
+          });
+          grid.addEventListener('keydown', (ev) => {
+            if (ev.key !== 'Enter' && ev.key !== ' ') return;
+            const target = ev.target;
+            if (!target || !target.closest) return;
+            const pill = target.closest('.metric-pill');
+            if (!pill || !pill.id || !RANKING_PILLAR_FILTERS[pill.id]) return;
+            if (target.closest('.metric-pill-toggle')) return;
+            ev.preventDefault();
+            setRankingPillarFilter(pill.id);
+          });
         });
       };
       if (document.readyState === 'loading') {
