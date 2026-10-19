@@ -8,7 +8,7 @@
  *  - checkpoints progress after every paid batch (no re-buy on timeout)
  *  - hard-aborts Ranking after ~4.5h wall or too many continue ticks
  *
- * Schedule: every 15 min Monday UTC.
+ * Schedule: every 2 min Monday UTC (was 15m — too much idle between ticks).
  */
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
