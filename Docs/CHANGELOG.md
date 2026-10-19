@@ -2,9 +2,9 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
-## [2026-10-19] - Ranking tiles: band order + AI Overview section
+## [2026-10-19] - Ranking tiles: fixed 2×3 order
 
-**Change:** Metric pills now read in rank order — Where you stand → Position #1 → Top-10 demand → Top-10 keywords → Striking distance — then a separate **Google AI Overviews** section below (not mixed into the classic rank row). Top-of-Page hero score (37) is unchanged: that dial is surface ownership maths, not the commercial-pool demand pills.
+**Change:** Six metric pills in one 3-column grid, two rows: (1) Where you stand (2) Google AI Overviews (3) Position #1 · (4) Top-10 demand (5) Top-10 keywords (6) Striking distance.
 
 **Files:** `audit-dashboard.html`, `Docs/CHANGELOG.md`.
 
