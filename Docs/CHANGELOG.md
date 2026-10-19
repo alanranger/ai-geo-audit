@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Ranking Wins/Striking tiles: restore deltas + per-keyword rank change
+
+**Change:** Pill label deltas on Wins / Striking distance (and other count pills) were blank because live pillar objects lack `topOfPage.schema_version` while the previous audit has schema 3 — the cross-schema gate wiped previous counts. Count deltas now always compare when previous exists. Each keyword in those list tiles shows ↑/↓ vs previous audit rank (or `new`).
+
+**Files:** `audit-dashboard.html`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - DFS recovery when AIO-expand blanks a SERP
 
 **Change:** Live Google can show a full SERP while DFS returns `40101 Internal SE` / `40106 partial` / empty under `expand_ai_overview` + depth=50 (e.g. `residential photography workshops`). Fixes: (1) stop treating `40101` as batch-fatal; (2) accept `40106` when items[] present; (3) after thin retries still empty, one recovery call with **no AIO expand + depth≤10**. Re-fetched the stuck keyword → Alan #1; dials repaired.

@@ -69019,6 +69019,11 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
           renderSurfaceStandingsCard(list);
         }
       } catch (_e) { /* non-fatal */ }
+      try {
+        if (typeof refreshRankedKeywordListTilesFromLiveRows === 'function') {
+          refreshRankedKeywordListTilesFromLiveRows();
+        }
+      } catch (_e) { /* non-fatal */ }
     }
 
     window.__storedTopOfPage = window.__storedTopOfPage || null;
@@ -70947,6 +70952,24 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         cache.previousAuditDateByAuditDate[currentAuditDate] = prevAuditDate;
         cache.previous = scores;
         cache.previousAuditDate = prevAuditDate;
+        // Prior ranks for per-keyword ↑/↓ in Wins / Striking-distance tiles.
+        if (prevAuditDate) {
+          try {
+            const krUrl = apiUrl(
+              `/api/supabase/get-keyword-rankings?propertyUrl=${encodeURIComponent(propertyUrl)}`
+              + `&auditDate=${encodeURIComponent(prevAuditDate)}`
+            );
+            const krRes = await fetch(krUrl);
+            if (krRes.ok) {
+              const krJson = await krRes.json();
+              const priorRows = krJson?.data?.keywords || krJson?.keywords || [];
+              if (Array.isArray(priorRows) && priorRows.length) {
+                window.__rankingPriorRankRows = priorRows;
+                window.__rankingPriorRankAuditDate = prevAuditDate;
+              }
+            }
+          } catch (_krErr) { /* non-fatal — list tiles fall back to citation-movement baseline */ }
+        }
         return scores;
       } catch (err) {
         debugLog(`⚠ Failed to fetch previous ranking pillar scores: ${err?.message || err}`, 'warn');
@@ -70988,22 +71011,20 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
     function renderRankingPillarLabelDeltas(currentScores) {
       const state = window.__rankingPillarScoreDeltaState || {};
       const curr = normalisePillarScoresShape(currentScores) || {};
-      const currVer = getStoredPillarSchemaVersion(currentScores);
-      const prevVer = getStoredPillarSchemaVersion(state.previous);
-      const suppressCrossSchema = currVer !== prevVer;
-      const prev = suppressCrossSchema ? {} : (normalisePillarScoresShape(state.previous) || {});
-      const prevDate = suppressCrossSchema ? null : (state.previousAuditDate || null);
+      // Live pillar objects often omit topOfPage.schema_version (currVer=1) while
+      // stored previous has schema 3 — that used to wipe ALL pill deltas. Count /
+      // coverage deltas are schema-safe; Top-of-Page composite gating stays in
+      // renderHeroDelta / Site AI Health only.
+      const prev = normalisePillarScoresShape(state.previous) || {};
+      const prevDate = state.previousAuditDate || null;
       setMetricPillLabelDelta('ranking-card-ai-coverage', curr.aiCoverage, prev.aiCoverage, prevDate);
       setMetricPillLabelDelta('ranking-card-ai-citations', curr.aiCitation, prev.aiCitation, prevDate);
       setMetricPillLabelDelta('ranking-card-ai-citations-money', curr.moneyCitations, prev.moneyCitations, prevDate);
       setMetricPillLabelDelta('ranking-card-top10', curr.top10, prev.top10, prevDate);
       setMetricPillLabelDelta('ranking-card-serp-features', curr.serpFeature, prev.serpFeature, prevDate);
-      // Phase 1 exploratory pillars — previous values will typically be null
-      // until the next audit is saved; setMetricPillLabelDelta handles that.
       setMetricPillLabelDelta('ranking-card-ai-cross-engine', curr.crossEngine, prev.crossEngine, prevDate);
       setMetricPillLabelDelta('ranking-card-serp-ai-gap', curr.serpAiGap, prev.serpAiGap, prevDate);
       setMetricPillLabelDelta('ranking-card-ai-share-of-voice', curr.shareOfVoice, prev.shareOfVoice, prevDate);
-      // 2026-06-24: list-tile deltas (prev will be null until the next audit saves them).
       setMetricPillLabelDelta('ranking-card-top10-keywords', curr.top10Keywords, prev.top10Keywords, prevDate);
       setMetricPillLabelDelta('ranking-card-rank11to20-keywords', curr.rank11to20Keywords, prev.rank11to20Keywords, prevDate);
     }
@@ -76146,20 +76167,61 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
     }
 
+    function priorRankByKeywordMap() {
+      const fromMovement = comparisonBaselineRows();
+      const sourceRows = (Array.isArray(fromMovement) && fromMovement.length)
+        ? fromMovement
+        : (Array.isArray(window.__rankingPriorRankRows) ? window.__rankingPriorRankRows : null);
+      if (!sourceRows?.length) return null;
+      const m = new Map();
+      for (const r of sourceRows) {
+        const k = String(r?.keyword || '').trim().toLowerCase();
+        if (!k) continue;
+        const rank = r.best_rank_group != null ? Number(r.best_rank_group) : null;
+        m.set(k, Number.isFinite(rank) ? rank : null);
+      }
+      return m;
+    }
+
+    /** Positive = improved (rank number went down). */
+    function formatKeywordRankDelta(currRank, prevRank) {
+      if (currRank == null || !Number.isFinite(Number(currRank))) return { text: '', dir: 'flat', title: '' };
+      const curr = Number(currRank);
+      if (prevRank == null || !Number.isFinite(Number(prevRank))) {
+        return { text: 'new', dir: 'up', title: 'No rank on previous comparable audit' };
+      }
+      const prev = Number(prevRank);
+      const diff = prev - curr;
+      if (diff > 0) return { text: `↑${diff}`, dir: 'up', title: `Was #${prev} → now #${curr}` };
+      if (diff < 0) return { text: `↓${Math.abs(diff)}`, dir: 'down', title: `Was #${prev} → now #${curr}` };
+      return { text: '→0', dir: 'flat', title: `Still #${curr}` };
+    }
+
     function rankedKeywordListHtml(sorted, title) {
       if (!sorted.length) {
         return `<p class="tile-details-title">${title}</p>`
           + `<p class="tile-details-footnote">No keywords in this band right now.</p>`;
       }
+      const prior = priorRankByKeywordMap();
       const items = sorted.map((r) => {
         const pos = Number(r.best_rank_group);
         const vol = (r.search_volume == null) ? '—' : Number(r.search_volume).toLocaleString('en-GB');
-        return `<li><strong>#${pos}</strong> ${rankedKeywordEscape(r.keyword || '(unknown)')}`
+        const key = String(r.keyword || '').trim().toLowerCase();
+        const delta = prior
+          ? formatKeywordRankDelta(pos, prior.has(key) ? prior.get(key) : null)
+          : { text: '', dir: 'flat', title: 'Previous audit ranks still loading…' };
+        const deltaHtml = delta.text
+          ? ` <span class="ra-rowdelta" data-dir="${delta.dir}" title="${rankedKeywordEscape(delta.title)}">${delta.text}</span>`
+          : '';
+        return `<li><strong>#${pos}</strong>${deltaHtml} ${rankedKeywordEscape(r.keyword || '(unknown)')}`
           + ` <span style="color:#64748b;">· vol ${vol}</span></li>`;
       }).join('');
+      const footnote = prior
+        ? 'Sorted by Google position (best first), then search volume. ↑/↓ = change vs previous audit (↑ = better rank).'
+        : 'Sorted by Google position (best first), then search volume. Rank deltas appear when the previous audit loads.';
       return `<p class="tile-details-title">${title}</p>`
         + `<ul class="tile-details-list" style="max-height:300px; overflow-y:auto;">${items}</ul>`
-        + `<p class="tile-details-footnote">Sorted by Google position (best first), then search volume (highest first).</p>`;
+        + `<p class="tile-details-footnote">${footnote}</p>`;
     }
 
     function renderRankedKeywordListTile(cardId, rows, opts) {
@@ -76177,6 +76239,18 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
       if (valueEl) valueEl.textContent = `${sorted.length} keyword${sorted.length === 1 ? '' : 's'}`;
       if (statusEl) statusEl.textContent = opts.statusLabel;
       if (detailsEl) detailsEl.innerHTML = rankedKeywordListHtml(sorted, opts.title);
+    }
+
+    function refreshRankedKeywordListTilesFromLiveRows() {
+      const rows = typeof getLiveRankingRowsForTiles === 'function' ? getLiveRankingRowsForTiles() : [];
+      if (!Array.isArray(rows) || !rows.length) return;
+      const measurable = rows.filter((r) => !rankingCaptureFailed(r));
+      renderRankedKeywordListTile('ranking-card-top10-keywords',
+        measurable.filter((r) => r.best_rank_group != null && r.best_rank_group <= 10),
+        { statusLabel: 'Wins', title: 'Keywords where you rank in Google’s top 10 (positions 1–10). Incomplete checks excluded.' });
+      renderRankedKeywordListTile('ranking-card-rank11to20-keywords',
+        measurable.filter((r) => r.best_rank_group != null && r.best_rank_group >= 11 && r.best_rank_group <= 20),
+        { statusLabel: 'Striking distance', title: 'Keywords ranking 11–20 — just off page 1 and prime optimisation targets. Incomplete checks excluded.' });
     }
 
     function formatSignedDelta(n) {
