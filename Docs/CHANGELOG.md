@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Rank-band tiles: title = range, subtitle = count/demand
+
+**Change:** Position #1 / Top-10 demand / Top-10 keywords / Striking distance now show the **ranking range as the main title** and **`N of pool · D% demand` as the subtitle** (was swapped).
+
+**Files:** `audit-dashboard.html`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - Ranking tiles: fixed 2×3 order
 
 **Change:** Six metric pills in one 3-column grid, two rows: (1) Where you stand (2) Google AI Overviews (3) Position #1 · (4) Top-10 demand (5) Top-10 keywords (6) Striking distance.
