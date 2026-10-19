@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Ranking gap-fill retry after SERP+AI
+
+**Change:** Monday / dashboard-parity Ranking adds a `gap_fill` phase after AI: re-fetch empty/incomplete/error captures one keyword at a time (up to 20 keywords, 2 rounds) before finalize. Fixes provisional dials from flaky DFS blank SERPs without a full re-audit.
+
+**Files:** `lib/keyword-ranking/gap-fill-empty.js`, `dashboard-parity-tick.js`, `lib/ceo-weekly/monday-ranking-guards.js`, `test/gap-fill-empty.test.js`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-07] - Fix Workshops/Courses date import + Strategy upcoming from Squarespace
 
 **Change:** Workshops importer mismatched **Event Date** into theme (`/event/`); Excel serial dates now parsed via shared `excel-date.mjs`. Re-imported attendees. Strategy upcoming/fill uses Squarespace feeds (places left + Week 1 beginners calendar) joined to sheet booked counts. Upload flags >10% NULL attendee dates. beginners_non_jlr from 2026-10-01.
