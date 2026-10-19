@@ -351,7 +351,9 @@ function resolveSerpDepth(rawDepth) {
 // subsequent keyword in the same handler invocation. Prevents a single
 // scan click from firing 100+ paid requests (at $0.025 each at depth=100
 // with AIO expansion) after the account is already depleted.
-const DFS_FATAL_STATUS_CODES = new Set([40100, 40101, 40200, 40300, 40400]);
+// Auth/billing only. 40101 "Internal SE Server Error" is a per-keyword DFS
+// flake — do NOT abort the rest of the batch when one keyword hits it.
+const DFS_FATAL_STATUS_CODES = new Set([40200, 40300, 40400]);
 
 function isDfsFatalStatus(statusCode) {
   if (statusCode === undefined || statusCode === null) return false;
@@ -495,9 +497,14 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
     }
 
     const task = data.tasks?.[0];
-    const taskOk = task?.status_code == null || String(task.status_code).startsWith("200");
     const result = task?.result?.[0];
     const items = result?.items ?? [];
+    const taskStatus = task?.status_code;
+    // 200xx = Ok. 40106 = partial crawl — still usable when items[] is present
+    // (depth-50 AIO-expand often 40106/40101; recovery retry drops expand).
+    const taskOk = taskStatus == null
+      || String(taskStatus).startsWith("200")
+      || (Number(taskStatus) === 40106 && Array.isArray(items) && items.length > 0);
 
     // DFS sometimes returns top-level 20000 with an empty/missing result payload
     // (seen especially on Coventry name-only location calls under concurrency).
@@ -929,6 +936,29 @@ export default async function handler(req, res) {
           + `(organic=${result?.organic_count ?? 0}, cost=${result?.dfs_cost ?? 'n/a'}, `
           + `se_results=${result?.se_results_count ?? 'n/a'}) — retry ${attempt}/${maxThin - 1}`
         );
+      }
+    }
+    // Recovery: AIO-expand + depth=50 sometimes 40101/empty while a shallow
+    // no-expand call returns a real SERP (seen on "residential photography workshops").
+    const stillBroken = !result || result.crawl_incomplete === true
+      || !Array.isArray(result.serp_surface_stack) || result.serp_surface_stack.length === 0
+      || (result.error && /partial results|Internal SE|empty SERP/i.test(String(result.error)));
+    if (stillBroken && expandAiOverview && !result?.fatal) {
+      const recoveryDepth = Math.min(Number(depth) || 50, 10);
+      const gate = spend.reserveAttempt(estimateDfsCallCost(spend.limits, { expandAiOverview: false }));
+      if (gate.ok) {
+        console.warn(
+          `[Handler] Recovery fetch for "${keyword}" (no AIO expand, depth=${recoveryDepth})`
+        );
+        const recovered = await fetchSerpForKeyword(keyword, auth, targetRoot, recoveryDepth, {
+          ...opts,
+          expandAiOverview: false,
+        });
+        spend.settleAttempt(gate.reserved, recovered?.dfs_cost);
+        if (recovered && !recovered.fatal && Array.isArray(recovered.serp_surface_stack)
+          && recovered.serp_surface_stack.length > 0) {
+          result = recovered;
+        }
       }
     }
     result = markIncompleteResult(result);

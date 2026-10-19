@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - DFS recovery when AIO-expand blanks a SERP
+
+**Change:** Live Google can show a full SERP while DFS returns `40101 Internal SE` / `40106 partial` / empty under `expand_ai_overview` + depth=50 (e.g. `residential photography workshops`). Fixes: (1) stop treating `40101` as batch-fatal; (2) accept `40106` when items[] present; (3) after thin retries still empty, one recovery call with **no AIO expand + depth≤10**. Re-fetched the stuck keyword → Alan #1; dials repaired.
+
+**Files:** `api/aigeo/serp-rank-test.js`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - Site AI Health overall = Surface + Top + Brand
 
 **Change:** Dial centre score is no longer Surface-only. Overall Site AI Health = **Surface 40% · Top of page 40% · Brand 20%** (missing legs redistribute). Three coloured needles stay per-metric; hub/label show the weighted overall + RAG. AI Summary Likelihood remains a separate four-input composite underneath.
