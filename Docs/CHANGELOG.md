@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Dashboard AI Summary Likelihood matches AI Health
+
+**Change:** Dashboard dial was computing AI Summary with **citation rate = 0** (→ 38) while AI Health used the live surface-outcomes citation rate (→ 45). Both `computeDashboardSnapshot` paths now pull AI-citation % from surface outcomes before `computeAiSummaryLikelihood`.
+
+**Files:** `audit-dashboard.html`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - Refresh 09 CSV + export API after LOCKED-v12 cull
 
 **Change:** Regenerated `config/09-url-target-keywords.csv` against LOCKED-v12 (clears integrity check 6 STALE EXPORT). Added `GET/POST /api/aigeo/export-09-url-target-keywords` to rebuild that CSV from DB + LOCKED without legacy local keys.
