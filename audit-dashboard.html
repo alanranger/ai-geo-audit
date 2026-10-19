@@ -68085,7 +68085,14 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
 
     function isTrackedRankingKeyword(keyword) {
       const k = String(keyword || '').trim();
-      return k.length > 0 && !REMOVED_FROM_TRACKING_EXACT.includes(k);
+      if (!k || REMOVED_FROM_TRACKING_EXACT.includes(k)) return false;
+      const set = window.__aigeoTrackedKeywordSet;
+      if (set && set.size > 0) return set.has(k.toLowerCase());
+      const locMap = window.__KEYWORD_LOCATION_LOCKED_BY_KEYWORD;
+      if (locMap && typeof locMap === 'object' && Object.keys(locMap).length > 0) {
+        return !!locMap[k.toLowerCase()];
+      }
+      return true;
     }
     function filterTrackedRankingRows(rows) {
       return (Array.isArray(rows) ? rows : []).filter((row) => isTrackedRankingKeyword(row?.keyword));

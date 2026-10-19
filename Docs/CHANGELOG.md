@@ -4,9 +4,9 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 
 ## [2026-10-19] - Keyword tracking cull v12 (money pages only)
 
-**Change:** Culled locked tracking from **155 → 87** keywords. Keep courses/workshops/mentoring/gifts (local + national) plus a thin **local/regional-only** services set; drop brand reviews, vol-0 junk, national service heads, synonym stacks, and off-brief terms. Canonical CSV: `config/keyword-tracking-locations-and-class-LOCKED-v12.csv`. Regenerated LOCKED JSON/JS mirrors (repo + `public/`). KEEP/DROP report: `Docs/KEYWORD-CULL-KEEP-DROP-v12.md`. Rebuild: `node scripts/cull-keyword-tracking-v12.mjs` then `node scripts/load-locked-v12.mjs` (REST persist needs non-legacy Supabase keys).
+**Change:** Culled locked tracking from **155 → 87** keywords. Keep courses/workshops/mentoring/gifts (local + national) plus a thin **local/regional-only** services set; drop brand reviews, vol-0 junk, national service heads, synonym stacks, and off-brief terms. Canonical CSV: `config/keyword-tracking-locations-and-class-LOCKED-v12.csv`. Regenerated LOCKED JSON/JS mirrors (repo + `public/`). Ranking membership now follows LOCKED JSON (`tracked-set-v3.js` + dashboard filter + `get-latest-audit` prefers bundled v12). KEEP/DROP report: `Docs/KEYWORD-CULL-KEEP-DROP-v12.md`. Rebuild: `node scripts/cull-keyword-tracking-v12.mjs` then `node scripts/load-locked-v12.mjs` (REST persist needs non-legacy Supabase keys).
 
-**Files:** `config/keyword-tracking-locations-and-class-LOCKED-v12.csv`, `*keyword-tracking-*-LOCKED.*`, `lib/keyword-ranking/locked-config-merge.js`, `scripts/cull-keyword-tracking-v12.mjs`, `scripts/load-locked-v12.mjs`, `Docs/KEYWORD-CULL-KEEP-DROP-v12.md`, `Docs/CHANGELOG.md`.
+**Files:** `config/keyword-tracking-locations-and-class-LOCKED-v12.csv`, `*keyword-tracking-*-LOCKED.*`, `lib/keyword-ranking/locked-config-merge.js`, `lib/keyword-ranking/tracked-set-v3.js`, `api/supabase/get-latest-audit.js`, `audit-dashboard.html`, `scripts/cull-keyword-tracking-v12.mjs`, `scripts/load-locked-v12.mjs`, `Docs/KEYWORD-CULL-KEEP-DROP-v12.md`, `Docs/CHANGELOG.md`.
 
 ---
 

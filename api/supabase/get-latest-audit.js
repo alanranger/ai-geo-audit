@@ -9,6 +9,7 @@ import { filterTrackedRows, filterTrackedKeywords } from '../../lib/keyword-rank
 import { coalesceSearchVolume } from '../../lib/keyword-ranking/ke-search-volumes.js';
 import { resolveRowsClassificationAtRender } from '../../lib/keyword-ranking/resolve-classification-at-render.js';
 import { computeTopOfPageRollup } from '../../lib/audit/topOfPage.js';
+import lockedLocationsJson from '../../lib/keyword-ranking/keyword-tracking-locations-LOCKED.json' with { type: 'json' };
 
 /** When capping query-page rows, keep highest-traffic rows so per-URL GSC totals stay representative. */
 function truncateQueryPagesByTraffic(rows, maxItems) {
@@ -343,14 +344,19 @@ export default async function handler(req, res) {
     // Re-enabled: Fetching from keyword_rankings table with proper limits to prevent timeouts
     let rankingAiData = null;
     let rankingDataAuditDate = null; // Track the actual audit_date of ranking data (may differ from latest audit)
-    let lockedByKeyword = null;
+    // Bundled LOCKED JSON is SoT (v12 cull). Audit override only if present and same/newer source.
+    let lockedByKeyword = lockedLocationsJson?.by_keyword || null;
     try {
       const rankingRaw = typeof record.ranking_ai_data === 'string'
         ? JSON.parse(record.ranking_ai_data)
         : record.ranking_ai_data;
-      lockedByKeyword = rankingRaw?.keywordTrackingLocked?.by_keyword || null;
+      const override = rankingRaw?.keywordTrackingLocked?.by_keyword || null;
+      const overrideSource = String(rankingRaw?.keywordTrackingLocked?.source || '');
+      if (override && overrideSource.includes('LOCKED-v12')) {
+        lockedByKeyword = override;
+      }
     } catch (_lockedErr) {
-      lockedByKeyword = null;
+      /* keep bundled */
     }
 
     // Re-enabled: Keyword rankings fetch with proper limits (2000 rows max)
