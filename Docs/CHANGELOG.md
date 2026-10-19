@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - PAA Surface disabled until DFS parses AIO-in-PAA
+
+**Change:** Fix 3 parser ready — `domainsFromPaaExpandedElement` / `collectPaaOwnerDomains` read classic PAA domain/url and AIO-in-PAA `items[].references[]`. DFS confirmed they do **not** currently parse AI Overview sources inside People Also Ask (null/async stubs), so PAA is temporarily excluded from Surface Visibility scoring (`PAA_SURFACE_SCORING_ENABLED=false`), gap callout, and dial weight redistribution. Ranking Outcomes shows *People Also Ask* in italics with `(not scored — DFS does not parse AIO-in-PAA sources yet)`. Re-enable when DFS hydrates those references.
+
+**Files:** `lib/keyword-ranking/serp-surface-extract.js`, `serp-surface-stack.js`, `lib/audit/surfaceScores.js`, `surfaceOutcomes.js`, `audit-dashboard.html`, `scripts/test-serp-surface-extract.mjs`, `scripts/test-surface-scores.mjs`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - Monday Ranking Acceptance Gate
 
 **Change:** Post-finalize acceptance gate fails the audit day (`ranking_incomplete`) unless: stack/capture completeness, pack flag↔stack integrity (0 mismatches), ≥90% measurable, local/national class counts ≥85% of prior complete day, Surface drop+pack integrity, dials scored from DB not slim memory. CEO / get-latest already skip incomplete days; fallback banner now shows acceptance reason. Stops shipping a broken Monday dial as “latest.”

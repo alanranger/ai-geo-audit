@@ -7,6 +7,8 @@ import {
   extractFeaturedSnippetOurs,
   extractPaaOurs,
   extractSerpSurfaces,
+  domainsFromPaaExpandedElement,
+  collectPaaOwnerDomains,
 } from '../lib/keyword-ranking/serp-surface-extract.js';
 import { resolveKeywordClass } from '../lib/keyword-ranking/tracking-class.js';
 
@@ -46,6 +48,37 @@ const paa = extractPaaOurs([
   },
 ]);
 assert(paa.paa_ours, 'paa ours');
+
+// Fix 3: AIO-in-PAA ownership via items[].references[] (when DFS hydrates them)
+const aioInPaaEl = {
+  type: 'ai_overview',
+  references: null,
+  items: [
+    {
+      type: 'ai_overview_element',
+      references: [
+        { domain: 'other.com', url: 'https://other.com/a' },
+        { domain: 'www.alanranger.com', url: 'https://www.alanranger.com/courses' },
+      ],
+    },
+  ],
+};
+const aioDomains = domainsFromPaaExpandedElement(aioInPaaEl);
+assert(aioDomains.includes('alanranger.com'), 'aio-in-paa refs');
+const paaAioOurs = extractPaaOurs([
+  {
+    type: 'people_also_ask',
+    items: [{ expanded_element: aioInPaaEl }],
+  },
+]);
+assert(paaAioOurs.paa_ours === true, 'paa ours via aio-in-paa refs');
+const emptyAsync = domainsFromPaaExpandedElement({
+  type: 'asynchronous_ai_overview',
+  references: null,
+  items: null,
+});
+assert(emptyAsync.length === 0, 'async stub yields no owners');
+assert(collectPaaOwnerDomains({ items: [{ expanded_element: aioInPaaEl }] }).length >= 2, 'collect owners');
 
 const surfaces = extractSerpSurfaces([...packItems, { type: 'knowledge_graph', title: 'Alan Ranger' }]);
 assert(surfaces.local_pack_present === true, 'bundle pack present');

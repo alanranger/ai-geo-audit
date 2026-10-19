@@ -12,6 +12,7 @@ import {
   computeKeywordSurfaceScore,
   computeSurfaceVisibilityRollup,
   CLASS_WEIGHTS,
+  PAA_SURFACE_SCORING_ENABLED,
 } from '../lib/audit/surfaceScores.js';
 
 function assert(cond, msg) {
@@ -144,6 +145,10 @@ assertEq(scoreKp(false), 0, 'kp miss');
   assert(s.served.pack === true, 'pack served from stack despite false flag');
   assertEq(s.subscores.pack, 100, 'pack #1 still scores 100');
   assert(s.score > 0, 'score must not collapse to 0');
+  // PAA in stack must not feed dial while DFS AIO-in-PAA sources are unparsed
+  assertEq(PAA_SURFACE_SCORING_ENABLED, false, 'paa scoring flag off');
+  assertEq(s.served.paa, false, 'paa not served for scoring while disabled');
+  assertEq(s.subscores.paa, null, 'paa subscore skipped while disabled');
 }
 
 console.log('surface-scores tests OK');

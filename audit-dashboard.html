@@ -6312,6 +6312,18 @@
       color: #64748b;
       font-weight: 600;
     }
+    .ai-health-surface-outcomes tr.aho-row-diag .aho-name em.aho-label-disabled {
+      font-style: italic;
+      font-weight: 600;
+      color: #64748b;
+    }
+    .ai-health-surface-outcomes .aho-disabled-note {
+      font-style: italic;
+      font-weight: 500;
+      font-size: 0.78rem;
+      color: #94a3b8;
+      margin-left: 0.25rem;
+    }
     .ai-health-surface-outcomes tr.aho-row-diag .aho-pct {
       color: #64748b !important;
     }
@@ -68096,9 +68108,10 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       const fsStack = stackForAio.filter((e) => e.type === 'featured_snippet' && e.slot != null);
       const fsPresent = fsStack.length > 0;
       const fsOurs = fsStack.some((e) => e.ours === true);
-      // PAA separate scored surface — stack-gated only (never paa_present_any / paa_ours alone).
+      // PAA disabled from Surface dial until DFS hydrates AIO-in-PAA references.
+      const PAA_SURFACE_SCORING_ENABLED = false;
       const paaStack = stackForAio.filter((e) => e.type === 'people_also_ask' && e.slot != null);
-      const paaPresent = paaStack.length > 0;
+      const paaPresent = PAA_SURFACE_SCORING_ENABLED && paaStack.length > 0;
       const paaOurs = paaStack.some((e) => e.ours === true);
       const kpPresent = row?.kp_present === true;
       const served = {
@@ -69785,7 +69798,15 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       { key: 'map_pack', label: 'Map pack', weightKey: 'pack', served: outcomePackServed, owned: outcomePackOwned },
       // Featured snippet only (MC-57) — classic SERP answer box, not AI Overview.
       { key: 'answer_boxes', label: 'Featured snippet', weightKey: 'fs_paa', served: outcomeBoxServed, owned: outcomeBoxOwned },
-      { key: 'paa', label: 'People Also Ask', weightKey: 'paa', served: outcomePaaServed, owned: outcomePaaOwned },
+      {
+        key: 'paa',
+        label: 'People Also Ask',
+        weightKey: 'paa',
+        served: outcomePaaServed,
+        owned: outcomePaaOwned,
+        diagnostic: true,
+        disabledReason: 'not scored — DFS does not parse AIO-in-PAA sources yet',
+      },
       {
         key: 'knowledge_panel',
         label: 'Knowledge panel',
@@ -69891,15 +69912,16 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         return {
           key: def.key, label: def.label, diagnostic: !!def.diagnostic,
           showOnly: !!def.showOnly,
+          disabledReason: def.disabledReason || null,
           weightKey: def.weightKey ?? null,
           overall: overallCell, local: localCell, national: nationalCell, gapVol,
           gapPctOfMoney: moneyVol > 0 ? Math.round((100 * gapVol) / moneyVol) : 0,
         };
       });
       let biggest = null;
-      // Leverage surfaces including PAA (scored 2026-08-10). Skip Answer boxes FS-only, KP show-only, AI Mode.
+      // Scored leverage surfaces only (skip FS, KP show-only, diagnostic AI Mode / PAA).
       for (const row of tableRows) {
-        if (row.key === 'answer_boxes' || row.key === 'knowledge_panel' || row.diagnostic || row.showOnly || row.key === 'google_ai_mode') continue;
+        if (row.key === 'answer_boxes' || row.key === 'knowledge_panel' || row.diagnostic || row.showOnly || row.key === 'google_ai_mode' || row.key === 'paa') continue;
         if (!biggest || row.gapVol > biggest.gapVol) biggest = row;
       }
       let biggestGap = null;
@@ -70288,7 +70310,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         google_ai_mode: 'Google AI Mode is a separate product from classic SERP. Shown for diagnostics only — does not feed Surface Visibility, Top of page, or levers.',
         map_pack: 'Local map pack (usually 3 businesses on map). Served when Google shows a pack; owned when you appear in it. High weight on local-money keywords.',
         answer_boxes: 'Featured snippet — the classic SERP “answer box” above organic links (highlight paragraph / list). Not Google AI Overview. MC-57: featured snippet only; People Also Ask is a separate row.',
-        paa: 'People Also Ask — expandable question block on Google. Stack-gated ownership. Scored in Surface Visibility (paa weight). Separate from the featured snippet.',
+        paa: 'People Also Ask — temporarily not scored. DFS does not parse AI Overview sources inside PAA (null references), so ownership cannot be measured fairly. Row stays visible until DFS ships that parsing.',
         knowledge_panel: 'Knowledge panel — the entity panel (often right rail). Shown for transparency on money keywords (base weight 0 — does not move Surface Visibility). Brand scoring uses KP separately.',
         organic_top10: 'Organic blue links in the top 10 results. “Owned” if your best rank is ≤10. High weight on national-money keywords; always counted as served for the visibility model.',
       };
@@ -70309,10 +70331,14 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         const isShowOnly = !!r.showOnly || r.key === 'knowledge_panel';
         const tip = SURFACE_OUTCOME_TIPS[r.key] || '';
         const tipAttr = tip ? ` title="${escapeTitle(tip)}"` : '';
-        let name = tip
+        const labelHtml = tip
           ? `<span class="aho-tip"${tipAttr}>${r.label}</span>`
           : r.label;
-        if (isDiag) {
+        let name = labelHtml;
+        if (r.disabledReason) {
+          name = `<em class="aho-label-disabled">${labelHtml}</em>`
+            + ` <span class="aho-disabled-note">(${escapeTitle(r.disabledReason)})</span>`;
+        } else if (isDiag) {
           name += ` <span class="aho-diag-tag" title="Does not feed Surface visibility, Top of page, or levers">diagnostic — not scored</span>`;
         } else if (isShowOnly) {
           name += ` <span class="aho-diag-tag" title="base wt 0 on money classes — shown for transparency only">show-only · base wt 0</span>`;
