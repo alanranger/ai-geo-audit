@@ -4,9 +4,9 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 
 ## [2026-10-19] - PAA Surface disabled until DFS parses AIO-in-PAA
 
-**Change:** Fix 3 parser ready — `domainsFromPaaExpandedElement` / `collectPaaOwnerDomains` read classic PAA domain/url and AIO-in-PAA `items[].references[]`. DFS confirmed they do **not** currently parse AI Overview sources inside People Also Ask (null/async stubs), so PAA is temporarily excluded from Surface Visibility scoring (`PAA_SURFACE_SCORING_ENABLED=false`), gap callout, dial weight redistribution, **Where you stand** gap/working chips, and surface-capture score. Census + Outcomes show *People Also Ask* in italics with `(not scored — DFS does not parse AIO-in-PAA sources yet)`. Re-enable when DFS hydrates those references.
+**Change:** Fix 3 parser ready — `domainsFromPaaExpandedElement` / `collectPaaOwnerDomains` read classic PAA domain/url and AIO-in-PAA `items[].references[]`. DFS confirmed they do **not** currently parse AI Overview sources inside People Also Ask (null/async stubs), so PAA is temporarily excluded from Surface Visibility scoring (`PAA_SURFACE_SCORING_ENABLED=false`), gap callout, dial weight redistribution, **Where you stand** gap/working chips, and surface-capture score. Census + Outcomes show *People Also Ask* in italics with `(not scored — DFS does not parse AIO-in-PAA sources yet)`. Paid DFS PAA expand (`people_also_ask_click_depth`) hard-off via `PAA_DFS_EXPAND_ENABLED=false` in `serp-rank-test.js` — Monday cron / refresh never passed it; guard blocks accidental re-enable. Organic SERP may still list a PAA block when Google shows one (not an extra fetch). Re-enable scoring + expand when DFS hydrates those references.
 
-**Files:** `lib/keyword-ranking/serp-surface-extract.js`, `serp-surface-stack.js`, `lib/audit/surfaceScores.js`, `surfaceOutcomes.js`, `audit-dashboard.html`, `scripts/test-serp-surface-extract.mjs`, `scripts/test-surface-scores.mjs`, `Docs/CHANGELOG.md`.
+**Files:** `lib/keyword-ranking/serp-surface-extract.js`, `serp-surface-stack.js`, `lib/audit/surfaceScores.js`, `surfaceOutcomes.js`, `api/aigeo/serp-rank-test.js`, `audit-dashboard.html`, `scripts/test-serp-surface-extract.mjs`, `scripts/test-surface-scores.mjs`, `Docs/CHANGELOG.md`.
 
 ---
 
