@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Refresh 09 CSV + export API after LOCKED-v12 cull
+
+**Change:** Regenerated `config/09-url-target-keywords.csv` against LOCKED-v12 (clears integrity check 6 STALE EXPORT). Added `GET/POST /api/aigeo/export-09-url-target-keywords` to rebuild that CSV from DB + LOCKED without legacy local keys.
+
+**Files:** `config/09-url-target-keywords.csv`, `api/aigeo/export-09-url-target-keywords.js`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - App-wide LOCKED-v12 membership (no more 155 mix)
 
 **Change:** Full gap fix so AI Health / Ranking / dials / integrity / Money / Traditional SEO / CEO weekly all use the **87** LOCKED-v12 tracked set — not raw `keyword_rankings` (155). Server filters in `get-keyword-rankings`, dial scoring, save-ranking-ai-summary, citation-movement, keyword-alignment, config integrity (CSV → v12). Client filters hero + storage + trends; fail-closed tracked membership; Money/TradSEO load LOCKED JSON not v4 CSV.
