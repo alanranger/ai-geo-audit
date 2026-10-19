@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Rank #1 tile title + keep title-first styling
+
+**Change:** #1 tile label is **Rank #1** (dropped redundant “(demand)”). RAG class updates no longer strip `metric-pill--title-first`, so Rank #1 / Top-10 demand match the same title→subtitle format as Top-10 keywords and Striking distance.
+
+**Files:** `audit-dashboard.html`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - Ranking tiles 2×3 order: Top-10 demand before #1
 
 **Change:** Grid order is now (1) Where you stand (2) Google AI Overviews (3) Top-10 demand coverage (4) Position #1 (5) Top-10 keywords (6) Striking distance.
