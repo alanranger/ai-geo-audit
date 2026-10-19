@@ -4,9 +4,9 @@ All notable changes to the AI GEO Audit Dashboard project will be documented in 
 
 ## [2026-10-19] - Fix local_pack_present_any undercount (Surface dial)
 
-**Change:** DFS often omits `local_pack` from `item_types` while still returning pack rows in `items[]`. Write path used only `item_types` → `local_pack_present_any=false` with stack/position populated. Surface scoring trusted the false flag and treated pack as unserved (scores collapsed toward 0). Now: (1) write path sets pack present from items extract + stack + item_types; (2) `resolvePackPresence` in surfaceScores (and dashboard mirror) trusts stack/position/flag; (3) SQL backfill for recent `keyword_rankings` + dial recompute.
+**Change:** Two layered bugs. (A) DFS `item_types` can omit `local_pack` while `items[]`/stack still have it — write path now trusts items+stack. (B) Monday multi-tick `slimRankingForPersist` dropped `local_pack_present_any` but kept stack; finalize then overwrote good batch saves with `false` (why only 2026-10-19 of recent weeks — first full multi-tick complete finalize after the Oct-5 stack-preserving filter). Slim now keeps/recovers presence flags; `buildCombinedRows` recovers pack from stack/features; Surface scoring uses `resolvePackPresence`. Oct-19 rows backfilled; dial 20→33.
 
-**Files:** `api/aigeo/serp-rank-test.js`, `lib/keyword-ranking/serp-surface-extract.js`, `lib/audit/surfaceScores.js`, `audit-dashboard.html`, `scripts/test-surface-scores.mjs`, `scripts/test-serp-surface-extract.mjs`, `Docs/CHANGELOG.md`.
+**Files:** `api/aigeo/serp-rank-test.js`, `lib/keyword-ranking/serp-surface-extract.js`, `lib/keyword-ranking/refresh-core.js`, `lib/ceo-weekly/monday-ranking-guards.js`, `lib/audit/surfaceScores.js`, `audit-dashboard.html`, `test/monday-ranking-guards.test.js`, `scripts/test-surface-scores.mjs`, `scripts/test-serp-surface-extract.mjs`, `Docs/CHANGELOG.md`.
 
 ---
 

@@ -62,6 +62,27 @@ test('slimRankingForPersist keeps serp_surface_stack for Top dial', () => {
   assert.ok(top > 0, `expected top>0 from slimmed stack, got ${top}`);
 });
 
+test('slimRankingForPersist keeps local_pack_present_any (or recovers from stack)', () => {
+  const withFlag = slimRankingForPersist({
+    serpRows: [{
+      keyword: 'photographer near me',
+      local_pack_present_any: true,
+      local_pack_position: 1,
+      serp_surface_stack: [{ type: 'local_pack', slot: 2, ours: true, our_position: 1 }],
+    }],
+  });
+  assert.equal(withFlag.serpRows[0].local_pack_present_any, true);
+
+  const recoverFromStack = slimRankingForPersist({
+    serpRows: [{
+      keyword: 'professional photographer',
+      local_pack_position: 1,
+      serp_surface_stack: [{ type: 'local_pack', slot: 2, ours: true, our_position: 1 }],
+    }],
+  });
+  assert.equal(recoverFromStack.serpRows[0].local_pack_present_any, true);
+});
+
 test('scoreSurfaceAndTop returns nulls for empty', () => {
   const empty = scoreSurfaceAndTop([]);
   assert.equal(empty.surface, null);
