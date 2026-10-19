@@ -15263,11 +15263,11 @@
           <div class="metric-pill metric-pill--red" id="ranking-card-top10">
             <div class="metric-pill-value" data-field="value">–</div>
             <div class="metric-pill-label-row">
-              <div class="metric-pill-label">Top-10 rank coverage</div>
+              <div class="metric-pill-label">Top-10 demand coverage</div>
               <span class="metric-pill-label-delta" data-field="label-delta">—</span>
             </div>
             <div class="metric-pill-status" data-field="status">–</div>
-            <div class="metric-pill-footer">Pillars: Visibility, Authority (Ranking)</div>
+            <div class="metric-pill-footer">Share of commercial-pool search volume in Google top 10 (national ≥50 · local/regional ≥10)</div>
             <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-top10')">Show details</div>
             <div class="metric-pill-details" id="ranking-card-top10-details"></div>
           </div>
@@ -15275,11 +15275,11 @@
           <div class="metric-pill metric-pill--amber" id="ranking-card-rank1-demand">
             <div class="metric-pill-value" data-field="value">–</div>
             <div class="metric-pill-label-row">
-              <div class="metric-pill-label">Position #1 (demand-weighted)</div>
+              <div class="metric-pill-label">Position #1 (demand)</div>
               <span class="metric-pill-label-delta" data-field="label-delta">—</span>
             </div>
             <div class="metric-pill-status" data-field="status">–</div>
-            <div class="metric-pill-footer">Share of measured search demand where you own Google rank #1 — not additive with Top-10 / podium</div>
+            <div class="metric-pill-footer">Commercial-pool demand at Google #1 — same floors as Top-10; not additive with podium</div>
             <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-rank1-demand')">Show details</div>
             <div class="metric-pill-details" id="ranking-card-rank1-demand-details"></div>
           </div>
@@ -15291,7 +15291,7 @@
               <span class="metric-pill-label-delta" data-field="label-delta">—</span>
             </div>
             <div class="metric-pill-status" data-field="status">–</div>
-            <div class="metric-pill-footer">Keywords ranking 1–10, sorted by position then search volume</div>
+            <div class="metric-pill-footer">Pool keywords in positions 1–10 · count + demand %</div>
             <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-top10-keywords')">Show details</div>
             <div class="metric-pill-details" id="ranking-card-top10-keywords-details"></div>
           </div>
@@ -15303,7 +15303,7 @@
               <span class="metric-pill-label-delta" data-field="label-delta">—</span>
             </div>
             <div class="metric-pill-status" data-field="status">–</div>
-            <div class="metric-pill-footer">Keywords ranking 11–20, sorted by position then search volume</div>
+            <div class="metric-pill-footer">Pool keywords in positions 11–20 · count + demand %</div>
             <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-rank11to20-keywords')">Show details</div>
             <div class="metric-pill-details" id="ranking-card-rank11to20-keywords-details"></div>
           </div>
@@ -70500,30 +70500,96 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
     function isCitationKeywordClass(row) {
       return row?.keyword_class !== 'brand';
     }
-    /** Demand-weighted Position #1 ownership over measurable SERP rows. */
-    function computeRank1DemandMetrics(rows) {
-      const list = Array.isArray(rows) ? rows.filter((r) => r && !rankingCaptureFailed(r)) : [];
-      const volOf = (r) => (Number(r.search_volume) > 0 ? Number(r.search_volume) : 10);
+    // Commercial Ranking demand pool: class-aware volume floors so local/city
+    // terms (often vol 10–40) still count, while weak national long-tails do not.
+    // Brand/education excluded. Missing volume excluded (no fake “10”).
+    const RANK_DEMAND_VOL_FLOOR = Object.freeze({
+      'national-money': 50,
+      'local-money': 10,
+      'regional-money': 10,
+    });
+    const RANK_BAND_CTR = Object.freeze({
+      1: 0.28,
+      '2-3': 0.12,
+      '4-10': 0.05,
+      '11-20': 0.02,
+    });
+
+    function rankDemandVolFloorForClass(keywordClass) {
+      const cls = keywordClass || 'national-money';
+      return Object.prototype.hasOwnProperty.call(RANK_DEMAND_VOL_FLOOR, cls)
+        ? RANK_DEMAND_VOL_FLOOR[cls]
+        : null;
+    }
+
+    function estClicksForRank(vol, rank) {
+      const g = Number(rank);
+      const v = Number(vol);
+      if (!Number.isFinite(g) || g < 1 || !Number.isFinite(v) || v <= 0) return 0;
+      let ctr = 0;
+      if (g === 1) ctr = RANK_BAND_CTR[1];
+      else if (g <= 3) ctr = RANK_BAND_CTR['2-3'];
+      else if (g <= 10) ctr = RANK_BAND_CTR['4-10'];
+      else if (g <= 20) ctr = RANK_BAND_CTR['11-20'];
+      else return 0;
+      return v * ctr;
+    }
+
+    /** Volume-weighted band metrics over the commercial demand pool. */
+    function computeRankBandDemandMetrics(rows, bandPredicate) {
+      const measurable = (Array.isArray(rows) ? rows : []).filter((r) => r && !rankingCaptureFailed(r));
+      const pool = [];
+      let excludedLowVol = 0;
+      let excludedClass = 0;
+      for (const raw of measurable) {
+        const r = resolveClassificationAtRender(raw);
+        const floor = rankDemandVolFloorForClass(r.keyword_class);
+        if (floor == null) { excludedClass += 1; continue; }
+        const vol = Number(r.search_volume);
+        if (!Number.isFinite(vol) || vol < floor) { excludedLowVol += 1; continue; }
+        pool.push(r);
+      }
       let demandAll = 0;
-      let demandRank1 = 0;
+      let demandBand = 0;
+      let estClicksBand = 0;
       let count = 0;
-      for (const r of list) {
-        const v = volOf(r);
-        demandAll += v;
-        if (Number(r.best_rank_group) === 1) {
-          demandRank1 += v;
+      const bandRows = [];
+      for (const r of pool) {
+        const vol = Number(r.search_volume);
+        demandAll += vol;
+        if (typeof bandPredicate === 'function' && bandPredicate(r)) {
+          demandBand += vol;
           count += 1;
+          estClicksBand += estClicksForRank(vol, r.best_rank_group);
+          bandRows.push(r);
         }
       }
-      const demandPct = demandAll > 0 ? Math.round((demandRank1 / demandAll) * 100) : 0;
+      const demandPct = demandAll > 0 ? Math.round((demandBand / demandAll) * 100) : 0;
       return {
         count,
-        measurable: list.length,
+        poolSize: pool.length,
+        measurable: measurable.length,
         demandPct,
-        demandRank1,
+        demandBand,
         demandAll,
-        rows: list.filter((r) => Number(r.best_rank_group) === 1),
+        demandRank1: demandBand,
+        estClicksBand,
+        excludedLowVol,
+        excludedClass,
+        rows: bandRows,
+        pool,
+        schema_version: 4,
       };
+    }
+
+    function computeRank1DemandMetrics(rows) {
+      return computeRankBandDemandMetrics(rows, (r) => Number(r.best_rank_group) === 1);
+    }
+
+    function rankDemandPoolFootnote(m) {
+      return `Scoring pool = money keywords above class floors (national ≥50 · local/regional ≥10). `
+        + `Brand/education excluded. ${m.excludedLowVol} below-floor + ${m.excludedClass} brand/edu out of ${m.measurable} measurable. `
+        + `Demand % = share of pool search volume in this band. Est. clicks use a fixed CTR curve (#1 ~28%, 2–3 ~12%, 4–10 ~5%, 11–20 ~2%) for relative priority — not GSC.`;
     }
     function computeRankingPillarScoresFromRows(rows, engine) {
       const eng = engine || 'all';
@@ -70540,9 +70606,14 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
       const withAiCitation = citationViews.filter(v => v.alan_count > 0).length;
 
       const measurableForRank = list.filter((r) => !rankingCaptureFailed(r));
-      const top10 = measurableForRank.filter(r => r.best_rank_group != null && r.best_rank_group <= 10).length;
-      const rank11to20 = measurableForRank.filter(r => r.best_rank_group != null && r.best_rank_group >= 11 && r.best_rank_group <= 20).length;
+      const top10Demand = computeRankBandDemandMetrics(measurableForRank, (r) => r.best_rank_group != null && Number(r.best_rank_group) <= 10);
+      const rank11to20Demand = computeRankBandDemandMetrics(measurableForRank, (r) => {
+        const g = Number(r.best_rank_group);
+        return Number.isFinite(g) && g >= 11 && g <= 20;
+      });
       const rank1Demand = computeRank1DemandMetrics(measurableForRank);
+      const top10 = top10Demand.count;
+      const rank11to20 = rank11to20Demand.count;
 
       const withLocalPack = list.filter(r => r.local_pack_present_any === true || (r.serp_features && r.serp_features.local_pack === true)).length;
       const withPaa = list.filter(r => r.paa_present_any === true || (r.serp_features && r.serp_features.people_also_ask === true)).length;
@@ -70566,16 +70637,15 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
       const pillars = {
         aiCoverage: { count: withAiOverview, total: totalKeywords, pct: pct(withAiOverview, totalKeywords) },
         aiCitation: { count: withAiCitation, total: citationTotal, pct: pct(withAiCitation, citationTotal) },
-        top10: { count: top10, total: totalKeywords, pct: pct(top10, totalKeywords) },
+        // Demand % over commercial pool (class-aware floors); count = keywords in band in pool.
+        top10: { count: top10, total: top10Demand.poolSize, pct: top10Demand.demandPct },
         serpFeature: { count: serpFeatureHits, total: serpFeatureSlots, pct: pct(serpFeatureHits, serpFeatureSlots) },
         moneyCitations: { count: moneyCitations, total: totalCitations, pct: pct(moneyCitations, totalCitations) },
-        // 2026-06-24: list-tile counts persisted so their delta tracks across audits.
-        top10Keywords: { count: top10, total: measurableForRank.length, pct: pct(top10, measurableForRank.length) },
-        rank11to20Keywords: { count: rank11to20, total: measurableForRank.length, pct: pct(rank11to20, measurableForRank.length) },
-        // Demand-weighted #1 ownership (pct = demand share; count = #1 keywords).
+        top10Keywords: { count: top10, total: top10Demand.poolSize, pct: top10Demand.demandPct },
+        rank11to20Keywords: { count: rank11to20, total: rank11to20Demand.poolSize, pct: rank11to20Demand.demandPct },
         rank1Demand: {
           count: rank1Demand.count,
-          total: rank1Demand.measurable,
+          total: rank1Demand.poolSize,
           pct: rank1Demand.demandPct,
         },
         crossEngine,
@@ -75246,11 +75316,11 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         predicate: (row) => rowHasAlanMoneyCitation(row)
       },
       'ranking-card-top10': {
-        label: 'Top-10 rank coverage',
+        label: 'Top-10 demand coverage',
         predicate: (row) => rowIsTop10(row)
       },
       'ranking-card-rank1-demand': {
-        label: 'Position #1 (demand-weighted)',
+        label: 'Position #1 (demand)',
         predicate: (row) => Number(row?.best_rank_group) === 1
       },
       'ranking-card-serp-features': {
@@ -76249,10 +76319,10 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
       return { text: '→0', dir: 'flat', title: `Still #${curr}` };
     }
 
-    function rankedKeywordListHtml(sorted, title) {
+    function rankedKeywordListHtml(sorted, title, footnoteExtra) {
       if (!sorted.length) {
         return `<p class="tile-details-title">${title}</p>`
-          + `<p class="tile-details-footnote">No keywords in this band right now.</p>`;
+          + `<p class="tile-details-footnote">No keywords in this band right now.${footnoteExtra ? ' ' + footnoteExtra : ''}</p>`;
       }
       const prior = priorRankByKeywordMap();
       const items = sorted.map((r) => {
@@ -76268,9 +76338,10 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         return `<li><strong>#${pos}</strong>${deltaHtml} ${rankedKeywordEscape(r.keyword || '(unknown)')}`
           + ` <span style="color:#64748b;">· vol ${vol}</span></li>`;
       }).join('');
-      const footnote = prior
+      let footnote = prior
         ? 'Sorted by Google position (best first), then search volume. ↑/↓ = change vs previous audit (↑ = better rank).'
         : 'Sorted by Google position (best first), then search volume. Rank deltas appear when the previous audit loads.';
+      if (footnoteExtra) footnote += ' ' + footnoteExtra;
       return `<p class="tile-details-title">${title}</p>`
         + `<ul class="tile-details-list" style="max-height:300px; overflow-y:auto;">${items}</ul>`
         + `<p class="tile-details-footnote">${footnote}</p>`;
@@ -76288,21 +76359,35 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
       const valueEl = card.querySelector(".metric-pill-value[data-field='value']");
       const statusEl = card.querySelector(".metric-pill-status[data-field='status']");
       const detailsEl = card.querySelector(".metric-pill-details");
-      if (valueEl) valueEl.textContent = `${sorted.length} keyword${sorted.length === 1 ? '' : 's'}`;
+      if (valueEl) {
+        valueEl.textContent = opts.valueText
+          || `${sorted.length} keyword${sorted.length === 1 ? '' : 's'}`;
+      }
       if (statusEl) statusEl.textContent = opts.statusLabel;
-      if (detailsEl) detailsEl.innerHTML = rankedKeywordListHtml(sorted, opts.title);
+      if (detailsEl) detailsEl.innerHTML = rankedKeywordListHtml(sorted, opts.title, opts.footnoteExtra || '');
     }
 
     function refreshRankedKeywordListTilesFromLiveRows() {
       const rows = typeof getLiveRankingRowsForTiles === 'function' ? getLiveRankingRowsForTiles() : [];
       if (!Array.isArray(rows) || !rows.length) return;
       const measurable = rows.filter((r) => !rankingCaptureFailed(r));
-      renderRankedKeywordListTile('ranking-card-top10-keywords',
-        measurable.filter((r) => r.best_rank_group != null && r.best_rank_group <= 10),
-        { statusLabel: 'Wins', title: 'Keywords where you rank in Google’s top 10 (positions 1–10). Incomplete checks excluded.' });
-      renderRankedKeywordListTile('ranking-card-rank11to20-keywords',
-        measurable.filter((r) => r.best_rank_group != null && r.best_rank_group >= 11 && r.best_rank_group <= 20),
-        { statusLabel: 'Striking distance', title: 'Keywords ranking 11–20 — just off page 1 and prime optimisation targets. Incomplete checks excluded.' });
+      const mTop10 = computeRankBandDemandMetrics(measurable, (r) => r.best_rank_group != null && Number(r.best_rank_group) <= 10);
+      const mStrike = computeRankBandDemandMetrics(measurable, (r) => {
+        const g = Number(r.best_rank_group);
+        return Number.isFinite(g) && g >= 11 && g <= 20;
+      });
+      renderRankedKeywordListTile('ranking-card-top10-keywords', mTop10.rows, {
+        statusLabel: 'Wins',
+        title: 'Commercial-pool keywords in Google’s top 10 (positions 1–10).',
+        valueText: `${mTop10.count} of ${mTop10.poolSize} · ${mTop10.demandPct}% demand`,
+        footnoteExtra: rankDemandPoolFootnote(mTop10),
+      });
+      renderRankedKeywordListTile('ranking-card-rank11to20-keywords', mStrike.rows, {
+        statusLabel: 'Striking distance',
+        title: 'Commercial-pool keywords ranking 11–20 — just off page 1.',
+        valueText: `${mStrike.count} of ${mStrike.poolSize} · ${mStrike.demandPct}% demand`,
+        footnoteExtra: rankDemandPoolFootnote(mStrike),
+      });
     }
 
     function formatSignedDelta(n) {
@@ -76868,94 +76953,76 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         // Ignore if localStorage missing/corrupt
       }
 
-      // Top-10 coverage
+      // Top-10 coverage — demand share of commercial pool (class-aware floors).
       const top10Card = document.getElementById("ranking-card-top10");
       if (top10Card) {
         const valueEl = top10Card.querySelector(".metric-pill-value[data-field='value']");
         const statusEl = top10Card.querySelector(".metric-pill-status[data-field='status']");
         const detailsEl = top10Card.querySelector(".metric-pill-details");
-        
-        // Calculate rank buckets — exclude failed/incomplete captures from
-        // coverage denominators (do not inflate % by dropping only failures).
         const scoredRows = rowsToUse.filter((r) => !rankingCaptureFailed(r));
-        const scoredCount = scoredRows.length;
-        const incompleteCount = rowsToUse.length - scoredCount;
-        const legacyUnverified = scoredRows.filter((r) => rankingCaptureQualityKind(r) === 'legacy_unverified').length;
-        const knownComplete = scoredRows.length - legacyUnverified;
-        const rank1 = scoredRows.filter(r => Number(r.best_rank_group) === 1).length;
-        const rank23 = scoredRows.filter(r => {
+        const incompleteCount = rowsToUse.length - scoredRows.length;
+        const mTop10 = computeRankBandDemandMetrics(scoredRows, (r) => r.best_rank_group != null && Number(r.best_rank_group) <= 10);
+        const m1 = computeRankBandDemandMetrics(scoredRows, (r) => Number(r.best_rank_group) === 1);
+        const m23 = computeRankBandDemandMetrics(scoredRows, (r) => {
           const g = Number(r.best_rank_group);
           return g >= 2 && g <= 3;
-        }).length;
-        const rank1Pct = scoredCount > 0 ? Math.round((rank1 / scoredCount) * 100) : 0;
-        const rank23Pct = scoredCount > 0 ? Math.round((rank23 / scoredCount) * 100) : 0;
-        const rank11to20 = scoredRows.filter(r => r.best_rank_group != null && r.best_rank_group >= 11 && r.best_rank_group <= 20).length;
-        const rank21to50 = scoredRows.filter(r => r.best_rank_group != null && r.best_rank_group >= 21 && r.best_rank_group <= 50).length;
-        const completeNoMatch = scoredRows.filter(r => r.best_rank_group == null).length;
-        const beyondDepth = scoredRows.filter(r => r.best_rank_group != null && r.best_rank_group > 50).length;
-        const top10 = scoredRows.filter(r => r.best_rank_group != null && r.best_rank_group <= 10).length;
-        const top10Pct = scoredCount > 0 ? Math.round((top10 / scoredCount) * 100) : 0;
-        if (valueEl) valueEl.textContent = `${top10}/${scoredCount} (${top10Pct}%)`;
-        
-        let ragClass = 'red';
-        let statusLabel = 'Weak';
-        if (top10Pct >= 60) { ragClass = 'green'; statusLabel = 'Strong'; }
-        else if (top10Pct >= 30) { ragClass = 'amber'; statusLabel = 'OK'; }
-        
-        top10Card.className = `metric-pill metric-pill--${ragClass}`;
-        if (statusEl) statusEl.textContent = statusLabel;
-        
-        // Positions 4–10 only (mutually exclusive with Rank 1 / 2–3)
-        const rank4to10 = scoredRows.filter(r => {
+        });
+        const m4to10 = computeRankBandDemandMetrics(scoredRows, (r) => {
           const g = Number(r.best_rank_group);
           return g >= 4 && g <= 10;
+        });
+        const m11to20 = computeRankBandDemandMetrics(scoredRows, (r) => {
+          const g = Number(r.best_rank_group);
+          return g >= 11 && g <= 20;
+        });
+        const pool = mTop10.pool || [];
+        const poolN = mTop10.poolSize;
+        const rank21to50 = pool.filter((r) => {
+          const g = Number(r.best_rank_group);
+          return Number.isFinite(g) && g >= 21 && g <= 50;
         }).length;
-        const pct4to10 = scoredCount > 0 ? Math.round((rank4to10 / scoredCount) * 100) : 0;
-        const pct11to20 = scoredCount > 0 ? Math.round((rank11to20 / scoredCount) * 100) : 0;
-        const pct21to50 = scoredCount > 0 ? Math.round((rank21to50 / scoredCount) * 100) : 0;
-        const pctNoMatch = scoredCount > 0 ? Math.round((completeNoMatch / scoredCount) * 100) : 0;
-        const depthHint = 50;
-        
-        // Update details — Rank 1 / 2–3 / 4–10 are exclusive bands (no double-count).
+        const completeNoMatch = pool.filter((r) => r.best_rank_group == null).length;
+        const volOf = (rows) => rows.reduce((s, r) => s + (Number(r.search_volume) || 0), 0);
+        const demand21to50 = volOf(pool.filter((r) => {
+          const g = Number(r.best_rank_group);
+          return Number.isFinite(g) && g >= 21 && g <= 50;
+        }));
+        const demandNoMatch = volOf(pool.filter((r) => r.best_rank_group == null));
+        const pctVol = (part) => (mTop10.demandAll > 0 ? Math.round((part / mTop10.demandAll) * 100) : 0);
+        if (valueEl) {
+          valueEl.textContent = `${mTop10.count} of ${poolN} · ${mTop10.demandPct}% demand`;
+          valueEl.title = `Top-10 in commercial pool: ${mTop10.count}/${poolN} keywords · ${mTop10.demandPct}% of pool search volume · est. ~${Math.round(mTop10.estClicksBand)} clicks/mo at current ranks`;
+        }
+        let ragClass = 'red';
+        let statusLabel = 'Weak';
+        if (mTop10.demandPct >= 60) { ragClass = 'green'; statusLabel = 'Strong'; }
+        else if (mTop10.demandPct >= 30) { ragClass = 'amber'; statusLabel = 'OK'; }
+        top10Card.className = `metric-pill metric-pill--${ragClass}`;
+        if (statusEl) statusEl.textContent = statusLabel;
         if (detailsEl) {
           detailsEl.innerHTML = `
             <p class="tile-details-title">
-              Distribution of best classic (blue-link) rankings across tracked keywords with a measurable depth-${depthHint} check
-              (${knownComplete} known-complete · ${legacyUnverified} legacy quality unavailable · tracked ${rowsToUse.length}).
+              Share of commercial-pool search demand in each exclusive rank band
+              (pool ${poolN} · measurable ${scoredRows.length} · tracked ${rowsToUse.length}).
             </p>
             <ul class="tile-details-list">
-              <li>
-                <strong>Rank 1:</strong> ${rank1}/${scoredCount} (${rank1Pct}%)
-              </li>
-              <li>
-                <strong>Ranks 2–3:</strong> ${rank23}/${scoredCount} (${rank23Pct}%)
-              </li>
-              <li>
-                <strong>Positions 4–10:</strong> ${rank4to10}/${scoredCount} (${pct4to10}%)
-              </li>
-              <li>
-                <strong>Positions 11–20:</strong> ${rank11to20}/${scoredCount} (${pct11to20}%)
-              </li>
-              <li>
-                <strong>Positions 21–50:</strong> ${rank21to50}/${scoredCount} (${pct21to50}%)
-              </li>
-              <li>
-                <strong>Not in top ${depthHint} (complete no-match):</strong> ${completeNoMatch}/${scoredCount} (${pctNoMatch}%)
-              </li>
-              ${beyondDepth > 0 ? `<li><strong>Beyond depth ${depthHint}:</strong> ${beyondDepth}/${scoredCount}</li>` : ''}
-              <li>
-                <strong>Incomplete / empty checks (excluded):</strong> ${incompleteCount}
-              </li>
+              <li><strong>Rank 1:</strong> ${m1.count}/${poolN} · ${m1.demandPct}% demand · est. ~${Math.round(m1.estClicksBand)} clicks/mo</li>
+              <li><strong>Ranks 2–3:</strong> ${m23.count}/${poolN} · ${m23.demandPct}% demand · est. ~${Math.round(m23.estClicksBand)} clicks/mo</li>
+              <li><strong>Positions 4–10:</strong> ${m4to10.count}/${poolN} · ${m4to10.demandPct}% demand · est. ~${Math.round(m4to10.estClicksBand)} clicks/mo</li>
+              <li><strong>Top-10 total:</strong> ${mTop10.count}/${poolN} · ${mTop10.demandPct}% demand · est. ~${Math.round(mTop10.estClicksBand)} clicks/mo</li>
+              <li><strong>Positions 11–20:</strong> ${m11to20.count}/${poolN} · ${m11to20.demandPct}% demand · est. ~${Math.round(m11to20.estClicksBand)} clicks/mo</li>
+              <li><strong>Positions 21–50:</strong> ${rank21to50}/${poolN} · ${pctVol(demand21to50)}% demand</li>
+              <li><strong>Not in top 50 (complete no-match):</strong> ${completeNoMatch}/${poolN} · ${pctVol(demandNoMatch)}% demand</li>
+              <li><strong>Incomplete / empty checks (excluded):</strong> ${incompleteCount}</li>
             </ul>
             <p class="tile-details-footnote">
-              Rank 1 + 2–3 + 4–10 = Top-10 coverage (no overlap). “Where you stand → Organic (top 3)” still means podium (1–3) as a separate page-value signal.
-              Complete no-match = null organic within depth on a measurable check. Failed DFS captures are excluded from both numerator and denominator.
+              Rank 1 + 2–3 + 4–10 = Top-10 (no overlap). ${rankDemandPoolFootnote(mTop10)}
             </p>
           `;
         }
       }
 
-      // Position #1 demand-weighted ownership (excellence dial — not additive with Top-10 %).
+      // Position #1 demand ownership (excellence dial — same pool rules as Top-10).
       {
         const rank1Card = document.getElementById('ranking-card-rank1-demand');
         if (rank1Card) {
@@ -76965,8 +77032,8 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
           const statusEl = rank1Card.querySelector(".metric-pill-status[data-field='status']");
           const detailsEl = rank1Card.querySelector('.metric-pill-details');
           if (valueEl) {
-            valueEl.textContent = `${m.count} at #1 · ${m.demandPct}/100 demand`;
-            valueEl.title = `${m.count} of ${m.measurable} measurable keywords at organic #1. Score ${m.demandPct}/100 = share of search-volume demand those #1s represent (${Math.round(m.demandRank1).toLocaleString('en-GB')} of ${Math.round(m.demandAll).toLocaleString('en-GB')}).`;
+            valueEl.textContent = `${m.count} of ${m.poolSize} · ${m.demandPct}% demand`;
+            valueEl.title = `${m.count} pool keywords at #1. ${m.demandPct}% of pool volume · est. ~${Math.round(m.estClicksBand)} clicks/mo`;
           }
           let ragClass = 'red';
           let statusLabel = 'Weak';
@@ -76977,33 +77044,48 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
           if (detailsEl) {
             const listHtml = rankedKeywordListHtml(
               m.rows.slice().sort((a, b) => (Number(b.search_volume) || 0) - (Number(a.search_volume) || 0)),
-              'Keywords at Google rank #1 (sorted by search volume).'
+              'Pool keywords at Google rank #1 (sorted by search volume).'
             );
             detailsEl.innerHTML = `
               <p class="tile-details-title">
-                Of measured search demand on this audit, how much sits on keywords where you own position #1.
+                Of commercial-pool search demand, how much sits on keywords where you own position #1.
               </p>
               <ul class="tile-details-list">
-                <li><strong>Demand-weighted score:</strong> ${m.demandPct}/100</li>
-                <li><strong>Keywords at #1:</strong> ${m.count}/${m.measurable}</li>
-                <li><strong>Demand volume at #1:</strong> ${Math.round(m.demandRank1).toLocaleString('en-GB')} of ${Math.round(m.demandAll).toLocaleString('en-GB')} (vol; missing vol counts as 10)</li>
+                <li><strong>Demand score:</strong> ${m.demandPct}/100</li>
+                <li><strong>Keywords at #1 (in pool):</strong> ${m.count}/${m.poolSize}</li>
+                <li><strong>Demand volume at #1:</strong> ${Math.round(m.demandBand).toLocaleString('en-GB')} of ${Math.round(m.demandAll).toLocaleString('en-GB')}</li>
+                <li><strong>Est. clicks at #1:</strong> ~${Math.round(m.estClicksBand).toLocaleString('en-GB')}/mo (CTR curve)</li>
               </ul>
               ${listHtml}
               <p class="tile-details-footnote">
-                Separate from Top-10 coverage and from “Organic (top 3)” on Where you stand — those stay as coverage/podium signals. This tile answers “how much demand do we win outright?”
+                ${rankDemandPoolFootnote(m)} Separate from “Organic (top 3)” podium on Where you stand.
               </p>
             `;
           }
         }
       }
 
-      // 2026-06-24: Top-10 + Striking-distance (11–20) ranked-keyword list tiles.
-      renderRankedKeywordListTile('ranking-card-top10-keywords',
-        rowsToUse.filter(r => !rankingCaptureFailed(r) && r.best_rank_group != null && r.best_rank_group <= 10),
-        { statusLabel: 'Wins', title: 'Keywords where you rank in Google’s top 10 (positions 1–10). Incomplete checks excluded.' });
-      renderRankedKeywordListTile('ranking-card-rank11to20-keywords',
-        rowsToUse.filter(r => !rankingCaptureFailed(r) && r.best_rank_group != null && r.best_rank_group >= 11 && r.best_rank_group <= 20),
-        { statusLabel: 'Striking distance', title: 'Keywords ranking 11–20 — just off page 1 and prime optimisation targets. Incomplete checks excluded.' });
+      // Top-10 + Striking-distance list tiles — same commercial pool + demand %.
+      {
+        const scoredRows = rowsToUse.filter((r) => !rankingCaptureFailed(r));
+        const mTop10List = computeRankBandDemandMetrics(scoredRows, (r) => r.best_rank_group != null && Number(r.best_rank_group) <= 10);
+        const mStrike = computeRankBandDemandMetrics(scoredRows, (r) => {
+          const g = Number(r.best_rank_group);
+          return Number.isFinite(g) && g >= 11 && g <= 20;
+        });
+        renderRankedKeywordListTile('ranking-card-top10-keywords', mTop10List.rows, {
+          statusLabel: 'Wins',
+          title: 'Commercial-pool keywords in Google’s top 10 (positions 1–10).',
+          valueText: `${mTop10List.count} of ${mTop10List.poolSize} · ${mTop10List.demandPct}% demand`,
+          footnoteExtra: rankDemandPoolFootnote(mTop10List),
+        });
+        renderRankedKeywordListTile('ranking-card-rank11to20-keywords', mStrike.rows, {
+          statusLabel: 'Striking distance',
+          title: 'Commercial-pool keywords ranking 11–20 — just off page 1.',
+          valueText: `${mStrike.count} of ${mStrike.poolSize} · ${mStrike.demandPct}% demand`,
+          footnoteExtra: rankDemandPoolFootnote(mStrike),
+        });
+      }
 
       // SERP feature coverage
       const serpFeaturesCard = document.getElementById("ranking-card-serp-features");

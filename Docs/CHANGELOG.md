@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Ranking bands: commercial-pool demand (class-aware floors)
+
+**Change:** Top-10, Position #1, Wins (1–10), and Striking distance (11–20) now score over a **commercial demand pool**, not all 155 keywords equally. Floors: **national-money ≥50**, **local/regional-money ≥10**; brand/education and missing volume excluded. Headline = `N of pool · D% demand` (volume share in band). Details add **est. clicks** via a fixed CTR curve (#1 ~28%, 2–3 ~12%, 4–10 ~5%, 11–20 ~2%). Local/city terms keep a lower floor so genuine low-vol locals are not cut with weak national long-tails.
+
+**Files:** `audit-dashboard.html`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - Position #1 demand-weighted tile + split Top-10 bands
 
 **Change:** Top-10 coverage details now use exclusive bands **Rank 1 · Ranks 2–3 · 4–10** (no double-count). New Ranking tile **Position #1 (demand-weighted)** = share of measured search demand at organic #1, with keyword list + pill delta. “Where you stand → Organic (top 3)” unchanged (podium signal).
