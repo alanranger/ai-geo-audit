@@ -49737,7 +49737,24 @@
       const heroSurfaceRag = heroSurfaceScore == null ? 'amber' : surfaceRagClass(heroSurfaceScore);
       const heroTopRag = heroTopOfPageScore == null ? 'amber' : topOfPageRagClass(heroTopOfPageScore);
       const heroCoverageLine = heroCoverage ? formatRankingCaptureCoverageLine(heroCoverage) : '';
-      debugLog(`Phase 1 hero: Surface visibility=${heroSurfaceDisplay}, Top-of-Page=${heroTopDisplay}, rows=${rankingRowsForHero.length}, provisional=${heroProvisional}`, 'info');
+      // Overall Site AI Health = weighted Surface + Top + Brand (needles stay per-metric).
+      const heroBrandForComposite = window.__brandDemandCachedOverlay || scores?.brandOverlay || null;
+      const heroBrandScore = (heroBrandForComposite && typeof heroBrandForComposite.score === 'number'
+        && Number.isFinite(heroBrandForComposite.score))
+        ? Math.round(heroBrandForComposite.score)
+        : null;
+      const heroOverall = computeSiteAiHealthComposite({
+        surface: heroSurfaceScore,
+        top: heroTopOfPageScore,
+        brand: heroBrandScore,
+      });
+      const heroOverallScore = heroOverall.score;
+      const heroOverallRag = heroOverall.rag || 'amber';
+      const heroOverallOutOf = heroOverallScore == null ? '—' : `${heroOverallScore}/100`;
+      debugLog(
+        `Site AI Health overall=${heroOverallOutOf} (Surface ${heroSurfaceDisplay} · Top ${heroTopDisplay} · Brand ${heroBrandScore == null ? '—' : heroBrandScore}), rows=${rankingRowsForHero.length}, provisional=${heroProvisional}`,
+        'info'
+      );
       // Visibility lever = surface-aware rollup (not classic posScore)
       if (heroRowsReady && surfaceVisibilityHero) {
         const localMoney = surfaceVisibilityHero.byClass?.['local-money']?.score;
@@ -49937,19 +49954,19 @@
                 <!-- Circular Progress Ring - Speedometer Style -->
                 <div style="position: relative; width: 520px; height: 520px; margin: 0 auto; overflow: visible;">
                 ${(() => {
-                  // Phase 1: primary dial = Surface Visibility (not GAIO composite / not Brand)
-                  const score = heroSurfaceScore == null ? 0 : heroSurfaceScore;
-                  const scoreLabel = heroSurfaceDisplay;
+                  // Overall = weighted Surface 40% + Top 40% + Brand 20% (needles stay per-metric).
+                  const score = heroOverallScore == null ? 0 : heroOverallScore;
                   const center = 260;
                   const radius = 195;
                   const strokeWidth = 26;
                   const normalizedRadius = radius - strokeWidth / 2;
                   
-                  // Determine colors based on surface RAG (≥70 green, ≥40 amber, else red)
-                  const color = heroSurfaceRag === 'green' ? '#10b981' : 
-                               heroSurfaceRag === 'amber' ? '#f59e0b' : '#ef4444';
-                  const bgColor = heroSurfaceRag === 'green' ? '#d1fae5' : 
-                                 heroSurfaceRag === 'amber' ? '#fef3c7' : '#fee2e2';
+                  // Centre hub uses overall RAG (≥70 green, ≥40 amber, else red)
+                  const color = heroOverallRag === 'green' ? '#10b981' : 
+                               heroOverallRag === 'amber' ? '#f59e0b' : '#ef4444';
+                  const bgColor = heroOverallRag === 'green' ? '#d1fae5' : 
+                                 heroOverallRag === 'amber' ? '#fef3c7' : '#fee2e2';
+                  const hubId = '#0f172a';
                   
                   // Angle calculations: 0% at 12:05 (-85°), 50% at 6pm (90°), 100% at 12pm (-90°)
                   const startAngle = -85; // 12:05 position
@@ -50051,7 +50068,7 @@
                             ${needle(topScore, topId, 3.8, 12, null)}
                             ${needle(brandScore, brandId, 3.4, 10, null)}
                             ${needle(heroSurfaceScore, surfaceId, 5.6, 18, null)}
-                            <circle cx="${center}" cy="${center}" r="10.4" fill="${surfaceId}" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));"/>
+                            <circle cx="${center}" cy="${center}" r="10.4" fill="${hubId}" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));"/>
                             ${labelAt(heroSurfaceScore, `Surface ${heroSurfaceScore == null ? '—' : heroSurfaceScore + '/100'}`, surfaceId)}
                             ${labelAt(topScore, `Top of page ${topScore == null ? '—' : topScore + '/100'}`, topId)}
                             ${labelAt(brandScore, `Brand ${brandScore == null ? '—' : brandScore + '/100'}`, brandId)}
@@ -50060,19 +50077,19 @@
                         })()}
                       </g>
                     </svg>
-                    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; max-width: 260px; pointer-events: none; z-index: 1;">
-                      <div style="font-size: 3.75rem; font-weight: 800; color: #78350f; line-height: 1; margin-bottom: 0.5rem; letter-spacing: -0.03em; text-shadow: 0 2px 12px #78350f25;" data-hero-surface-score="${heroSurfaceOutOf}">
-                        ${heroSurfaceOutOf}
+                    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; max-width: 280px; pointer-events: none; z-index: 1;">
+                      <div style="font-size: 3.75rem; font-weight: 800; color: ${hubId}; line-height: 1; margin-bottom: 0.5rem; letter-spacing: -0.03em; text-shadow: 0 2px 12px rgba(15,23,42,0.18);" data-hero-overall-score="${heroOverallOutOf}">
+                        ${heroOverallOutOf}
                       </div>
-                      <div style="font-size: 0.82rem; color: #78350f; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.35rem;">
-                        Surface visibility
+                      <div style="font-size: 0.82rem; color: ${hubId}; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.35rem;">
+                        Site AI Health
                       </div>
                       <div style="font-size: 0.75rem; color: #94a3b8; font-weight: 500; max-width: 280px; margin: 0 auto 0.75rem; line-height: 1.35; text-transform: none; letter-spacing: 0;">
-                        of the answer surfaces Google served on your money searches, how many you own — demand-weighted
+                        Weighted overall — Surface 40% · Top of page 40% · Brand 20%
                       </div>
-                      <div style="padding: 0.5rem 1rem; background: #faf5f0; border: 1px solid #78350f; border-radius: 24px; display: inline-block;">
-                        <span style="font-size: 0.875rem; color: #78350f; font-weight: 700;">
-                          ${heroSurfaceRag === 'green' ? '✓ Strong' : heroSurfaceRag === 'amber' ? '⚠ Moderate' : '✗ Weak'}
+                      <div style="padding: 0.5rem 1rem; background: ${bgColor}; border: 1px solid ${color}; border-radius: 24px; display: inline-block;">
+                        <span style="font-size: 0.875rem; color: ${color}; font-weight: 700;">
+                          ${heroOverallRag === 'green' ? '✓ Strong' : heroOverallRag === 'amber' ? '⚠ Moderate' : '✗ Weak'}
                         </span>
                       </div>
                     </div>
@@ -50115,14 +50132,14 @@
                     ${formatHeroDeltaBadge(heroDeltas?.brand)}
                     <div style="font-size: 0.75rem; color: #2563eb; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.35rem;">Brand</div>
                     <div style="font-size: 2.5rem; font-weight: 800; color: #2563eb; line-height: 1;">${brandOutOf}</div>
-                    <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.4rem; line-height: 1.35;" title="Derived from GBP + branded search. Doesn't feed the pillar levers or the Surface Visibility headline. It does contribute 15% of AI Summary Likelihood.">Brand demand (derived · doesn't feed levers)</div>
+                    <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.4rem; line-height: 1.35;" title="Derived from GBP + branded search. Doesn't feed the pillar levers. Contributes 20% of Site AI Health overall and 15% of AI Summary Likelihood.">Brand demand (derived · 20% of overall)</div>
                   </div>`;
                   })()}
                 </div>
                 <div id="hero-ai-summary-under-dial" style="margin-top: 1.5rem; width: 100%; max-width: 560px;">
                   <div style="text-align: center; margin-bottom: 0.85rem;">
                     <h3 style="font-size: 1rem; font-weight: 800; color: #0d9488; margin: 0 0 0.25rem; letter-spacing: 0.04em; text-transform: uppercase;">AI Summary Likelihood</h3>
-                    <p style="margin: 0; font-size: 0.8rem; color: #64748b; font-weight: 500;">Composite of four inputs — not the dial score.</p>
+                    <p style="margin: 0; font-size: 0.8rem; color: #64748b; font-weight: 500;">Separate four-input composite — not the Site AI Health overall above.</p>
                   </div>
                   ${(() => {
                     const aiTeal = '#0d9488';
@@ -50144,7 +50161,7 @@
 • Brand demand: ${brandShow}/100 (15% weight)
 Score: ${score}/100
 
-Composite of four inputs — not the Surface Visibility dial score.`;
+Separate four-input composite — not the Site AI Health overall (Surface 40% · Top 40% · Brand 20%).`;
                     return `
                   <div style="display: flex; align-items: flex-start; gap: 1rem; justify-content: center; flex-wrap: wrap;">
                     <span style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: ${pillBg}; color: ${aiTeal}; border: 1px solid ${aiTeal}; cursor: help; width: 170px; justify-content: center; flex-shrink: 0;" title="${aiSummaryBreakdown}">
@@ -68247,6 +68264,24 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       if (score >= 70) return 'green';
       if (score >= 40) return 'amber';
       return 'red';
+    }
+    /** Mirror of lib/audit/siteAiHealthComposite.js — keep weights in sync. */
+    function computeSiteAiHealthComposite(parts) {
+      const w = { surface: 0.4, top: 0.4, brand: 0.2 };
+      const used = [];
+      const push = (key, v) => {
+        if (v == null || v === '') return;
+        const n = Number(v);
+        if (Number.isFinite(n)) used.push({ key, w: w[key], v: n });
+      };
+      push('surface', parts?.surface);
+      push('top', parts?.top);
+      push('brand', parts?.brand);
+      if (!used.length) return { score: null, rag: null, weights: w, formula: 'Surface 40% · Top of page 40% · Brand 20%' };
+      const wSum = used.reduce((s, p) => s + p.w, 0);
+      const score = Math.round(used.reduce((s, p) => s + p.v * (p.w / wSum), 0));
+      const rag = score >= 70 ? 'green' : score >= 40 ? 'amber' : 'red';
+      return { score, rag, weights: w, formula: 'Surface 40% · Top of page 40% · Brand 20%', used };
     }
     function ensureRowSurfaceScore(row) {
       if (!row || typeof row !== 'object') return null;

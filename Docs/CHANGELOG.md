@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Site AI Health overall = Surface + Top + Brand
+
+**Change:** Dial centre score is no longer Surface-only. Overall Site AI Health = **Surface 40% · Top of page 40% · Brand 20%** (missing legs redistribute). Three coloured needles stay per-metric; hub/label show the weighted overall + RAG. AI Summary Likelihood remains a separate four-input composite underneath.
+
+**Files:** `lib/audit/siteAiHealthComposite.js`, `audit-dashboard.html`, `test/site-ai-health-composite.test.js`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - Dashboard Ranking gap-fill covers unverified absences
 
 **Change:** App Ranking & AI full scan now runs the same end-of-SERP gap-fill as Monday parity: retries empty/incomplete/error **and** unverified absences (`exhausted_budget` / `unconfirmed_unstable` / `partial_failure`) with a **fresh** DFS spend budget so confirm-cap leftovers from the main pass get a second look. Cap raised 20 → 40 keywords × 2 rounds. Manual repair: `node scripts/gap-fill-ranking-gaps.mjs --date=YYYY-MM-DD`.
