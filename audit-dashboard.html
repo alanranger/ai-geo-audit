@@ -67790,18 +67790,27 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         return slot != null ? 'typical slot ' + slot : '—';
       };
       const packNote = c.pack.avgPosition != null ? ('avg pack pos ' + c.pack.avgPosition) : typ('local_pack');
+      const paaLabel = PAA_SURFACE_SCORING_ENABLED
+        ? 'People Also Ask'
+        : '<em style="font-style:italic;color:#64748b;">People Also Ask</em>'
+          + ' <span style="font-style:italic;color:#94a3b8;font-size:0.78rem;">(' + PAA_DISABLED_REASON + ')</span>';
+      const paaNote = PAA_SURFACE_SCORING_ENABLED
+        ? typ('people_also_ask')
+        : 'diagnostic — excluded from scores/gaps';
       body.innerHTML =
         '<table><thead><tr><th>Surface</th><th>Served</th><th>Owned</th><th>Note</th></tr></thead><tbody>' +
         rowHtml('Organic top-10', c.organic.served, c.organic.owned, typ('organic')) +
         rowHtml('Google AI Overview', c.aio.served, c.aio.owned, typ('ai_overview')) +
         rowHtml('Map results', c.pack.served, c.pack.owned, packNote) +
         rowHtml('Knowledge Panel', c.kp.served, c.kp.owned, 'rail-side (no slot)') +
-        rowHtml('People Also Ask', c.paa.served, c.paa.owned, typ('people_also_ask')) +
+        rowHtml(paaLabel, c.paa.served, c.paa.owned, paaNote) +
         rowHtml('Featured snippet', c.fs.served, c.fs.owned, typ('featured_snippet')) +
         rowHtml('Google AI Mode', c.aimode.served, c.aimode.owned, 'diagnostic product') +
         '</tbody></table>' +
         '<p class="soc-footnote">Served/owned use measurable checks only (incomplete/empty/error excluded — unknowns are not zeros). ' +
-        'PAA, featured snippet and AI Overview are stack-gated (same definition as Surface Outcomes). Google AI Mode uses the separate ai_engines product slot. ' +
+        'PAA, featured snippet and AI Overview are stack-gated (same definition as Surface Outcomes). ' +
+        (PAA_SURFACE_SCORING_ENABLED ? '' : 'PAA ownership counts are shown but not scored (DFS AIO-in-PAA sources pending). ') +
+        'Google AI Mode uses the separate ai_engines product slot. ' +
         'Typical position = median stack slot. Scope = class filter above (not money-only unless filtered). ' +
         formatRankingCaptureCoverageLine(c.coverage || {}) + '</p>';
       try { updateGoogleAioCaptionFromRows(allRows); } catch (_e) { /* optional */ }
@@ -67851,6 +67860,10 @@ Composite of four inputs — not the Surface Visibility dial score.`;
     const HERO_28D_AGE_TOLERANCE_DAYS = 26;
     const HERO_28D_COMPARISON_WINDOW_DAYS = 28;
     // Mirror of lib/audit/surfaceScores.js CLASS_WEIGHTS — Surface Outcomes "base wt" tags read this.
+    // DFS confirmed they do not parse AIO-in-PAA sources yet — keep parser ready, exclude from scores/gaps.
+    const PAA_SURFACE_SCORING_ENABLED = false;
+    const PAA_DISABLED_REASON = 'not scored — DFS does not parse AIO-in-PAA sources yet';
+
     const SURFACE_CLASS_WEIGHTS = Object.freeze({
       'local-money': Object.freeze({ pack: 35, organic: 25, aio: 25, fs_paa: 10, paa: 5, kp: 0 }),
       'regional-money': Object.freeze({ pack: 25, organic: 38, aio: 28, fs_paa: 12, paa: 0, kp: 0 }),
@@ -68109,7 +68122,6 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       const fsPresent = fsStack.length > 0;
       const fsOurs = fsStack.some((e) => e.ours === true);
       // PAA disabled from Surface dial until DFS hydrates AIO-in-PAA references.
-      const PAA_SURFACE_SCORING_ENABLED = false;
       const paaStack = stackForAio.filter((e) => e.type === 'people_also_ask' && e.slot != null);
       const paaPresent = PAA_SURFACE_SCORING_ENABLED && paaStack.length > 0;
       const paaOurs = paaStack.some((e) => e.ours === true);
@@ -76125,7 +76137,16 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         { key: 'map', name: 'Map results', owned: mapOwned, served: mapServed, avgPos: packAvg, unownedVol: mapUnownedVol, workingEligible: true },
         { key: 'blue_top3', name: 'Organic (top 3)', owned: blueOwned, served: n, avgPos: null, unownedVol: blueUnownedVol, workingEligible: true },
         { key: 'ai', name: 'Google AI Overview', owned: aioOwned, served: aioServed, avgPos: null, unownedVol: aioUnownedVol, workingEligible: true },
-        { key: 'paa', name: 'People Also Ask', owned: paaOwned, served: paaServed, avgPos: null, unownedVol: paaUnownedVol, workingEligible: true },
+        {
+          key: 'paa',
+          name: 'People Also Ask',
+          owned: paaOwned,
+          served: paaServed,
+          avgPos: null,
+          unownedVol: paaUnownedVol,
+          workingEligible: PAA_SURFACE_SCORING_ENABLED,
+          scoringDisabled: !PAA_SURFACE_SCORING_ENABLED,
+        },
         { key: 'fs', name: 'Featured snippet', owned: fsOwned, served: fsServed, avgPos: null, unownedVol: fsUnownedVol, workingEligible: true },
         { key: 'kp', name: 'Knowledge panel', owned: kpOwned, served: kpServed, avgPos: null, unownedVol: 0, workingEligible: false },
       ];
@@ -76135,7 +76156,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       let biggestGapShare = -1;
       let biggestGapVol = -1;
       for (const row of rowsDef) {
-        if (row.key === 'kp' || row.served <= 0) continue;
+        if (row.key === 'kp' || row.scoringDisabled || row.served <= 0) continue;
         const share = row.owned / row.served;
         if (share > strongestShare) {
           strongestShare = share;
@@ -76160,7 +76181,8 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         }
         row.share = row.owned / row.served;
         row.working = row.workingEligible && row.share >= 0.25;
-        if (row.key === 'kp') row.verdict = 'owned';
+        if (row.scoringDisabled) row.verdict = 'not scored';
+        else if (row.key === 'kp') row.verdict = 'owned';
         else if (row.key === strongestKey) row.verdict = 'strongest';
         else if (row.key === biggestGapKey) row.verdict = 'biggest gap';
         else if (row.share >= 0.4) row.verdict = 'strong';
@@ -76184,6 +76206,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         const stack = normalizeSerpSurfaceStack(r);
         for (const el of stack) {
           if (!TOP_OWNABLE_TYPES.has(el?.type)) continue;
+          if (!PAA_SURFACE_SCORING_ENABLED && el.type === 'people_also_ask') continue;
           const slot = Number(el.slot);
           if (!Number.isFinite(slot) || slot < 1) continue;
           const contrib = topSlotValue(slot) * vol;
@@ -76352,7 +76375,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         if (v === 'strongest' || v === 'strong') return 'c-win';
         if (v === 'biggest gap' || v === 'gap') return 'c-gap';
         if (v === 'owned') return 'c-kp';
-        if (v === 'n/a') return 'c-null';
+        if (v === 'not scored' || v === 'n/a') return 'c-null';
         return 'c-mid';
       };
       const barClass = (share) => {
@@ -76382,15 +76405,20 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         const barHtml = row.served <= 0
           ? '<span class="bar"></span>'
           : `<span class="bar"><i class="${barClass(row.share)}" style="width:${pct}%"></i></span>`;
-        const na = row.key === 'kp' || row.served <= 0 ? ' is-na' : '';
+        const na = row.key === 'kp' || row.scoringDisabled || row.served <= 0 ? ' is-na' : '';
         const selected = rankingFilterState.surfaceStandFilter === row.key ? ' is-selected' : '';
-        const chipLabel = selected ? 'filtering — click to clear' : row.verdict;
+        const chipLabel = selected
+          ? 'filtering — click to clear'
+          : (row.scoringDisabled ? PAA_DISABLED_REASON : row.verdict);
+        const nameHtml = row.scoringDisabled
+          ? `<em style="font-style:italic;color:#64748b;">${row.name}</em>`
+          : row.name;
         return `<div class="ra-srow${na}${selected}" data-surface-stand="${row.key}">
-          <span class="nm">${row.name}</span>
+          <span class="nm">${nameHtml}</span>
           ${barHtml}
           <span class="stat">${statText(row)}</span>
           <span class="ra-rowdelta" data-dir="${d.dir}">${d.text}</span>
-          <span class="ra-chip ${chipClass(row.verdict)}">${chipLabel}</span>
+          <span class="ra-chip ${chipClass(row.verdict)}" title="${row.scoringDisabled ? PAA_DISABLED_REASON : ''}">${chipLabel}</span>
         </div>`;
       }).join('');
       bodyEl.querySelectorAll('.ra-srow[data-surface-stand]:not(.is-na)').forEach((el) => {
@@ -76400,7 +76428,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
         });
       });
       if (detailsEl) {
-        detailsEl.innerHTML = `<p class="tile-details-footnote">Surface capture score = your share of every served ownable surface, weighted by slot value × search volume (same D3 table as Top-of-Page). PAA and featured snippet rows are stack-gated (same serve/own as Surface Outcomes). Organic here is top-3 only (capture instrument ≠ Outcomes top-10). Knowledge panel shown but excluded from the score. Google AI Mode is not on this tile — see Surface Outcomes / census. A surface is "working" when you own ≥25% of its served set. Row click filters gap keywords.</p>`;
+        detailsEl.innerHTML = `<p class="tile-details-footnote">Surface capture score = your share of every served ownable surface, weighted by slot value × search volume (same D3 table as Top-of-Page). PAA and featured snippet rows are stack-gated (same serve/own as Surface Outcomes). ${PAA_SURFACE_SCORING_ENABLED ? '' : 'PAA is shown but excluded from capture score and gap chips until DFS parses AIO-in-PAA sources. '}Organic here is top-3 only (capture instrument ≠ Outcomes top-10). Knowledge panel shown but excluded from the score. Google AI Mode is not on this tile — see Surface Outcomes / census. A surface is "working" when you own ≥25% of its served set. Row click filters gap keywords.</p>`;
         if (!detailsEl.classList.contains('expanded')) {
           const toggleEl = card.querySelector('.metric-pill-toggle');
           if (toggleEl) toggleEl.textContent = 'Show details';
