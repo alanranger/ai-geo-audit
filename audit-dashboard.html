@@ -15272,6 +15272,18 @@
             <div class="metric-pill-details" id="ranking-card-top10-details"></div>
           </div>
 
+          <div class="metric-pill metric-pill--amber" id="ranking-card-rank1-demand">
+            <div class="metric-pill-value" data-field="value">–</div>
+            <div class="metric-pill-label-row">
+              <div class="metric-pill-label">Position #1 (demand-weighted)</div>
+              <span class="metric-pill-label-delta" data-field="label-delta">—</span>
+            </div>
+            <div class="metric-pill-status" data-field="status">–</div>
+            <div class="metric-pill-footer">Share of measured search demand where you own Google rank #1 — not additive with Top-10 / podium</div>
+            <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-rank1-demand')">Show details</div>
+            <div class="metric-pill-details" id="ranking-card-rank1-demand-details"></div>
+          </div>
+
           <div class="metric-pill metric-pill--green" id="ranking-card-top10-keywords">
             <div class="metric-pill-value" data-field="value">–</div>
             <div class="metric-pill-label-row">
@@ -70488,6 +70500,31 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
     function isCitationKeywordClass(row) {
       return row?.keyword_class !== 'brand';
     }
+    /** Demand-weighted Position #1 ownership over measurable SERP rows. */
+    function computeRank1DemandMetrics(rows) {
+      const list = Array.isArray(rows) ? rows.filter((r) => r && !rankingCaptureFailed(r)) : [];
+      const volOf = (r) => (Number(r.search_volume) > 0 ? Number(r.search_volume) : 10);
+      let demandAll = 0;
+      let demandRank1 = 0;
+      let count = 0;
+      for (const r of list) {
+        const v = volOf(r);
+        demandAll += v;
+        if (Number(r.best_rank_group) === 1) {
+          demandRank1 += v;
+          count += 1;
+        }
+      }
+      const demandPct = demandAll > 0 ? Math.round((demandRank1 / demandAll) * 100) : 0;
+      return {
+        count,
+        measurable: list.length,
+        demandPct,
+        demandRank1,
+        demandAll,
+        rows: list.filter((r) => Number(r.best_rank_group) === 1),
+      };
+    }
     function computeRankingPillarScoresFromRows(rows, engine) {
       const eng = engine || 'all';
       const list = Array.isArray(rows) ? rows : [];
@@ -70502,8 +70539,10 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
       const withAiOverview = views.filter(v => v.present).length;
       const withAiCitation = citationViews.filter(v => v.alan_count > 0).length;
 
-      const top10 = list.filter(r => r.best_rank_group != null && r.best_rank_group <= 10).length;
-      const rank11to20 = list.filter(r => r.best_rank_group != null && r.best_rank_group >= 11 && r.best_rank_group <= 20).length;
+      const measurableForRank = list.filter((r) => !rankingCaptureFailed(r));
+      const top10 = measurableForRank.filter(r => r.best_rank_group != null && r.best_rank_group <= 10).length;
+      const rank11to20 = measurableForRank.filter(r => r.best_rank_group != null && r.best_rank_group >= 11 && r.best_rank_group <= 20).length;
+      const rank1Demand = computeRank1DemandMetrics(measurableForRank);
 
       const withLocalPack = list.filter(r => r.local_pack_present_any === true || (r.serp_features && r.serp_features.local_pack === true)).length;
       const withPaa = list.filter(r => r.paa_present_any === true || (r.serp_features && r.serp_features.people_also_ask === true)).length;
@@ -70531,8 +70570,14 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         serpFeature: { count: serpFeatureHits, total: serpFeatureSlots, pct: pct(serpFeatureHits, serpFeatureSlots) },
         moneyCitations: { count: moneyCitations, total: totalCitations, pct: pct(moneyCitations, totalCitations) },
         // 2026-06-24: list-tile counts persisted so their delta tracks across audits.
-        top10Keywords: { count: top10, total: totalKeywords, pct: pct(top10, totalKeywords) },
-        rank11to20Keywords: { count: rank11to20, total: totalKeywords, pct: pct(rank11to20, totalKeywords) },
+        top10Keywords: { count: top10, total: measurableForRank.length, pct: pct(top10, measurableForRank.length) },
+        rank11to20Keywords: { count: rank11to20, total: measurableForRank.length, pct: pct(rank11to20, measurableForRank.length) },
+        // Demand-weighted #1 ownership (pct = demand share; count = #1 keywords).
+        rank1Demand: {
+          count: rank1Demand.count,
+          total: rank1Demand.measurable,
+          pct: rank1Demand.demandPct,
+        },
         crossEngine,
         serpAiGap,
         shareOfVoice
@@ -71004,7 +71049,8 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         serpAiGap: serpAiGapCompat,
         shareOfVoice: scores.shareOfVoice && typeof scores.shareOfVoice === 'object' ? scores.shareOfVoice : null,
         top10Keywords: scores.top10Keywords && typeof scores.top10Keywords === 'object' ? scores.top10Keywords : null,
-        rank11to20Keywords: scores.rank11to20Keywords && typeof scores.rank11to20Keywords === 'object' ? scores.rank11to20Keywords : null
+        rank11to20Keywords: scores.rank11to20Keywords && typeof scores.rank11to20Keywords === 'object' ? scores.rank11to20Keywords : null,
+        rank1Demand: scores.rank1Demand && typeof scores.rank1Demand === 'object' ? scores.rank1Demand : null
       };
     }
 
@@ -71027,6 +71073,7 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
       setMetricPillLabelDelta('ranking-card-ai-share-of-voice', curr.shareOfVoice, prev.shareOfVoice, prevDate);
       setMetricPillLabelDelta('ranking-card-top10-keywords', curr.top10Keywords, prev.top10Keywords, prevDate);
       setMetricPillLabelDelta('ranking-card-rank11to20-keywords', curr.rank11to20Keywords, prev.rank11to20Keywords, prevDate);
+      setMetricPillLabelDelta('ranking-card-rank1-demand', curr.rank1Demand, prev.rank1Demand, prevDate);
     }
 
     // ----------------------------------------------------------------
@@ -75202,6 +75249,10 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         label: 'Top-10 rank coverage',
         predicate: (row) => rowIsTop10(row)
       },
+      'ranking-card-rank1-demand': {
+        label: 'Position #1 (demand-weighted)',
+        predicate: (row) => Number(row?.best_rank_group) === 1
+      },
       'ranking-card-serp-features': {
         label: 'SERP feature coverage',
         predicate: (row) => {
@@ -75706,6 +75757,7 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         'ranking-card-ai-citations',
         'ranking-card-ai-citations-money',
         'ranking-card-top10',
+        'ranking-card-rank1-demand',
         'ranking-card-serp-features',
         'ranking-card-ai-cross-engine',
         'ranking-card-serp-ai-gap',
@@ -76830,8 +76882,13 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         const incompleteCount = rowsToUse.length - scoredCount;
         const legacyUnverified = scoredRows.filter((r) => rankingCaptureQualityKind(r) === 'legacy_unverified').length;
         const knownComplete = scoredRows.length - legacyUnverified;
-        const top3 = scoredRows.filter(r => r.best_rank_group != null && r.best_rank_group <= 3).length;
-        const top3Pct = scoredCount > 0 ? Math.round((top3 / scoredCount) * 100) : 0;
+        const rank1 = scoredRows.filter(r => Number(r.best_rank_group) === 1).length;
+        const rank23 = scoredRows.filter(r => {
+          const g = Number(r.best_rank_group);
+          return g >= 2 && g <= 3;
+        }).length;
+        const rank1Pct = scoredCount > 0 ? Math.round((rank1 / scoredCount) * 100) : 0;
+        const rank23Pct = scoredCount > 0 ? Math.round((rank23 / scoredCount) * 100) : 0;
         const rank11to20 = scoredRows.filter(r => r.best_rank_group != null && r.best_rank_group >= 11 && r.best_rank_group <= 20).length;
         const rank21to50 = scoredRows.filter(r => r.best_rank_group != null && r.best_rank_group >= 21 && r.best_rank_group <= 50).length;
         const completeNoMatch = scoredRows.filter(r => r.best_rank_group == null).length;
@@ -76848,15 +76905,18 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         top10Card.className = `metric-pill metric-pill--${ragClass}`;
         if (statusEl) statusEl.textContent = statusLabel;
         
-        // Calculate top10Only (positions 4-10)
-        const top10Only = top10 - top3;
-        const pctTop10Only = scoredCount > 0 ? Math.round((top10Only / scoredCount) * 100) : 0;
+        // Positions 4–10 only (mutually exclusive with Rank 1 / 2–3)
+        const rank4to10 = scoredRows.filter(r => {
+          const g = Number(r.best_rank_group);
+          return g >= 4 && g <= 10;
+        }).length;
+        const pct4to10 = scoredCount > 0 ? Math.round((rank4to10 / scoredCount) * 100) : 0;
         const pct11to20 = scoredCount > 0 ? Math.round((rank11to20 / scoredCount) * 100) : 0;
         const pct21to50 = scoredCount > 0 ? Math.round((rank21to50 / scoredCount) * 100) : 0;
         const pctNoMatch = scoredCount > 0 ? Math.round((completeNoMatch / scoredCount) * 100) : 0;
         const depthHint = 50;
         
-        // Update details
+        // Update details — Rank 1 / 2–3 / 4–10 are exclusive bands (no double-count).
         if (detailsEl) {
           detailsEl.innerHTML = `
             <p class="tile-details-title">
@@ -76865,10 +76925,13 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
             </p>
             <ul class="tile-details-list">
               <li>
-                <strong>Top 3 (positions 1–3):</strong> ${top3}/${scoredCount} (${top3Pct}%)
+                <strong>Rank 1:</strong> ${rank1}/${scoredCount} (${rank1Pct}%)
               </li>
               <li>
-                <strong>Positions 4–10:</strong> ${top10Only}/${scoredCount} (${pctTop10Only}%)
+                <strong>Ranks 2–3:</strong> ${rank23}/${scoredCount} (${rank23Pct}%)
+              </li>
+              <li>
+                <strong>Positions 4–10:</strong> ${rank4to10}/${scoredCount} (${pct4to10}%)
               </li>
               <li>
                 <strong>Positions 11–20:</strong> ${rank11to20}/${scoredCount} (${pct11to20}%)
@@ -76885,11 +76948,49 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
               </li>
             </ul>
             <p class="tile-details-footnote">
-              "Top 3" and "4–10" together make up Top-10 coverage. Positions 21–50 are known ranks inside depth ${depthHint} — not absent.
-              Complete no-match = null organic within depth on a measurable check (legacy rows without capture_status are not labelled proven-complete).
-              Failed DFS captures are excluded from both numerator and denominator so coverage is not inflated or treated as a real ranking loss.
+              Rank 1 + 2–3 + 4–10 = Top-10 coverage (no overlap). “Where you stand → Organic (top 3)” still means podium (1–3) as a separate page-value signal.
+              Complete no-match = null organic within depth on a measurable check. Failed DFS captures are excluded from both numerator and denominator.
             </p>
           `;
+        }
+      }
+
+      // Position #1 demand-weighted ownership (excellence dial — not additive with Top-10 %).
+      {
+        const rank1Card = document.getElementById('ranking-card-rank1-demand');
+        if (rank1Card) {
+          const scoredRows = rowsToUse.filter((r) => !rankingCaptureFailed(r));
+          const m = computeRank1DemandMetrics(scoredRows);
+          const valueEl = rank1Card.querySelector(".metric-pill-value[data-field='value']");
+          const statusEl = rank1Card.querySelector(".metric-pill-status[data-field='status']");
+          const detailsEl = rank1Card.querySelector('.metric-pill-details');
+          if (valueEl) valueEl.textContent = `${m.demandPct}/100`;
+          let ragClass = 'red';
+          let statusLabel = 'Weak';
+          if (m.demandPct >= 40) { ragClass = 'green'; statusLabel = 'Strong'; }
+          else if (m.demandPct >= 20) { ragClass = 'amber'; statusLabel = 'Building'; }
+          rank1Card.className = `metric-pill metric-pill--${ragClass}`;
+          if (statusEl) statusEl.textContent = statusLabel;
+          if (detailsEl) {
+            const listHtml = rankedKeywordListHtml(
+              m.rows.slice().sort((a, b) => (Number(b.search_volume) || 0) - (Number(a.search_volume) || 0)),
+              'Keywords at Google rank #1 (sorted by search volume).'
+            );
+            detailsEl.innerHTML = `
+              <p class="tile-details-title">
+                Of measured search demand on this audit, how much sits on keywords where you own position #1.
+              </p>
+              <ul class="tile-details-list">
+                <li><strong>Demand-weighted score:</strong> ${m.demandPct}/100</li>
+                <li><strong>Keywords at #1:</strong> ${m.count}/${m.measurable}</li>
+                <li><strong>Demand volume at #1:</strong> ${Math.round(m.demandRank1).toLocaleString('en-GB')} of ${Math.round(m.demandAll).toLocaleString('en-GB')} (vol; missing vol counts as 10)</li>
+              </ul>
+              ${listHtml}
+              <p class="tile-details-footnote">
+                Separate from Top-10 coverage and from “Organic (top 3)” on Where you stand — those stay as coverage/podium signals. This tile answers “how much demand do we win outright?”
+              </p>
+            `;
+          }
         }
       }
 
