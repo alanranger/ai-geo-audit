@@ -72,9 +72,8 @@ assertEq(scoreKp(false), 0, 'kp miss');
     kp_present: false,
   };
   const s = computeKeywordSurfaceScore(row);
-  // served: organic+pack only → weights 30+35=65 → organic 30/65, pack 35/65
-  // score ≈ (30/65)*75 + (35/65)*100
-  const expected = Math.round((30 / 65) * 75 + (35 / 65) * 100);
+  // served: organic+pack only → local-money weights organic 25 + pack 35 = 60
+  const expected = Math.round((25 / 60) * 75 + (35 / 60) * 100);
   assertEq(s.score, expected, 'local-money pack+organic');
   assert(s.subscores.aio === null, 'aio not scored when unserved');
 }
@@ -124,6 +123,27 @@ assertEq(scoreKp(false), 0, 'kp miss');
   assert(roll.overall > 0, 'overall');
   assert(roll.byClass.brand.count === 1, 'brand count');
   assert(roll.byClass['local-money'].count === 1, 'local count');
+}
+
+// Regression: DFS item_types omitted local_pack → flag false, but stack + position set.
+// Scoring must still count pack (2026-10-19 Surface dial undercount).
+{
+  const row = {
+    keyword: 'photographer near me',
+    keyword_class: 'local-money',
+    best_rank_group: null,
+    local_pack_present_any: false,
+    local_pack_position: 1,
+    serp_surface_stack: [
+      { type: 'local_pack', slot: 2, ours: true, our_position: 1 },
+      { type: 'people_also_ask', slot: 3, ours: false },
+    ],
+    search_volume: 4400,
+  };
+  const s = computeKeywordSurfaceScore(row);
+  assert(s.served.pack === true, 'pack served from stack despite false flag');
+  assertEq(s.subscores.pack, 100, 'pack #1 still scores 100');
+  assert(s.score > 0, 'score must not collapse to 0');
 }
 
 console.log('surface-scores tests OK');

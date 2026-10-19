@@ -68071,10 +68071,25 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       if (slot && slot.alan_citations_count != null) return Number(slot.alan_citations_count) || 0;
       return 0;
     }
+    function resolvePackPresenceSurface(row) {
+      const stack = Array.isArray(row?.serp_surface_stack) ? row.serp_surface_stack : [];
+      const lp = stack.find((e) => e && e.type === 'local_pack' && e.slot != null);
+      const present =
+        row?.local_pack_present_any === true
+        || (row?.serp_features && row.serp_features.local_pack === true)
+        || !!lp
+        || (row?.local_pack_position != null && Number(row.local_pack_position) > 0);
+      let position = row?.local_pack_position != null ? Number(row.local_pack_position) : null;
+      if (!Number.isFinite(position) && lp && lp.our_position != null) {
+        position = Number(lp.our_position);
+      }
+      return { present, position: Number.isFinite(position) ? position : null };
+    }
     function computeKeywordSurfaceScore(row) {
       const keywordClass = row?.keyword_class || 'national-money';
       const weights = SURFACE_CLASS_WEIGHTS[keywordClass] || SURFACE_CLASS_WEIGHTS['national-money'];
-      const packPresent = row?.local_pack_present_any === true;
+      const packResolved = resolvePackPresenceSurface(row);
+      const packPresent = packResolved.present;
       const stackForAio = Array.isArray(row?.serp_surface_stack) ? row.serp_surface_stack : [];
       const aioPresent = stackForAio.some((e) => e.type === 'ai_overview' && e.slot != null);
       // MC-57 Option A: fs_paa surface = featured snippet only, stack-gated.
@@ -68096,7 +68111,7 @@ Composite of four inputs — not the Surface Visibility dial score.`;
       };
       const subscores = {
         organic: scoreOrganicSurface(row?.best_rank_group),
-        pack: packPresent ? scorePackSurface(row?.local_pack_position) : null,
+        pack: packPresent ? scorePackSurface(packResolved.position) : null,
         aio: aioPresent ? scoreAioSurface(googleAioCitationCountSurface(row)) : null,
         fs_paa: fsPresent ? scoreFsPaaSurface(fsOurs, false) : null,
         paa: paaPresent ? scorePaaSurface(paaOurs) : null,

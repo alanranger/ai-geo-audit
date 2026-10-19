@@ -519,17 +519,27 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
 
     // Derive SERP features from result.item_types
     const itemTypes = result?.item_types || [];
-    
-    // Extract individual boolean fields for Supabase storage
-    const ai_overview_present_any = itemTypes.includes("ai_overview");
-    const local_pack_present_any = itemTypes.includes("local_pack");
-    const paa_present_any = itemTypes.includes("people_also_ask");
-    const featured_snippet_present_any = itemTypes.includes("featured_snippet");
 
     // Phase 1 surfaces: pack position, KP, FS/PAA ownership (parse-only, no extra DFS)
     const surfaces = extractSerpSurfaces(items, targetRoot);
     const classInfo = resolveKeywordClass(keyword);
-    
+
+    // Phase 1: extract Google AI Overview citations from the same response.
+    const aiOverviewCitations = extractCitationsFromDfsResult(result);
+
+    const serpSurfaceStack = buildSerpSurfaceStack(items, targetRoot);
+
+    // Pack presence: DFS item_types often omits local_pack even when items[] has it.
+    // Trust items extract + stack; item_types is additive only.
+    const stackHasLocalPack = serpSurfaceStack.some((e) => e?.type === 'local_pack');
+    const ai_overview_present_any = itemTypes.includes("ai_overview");
+    const local_pack_present_any =
+      itemTypes.includes("local_pack")
+      || surfaces.local_pack_present === true
+      || stackHasLocalPack;
+    const paa_present_any = itemTypes.includes("people_also_ask");
+    const featured_snippet_present_any = itemTypes.includes("featured_snippet");
+
     // Keep serp_features object for backward compatibility (+ ownership extras)
     const serpFeatures = {
       local_pack: local_pack_present_any,
@@ -537,11 +547,6 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
       people_also_ask: paa_present_any,
       ...(surfaces.serp_features_extra || {}),
     };
-
-    // Phase 1: extract Google AI Overview citations from the same response.
-    const aiOverviewCitations = extractCitationsFromDfsResult(result);
-
-    const serpSurfaceStack = buildSerpSurfaceStack(items, targetRoot);
     const organicCount = items.filter((item) => item.type === 'organic').length;
     const taskCost = task?.cost != null ? Number(task.cost) : (data?.cost != null ? Number(data.cost) : null);
     const seResultsCount = result?.se_results_count != null ? Number(result.se_results_count) : null;

@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-19] - Fix local_pack_present_any undercount (Surface dial)
+
+**Change:** DFS often omits `local_pack` from `item_types` while still returning pack rows in `items[]`. Write path used only `item_types` → `local_pack_present_any=false` with stack/position populated. Surface scoring trusted the false flag and treated pack as unserved (scores collapsed toward 0). Now: (1) write path sets pack present from items extract + stack + item_types; (2) `resolvePackPresence` in surfaceScores (and dashboard mirror) trusts stack/position/flag; (3) SQL backfill for recent `keyword_rankings` + dial recompute.
+
+**Files:** `api/aigeo/serp-rank-test.js`, `lib/keyword-ranking/serp-surface-extract.js`, `lib/audit/surfaceScores.js`, `audit-dashboard.html`, `scripts/test-surface-scores.mjs`, `scripts/test-serp-surface-extract.mjs`, `Docs/CHANGELOG.md`.
+
+---
+
 ## [2026-10-19] - Ranking gap-fill retry after SERP+AI
 
 **Change:** Monday / dashboard-parity Ranking adds a `gap_fill` phase after AI: re-fetch empty/incomplete/error captures one keyword at a time (up to 20 keywords, 2 rounds) before finalize. Fixes provisional dials from flaky DFS blank SERPs without a full re-audit.

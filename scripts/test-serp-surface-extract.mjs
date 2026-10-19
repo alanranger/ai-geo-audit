@@ -48,7 +48,9 @@ const paa = extractPaaOurs([
 assert(paa.paa_ours, 'paa ours');
 
 const surfaces = extractSerpSurfaces([...packItems, { type: 'knowledge_graph', title: 'Alan Ranger' }]);
+assert(surfaces.local_pack_present === true, 'bundle pack present');
 assert(surfaces.local_pack_position === 2, 'bundle pack');
+assert(surfaces.serp_features_extra?.local_pack === true, 'serp_features local_pack');
 assert(surfaces.kp_ours === true, 'bundle kp');
 
 const brand = resolveKeywordClass('alan ranger');
