@@ -67403,9 +67403,12 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         }
 
         // Save to localStorage first (with quota error handling)
+        const rankingAuditDate = (Array.isArray(combinedRows) && combinedRows.find((r) => r?.audit_date)?.audit_date)
+          || new Date().toISOString().slice(0, 10);
         const rankingAiData = {
           combinedRows,
           summary,
+          audit_date: rankingAuditDate,
           timestamp: new Date().toISOString()
         };
         let localStorageSuccess = false;
@@ -67413,6 +67416,8 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
           const jsonStr = JSON.stringify(rankingAiData);
           const sizeKB = (new Blob([jsonStr]).size) / 1024;
           localStorage.setItem('rankingAiData', jsonStr);
+          window.rankingAiData = combinedRows;
+          window.__dashboardRankingRowsFetchedAt = 0; // force Dashboard dial refresh next paint
           debugLog(`✓ Ranking & AI data saved to localStorage (${sizeKB.toFixed(1)}KB)`, 'success');
           localStorageSuccess = true;
         } catch (localStorageErr) {
@@ -90080,7 +90085,34 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         } catch (fetchErr) {
           debugLog(`[Dashboard] Audit refresh skipped: ${fetchErr.message || fetchErr}`, 'warn');
         }
-        
+
+        // Ranking dials (Surface / Top / AI Summary cite / money citations) read
+        // localStorage.rankingAiData — not audit_results columns. Without a
+        // throttled KR refresh, Dashboard stays on a stale cache while Site AI
+        // Health / Ranking fetch keyword_rankings. TTL matches fetch dedup (120s).
+        try {
+          const DASH_RANK_TTL_MS = 120 * 1000;
+          const lastMs = window.__dashboardRankingRowsFetchedAt || 0;
+          const rankLocal = dashboardSafeJsonParse(localStorage.getItem('rankingAiData'), null);
+          const cachedRankRows = Array.isArray(rankLocal?.combinedRows)
+            ? rankLocal.combinedRows
+            : (Array.isArray(window.rankingAiData) ? window.rankingAiData : []);
+          const auditCached = (typeof loadAuditResultsSync === 'function') ? loadAuditResultsSync() : null;
+          const auditDate = String(auditCached?.auditDate || auditCached?.audit_date || '').slice(0, 10);
+          const rankDate = String(rankLocal?.audit_date || '').slice(0, 10);
+          const dateMismatch = !!(auditDate && rankDate && auditDate !== rankDate);
+          const needRankRefresh = (Date.now() - lastMs > DASH_RANK_TTL_MS)
+            || !cachedRankRows.length
+            || dateMismatch;
+          if (needRankRefresh && typeof window.fetchLatestAuditAndCombinedRows === 'function' && !isSupabaseDegraded()) {
+            await window.fetchLatestAuditAndCombinedRows();
+            window.__dashboardRankingRowsFetchedAt = Date.now();
+            debugLog(`[Dashboard] Ranking rows refreshed for dials (audit ${auditDate || 'n/a'} · mismatch=${dateMismatch})`, 'info');
+          }
+        } catch (rankErr) {
+          debugLog(`[Dashboard] Ranking row refresh skipped: ${rankErr?.message || rankErr}`, 'warn');
+        }
+
         // Always show LIVE latest-available metrics (from the latest independent audits).
         // Deltas are computed using rolling 28-day window (audit ~27 days ago vs current) for consistency.
         const liveSnapshot = computeDashboardSnapshot();

@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-20] - Dashboard dials refresh ranking rows (not stale localStorage)
+
+**Change:** Main Dashboard Search Visibility / AI Summary / money-citation dials were stuck on old `rankingAiData` while Site AI Health fetched live `keyword_rankings`. `renderDashboardTab` now throttles `fetchLatestAuditAndCombinedRows` (120s / audit-date mismatch) before `computeDashboardSnapshot`.
+
+**Files:** `audit-dashboard.html`, `Docs/DASHBOARD_DATA_REFRESH.md`, `Docs/CHANGELOG.md`
+
 ## [2026-10-19] - Monday CEO Section C: LOCKED-v12 + commercial-pool demand
 
 **Change:** CEO weekly AI front now uses the same measurement as Ranking / Site AI Health: LOCKED-v12 filter on rows, surface bars = money-class won÷served, plus Rank #1 / Top-10 / Striking **commercial-pool demand %** (national ≥50 · local/regional ≥10). Email Section C shows dials + demand line + methodology note.

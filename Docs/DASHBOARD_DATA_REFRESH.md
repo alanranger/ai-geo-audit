@@ -1,6 +1,6 @@
 # Dashboard data refresh policy
 
-**Last updated:** 2026-06-12 (post request-storm audit)
+**Last updated:** 2026-10-20 (Dashboard ranking-dial refresh)
 
 The dashboard is a ~3.4MB monolith (`audit-dashboard.html`). Many tabs share the
 same Supabase payloads (`get-latest-audit` ≈ 1.8MB, `get-audit-history` large).
@@ -43,6 +43,18 @@ also hammers Supabase Nano.
 - **60s session TTL** for normal loads (tab open, drawer, filters).
 - **`forceRefresh: true`** only for “Update All Tasks”, bulk rebaseline, global run.
 - **Not** in global GET dedup (auth headers per caller; dedup caused cached 500s).
+
+### Ranking rows for Dashboard dials (`keyword_rankings` → `rankingAiData`)
+
+Surface Visibility / Top of Page levers, AI Summary Likelihood (citation rate), and
+Google AI Overviews money-share dials all compute from **`localStorage.rankingAiData`**
+(via `getRankingAiRowsFromStorage`), not from `audit_results.surface_visibility_score`.
+
+- **`renderDashboardTab`** awaits **`fetchLatestAuditAndCombinedRows()`** when:
+  - no tracked rows in cache, or
+  - cache `audit_date` ≠ latest audit date, or
+  - session TTL **120s** since last dashboard ranking fetch (`__dashboardRankingRowsFetchedAt`).
+- Same helper as Site AI Health (LOCKED filter + surface stacks). Does **not** run on every tab switch thereafter within the TTL.
 
 ### Tab switch
 
