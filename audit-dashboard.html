@@ -84789,9 +84789,16 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
 
       function getRankingAiRowsFromStorage() {
         const local = dashboardSafeJsonParse(localStorage.getItem('rankingAiData'), null);
-        const raw = (local && Array.isArray(local.combinedRows))
-          ? local.combinedRows
-          : (Array.isArray(window.rankingAiData) ? window.rankingAiData : []);
+        const fromWindow = Array.isArray(window.rankingAiData) ? window.rankingAiData : [];
+        const fromLocal = (local && Array.isArray(local.combinedRows)) ? local.combinedRows : [];
+        // Prefer in-memory rows when present — localStorage often lags a just-finished
+        // Ranking audit / KR refresh (quota failures, or older cache winning).
+        const winHasStacks = fromWindow.some((r) => Array.isArray(r?.serp_surface_stack) && r.serp_surface_stack.length);
+        const winHasCites = fromWindow.some((r) => Number(r?.ai_alan_citations_count || 0) > 0);
+        const locHasCites = fromLocal.some((r) => Number(r?.ai_alan_citations_count || 0) > 0);
+        const raw = (fromWindow.length && (winHasStacks || winHasCites || !locHasCites))
+          ? fromWindow
+          : (fromLocal.length ? fromLocal : fromWindow);
         return typeof filterTrackedRankingRows === 'function'
           ? filterTrackedRankingRows(raw)
           : raw;
@@ -90086,11 +90093,32 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
           debugLog(`[Dashboard] Audit refresh skipped: ${fetchErr.message || fetchErr}`, 'warn');
         }
 
-        // Ranking dials (Surface / Top / AI Summary cite / money citations) read
-        // localStorage.rankingAiData — not audit_results columns. Without a
-        // throttled KR refresh, Dashboard stays on a stale cache while Site AI
-        // Health / Ranking fetch keyword_rankings. TTL matches fetch dedup (120s).
+        // Ranking dials (Surface / Top / AI Summary cite / money citations) need
+        // live keyword_rankings — localStorage.rankingAiData is often stale after
+        // a Ranking audit. Bust on deploy commit change; force KR refresh when
+        // cache lacks audit_date / citations (0/0 money-share symptom).
         try {
+          if (!window.__GAIO_DIAG_BUILD__) {
+            try {
+              const vr = await fetch('/api/git/previous-commit', { cache: 'no-store' });
+              if (vr.ok) {
+                const vj = await vr.json();
+                if (vj?.commitHash) window.__GAIO_DIAG_BUILD__ = vj.commitHash;
+              }
+            } catch (_vErr) { /* non-fatal */ }
+          }
+          const commit = String(window.__GAIO_DIAG_BUILD__ || '').trim();
+          const prevCommit = String(localStorage.getItem('_gaio_commit_hash') || '').trim();
+          if (commit && prevCommit && commit !== prevCommit) {
+            try { localStorage.removeItem('rankingAiData'); } catch (_e) { /* ignore */ }
+            window.rankingAiData = [];
+            window.__dashboardRankingRowsFetchedAt = 0;
+            debugLog(`[Dashboard] Cleared rankingAiData — deploy ${prevCommit} → ${commit}`, 'warn');
+          }
+          if (commit) {
+            try { localStorage.setItem('_gaio_commit_hash', commit); } catch (_e) { /* ignore */ }
+          }
+
           const DASH_RANK_TTL_MS = 120 * 1000;
           const lastMs = window.__dashboardRankingRowsFetchedAt || 0;
           const rankLocal = dashboardSafeJsonParse(localStorage.getItem('rankingAiData'), null);
@@ -90101,13 +90129,29 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
           const auditDate = String(auditCached?.auditDate || auditCached?.audit_date || '').slice(0, 10);
           const rankDate = String(rankLocal?.audit_date || '').slice(0, 10);
           const dateMismatch = !!(auditDate && rankDate && auditDate !== rankDate);
+          const cacheHasCites = cachedRankRows.some((r) => Number(r?.ai_alan_citations_count || 0) > 0);
           const needRankRefresh = (Date.now() - lastMs > DASH_RANK_TTL_MS)
             || !cachedRankRows.length
-            || dateMismatch;
+            || !rankDate
+            || dateMismatch
+            || !cacheHasCites;
           if (needRankRefresh && typeof window.fetchLatestAuditAndCombinedRows === 'function' && !isSupabaseDegraded()) {
-            await window.fetchLatestAuditAndCombinedRows();
+            const hero = await window.fetchLatestAuditAndCombinedRows();
+            const liveRows = Array.isArray(hero?.combinedRows) ? hero.combinedRows : [];
+            if (liveRows.length) {
+              window.rankingAiData = liveRows;
+              try {
+                localStorage.setItem('rankingAiData', JSON.stringify({
+                  combinedRows: liveRows,
+                  audit_date: liveRows.find((r) => r?.audit_date)?.audit_date || auditDate || null,
+                  timestamp: new Date().toISOString(),
+                  source: 'renderDashboardTab'
+                }));
+              } catch (_e) { /* quota — window.rankingAiData still used */ }
+            }
             window.__dashboardRankingRowsFetchedAt = Date.now();
-            debugLog(`[Dashboard] Ranking rows refreshed for dials (audit ${auditDate || 'n/a'} · mismatch=${dateMismatch})`, 'info');
+            const citeN = liveRows.filter((r) => Number(r?.ai_alan_citations_count || 0) > 0).length;
+            debugLog(`[Dashboard] Ranking rows refreshed for dials (n=${liveRows.length} cites=${citeN} audit ${auditDate || 'n/a'} · mismatch=${dateMismatch})`, 'info');
           }
         } catch (rankErr) {
           debugLog(`[Dashboard] Ranking row refresh skipped: ${rankErr?.message || rankErr}`, 'warn');

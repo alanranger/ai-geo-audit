@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-20] - Dashboard dials: force KR replace + prefer in-memory rows
+
+**Change:** Follow-up — production still showed 0/0 citations / wrong Surface·ToP when stale `localStorage.rankingAiData` won over a fresh KR fetch. Bust cache on deploy commit change; force refresh when cache has no citations / no `audit_date`; write fetched rows to `window.rankingAiData` before snapshot; prefer in-memory rows over localStorage when they have stacks/cites.
+
+**Files:** `audit-dashboard.html`, `Docs/CHANGELOG.md`
+
 ## [2026-10-20] - Dashboard dials refresh ranking rows (not stale localStorage)
 
 **Change:** Main Dashboard Search Visibility / AI Summary / money-citation dials were stuck on old `rankingAiData` while Site AI Health fetched live `keyword_rankings`. `renderDashboardTab` now throttles `fetchLatestAuditAndCombinedRows` (120s / audit-date mismatch) before `computeDashboardSnapshot`.
