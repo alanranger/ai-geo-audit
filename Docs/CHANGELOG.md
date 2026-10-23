@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-23] - YTD Pulse aligned to Exec Summary year forecast
+
+**Change:** YTD Pulse was using month-pace `forecast_impact` (~£45.7k / DEFCON 1) while Exec Summary used seasonally adjusted `resolveExecYearForecast` (~£42.9k / below £44.4k). YTD Pulse now uses the same year forecast as Exec Summary. Insight strip no longer always shows a red 🔴 — green when above survival / not a worry.
+
+**Files:** `lib/revenue-truth-current-month-pulse-ui.mjs`, `lib/revenue-truth-controller.mjs`, `assets/revenue-truth-tab.css`, `Docs/CHANGELOG.md`
+
 ## [2026-10-23] - Revenue Truth: Current Year YTD Pulse tile
 
 **Change:** Beside Current Month Pulse, a second tile **Current Year YTD Pulse** shows full-year projected £ with DEFCON vs annual GP survival (£44.4k), YTD actual (closed + current month so far), and months remaining. Month tile unchanged (rescue actions stay there).
