@@ -17513,6 +17513,11 @@
               <span id="traditional-seo-eval-progress-eta">ETA: —</span>
             </span>
           </div>
+          <div style="margin-top:0.85rem;display:flex;justify-content:flex-end;">
+            <button type="button" id="traditional-seo-eval-progress-cancel" class="btn"
+              style="background:#dc2626;border:1px solid #b91c1c;color:#fff;font-weight:700;padding:0.45rem 0.9rem;"
+              title="Stop this Traditional SEO run after the current batch finishes">Stop / Cancel</button>
+          </div>
         </div>
       </div>
       <div id="traditional-seo-eval-summary-modal" class="impl-progress-modal-backdrop" aria-hidden="true" style="z-index:10010;">
@@ -92094,8 +92099,21 @@ Confidence: ${c}`;
       floorPct: 5,
       trackDone: 0,
       trackTotal: 0,
-      trackPhaseAt: 0
+      trackPhaseAt: 0,
+      cancelled: false
     };
+
+    function traditionalSeoEvalThrowIfCancelled() {
+      if (!TRADITIONAL_SEO_EVAL_PROGRESS.cancelled) return;
+      const err = new Error('Traditional SEO run cancelled by user');
+      err.code = 'TRAD_SEO_CANCELLED';
+      throw err;
+    }
+
+    function traditionalSeoEvalIsCancelledError(err) {
+      return String(err?.code || '') === 'TRAD_SEO_CANCELLED'
+        || /cancelled by user/i.test(String(err?.message || err || ''));
+    }
 
     const TRADITIONAL_SEO_DFS_PROGRESS = {
       timer: null,
@@ -94638,6 +94656,7 @@ Confidence: ${c}`;
         throw new Error(msg);
       };
       for (let i = 0; i < pending.length; i += batchSize) {
+        traditionalSeoEvalThrowIfCancelled();
         const slice = pending.slice(i, i + batchSize);
         const urlChunk = slice.map((x) => x.uReq);
         traditionalSeoDbg(`GSC POST batch ${Math.floor(i / batchSize) + 1} size=${urlChunk.length}`);
@@ -94993,6 +95012,7 @@ Confidence: ${c}`;
       if (typeof onProgress === 'function') onProgress({ done: 0, total: need.length });
       const chunkSize = 25;
       for (let i = 0; i < need.length; i += chunkSize) {
+        traditionalSeoEvalThrowIfCancelled();
         const chunk = need.slice(i, i + chunkSize);
         const done = Math.min(i + chunk.length, need.length);
         if (typeof onProgress === 'function') onProgress({ done, total: need.length });
@@ -95013,6 +95033,7 @@ Confidence: ${c}`;
         const freshRows = Array.isArray(payload?.data?.rows) ? payload.data.rows : [];
         cache = traditionalSeoMergeExtractabilityCacheMutate(cache, prop, freshRows);
       }
+      traditionalSeoEvalThrowIfCancelled();
       if (typeof implLatestAuditPayloads === 'object' && implLatestAuditPayloads) {
         implLatestAuditPayloads.extractability = cache;
       }
@@ -100902,7 +100923,8 @@ Confidence: ${c}`;
         fill: document.getElementById('traditional-seo-eval-progress-fill'),
         pct: document.getElementById('traditional-seo-eval-progress-percent'),
         elapsed: document.getElementById('traditional-seo-eval-progress-elapsed'),
-        eta: document.getElementById('traditional-seo-eval-progress-eta')
+        eta: document.getElementById('traditional-seo-eval-progress-eta'),
+        cancelBtn: document.getElementById('traditional-seo-eval-progress-cancel')
       };
     }
 
@@ -100941,7 +100963,7 @@ Confidence: ${c}`;
     }
 
     function traditionalSeoEvalProgressOpen(refreshAudit, titleOverride) {
-      const { modal, title, subtitle } = traditionalSeoEvalProgressDom();
+      const { modal, title, subtitle, cancelBtn } = traditionalSeoEvalProgressDom();
       if (!modal || !title || !subtitle) return;
       traditionalSeoEvalProgressClearTimer();
       TRADITIONAL_SEO_EVAL_PROGRESS.startedAt = Date.now();
@@ -100950,12 +100972,24 @@ Confidence: ${c}`;
       TRADITIONAL_SEO_EVAL_PROGRESS.trackDone = 0;
       TRADITIONAL_SEO_EVAL_PROGRESS.trackTotal = 0;
       TRADITIONAL_SEO_EVAL_PROGRESS.trackPhaseAt = 0;
+      TRADITIONAL_SEO_EVAL_PROGRESS.cancelled = false;
       title.textContent = titleOverride
         ? String(titleOverride)
         : (refreshAudit
           ? 'Traditional SEO (after full audit refresh)'
           : 'Running Traditional SEO (score only)');
       subtitle.textContent = 'Starting…';
+      if (cancelBtn) {
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = 'Stop / Cancel';
+        cancelBtn.onclick = () => {
+          TRADITIONAL_SEO_EVAL_PROGRESS.cancelled = true;
+          cancelBtn.disabled = true;
+          cancelBtn.textContent = 'Stopping…';
+          if (subtitle) subtitle.textContent = 'Cancel requested — stopping after current batch…';
+          traditionalSeoDbg('Traditional SEO cancel requested by user', 'warn');
+        };
+      }
       traditionalSeoEvalProgressPaint();
       modal.classList.add('is-open');
       modal.setAttribute('aria-hidden', 'false');
@@ -101559,9 +101593,11 @@ Confidence: ${c}`;
         );
         TRADITIONAL_SEO_STATE.seoEvalInFlight = true;
         renderTraditionalSeoResultsTable();
+        traditionalSeoEvalThrowIfCancelled();
         traditionalSeoEvalProgressStage('Loading saved audit data…', 10);
         const audit = await traditionalSeoLoadAuditData(true);
         if (!audit) throw new Error('No audit data available. Run a full audit first.');
+        traditionalSeoEvalThrowIfCancelled();
         const propertyUrl = String(traditionalSeoEffectivePropertyUrl() || '').trim();
         traditionalSeoEvalProgressStage('Collecting URLs and GSC metrics…', 18);
         const rawUrls = await traditionalSeoCollectUrls(audit, propertyUrl);
@@ -101569,10 +101605,12 @@ Confidence: ${c}`;
         const urls = Array.isArray(rawUrls) ? rawUrls.slice() : [];
         const metricLookup = traditionalSeoBuildMetricsLookup(audit, propertyUrl);
         const resolveTier = await traditionalSeoBuildTierResolver(audit);
+        traditionalSeoEvalThrowIfCancelled();
         traditionalSeoEvalProgressStage('Loading URL → target keyword map…', 21);
         const keywordLookup = await fetchTraditionalSeoTargetKeywordLookup({
           snapshotKey: String(window.__implTierSnapshotKey || '')
         });
+        traditionalSeoEvalThrowIfCancelled();
         if (!isPartialPageRescore) {
           if (refreshExtractability) {
             traditionalSeoEvalProgressStage('Refreshing extractability for all URLs (batched)…', 24);
@@ -101598,6 +101636,7 @@ Confidence: ${c}`;
           );
           await new Promise((resolve) => setTimeout(resolve, 0));
         }
+        traditionalSeoEvalThrowIfCancelled();
         const tableRules = collectTraditionalSeoRulesFromTable();
         const rulesPrecheck = (tableRules.length ? tableRules : (TRADITIONAL_SEO_STATE.rules || []).slice()).filter(
           (r) => r.enabled !== false
@@ -101907,10 +101946,11 @@ Confidence: ${c}`;
         const elapsedFail = Math.max(0, Math.floor((Date.now() - evalWallClockMark) / 1000));
         const msgFail = String(err?.message || err);
         const stackFail = err?.stack ? String(err.stack) : '';
-        traditionalSeoDbg(`run FAILED: ${msgFail}`, 'error');
-        traditionalSeoEvalFinishProgressAndShowSummary(false, 'Stopped with errors.', {
+        const wasCancelled = traditionalSeoEvalIsCancelledError(err);
+        traditionalSeoDbg(wasCancelled ? `run cancelled: ${msgFail}` : `run FAILED: ${msgFail}`, wasCancelled ? 'warn' : 'error');
+        traditionalSeoEvalFinishProgressAndShowSummary(false, wasCancelled ? 'Cancelled.' : 'Stopped with errors.', {
           ok: false,
-          title: 'Traditional SEO run failed',
+          title: wasCancelled ? 'Traditional SEO run cancelled' : 'Traditional SEO run failed',
           lead: msgFail,
           lines: [
             `Finished: ${new Date().toISOString()}`,
@@ -101918,13 +101958,22 @@ Confidence: ${c}`;
             `Message: ${msgFail}`,
             `Page URL: ${String(typeof location !== 'undefined' ? location.href : '')}`
           ],
-          errorDetail: stackFail
+          errorDetail: wasCancelled ? '' : stackFail
         });
         if (typeof window.showStatus === 'function') {
-          window.showStatus(`Traditional SEO audit failed: ${msgFail}`, 'error');
+          window.showStatus(
+            wasCancelled ? 'Traditional SEO run cancelled.' : `Traditional SEO audit failed: ${msgFail}`,
+            wasCancelled ? 'warning' : 'error'
+          );
         }
       } finally {
         TRADITIONAL_SEO_STATE.seoEvalInFlight = false;
+        TRADITIONAL_SEO_EVAL_PROGRESS.cancelled = false;
+        const cancelBtnDone = document.getElementById('traditional-seo-eval-progress-cancel');
+        if (cancelBtnDone) {
+          cancelBtnDone.disabled = false;
+          cancelBtnDone.textContent = 'Stop / Cancel';
+        }
         if (runBtn) runBtn.disabled = false;
         if (runFullBtn) runFullBtn.disabled = false;
         if (gscRefreshBtnEval) gscRefreshBtnEval.disabled = false;

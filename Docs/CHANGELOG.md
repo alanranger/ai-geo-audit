@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-23] - Traditional SEO progress: Stop / Cancel
+
+**Change:** Traditional SEO run progress modal now has a **Stop / Cancel** button. Cancel is checked between extractability batches and GSC URL Inspection batches (current in-flight batch still finishes). Soft-closes as “cancelled” rather than a hard failure.
+
+**Note:** Button ② URL count comes from GitHub `alan-shared-resources` `csv/06-site-urls.csv` (not a local Dropbox-only edit). After adding blogs, commit+push that CSV, then re-run ② — raw CDN can lag briefly; the dashboard force-refreshes with a cache-buster.
+
+**Files:** `audit-dashboard.html`, `Docs/CHANGELOG.md`
+
 ## [2026-10-20] - Global Run: snapshot Dashboard after KR refresh
 
 **Change:** `postGlobalRunRefresh` was saving delta snapshots via `computeDashboardSnapshot()` before `renderDashboardTab` refreshed `rankingAiData`, so Global Run deltas could freeze stale Surface/ToP/citations. Order flipped: refresh Dashboard first, then snapshot.
