@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-23] - Pulse + Exec Summary show revenue and GP together
+
+**Change:** Current Month Pulse, Current Year YTD Pulse, and Exec Summary tracker now show **£rev / £GP** side by side (GP = revenue × rolling 3-mo margin, currently 72.5%). Survival lines labelled as sales vs GP (`£5,103/mo sales · £3,700/mo GP`; annual `£61,241 sales · £44,400 GP`). Year DEFCON uses **GP** vs £44.4k (no longer compares sales £ to GP target).
+
+**Files:** `lib/revenue-truth-money-dual.mjs`, `lib/revenue-truth-current-month-pulse-ui.mjs`, `lib/revenue-truth-exec-summary.mjs`, `assets/revenue-truth-tab.css`, `Docs/CHANGELOG.md`
+
 ## [2026-10-23] - YTD Pulse aligned to Exec Summary year forecast
 
 **Change:** YTD Pulse was using month-pace `forecast_impact` (~£45.7k / DEFCON 1) while Exec Summary used seasonally adjusted `resolveExecYearForecast` (~£42.9k / below £44.4k). YTD Pulse now uses the same year forecast as Exec Summary. Insight strip no longer always shows a red 🔴 — green when above survival / not a worry.
