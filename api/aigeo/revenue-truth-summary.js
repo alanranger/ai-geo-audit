@@ -30,6 +30,7 @@ export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
 import { buildCurrentMonthPulse } from '../../lib/revenue-truth-current-month-pulse.mjs';
+import { buildCurrentYearYtdPulse } from '../../lib/revenue-truth-current-year-ytd-pulse.mjs';
 import {
   attachRecurringToMonthly,
   buildRecurringHeadlineStats,
@@ -119,6 +120,7 @@ async function buildPayload(supabase, propertyUrl, includeJlr) {
   const forecast = buildForecast(monthly, cfg);
   const recurringForecast = buildRecurringForecast(monthly, cfg);
   const currentMonthPulse = buildCurrentMonthPulse(transactions, cfg, monthly, forecast, seasonalityByProduct);
+  const currentYearYtdPulse = buildCurrentYearYtdPulse(monthly, cfg, forecast, currentMonthPulse);
   const categoryBreakdown = buildCategoryBreakdown(categories, gp, marketMap, txnRows);
   const categoryAdjusted = includeJlr ? categoryBreakdown : applyJlrToCategoryBreakdown(categoryBreakdown, jlrByCatMonth);
   const headlineReconciliation = includeJlr
@@ -144,6 +146,7 @@ async function buildPayload(supabase, propertyUrl, includeJlr) {
     monthly,
     yearTotals,
     currentMonthPulse,
+    currentYearYtdPulse,
     headlineStrip: buildHeadlineStrip(monthly, cfg),
     recurringBaseline: buildRecurringHeadlineStats(monthly, cfg),
     forecast,

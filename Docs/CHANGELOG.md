@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-23] - Revenue Truth: Current Year YTD Pulse tile
+
+**Change:** Beside Current Month Pulse, a second tile **Current Year YTD Pulse** shows full-year projected £ with DEFCON vs annual GP survival (£44.4k), YTD actual (closed + current month so far), and months remaining. Month tile unchanged (rescue actions stay there).
+
+**Files:** `lib/revenue-truth-current-year-ytd-pulse.mjs`, `lib/revenue-truth-current-month-pulse-ui.mjs`, `lib/revenue-truth-controller.mjs`, `api/aigeo/revenue-truth-summary.js`, `audit-dashboard.html`, `assets/revenue-truth-tab.css`, `Docs/CHANGELOG.md`
+
 ## [2026-10-23] - Traditional SEO progress: Stop / Cancel
 
 **Change:** Traditional SEO run progress modal now has a **Stop / Cancel** button. Cancel is checked between extractability batches and GSC URL Inspection batches (current in-flight batch still finishes). Soft-closes as “cancelled” rather than a hard failure.
