@@ -24,6 +24,18 @@ test('evaluation save merges one page: other pages and site-wide rows untouched'
   assert.ok(merged.some((r) => r.tier === 'sitewide'));
 });
 
+test('evaluation merge replaces the www copy when the re-audit saves the bare-host form', () => {
+  const bare = A.replace('www.', '');
+  const stored = [
+    { url: A, rule_key: 'h1', status: 'fail', tier: 'blog' },
+    { url: `${bare}/`, rule_key: 'h1', status: 'fail', tier: 'blog' },
+    { url: B, rule_key: 'h1', status: 'pass', tier: 'landing' },
+  ];
+  const merged = mergeEvaluationRows(stored, [bare], [{ url: bare, rule_key: 'h1', status: 'pass', tier: 'blog' }]);
+  assert.equal(merged.length, 2);
+  assert.deepEqual(merged.map((r) => r.url), [B, bare]);
+});
+
 test('evaluation merge refuses when nothing is stored (caller sends a full save)', () => {
   assert.equal(mergeEvaluationRows([], [A], [{ url: A }]), null);
 });

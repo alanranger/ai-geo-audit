@@ -58,15 +58,29 @@ async function handleGet(req, res, supabase) {
   });
 }
 
+/** Same page whether stored as www / bare host or with a trailing slash. */
+const pageKey = (url) => {
+  const s = String(url || '').trim();
+  try {
+    const u = new URL(s);
+    const host = u.hostname.toLowerCase().replace(/^www\./, '');
+    return `${host}${u.pathname.replace(/\/+$/, '').toLowerCase() || '/'}`;
+  } catch (e) {
+    return s.toLowerCase();
+  }
+};
+
 /**
- * Single-page save: replace only rows whose `url` is in mergeUrls, keep everything else.
- * Stops a stale tab overwriting the whole-site set. 409 when there is no stored set yet
- * (caller then falls back to a full save).
+ * Single-page save: replace every stored row for the pages in mergeUrls (and the posted
+ * rows' own pages), keep everything else. Stops a stale tab overwriting the whole-site set.
+ * Returns null when there is no stored set yet (caller then falls back to a full save).
  */
 export function mergeEvaluationRows(stored, mergeUrls, rows) {
   if (!Array.isArray(stored) || !stored.length) return null;
-  const drop = new Set((mergeUrls || []).map((u) => String(u || '').trim()).filter(Boolean));
-  const kept = stored.filter((r) => String(r?.tier || '').toLowerCase() === 'sitewide' || !drop.has(String(r?.url || '').trim()));
+  const drop = new Set(
+    [...(mergeUrls || []), ...(rows || []).map((r) => r?.url)].filter(Boolean).map(pageKey)
+  );
+  const kept = stored.filter((r) => String(r?.tier || '').toLowerCase() === 'sitewide' || !drop.has(pageKey(r?.url)));
   return kept.concat(rows);
 }
 
