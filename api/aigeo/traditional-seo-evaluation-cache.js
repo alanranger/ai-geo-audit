@@ -58,17 +58,55 @@ async function handleGet(req, res, supabase) {
   });
 }
 
-/** Same page whether stored as www / bare host or with a trailing slash. */
+/** Squarespace serves the homepage at both / and /home. */
+const pagePath = (pathname) => {
+  const p = String(pathname || '/').replace(/\/+$/, '');
+  return !p || p.toLowerCase() === '/home' ? '/' : p;
+};
+
+/** Same page whether stored as www / bare host, with a trailing slash, or /home vs /. */
 const pageKey = (url) => {
   const s = String(url || '').trim();
   try {
     const u = new URL(s);
     const host = u.hostname.toLowerCase().replace(/^www\./, '');
-    return `${host}${u.pathname.replace(/\/+$/, '').toLowerCase() || '/'}`;
+    return `${host}${pagePath(u.pathname).toLowerCase()}`;
   } catch (e) {
     return s.toLowerCase();
   }
 };
+
+/** One stored form per page (www host, no trailing slash) so every save path agrees. */
+function canonicalRowUrl(url, propertyKey) {
+  const s = String(url || '').trim();
+  try {
+    const u = new URL(s);
+    const siteHost = new URL(propertyKey).hostname.replace(/^www\./, '');
+    if (u.hostname.toLowerCase().replace(/^www\./, '') !== siteHost) return s;
+    return `https://www.${siteHost}${pagePath(u.pathname)}`;
+  } catch (e) {
+    return s;
+  }
+}
+
+/**
+ * Every save: canonical URL per row, then one row per (page, rule, site-wide flag) — the
+ * last occurrence wins, which is the freshest (re-audited rows are appended at the end).
+ */
+export function normalizeEvaluationRows(rows, propertyKey) {
+  const seen = new Set();
+  const out = [];
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const r = rows[i];
+    const sitewide = String(r?.tier || '').toLowerCase() === 'sitewide';
+    const url = canonicalRowUrl(r?.url, propertyKey);
+    const k = `${sitewide ? 'S' : 'P'}|${pageKey(url)}|${String(r?.rule_key || '')}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(url === r?.url ? r : { ...r, url });
+  }
+  return out.reverse();
+}
 
 /**
  * Single-page save: replace every stored row for the pages in mergeUrls (and the posted
@@ -113,6 +151,7 @@ async function handlePost(req, res, supabase) {
     }
     rows = merged;
   }
+  rows = normalizeEvaluationRows(rows, key);
   const now = new Date().toISOString();
   const row = {
     property_url: key,

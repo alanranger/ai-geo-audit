@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeEvaluationRows } from '../api/aigeo/traditional-seo-evaluation-cache.js';
+import { mergeEvaluationRows, normalizeEvaluationRows } from '../api/aigeo/traditional-seo-evaluation-cache.js';
 import { mergePayloadRowsByUrl } from '../api/aigeo/impl-snapshots.js';
 
 const A = 'https://www.alanranger.com/blog-on-photography/student-photo-essay';
@@ -34,6 +34,26 @@ test('evaluation merge replaces the www copy when the re-audit saves the bare-ho
   const merged = mergeEvaluationRows(stored, [bare], [{ url: bare, rule_key: 'h1', status: 'pass', tier: 'blog' }]);
   assert.equal(merged.length, 2);
   assert.deepEqual(merged.map((r) => r.url), [B, bare]);
+});
+
+test('every save keeps one row per page+rule (www/bare, slash, /home) — newest wins, www form', () => {
+  const PROP = 'https://alanranger.com/';
+  const bare = A.replace('www.', '');
+  const rows = [
+    { url: A, rule_key: 'h1', status: 'fail', tier: 'blog' },
+    { url: 'https://www.alanranger.com/', rule_key: 'robots', status: 'pass', tier: 'sitewide' },
+    { url: 'https://www.alanranger.com/', rule_key: 'h1', status: 'fail', tier: 'landing' },
+    { url: 'https://alanranger.com/home', rule_key: 'h1', status: 'warn', tier: 'landing' },
+    { url: `${bare}/`, rule_key: 'h1', status: 'pass', tier: 'blog' },
+    { url: 'https://other.example/x', rule_key: 'h1', status: 'pass', tier: 'blog' },
+  ];
+  const out = normalizeEvaluationRows(rows, PROP);
+  assert.deepEqual(out.map((r) => `${r.url}|${r.rule_key}|${r.status}`), [
+    'https://www.alanranger.com/|robots|pass',
+    'https://www.alanranger.com/|h1|warn',
+    `${A}|h1|pass`,
+    'https://other.example/x|h1|pass',
+  ]);
 });
 
 test('evaluation merge refuses when nothing is stored (caller sends a full save)', () => {
