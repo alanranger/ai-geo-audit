@@ -93819,29 +93819,39 @@ Confidence: ${c}`;
       }
     }
 
-    async function traditionalSeoPersistEvaluationToServer() {
+    /**
+     * opts.merge = { removeUrls, rows } → server replaces only those URLs' rows (single-page
+     * re-audit), so a stale tab cannot overwrite the whole-site set. Falls back to full save.
+     */
+    async function traditionalSeoPersistEvaluationToServer(opts = {}) {
       try {
         const prop = String(traditionalSeoPropertyUrl() || '').trim();
         const rows = TRADITIONAL_SEO_STATE.evaluationRows;
         if (!prop || !Array.isArray(rows) || !rows.length) return;
-        await fetch(traditionalSeoApiPath('/api/aigeo/traditional-seo-evaluation-cache'), {
+        const base = {
+          propertyUrl: prop,
+          lastPropertyUrl: String(TRADITIONAL_SEO_STATE.lastPropertyUrl || prop).trim(),
+          lastEvaluationAt: TRADITIONAL_SEO_STATE.lastEvaluationAt || null
+        };
+        const post = (body) => fetch(traditionalSeoApiPath('/api/aigeo/traditional-seo-evaluation-cache'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            propertyUrl: prop,
-            lastPropertyUrl: String(TRADITIONAL_SEO_STATE.lastPropertyUrl || prop).trim(),
-            lastEvaluationAt: TRADITIONAL_SEO_STATE.lastEvaluationAt || null,
-            evaluationRows: rows
-          })
+          body: JSON.stringify({ ...base, ...body })
         });
+        const merge = opts?.merge;
+        if (merge && Array.isArray(merge.rows) && merge.rows.length && Array.isArray(merge.removeUrls)) {
+          const res = await post({ evaluationRows: merge.rows, mergeUrls: merge.removeUrls });
+          if (res.ok) return;
+        }
+        await post({ evaluationRows: rows });
       } catch (e) {
         /* Network / payload limits */
       }
     }
 
-    function traditionalSeoPersistEvaluationSnapshot() {
+    function traditionalSeoPersistEvaluationSnapshot(opts = {}) {
       traditionalSeoWriteEvaluationLocalStorage();
-      void traditionalSeoPersistEvaluationToServer();
+      void traditionalSeoPersistEvaluationToServer(opts);
     }
 
     async function traditionalSeoHydrateEvaluationFromServer() {
@@ -94909,14 +94919,34 @@ Confidence: ${c}`;
         if (rowCount(memoryCache) > rowCount(base)) base = memoryCache;
         const merged = traditionalSeoMergeExtractabilityCacheMutate(base, prop, freshRows);
         if (typeof saveImplementationAuditCache === 'function') {
-          saveImplementationAuditCache(key, merged);
+          // Local copy only — the server gets just this page's rows (merged server-side).
+          saveImplementationAuditCache(key, merged, { syncRemote: false });
         }
         if (typeof implLatestAuditPayloads === 'object' && implLatestAuditPayloads) {
           implLatestAuditPayloads.extractability = merged;
         }
+        void traditionalSeoMergeExtractabilityRowsOnServer(freshRows);
         return true;
       } catch (err) {
         return false;
+      }
+    }
+
+    async function traditionalSeoMergeExtractabilityRowsOnServer(freshRows) {
+      try {
+        await fetch(apiUrl('/api/aigeo/impl-snapshots'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            propertyUrl: getImplementationPropertyUrl(),
+            snapshotKey: 'extractability',
+            mode: 'full',
+            mergeRows: true,
+            payload: { status: 'ok', source: 'content-extractability', data: { rows: freshRows } }
+          })
+        });
+      } catch (err) {
+        /* Non-blocking — local copy already updated */
       }
     }
 
@@ -101826,13 +101856,16 @@ Confidence: ${c}`;
             const k = traditionalSeoToComparableUrl(u, propertyUrl) || traditionalSeoNormalizeUrl(u, propertyUrl);
             if (k) targetKeys.add(k);
           });
+          const removeUrls = new Set(pageRows.map((r) => String(r.url || '').trim()));
           const kept = priorRows.filter((row) => {
             if (String(row?.tier || '').toLowerCase() === 'sitewide') return true;
             const rk = traditionalSeoToComparableUrl(row.url, propertyUrl)
               || traditionalSeoNormalizeUrl(row.url, propertyUrl);
+            if (targetKeys.has(rk)) removeUrls.add(String(row.url || '').trim());
             return !targetKeys.has(rk);
           });
           rows = kept.concat(pageRows);
+          TRADITIONAL_SEO_STATE.pendingPartialMerge = { removeUrls: [...removeUrls], rows: pageRows };
         } else {
           rows = pageRows.slice();
           const siteRowUrl = traditionalSeoNormalizeUrl(propertyUrl, propertyUrl)
@@ -101950,7 +101983,10 @@ Confidence: ${c}`;
           lines: linesRun
         });
         void traditionalSeoKeywordMetricsLookupIfNeededForRun();
-        traditionalSeoPersistEvaluationSnapshot();
+        traditionalSeoPersistEvaluationSnapshot(
+          isPartialPageRescore ? { merge: TRADITIONAL_SEO_STATE.pendingPartialMerge } : {}
+        );
+        TRADITIONAL_SEO_STATE.pendingPartialMerge = null;
         traditionalSeoDbg('run complete OK', 'success');
       } catch (err) {
         const elapsedFail = Math.max(0, Math.floor((Date.now() - evalWallClockMark) / 1000));
@@ -103715,6 +103751,50 @@ Confidence: ${c}`;
       });
       return traditionalSeoTabLoadOrchestratorPromise;
     };
+
+    // Deep link from the "Audit this page" bookmarklet/extension:
+    //   audit-dashboard.html?seoPage=<alanranger.com URL>&reaudit=1
+    // Opens Traditional SEO → that page's rules panel (last saved results), then re-audits.
+    function traditionalSeoDeepLinkTarget() {
+      const params = new URLSearchParams(window.location.search);
+      const raw = String(params.get('seoPage') || '').trim();
+      if (!raw) return null;
+      let u;
+      try { u = new URL(raw); } catch (e) { return null; }
+      if (!/^https?:$/.test(u.protocol) || !/(^|\.)alanranger\.com$/i.test(u.hostname)) return null;
+      u.hash = '';
+      u.search = '';
+      return { url: u.toString().replace(/\/+$/, ''), reaudit: params.get('reaudit') === '1' };
+    }
+
+    async function traditionalSeoOpenDeepLink() {
+      const target = traditionalSeoDeepLinkTarget();
+      if (!target) return;
+      const clean = new URL(window.location.href);
+      clean.searchParams.delete('seoPage');
+      clean.searchParams.delete('reaudit');
+      clean.hash = '#traditional-seo';
+      window.history.replaceState(null, '', clean.toString());
+      try {
+        const nav = document.querySelector('.aigeo-nav-item[data-panel="traditional-seo"]');
+        if (nav) nav.click();
+        await window.renderTraditionalSeoTab();
+        const prop = traditionalSeoEffectivePropertyUrl();
+        const pageUrl = traditionalSeoNormalizeUrl(target.url, prop) || target.url;
+        await traditionalSeoOpenPageModal(pageUrl);
+        if (target.reaudit) await traditionalSeoReauditModalPage();
+      } catch (err) {
+        if (typeof window.showStatus === 'function') {
+          window.showStatus(`Could not open page audit: ${err?.message || err}`, 'error');
+        }
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => { void traditionalSeoOpenDeepLink(); });
+    } else {
+      setTimeout(() => { void traditionalSeoOpenDeepLink(); }, 0);
+    }
 
     window.runTraditionalSeoEvaluation = runTraditionalSeoEvaluation;
     window.traditionalSeoRefreshKeywordMetricsFromProvider = traditionalSeoRefreshKeywordMetricsFromProvider;

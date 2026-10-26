@@ -58,16 +58,46 @@ async function handleGet(req, res, supabase) {
   });
 }
 
+/**
+ * Single-page save: replace only rows whose `url` is in mergeUrls, keep everything else.
+ * Stops a stale tab overwriting the whole-site set. 409 when there is no stored set yet
+ * (caller then falls back to a full save).
+ */
+export function mergeEvaluationRows(stored, mergeUrls, rows) {
+  if (!Array.isArray(stored) || !stored.length) return null;
+  const drop = new Set((mergeUrls || []).map((u) => String(u || '').trim()).filter(Boolean));
+  const kept = stored.filter((r) => String(r?.tier || '').toLowerCase() === 'sitewide' || !drop.has(String(r?.url || '').trim()));
+  return kept.concat(rows);
+}
+
+async function mergeRowsIntoStored(supabase, key, mergeUrls, rows) {
+  const { data, error } = await supabase
+    .from('traditional_seo_evaluation_cache')
+    .select('evaluation_rows')
+    .eq('property_url', key)
+    .maybeSingle();
+  if (error) throw error;
+  return mergeEvaluationRows(data?.evaluation_rows, mergeUrls, rows);
+}
+
 async function handlePost(req, res, supabase) {
   const body = req.body || {};
   const raw = String(body?.propertyUrl || '').trim();
   const key = normalizePropertyKey(raw);
-  const rows = Array.isArray(body?.evaluationRows) ? body.evaluationRows : [];
+  let rows = Array.isArray(body?.evaluationRows) ? body.evaluationRows : [];
+  const mergeUrls = Array.isArray(body?.mergeUrls) ? body.mergeUrls : null;
   if (!key) {
     return sendJson(res, 400, { status: 'error', message: 'propertyUrl is required.' });
   }
   if (!rows.length) {
     return sendJson(res, 400, { status: 'error', message: 'evaluationRows must be a non-empty array.' });
+  }
+  if (mergeUrls) {
+    const merged = await mergeRowsIntoStored(supabase, key, mergeUrls, rows);
+    if (!merged) {
+      return sendJson(res, 409, { status: 'error', message: 'no_stored_rows — send a full save.' });
+    }
+    rows = merged;
   }
   const now = new Date().toISOString();
   const row = {
@@ -83,6 +113,7 @@ async function handlePost(req, res, supabase) {
     status: 'ok',
     propertyUrl: key,
     rowCount: rows.length,
+    merged: !!mergeUrls,
     meta: { generatedAt: now }
   });
 }

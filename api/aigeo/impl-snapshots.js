@@ -123,18 +123,67 @@ const handleGet = async (supabase, req, res) => {
   });
 };
 
+const rowUrlKey = (url) => {
+  try {
+    const u = new URL(String(url || '').trim());
+    const host = u.hostname.toLowerCase().replace(/^www\./, '');
+    return `${host}${u.pathname.replace(/\/+$/, '').toLowerCase()}`;
+  } catch (err) {
+    return String(url || '').trim().toLowerCase();
+  }
+};
+
+/**
+ * Per-page save (mergeRows): replace only the posted rows (matched by URL) inside the
+ * stored payload's data.rows, so a single-page re-audit never overwrites the site set.
+ */
+export function mergePayloadRowsByUrl(stored, payload) {
+  const freshRows = Array.isArray(payload?.data?.rows) ? payload.data.rows : [];
+  const storedRows = Array.isArray(stored?.data?.rows) ? stored.data.rows : null;
+  if (!storedRows) return payload;
+  const freshByKey = new Map(freshRows.map((r) => [rowUrlKey(r?.url), r]));
+  const rows = storedRows.map((r) => {
+    const k = rowUrlKey(r?.url);
+    if (!freshByKey.has(k)) return r;
+    const fresh = freshByKey.get(k);
+    freshByKey.delete(k);
+    return fresh;
+  });
+  freshByKey.forEach((r) => rows.push(r));
+  return {
+    ...stored,
+    data: { ...(stored.data || {}), rows },
+    meta: { ...(stored.meta || {}), lastRowMergeAt: new Date().toISOString() },
+  };
+}
+
+const mergeIntoStoredPayload = async (supabase, propertyUrl, snapshotKey, mode, payload) => {
+  const { data, error } = await supabase
+    .from('impl_audit_snapshots')
+    .select('payload')
+    .eq('property_url', propertyUrl)
+    .eq('snapshot_key', snapshotKey)
+    .eq('mode', mode)
+    .maybeSingle();
+  if (error) throw error;
+  return mergePayloadRowsByUrl(data?.payload, payload);
+};
+
 const handlePost = async (supabase, req, res) => {
   const body = parseBody(req);
   const propertyUrl = normalizePropertyUrl(body.propertyUrl);
   const snapshotKey = normalizeSnapshotKey(body.snapshotKey);
   const mode = normalizeMode(body.mode);
-  const payload = body.payload && typeof body.payload === 'object' ? body.payload : null;
+  let payload = body.payload && typeof body.payload === 'object' ? body.payload : null;
 
   if (!SNAPSHOT_KEYS.has(snapshotKey)) {
     return sendJson(res, 400, { status: 'error', message: `Invalid snapshotKey: ${snapshotKey || 'missing'}` });
   }
   if (!payload) {
     return sendJson(res, 400, { status: 'error', message: 'Missing payload object.' });
+  }
+  if (body.mergeRows === true) {
+    payload = await mergeIntoStoredPayload(supabase, propertyUrl, snapshotKey, mode, payload);
   }
 
   const generatedAtIso = deriveGeneratedAt(payload);

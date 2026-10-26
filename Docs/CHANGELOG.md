@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-26] - "Audit this page" button + per-page saves (single source of truth)
+
+**Change:** One click on any alanranger.com page (Chrome extension in `tools/seo-audit-extension/` or bookmarklet in its README) opens `audit-dashboard.html?seoPage=<url>&reaudit=1` → Traditional SEO → that page's **All rules for this URL** panel with the last saved results, then **Re-audit page**. Single-page re-audits now save **per page**: `traditional-seo-evaluation-cache` POST `mergeUrls` replaces only that page's rows (409 → full save fallback); `impl-snapshots` POST `mergeRows` merges only that page's extractability rows into the stored full payload. A stale tab can no longer overwrite the whole-site set.
+
+**Files:** `audit-dashboard.html`, `api/aigeo/traditional-seo-evaluation-cache.js`, `api/aigeo/impl-snapshots.js`, `tools/seo-audit-extension/*`, `test/single-page-save-merge.test.js`, `Docs/CHANGELOG.md`
+
 ## [2026-10-23] - Pulse + Exec Summary show revenue and GP together
 
 **Change:** Current Month Pulse, Current Year YTD Pulse, and Exec Summary tracker now show **£rev / £GP** side by side (GP = revenue × rolling 3-mo margin, currently 72.5%). Survival lines labelled as sales vs GP (`£5,103/mo sales · £3,700/mo GP`; annual `£61,241 sales · £44,400 GP`). Year DEFCON uses **GP** vs £44.4k (no longer compares sales £ to GP target).
