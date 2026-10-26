@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-26] - LOCKED v13: add `online photography course`
+
+**Change:** v12 (87) + `online photography course` (UK, national-money, `/free-online-photography-course`) = **88** tracked keywords. Approved by Alan after repositioning that page on the singular phrase (title/meta/H1/hero). `online photography courses` stays tracked on the same page. v12's cull had dropped the singular as a synonym; reinstated. Loaded via `scripts/load-locked-v13.mjs` (repo JSON mirrors + Supabase `keywordTrackingLocked` + one `keyword_rankings` stub). Traditional SEO panel now shows ✓ tracked for the singular.
+
+**Files:** `config/keyword-tracking-locations-and-class-LOCKED-v13.csv`, `scripts/load-locked-v13.mjs`, `lib/keyword-ranking/locked-config-merge.js`, `api/keywords/save-csv.js`, locked JSON/JS mirrors (`public/`, `lib/keyword-ranking/`, root), `Docs/CHANGELOG.md`
+
 ## [2026-10-26] - "Audit this page" button + per-page saves (single source of truth)
 
 **Change:** One click on any alanranger.com page (Chrome extension in `tools/seo-audit-extension/` or bookmarklet in its README) opens `audit-dashboard.html?seoPage=<url>&reaudit=1` → Traditional SEO → that page's **All rules for this URL** panel with the last saved results, then **Re-audit page**. Single-page re-audits now save **per page**: `traditional-seo-evaluation-cache` POST `mergeUrls` replaces only that page's rows (409 → full save fallback); `impl-snapshots` POST `mergeRows` merges only that page's extractability rows into the stored full payload. A stale tab can no longer overwrite the whole-site set.
