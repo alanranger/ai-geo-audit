@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-26] - LOCKED v14: `free online photography course` → blog guide
+
+**Change:** Target page for `free online photography course` (UK, national-money) moved from `/free-online-photography-course` to `/blog-on-photography/best-free-online-photography-courses` (approved by Alan). Still 88 keywords; no other changes. Readers no longer pin a LOCKED version: config integrity reads the bundled LOCKED JSON, `defaultLockedCsvPath` picks the highest `config/...LOCKED-vNN.csv`, `llm-visibility-collect` bundles `LOCKED-v*.csv`, and `get-latest-audit` already accepts same-or-newer overrides. Future versions only need a new CSV + `scripts/load-locked-vNN.mjs`.
+
+**Files:** `config/keyword-tracking-locations-and-class-LOCKED-v14.csv`, `scripts/load-locked-v14.mjs`, `lib/configIntegrity/checks.mjs`, `lib/keyword-ranking/locked-config-merge.js`, `api/aigeo/llm-visibility-collect.js`, `api/aigeo/export-09-url-target-keywords.js`, `api/keywords/save-csv.js`, `lib/ceo-weekly/metrics.js`, locked JSON/JS mirrors, `Docs/CHANGELOG.md`
+
 ## [2026-10-26] - LOCKED v13: add `online photography course`
 
 **Change:** v12 (87) + `online photography course` (UK, national-money, `/free-online-photography-course`) = **88** tracked keywords. Approved by Alan after repositioning that page on the singular phrase (title/meta/H1/hero). `online photography courses` stays tracked on the same page. v12's cull had dropped the singular as a synonym; reinstated. Loaded via `scripts/load-locked-v13.mjs` (repo JSON mirrors + Supabase `keywordTrackingLocked` + one `keyword_rankings` stub). Traditional SEO panel now shows ✓ tracked for the singular.
