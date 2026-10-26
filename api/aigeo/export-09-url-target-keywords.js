@@ -1,5 +1,5 @@
 /**
- * GET/POST — generate 09-url-target-keywords.csv from DB overrides + LOCKED-v12.
+ * GET/POST — generate 09-url-target-keywords.csv from DB overrides + LOCKED-v13.
  * Used to clear config-integrity check 6 (STALE EXPORT) after locked-set culls.
  */
 export const config = { runtime: 'nodejs', maxDuration: 60 };

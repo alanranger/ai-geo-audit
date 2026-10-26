@@ -344,15 +344,16 @@ export default async function handler(req, res) {
     // Re-enabled: Fetching from keyword_rankings table with proper limits to prevent timeouts
     let rankingAiData = null;
     let rankingDataAuditDate = null; // Track the actual audit_date of ranking data (may differ from latest audit)
-    // Bundled LOCKED JSON is SoT (v12 cull). Audit override only if present and same/newer source.
+    // Bundled LOCKED JSON is SoT. Audit override only if present and same/newer LOCKED version.
     let lockedByKeyword = lockedLocationsJson?.by_keyword || null;
+    const lockedVersionOf = (src) => Number(String(src || '').match(/LOCKED-v(\d+)/)?.[1] || 0);
     try {
       const rankingRaw = typeof record.ranking_ai_data === 'string'
         ? JSON.parse(record.ranking_ai_data)
         : record.ranking_ai_data;
       const override = rankingRaw?.keywordTrackingLocked?.by_keyword || null;
-      const overrideSource = String(rankingRaw?.keywordTrackingLocked?.source || '');
-      if (override && overrideSource.includes('LOCKED-v12')) {
+      const overrideVersion = lockedVersionOf(rankingRaw?.keywordTrackingLocked?.source);
+      if (override && overrideVersion >= Math.max(12, lockedVersionOf(lockedLocationsJson?.source))) {
         lockedByKeyword = override;
       }
     } catch (_lockedErr) {

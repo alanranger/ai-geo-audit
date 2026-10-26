@@ -7,7 +7,7 @@ export const config = {
   runtime: 'nodejs',
   maxDuration: 300,
   // Ensure LOCKED CSV is traced into this lambda (NFT often misses dynamic path reads).
-  includeFiles: ['config/keyword-tracking-locations-and-class-LOCKED-v12.csv'],
+  includeFiles: ['config/keyword-tracking-locations-and-class-LOCKED-v13.csv'],
 };
 
 import { collectLlmVisibilitySnapshot, loadFlaggedPromptBank } from '../../lib/llm-visibility/collect-core.js';
