@@ -209,6 +209,7 @@
   <script src="/keyword-tracking-class-LOCKED.js"></script>
   <script src="/lib/competitor-analysis-tab.js?v=ca-prog-20260719a"></script>
   <script src="/lib/strategy-tab.js?v=st-20261008-th-wrap"></script>
+  <script src="/lib/silent-faults-tab.js?v=sf-20261027a"></script>
   <script>
     // CRITICAL: Set up error capture IMMEDIATELY, before any other code runs
     // This must be the very first script to execute
@@ -7752,6 +7753,10 @@
         <span class="aigeo-nav-icon">⚙️</span>
         <span>Configuration & Reporting</span>
       </button>
+      <button class="aigeo-nav-item" data-panel="silent-faults" title="Silent faults — faults that never throw an error: schema that disagrees with the rendered page, noindex/canonical/redirect problems, blocks that stopped rendering, dead tool keys and Supabase sync gaps. Open faults only; each closes itself when the page passes.">
+        <span class="aigeo-nav-icon">🚨</span>
+        <span>Silent faults</span>
+      </button>
       <div class="aigeo-nav-spacer" aria-hidden="true"></div>
       <button class="aigeo-nav-item is-active" data-panel="dashboard" title="Dashboard — global audit run controls (Quick / Standard / Full) and executive scorecard dials covering AI health, Traditional SEO and Backlinks.">
         <span class="aigeo-nav-icon">🧭</span>
@@ -8217,6 +8222,90 @@
         </div>
         <div id="config-integrity-panel-body"><p style="margin:0.5rem 0 0; color:#666;">No run yet.</p></div>
       </div>
+      <!-- Silent faults — rendered-page schema/indexing/rendering checks + tool and sync health -->
+      <section class="aigeo-panel" data-panel="silent-faults">
+        <style>
+          section[data-panel="silent-faults"] {
+            background: var(--dark-bg) !important;
+            min-height: calc(100vh - 4rem);
+            color: var(--dark-text) !important;
+            width: calc(100vw - 260px);
+            margin-left: calc(-50vw + 50% + 130px);
+            margin-right: calc(-50vw + 50% - 130px);
+            padding: 2rem;
+            box-sizing: border-box;
+          }
+          section[data-panel="silent-faults"] h2 { color: var(--dark-brand) !important; margin: 0; }
+          #sf-root .sf-sub { color: var(--dark-text-muted); font-size: 0.88rem; margin: 0.35rem 0 1.1rem; max-width: 110ch; }
+          #sf-root .sf-chips { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.75rem; margin-bottom: 1rem; }
+          #sf-root .sf-chip { background: #0b1118; border: 1px solid var(--dark-border); border-left: 3px solid #334155; border-radius: 0 10px 10px 0; padding: 0.8rem 0.95rem; }
+          #sf-root .sf-chip .n { font-size: 1.5rem; font-weight: 800; color: var(--dark-text); }
+          #sf-root .sf-chip .l { color: var(--dark-text-muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
+          #sf-root .sf-chip.red { border-left-color: #ef4444; } #sf-root .sf-chip.red .n { color: #f87171; }
+          #sf-root .sf-chip.amber { border-left-color: #f59e0b; } #sf-root .sf-chip.amber .n { color: #fbbf24; }
+          #sf-root .sf-chip.green { border-left-color: #10b981; } #sf-root .sf-chip.green .n { color: #34d399; }
+          #sf-root .sf-bar { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; background: #0b1118; border: 1px solid var(--dark-border); border-radius: 10px; padding: 0.6rem 0.75rem; margin-bottom: 0.75rem; }
+          #sf-root select, #sf-root input { background: #0f1419; color: var(--dark-text); border: 1px solid var(--dark-border); border-radius: 6px; padding: 0.4rem 0.55rem; font-size: 0.84rem; }
+          #sf-root input { min-width: 16rem; } #sf-root .sf-spacer { flex: 1; } #sf-root .sf-count { color: var(--dark-text-muted); font-size: 0.8rem; }
+          #sf-root .sf-btn { background: var(--dark-brand); color: #0f1419; border: 0; border-radius: 6px; padding: 0.45rem 0.8rem; font-weight: 700; cursor: pointer; font-size: 0.82rem; text-decoration: none; display: inline-block; }
+          #sf-root .sf-btn.ghost { background: transparent; border: 1px solid var(--dark-border); color: var(--dark-text); }
+          #sf-root .sf-btn:disabled { opacity: 0.6; cursor: progress; }
+          #sf-root table { width: 100%; border-collapse: separate; border-spacing: 0; background: #0b1118; border: 1px solid var(--dark-border); border-radius: 10px; overflow: hidden; }
+          #sf-root th, #sf-root td { text-align: left; padding: 0.58rem 0.7rem; border-bottom: 1px solid #1f2937; vertical-align: top; font-size: 0.84rem; }
+          #sf-root th { color: var(--dark-text-muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; cursor: pointer; user-select: none; background: #111827; white-space: nowrap; }
+          #sf-root th:hover { color: var(--dark-text); }
+          #sf-root tr.sf-row { cursor: pointer; } #sf-root tr.sf-row:hover td { background: rgba(245, 158, 11, 0.06); }
+          #sf-root .sf-pill { display: inline-flex; min-width: 54px; justify-content: center; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid; }
+          #sf-root .sf-pill.red { color: #fca5a5; border-color: rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.12); }
+          #sf-root .sf-pill.amber { color: #fcd34d; border-color: rgba(245, 158, 11, 0.5); background: rgba(245, 158, 11, 0.12); }
+          #sf-root .sf-area, #sf-root .sf-page small { display: block; color: #64748b; font-size: 0.74rem; }
+          #sf-root .sf-page a { color: #93c5fd; text-decoration: none; word-break: break-all; }
+          #sf-root .sf-fix { color: var(--dark-text-muted); font-size: 0.8rem; } #sf-root .sf-ago { color: var(--dark-text-muted); white-space: nowrap; font-size: 0.8rem; }
+          #sf-root .sf-stale { color: #fbbf24; font-size: 0.7rem; display: block; white-space: normal; }
+          #sf-root .sf-empty { text-align: center; color: var(--dark-text-muted); padding: 1.75rem; }
+          #sf-drawer { position: fixed; top: 0; right: 0; width: 470px; max-width: 95vw; height: 100%; background: #0b1118; border-left: 1px solid var(--dark-border); box-shadow: -20px 0 40px rgba(0, 0, 0, 0.45); padding: 1.25rem; transform: translateX(105%); transition: transform 0.2s; overflow: auto; z-index: 3000; color: var(--dark-text); }
+          #sf-drawer.open { transform: none; }
+          #sf-drawer h3 { margin: 0.35rem 0 0.6rem; color: var(--dark-text); word-break: break-all; }
+          #sf-drawer .sf-kv { display: grid; grid-template-columns: 7.5rem 1fr; gap: 0.35rem 0.6rem; font-size: 0.84rem; margin: 0.7rem 0; }
+          #sf-drawer .sf-kv div:nth-child(odd) { color: var(--dark-text-muted); }
+          #sf-drawer .sf-cmp { background: #0f1419; border: 1px solid var(--dark-border); border-radius: 8px; padding: 0.55rem 0.65rem; font-size: 0.8rem; margin: 0.4rem 0; word-break: break-word; }
+          #sf-drawer .sf-cmp .h { color: var(--dark-text-muted); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.2rem; }
+          #sf-drawer .sf-cmp ul { margin: 0.2rem 0 0; padding-left: 1.1rem; max-height: 14rem; overflow: auto; }
+          #sf-drawer .sf-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+          #sf-drawer .sf-x { float: right; cursor: pointer; color: var(--dark-text-muted); }
+          #sf-drawer .sf-pill { display: inline-flex; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.68rem; font-weight: 800; text-transform: uppercase; border: 1px solid; }
+          #sf-drawer .sf-pill.red { color: #fca5a5; border-color: rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.12); }
+          #sf-drawer .sf-pill.amber { color: #fcd34d; border-color: rgba(245, 158, 11, 0.5); background: rgba(245, 158, 11, 0.12); }
+          #sf-drawer .sf-btn { background: var(--dark-brand); color: #0f1419; border: 0; border-radius: 6px; padding: 0.45rem 0.8rem; font-weight: 700; cursor: pointer; font-size: 0.82rem; text-decoration: none; display: inline-block; }
+          #sf-drawer .sf-btn.ghost { background: transparent; border: 1px solid var(--dark-border); color: var(--dark-text); }
+          #sf-drawer .sf-fix { color: var(--dark-text-muted); font-size: 0.82rem; }
+          @media (max-width: 1100px) { #sf-root .sf-chips { grid-template-columns: repeat(3, 1fr); } }
+        </style>
+        <div id="sf-root">
+          <h2>🚨 Silent faults</h2>
+          <div class="sf-sub" id="sf-sub">Loading…</div>
+          <div class="sf-chips" id="sf-chips"></div>
+          <div class="sf-bar">
+            <select id="sf-f-sev"><option value="">All severities</option><option value="red">Red</option><option value="amber">Amber</option></select>
+            <select id="sf-f-area"><option value="">All areas</option><option>Schema</option><option>Indexing</option><option>Rendering</option><option>Tools</option></select>
+            <select id="sf-f-type"><option value="">All page types</option><option value="money">Money</option><option value="landing">Landing</option><option value="blog">Blog</option><option value="other">Event / product / other</option><option value="data">Data sync</option><option value="tool">Tool</option><option value="site">Site-wide</option></select>
+            <input id="sf-f-q" placeholder="Search page, check or detail…">
+            <span class="sf-count" id="sf-count"></span>
+            <span class="sf-spacer"></span>
+            <button class="sf-btn ghost" id="sf-export" type="button">Export CSV</button>
+            <button class="sf-btn" id="sf-run" type="button" title="Runs the same check as the Full refresh step (about 20 minutes for ~160 pages).">Run full check now</button>
+          </div>
+          <table id="sf-table">
+            <thead><tr>
+              <th data-k="sev">Severity ↕</th><th data-k="page">Page ↕</th><th data-k="check">Check ↕</th>
+              <th>What's wrong</th><th data-k="first">First seen ↕</th><th data-k="last">Last checked ↕</th><th>Fix hint</th>
+            </tr></thead>
+            <tbody id="sf-rows"><tr><td colspan="7" class="sf-empty">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <aside id="sf-drawer"><span class="sf-x" id="sf-drawer-x">✕ close</span><div id="sf-drawer-body"></div></aside>
+      </section>
+
       <!-- Revenue Funnel Panel — exec view: impressions -> clicks -> revenue -->
       <section class="aigeo-panel" data-panel="acquisition">
         <style>
@@ -32214,6 +32303,12 @@
             if (typeof window.renderAcquisitionTab === 'function') {
               window.renderAcquisitionTab();
             }
+          }, 50);
+        }
+
+        if (isActive && panelId === 'silent-faults') {
+          setTimeout(() => {
+            if (typeof window.renderSilentFaultsTab === 'function') window.renderSilentFaultsTab();
           }, 50);
         }
 
@@ -90862,6 +90957,7 @@ Confidence: ${c}`;
           { key: 'acquisition_channels', label: 'Acquisition channels (AI mentions + YouTube + GA4)', tiers: ['standard','full'], dependsOn: [], runner: runGlobalStepAcquisitionChannels },
           { key: 'update_tasks', label: 'Update all tasks with latest data', tiers: ['quick','standard','full'], dependsOn: ['audit_scan'], runner: runGlobalStepUpdateTasks },
           { key: 'academy_refresh', label: 'Academy refresh (Memberstack + weekly metrics)', tiers: ['full'], dependsOn: [], runner: runGlobalStepAcademyRefresh },
+          { key: 'silent_faults', label: 'Silent fault monitor (rendered pages + tools)', tiers: ['full'], dependsOn: [], runner: runGlobalStepSilentFaults },
           { key: 'ceo_weekly_email', label: 'CEO weekly HTML email', tiers: ['full'], dependsOn: [], runner: runGlobalStepCeoWeeklyEmail }
         ];
       }
@@ -91257,6 +91353,18 @@ Confidence: ${c}`;
         return body;
       }
 
+      // Multi-tick: each POST renders pages for ~3 min and checkpoints; loops until the run is done.
+      async function runGlobalStepSilentFaults() {
+        debugLog('[Global Run] [Silent faults] Starting (render ~160 pages + tool checks)...', 'info');
+        if (typeof window.sfRunMonitor !== 'function') throw new Error('silent-faults-tab.js not loaded');
+        const summary = await window.sfRunMonitor({
+          source: 'manual_full_refresh',
+          onProgress: (s) => debugLog(`[Global Run] [Silent faults] ${s.pages_checked || 0}/${s.pages_planned || '?'} pages checked${s.retry_pending ? ` · ${s.retry_pending} waiting on 429 retry` : ''}`, 'info')
+        });
+        debugLog(`[Global Run] [Silent faults] ✓ Done — ${summary?.pages_checked || 0} checked, ${summary?.pages_not_checked || 0} not checked`, 'success');
+        return summary;
+      }
+
       async function runGlobalStepCeoWeeklyEmail(ctx = {}) {
         debugLog('[Global Run] [CEO weekly email] Starting (last Full Refresh step)...', 'info');
         const failedKeys = ctx.failedKeys instanceof Set ? ctx.failedKeys : new Set();
@@ -91319,7 +91427,7 @@ Confidence: ${c}`;
 
       async function confirmFullTierIfNeeded(tier) {
         if (tier !== 'full') return true;
-        const msg = 'Full refresh runs Schema QA (whole site), DFS backlink full index, Domain Strength, GSC URL Inspection, Traditional SEO + extractability, citation/mentions refresh, 13-month Squarespace/Stripe revenue sync, GA4 enquiry metrics, and Academy weekly metrics.\n\nThis can take 30+ minutes and will consume DataForSEO credits.\n\nContinue?';
+        const msg = 'Full refresh runs Schema QA (whole site), DFS backlink full index, Domain Strength, GSC URL Inspection, Traditional SEO + extractability, citation/mentions refresh, 13-month Squarespace/Stripe revenue sync, GA4 enquiry metrics, Academy weekly metrics, and the Silent fault monitor (renders ~160 pages, ~20 min).\n\nThis can take 50+ minutes and will consume DataForSEO credits.\n\nContinue?';
         return window.confirm(msg);
       }
 

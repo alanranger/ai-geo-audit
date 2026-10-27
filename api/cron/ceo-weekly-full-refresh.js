@@ -65,6 +65,7 @@ function emptyProgress(weekStart) {
     ranking_started_at: null,
     domain_strength: null,
     gsc: null,
+    silent_faults: null,
     multi_ticks: 0
   };
 }
@@ -251,6 +252,7 @@ export default async function handler(req, res) {
       if (result.ranking) progress.ranking = slimRankingForPersist(result.ranking);
       if (result.domain_strength) progress.domain_strength = result.domain_strength;
       if (result.gsc) progress.gsc = result.gsc;
+      if (result.silent_faults) progress.silent_faults = result.silent_faults;
 
       const stepDone = result.done !== false;
       if (stepDone) {
@@ -280,6 +282,7 @@ export default async function handler(req, res) {
         }
         if (step.key === 'domain_strength') progress.domain_strength = null;
         if (step.key === 'gsc_url_inspection') progress.gsc = null;
+        if (step.key === 'silent_faults') progress.silent_faults = null;
         progress.step_index += 1;
         ran += 1;
       } else {
