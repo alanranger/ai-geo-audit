@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-27] - Silent fault monitor (Full refresh step + dashboard section + CEO line)
+
+**Change:** New step `silent_faults` immediately before `ceo_weekly_email` in both the Monday cron and the dashboard Full refresh (no separate cron). Renders money/landing pages every week and a 25% rotation of blog/deeper pages as Googlebot smartphone, and runs checks A1–A6 (schema vs page), B1–B4 (indexing), C1–C3 (rendering), D1–D6 (tool keys, run reports, sync heartbeat, 09 export, Supabase sync, ingest). New **Silent faults** section next to Config (open faults only, re-check per page). CEO brief shows one red line only when red faults are open. Schema Tools, the chatbot ingest screen and the shared-resources sync job now post run reports. `runFullStep` became a dispatch table. Spec: `Docs/SILENT-FAULT-MONITOR.md`.
+
+**Files:** `lib/fault-monitor/*`, `api/aigeo/silent-fault-monitor.js`, `api/aigeo/tool-run-report.js`, `lib/silent-faults-tab.js`, `audit-dashboard.html`, `lib/ceo-weekly/{dashboard-full-catalog,report,email}.js`, `api/cron/ceo-weekly-full-refresh.js`, `migrations/20261027_silent_fault_monitor.sql`, `test/silent-fault-monitor.test.js`, `Docs/SILENT-FAULT-MONITOR.md`
+
 ## [2026-10-26] - LOCKED v14: `free online photography course` → blog guide
 
 **Change:** Target page for `free online photography course` (UK, national-money) moved from `/free-online-photography-course` to `/blog-on-photography/best-free-online-photography-courses` (approved by Alan). Still 88 keywords; no other changes. Readers no longer pin a LOCKED version: config integrity reads the bundled LOCKED JSON, `defaultLockedCsvPath` picks the highest `config/...LOCKED-vNN.csv`, `llm-visibility-collect` bundles `LOCKED-v*.csv`, and `get-latest-audit` already accepts same-or-newer overrides. Future versions only need a new CSV + `scripts/load-locked-vNN.mjs`.
