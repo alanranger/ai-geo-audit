@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-28] - Skip ProductList-title H1s only when the product loader is in the HTML
+
+**Change:** Extractability ignores Squarespace `h1.ProductList-title` cards only when the raw HTML contains `product-page-loader.js`. If that script line is missing, those H1s count and `single_h1` fails. The mobile/desktop `ProductItem-details-title` pair still counts as one; K3 still uses the product title.
+
+**Files:** `api/aigeo/content-extractability.js`, `audit-dashboard.html`, `test/traditional-seo-h1-signals.test.js`, `Docs/CHANGELOG.md`
+
 ## [2026-10-28] - Traditional SEO: real H1 count + K3 uses product title
 
 **Change:** Extractability no longer treats Squarespace `h1.ProductList-title` shop/related cards as page H1s (the product loader demotes those to H2). A mobile/desktop `ProductItem-details-title` pair counts as one. K3 primary H1 is that product title, not the longest heading. Removed the `/photo-workshops-uk/` + `/photography-services-near-me/` “≥1 H1 passes” exception — that existed because related/grid H1s made `single_h1` fail on raw HTML.

@@ -752,14 +752,18 @@ function normalizeH1PlainKey(plain = '') {
   return String(plain || '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
-/** Page H1s after loader tidy: drop ProductList-title; count details-title pair as one. */
-function collectTraditionalSeoH1s(source = '') {
+function htmlHasProductPageLoader(html = '') {
+  return /<script\b[^>]*product-page-loader\.js/i.test(String(html || ''));
+}
+
+/** Page H1s: skip ProductList-title only when the product loader is in the HTML. */
+function collectTraditionalSeoH1s(source = '', skipProductListTitles = false) {
   const matches = [...String(source || '').matchAll(/<h1\b([^>]*)>([\s\S]*?)<\/h1>/gi)];
   const kept = [];
   const seenDetails = new Set();
   matches.forEach((match) => {
     const attrs = match[1] || '';
-    if (isProductListTitleH1(attrs)) return;
+    if (skipProductListTitles && isProductListTitleH1(attrs)) return;
     const plain = plainTextFromHtmlFragment(match[2]);
     const isDetails = isProductItemDetailsTitle(attrs);
     if (isDetails) {
@@ -791,7 +795,7 @@ function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
   };
   const source = stripNoiseForSeoTextParsing(String(html || ''));
   out.metaDescription = extractMetaDescriptionFromHtml(String(html || ''));
-  const h1s = collectTraditionalSeoH1s(source);
+  const h1s = collectTraditionalSeoH1s(source, htmlHasProductPageLoader(html));
   out.h1Count = h1s.length;
   const first = h1s[0];
   if (first) {
