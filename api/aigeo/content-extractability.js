@@ -740,6 +740,38 @@ function isDecorativeImgTag(tag = '') {
   return DECORATIVE_IMG_MATCHERS.some((re) => re.test(s));
 }
 
+function isProductListTitleH1(attrs = '') {
+  return /\bProductList-title\b/i.test(String(attrs || ''));
+}
+
+function isProductItemDetailsTitle(attrs = '') {
+  return /\bProductItem-details-title\b/i.test(String(attrs || ''));
+}
+
+function normalizeH1PlainKey(plain = '') {
+  return String(plain || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/** Page H1s after loader tidy: drop ProductList-title; count details-title pair as one. */
+function collectTraditionalSeoH1s(source = '') {
+  const matches = [...String(source || '').matchAll(/<h1\b([^>]*)>([\s\S]*?)<\/h1>/gi)];
+  const kept = [];
+  const seenDetails = new Set();
+  matches.forEach((match) => {
+    const attrs = match[1] || '';
+    if (isProductListTitleH1(attrs)) return;
+    const plain = plainTextFromHtmlFragment(match[2]);
+    const isDetails = isProductItemDetailsTitle(attrs);
+    if (isDetails) {
+      const key = normalizeH1PlainKey(plain);
+      if (seenDetails.has(key)) return;
+      seenDetails.add(key);
+    }
+    kept.push({ plain, isDetails });
+  });
+  return kept;
+}
+
 /** Counts used by Traditional SEO dashboard (H1, images, outbound links). */
 function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
   const out = {
@@ -759,25 +791,20 @@ function analyzeTraditionalSeoHtmlSignals(html = '', pageUrl = '') {
   };
   const source = stripNoiseForSeoTextParsing(String(html || ''));
   out.metaDescription = extractMetaDescriptionFromHtml(String(html || ''));
-  const h1Matches = [...source.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)];
-  out.h1Count = h1Matches.length;
+  const h1s = collectTraditionalSeoH1s(source);
+  out.h1Count = h1s.length;
+  const first = h1s[0];
+  if (first) {
+    out.firstH1PlainText = first.plain;
+    out.firstH1PlainLength = first.plain.length;
+  }
   let longest = 0;
-  let primaryText = '';
-  h1Matches.forEach((match) => {
-    const plain = plainTextFromHtmlFragment(match[1]);
-    const len = plain.length;
-    if (len > longest) {
-      longest = len;
-      primaryText = plain;
-    }
+  h1s.forEach((h1) => {
+    if (h1.plain.length > longest) longest = h1.plain.length;
   });
   out.longestH1PlainLength = longest;
-  if (h1Matches[0]) {
-    const firstPlain = plainTextFromHtmlFragment(h1Matches[0][1]);
-    out.firstH1PlainLength = firstPlain.length;
-    out.firstH1PlainText = firstPlain;
-  }
-  out.primaryH1PlainText = primaryText || out.firstH1PlainText;
+  const details = h1s.find((h1) => h1.isDetails);
+  out.primaryH1PlainText = (details && details.plain) || out.firstH1PlainText;
 
   const imgMatches = [...source.matchAll(/<img\b[^>]*>/gi)];
   imgMatches.forEach((match) => {
@@ -1374,4 +1401,4 @@ export default async function handler(req, res) {
   }
 }
 
-export { checkUrl, isExternalLinkTargetBlankExemptHost };
+export { checkUrl, isExternalLinkTargetBlankExemptHost, analyzeTraditionalSeoHtmlSignals };

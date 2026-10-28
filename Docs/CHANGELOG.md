@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-28] - Traditional SEO: real H1 count + K3 uses product title
+
+**Change:** Extractability no longer treats Squarespace `h1.ProductList-title` shop/related cards as page H1s (the product loader demotes those to H2). A mobile/desktop `ProductItem-details-title` pair counts as one. K3 primary H1 is that product title, not the longest heading. Removed the `/photo-workshops-uk/` + `/photography-services-near-me/` “≥1 H1 passes” exception — that existed because related/grid H1s made `single_h1` fail on raw HTML.
+
+**Files:** `api/aigeo/content-extractability.js`, `audit-dashboard.html`, `test/traditional-seo-h1-signals.test.js`, `Docs/CHANGELOG.md`
+
 ## [2026-10-27] - Silent fault monitor (Full refresh step + dashboard section + CEO line)
 
 **Change:** New step `silent_faults` immediately before `ceo_weekly_email` in both the Monday cron and the dashboard Full refresh (no separate cron). Renders money/landing pages every week and a 25% rotation of blog/deeper pages as Googlebot smartphone, and runs checks A1–A6 (schema vs page), B1–B4 (indexing), C1–C3 (rendering), D1–D6 (tool keys, run reports, sync heartbeat, 09 export, Supabase sync, ingest). New **Silent faults** section next to Config (open faults only, re-check per page). CEO brief shows one red line only when red faults are open. Schema Tools, the chatbot ingest screen and the shared-resources sync job now post run reports. `runFullStep` became a dispatch table. Spec: `Docs/SILENT-FAULT-MONITOR.md`.
