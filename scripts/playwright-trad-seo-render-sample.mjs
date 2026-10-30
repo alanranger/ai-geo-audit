@@ -114,6 +114,12 @@ try {
   }, { sampleJson, forceJson });
   await page.locator('.aigeo-nav-item[data-panel="traditional-seo"]').click().catch(() => {});
 
+  await page.evaluate(async () => {
+    if (typeof window.tradSeoRenderLoop !== 'function') return;
+    const id = localStorage.getItem('trad_seo_render_run_id');
+    await window.tradSeoRenderLoop(() => {}, id);
+  }).catch(() => null);
+
   const deadline = Date.now() + 10 * 60 * 1000;
   while (Date.now() < deadline) {
     const banner = await page.locator('#traditional-seo-render-banner').innerText().catch(() => '');
