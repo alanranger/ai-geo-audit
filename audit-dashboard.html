@@ -92498,7 +92498,7 @@ Confidence: ${c}`;
       'schema_body_coverage', 'schema_body_starts_with_page', 'schema_not_title_only',
       'faq_schema_parity', 'academy_course_schema', 'no_duplicate_schema',
       'code_blocks_intact', 'no_squarespace_error_text', 'no_site_script_errors',
-      'key_blocks_loaded', 'hidden_tag_matches_lists'
+      'key_blocks_loaded', 'hidden_tag_matches_lists', 'thin_content_guardrail'
     ];
     const TRADITIONAL_SEO_NO_RENDER_RULE_KEYS = [
       'gsc_url_indexed', 'google_gsc_visible', 'url_slug_word_count', 'keyword_slug_tokens',
@@ -98208,6 +98208,10 @@ Confidence: ${c}`;
       const extractSignal = traditionalSeoSignalMapGet(maps.extractability, url, propertyUrl);
       const renderOutcome = traditionalSeoRenderMapGet(TRADITIONAL_SEO_STATE.renderOutcomeByUrl, url);
       if (String(tier || '').toLowerCase() !== 'sitewide'
+          && String(renderOutcome || '').toLowerCase() === 'not_checked') {
+        return 'not_checked';
+      }
+      if (String(tier || '').toLowerCase() !== 'sitewide'
           && traditionalSeoRuleNeedsCurrentRender(key)
           && renderOutcome !== 'checked') {
         return 'not_checked';
@@ -98216,9 +98220,13 @@ Confidence: ${c}`;
         const pack = traditionalSeoRenderMapGet(TRADITIONAL_SEO_STATE.renderFindings, url);
         return pack && typeof pack === 'object' ? pack[key] : null;
       })();
+      if ((key === 'schema_body_starts_with_page' || key === 'schema_not_title_only')
+          && extractSignal?.hasNoindex === true) {
+        return 'na';
+      }
       if (TRADITIONAL_SEO_RENDER_RULE_KEYS.includes(key)) {
         if (renderFinding?.status) return String(renderFinding.status).toLowerCase();
-        return 'pass';
+        if (key !== 'thin_content_guardrail') return 'pass';
       }
       const gscInspectSignal = traditionalSeoSignalMapGet(maps.gscIndexInspect, url, propertyUrl);
       const qaSignal = traditionalSeoSignalMapGetWithUrlAliases(maps.qaGate, url, propertyUrl);

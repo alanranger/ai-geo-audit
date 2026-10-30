@@ -87,6 +87,24 @@ test('findingsFromPage maps A3 to schema_not_title_only fail', () => {
   assert.equal(out.schema_not_title_only.status, 'fail');
 });
 
+test('findingsFromPage skips A2/A3 on checklist noindex and stores thin-content words', () => {
+  const html = '<article class="BlogItem category-1-page-field-checklists"><p>Members only checklist wall.</p></article>';
+  const out = findingsFromPage({
+    url: POST,
+    pageType: 'blog',
+    render: { measure: { rawHtml: html, html, robots: 'noindex' } },
+    results: [{ check: 'A2', status: 'fault', title: 'body start' }, { check: 'A3', status: 'fault', title: 'title only' }],
+    extract: { seoMainWordCount: 90 },
+    inCsv: new Set(),
+    intentionalNoindex: false,
+    siteErrors: []
+  });
+  assert.equal(out.schema_body_starts_with_page.status, 'na');
+  assert.equal(out.schema_not_title_only.status, 'na');
+  assert.equal(out.thin_content_guardrail.status, 'fail');
+  assert.match(out.thin_content_guardrail.note, /90 words/);
+});
+
 test('extractRowFromRendered keeps title and H1 signals', () => {
   const html = '<html><head><title>Photography Courses in Coventry</title></head><body><h1>Photography Courses</h1></body></html>';
   const row = extractRowFromRendered(COURSES, html, 200);

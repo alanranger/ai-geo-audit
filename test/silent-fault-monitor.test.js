@@ -63,6 +63,15 @@ test('questionLabels counts "? +" accordions and ignores numbered HowTo steps', 
   assert.equal(questionLabels(['1Pack the night before+', 'When do bluebells flower?+', 'Do I need a tripod?', 'Which direction should my window face?▼', '2 Set up a clean background▼']), 3);
 });
 
+test('questionLabels ignores numbered checklist questions without 1. punctuation', () => {
+  assert.equal(questionLabels([
+    'When should I convert to black and white?',
+    '1 Does removing colour add power?',
+    '1Does removing colour add power?',
+    '1 BEFORE — would I want this on my wall?'
+  ]), 1);
+});
+
 test('A4: 12 visible FAQs, no FAQPage on a money page = red', () => {
   const r = faqParityCheck(ACADEMY, 'money', [], { faqLabels: labels(12), html: '' });
   assert.equal(r.status, 'fault');
