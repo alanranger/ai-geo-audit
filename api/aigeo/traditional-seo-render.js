@@ -6,8 +6,8 @@ import { recheckUrl, startRun, tickRun, tickSummary } from '../../lib/fault-moni
 import { latestAnyTradSeoRun, latestRunningTradSeoRun, latestTradSeoRun, loadRun, saveRun } from '../../lib/fault-monitor/store.js';
 import { isFullTradSeoSource } from '../../lib/trad-seo-render/run-kind.js';
 import { loadFaultSummary } from '../../lib/fault-monitor/brief.js';
-import { CHECKS } from '../../lib/fault-monitor/monitor-config.js';
 import { runSiteChecks } from '../../lib/fault-monitor/site-checks.js';
+import { groupHealthRows } from '../../lib/fault-monitor/health-panel.js';
 import { loadRunPages, loadLatestPage } from '../../lib/trad-seo-render/pages-store.js';
 import { loadBrokenPages, tickBrokenLinks } from '../../lib/trad-seo-render/broken-job.js';
 
@@ -26,20 +26,7 @@ function playwrightSource(source) {
 }
 
 function healthRows(findings) {
-  return (findings || [])
-    .filter((f) => f.status === 'fault' && /^D[1-6]$/.test(f.check || f.check_id || ''))
-    .map((f) => {
-      const id = f.check || f.check_id;
-      const meta = CHECKS[id] || {};
-      return {
-        check: id,
-        label: String(meta.label || '').replace(/^D\d\s+/, '') || f.title,
-        severity: f.severity === 'red' ? 'critical' : 'high',
-        title: f.title,
-        fix: meta.fix || '',
-        url: f.url || null
-      };
-    });
+  return groupHealthRows(findings);
 }
 
 async function handleGet(sb, req, res) {
