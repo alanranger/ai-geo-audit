@@ -72,21 +72,27 @@ try {
   report.silentFaultsNavHidden = !silentVisible;
 
   for (const url of REAUDIT) {
-    await page.evaluate((u) => {
-      if (typeof window.traditionalSeoOpenPageModal === 'function') return window.traditionalSeoOpenPageModal(u);
-      if (window.TRADITIONAL_SEO_STATE) window.TRADITIONAL_SEO_STATE.modalPageUrl = u;
-    }, url);
-    await page.waitForTimeout(800);
-    const btn = page.locator('#traditional-seo-page-modal-reaudit');
-    if (await btn.count()) {
-      await btn.click();
-      await page.waitForFunction(() => {
-        const b = document.getElementById('traditional-seo-page-modal-reaudit');
-        return b && !b.disabled && /Re-audit page/i.test(b.textContent || '');
-      }, { timeout: 180000 });
-    }
+    const deep = `${BASE}/audit-dashboard.html?seoPage=${encodeURIComponent(url)}&reaudit=1&cb=${Date.now()}#traditional-seo`;
+    await page.goto(deep, { waitUntil: 'domcontentloaded', timeout: 120000 });
+    await page.evaluate(({ sample, force }) => {
+      localStorage.setItem('trad_seo_sample_urls', JSON.stringify(sample));
+      localStorage.setItem('trad_seo_force_not_checked', JSON.stringify([force]));
+    }, { sample: SAMPLE, force: FORCE_429 });
+    await page.waitForSelector('#traditional-seo-page-modal-reaudit', { state: 'visible', timeout: 90000 });
+    await page.waitForFunction(() => {
+      const b = document.getElementById('traditional-seo-page-modal-reaudit');
+      return b && !b.disabled && /Re-audit page/i.test(b.textContent || '');
+    }, { timeout: 180000 });
     report.steps.push(`reaudit ${url}`);
   }
+  const tabUrl = `${BASE}/audit-dashboard.html?cb=${Date.now()}#traditional-seo`;
+  await page.goto(tabUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+  await page.evaluate(({ sample, force }) => {
+    localStorage.setItem('trad_seo_sample_urls', JSON.stringify(sample));
+    localStorage.setItem('trad_seo_force_not_checked', JSON.stringify([force]));
+  }, { sample: SAMPLE, force: FORCE_429 });
+  await page.locator('.aigeo-nav-item[data-panel="traditional-seo"]').click().catch(() => {});
+  await page.waitForSelector('#traditional-seo-run-full-audit-btn', { timeout: 60000 });
   await page.screenshot({ path: png('SCREEN-2026-10-30-trad-seo-reaudit-modal.png'), fullPage: false });
 
   const cols = await page.locator('#traditional-seo-results-table thead th').allTextContents();
