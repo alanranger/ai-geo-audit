@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-30] - no_duplicate_schema: shared @id with the same type is not a duplicate
+
+**Change:** A6 / `no_duplicate_schema` no longer fails when landing-page schema and the site-wide footer graph both use `https://www.alanranger.com/#person` (Google merges same-@id nodes). Fail only for >1 FAQPage, >1 HowTo, or the same `@id` used with a different `@type`. Organization+LocalBusiness vs Organization on one `@id` is a match (one type set contains the other).
+
+**Files:** `lib/fault-monitor/page-checks.js`, `audit-dashboard.html`, `test/silent-fault-monitor.test.js`, `Docs/CHANGELOG.md`
+
 ## [2026-10-30] - Traditional SEO: missing render is Not checked; hidden-status checks the live tag
 
 **Change:** A URL with no Chromium render in the current run is **Not checked** for render-dependent rules (excluded from the score; never warn/fail). GSC inspection, slug, sitewide robots/sitemap/HTTPS, and schema-scanner rules still score. `hidden_tag_matches_lists` now compares the live robots tag with `page_indexability_policy`: policy-hidden + visible page → warn “Policy says hidden, page is visible”; money/landing hidden without policy → fail; noindex still in 06 → fail. Policy rows 4 and 5 (`/photo-workshops-uk`, `/photography-services-near-me`) retired to `indexed` (rows kept as backup). Id 3 beginners prefix untouched.

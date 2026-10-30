@@ -101,6 +101,27 @@ test('A6: two FAQPage blocks or a repeated HowTo id are duplicates', () => {
   assert.equal(duplicateTypesCheck(POST, [faqNode(3), { '@type': 'HowTo', '@id': '#h' }]).status, 'pass');
 });
 
+test('A6: shared @id with the same type is not a duplicate', () => {
+  const id = 'https://www.alanranger.com/#person';
+  const a = { '@type': 'Person', '@id': id, name: 'Alan Ranger' };
+  const b = { '@type': 'Person', '@id': id, name: 'Alan Ranger' };
+  assert.equal(duplicateTypesCheck(POST, [a, b]).status, 'pass');
+});
+
+test('A6: Organization+LocalBusiness vs Organization on the same @id passes', () => {
+  const id = 'https://www.alanranger.com/#business';
+  const a = { '@type': ['Organization', 'LocalBusiness'], '@id': id };
+  const b = { '@type': 'Organization', '@id': id };
+  assert.equal(duplicateTypesCheck(POST, [a, b]).status, 'pass');
+});
+
+test('A6: same @id with a different @type is a conflict', () => {
+  const id = 'https://www.alanranger.com/#person';
+  const a = { '@type': 'Person', '@id': id };
+  const b = { '@type': 'Organization', '@id': id };
+  assert.equal(duplicateTypesCheck(POST, [a, b]).status, 'fault');
+});
+
 test('B1: noindex respects intentional policy; money page noindex is red', () => {
   const m = { robots: 'noindex, follow' };
   assert.equal(noindexCheck(ACADEMY, 'money', m, {}, { intentionalNoindex: true }).status, 'pass');

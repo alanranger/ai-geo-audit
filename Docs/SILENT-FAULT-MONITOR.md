@@ -26,7 +26,7 @@ Plan per run (`lib/fault-monitor/plan.js`): every top-level money/landing page f
 | A3 | `articleBody` or `description` equals the headline, or the body is ≤ 12 words | red |
 | A4 | Visible FAQs (question-style accordion labels or the Schema Tools extractor) ≠ FAQPage count; FAQPage missing with ≥ 3 visible; or < 50% of FAQPage questions appear on the page (stale/invisible FAQPage) | amber, red on money pages |
 | A5 | Academy page lacks Course / CourseInstance / ≥ 2 Offers / AggregateRating, or review strip count ≠ schema count | red |
-| A6 | > 1 FAQPage, or a HowTo repeated with the same `@id` | amber |
+| A6 | > 1 FAQPage, > 1 HowTo, or the same `@id` used with a different `@type` (shared `@id` with matching types is not a duplicate) | amber |
 | B1 | `noindex` (meta or `X-Robots-Tag`) unless `page_indexability_policy` says intentional | red on money/landing, else amber |
 | B2 | Canonical ≠ the page (www/slash normalised) on money/landing/blog pages | red |
 | B3 | `gsc_url_inspection_cache` not indexed for a money/landing page (cache only, no API spend) | amber |
