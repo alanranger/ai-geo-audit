@@ -2821,6 +2821,29 @@
       background: rgba(51, 65, 85, 0.35);
       color: #94a3b8;
     }
+    section[data-panel="traditional-seo"] .trad-seo-health-table {
+      width: 100%;
+      margin-top: 0.45rem;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+      color: #e2e8f0;
+    }
+    section[data-panel="traditional-seo"] .trad-seo-health-table th,
+    section[data-panel="traditional-seo"] .trad-seo-health-table td {
+      text-align: left;
+      padding: 0.4rem 0.55rem;
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      vertical-align: top;
+    }
+    section[data-panel="traditional-seo"] .trad-seo-health-table th {
+      background: rgba(15, 23, 42, 0.85);
+      color: #cbd5e1;
+      font-weight: 700;
+    }
+    section[data-panel="traditional-seo"] .trad-seo-health-table td {
+      background: rgba(15, 23, 42, 0.45);
+      color: #e2e8f0;
+    }
     section[data-panel="traditional-seo"] .traditional-seo-status-pill[data-status="redirected"],
     section[data-panel="traditional-seo"] .traditional-seo-status-pill[data-status="gone"],
     section[data-panel="traditional-seo"] .traditional-seo-status-pill[data-status="hidden"] {
@@ -92389,7 +92412,7 @@ Confidence: ${c}`;
       { rule_key: 'service_schema_product_page', rule_name: 'Service schema (Tier B product)', description: 'For Tier B product URLs in Service Schema Coverage audit: expect Service JSON-LD.', category: 'schema', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 101 },
       { rule_key: 'localbusiness_schema_page', rule_name: 'LocalBusiness schema (scanned URLs)', description: 'When URL appears in LocalBusiness scanner results: expect LocalBusiness JSON-LD.', category: 'schema', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 102 },
       { rule_key: 'internal_links_minimum', rule_name: 'Internal backlinks present', description: 'Pages should have at least one inbound internal link from another crawled page. Use manual bypass for utility pages you want excluded.', category: 'architecture', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 105 },
-      { rule_key: 'thin_content_guardrail', rule_name: 'Thin content guardrail', description: 'Content Extractability pass/score; excluded/noindex rows pass.', category: 'content', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 115 },
+      { rule_key: 'thin_content_guardrail', rule_name: 'Thin content guardrail', description: 'Rendered main-text word count. Pass ≥300 words, warn 150–299, fail below 150. Missing count is Not checked (Input missing), never a fail.', category: 'content', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.4, sort_order: 115 },
       { rule_key: 'content_freshness_last_updated', rule_name: 'Updated within 12 months', description: 'Pages should have a page date signal from HTML/meta or sitemap lastmod, and it should be within the last 12 months. Use manual bypass for utility pages you want excluded.', category: 'content', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 118 },
       { rule_key: 'image_alt_coverage', rule_name: 'Image alt attributes', description: 'All img tags should have a non-empty alt (Extractability HTML parse). Zero images on the page passes.', category: 'content', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 125 },
       { rule_key: 'external_links_new_tab', rule_name: 'External links open in new tab', description: 'Outbound links to other hosts should use target=_blank (parsed from Extractability HTML).', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 130 },
@@ -95168,7 +95191,7 @@ Confidence: ${c}`;
           idxByKey.set(k, rows.length);
           rows.push(fresh);
         } else {
-          rows[idxByKey.get(k)] = fresh;
+          rows[idxByKey.get(k)] = { ...rows[idxByKey.get(k)], ...fresh };
         }
       });
       next.data.rows = rows;
@@ -96358,6 +96381,7 @@ Confidence: ${c}`;
           'keyword_in_intro',
           'internal_links_minimum',
           'content_freshness_last_updated',
+          'thin_content_guardrail',
           'broken_links_no_404',
           'schema_body_coverage',
           'schema_body_starts_with_page',
@@ -96374,6 +96398,7 @@ Confidence: ${c}`;
         if (canonicalRuleCopy.has(merged.rule_key)) {
           merged.rule_name = baseRule.rule_name;
           merged.description = baseRule.description;
+          merged.category = baseRule.category;
         }
         if (merged.rule_key === 'broken_links_no_404') {
           merged.enabled = baseRule.enabled;
@@ -98032,18 +98057,27 @@ Confidence: ${c}`;
       }
       const healthEl = document.getElementById('traditional-seo-system-health');
       if (healthEl) {
-        const rows = st.renderHealth.filter((h) => h && h.title);
+        const rows = st.renderHealth.filter((h) => h && (h.title || h.label));
         if (!rows.length) {
           healthEl.style.display = 'none';
           healthEl.innerHTML = '';
         } else {
+          const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          const body = rows.map((h) => {
+            const problem = esc(h.title || h.label);
+            const fix = esc(h.fix || '');
+            return `<tr><td>${problem}</td><td>${fix}</td></tr>`;
+          }).join('');
           healthEl.style.display = 'block';
-          healthEl.innerHTML = `<strong>System health</strong> — ${rows.map((h) => `${h.check || ''}: ${h.title}`).join(' · ')}`;
+          healthEl.innerHTML = `<strong>System health</strong> — problems only`
+            + `<table class="trad-seo-health-table"><thead><tr><th>Problem</th><th>What to do</th></tr></thead>`
+            + `<tbody>${body}</tbody></table>`;
         }
       }
       const banner = document.getElementById('traditional-seo-render-banner');
       if (banner) {
-        const full = st.renderRun && String(st.renderRun.source || '') === 'trad_seo';
+        const stRun = String(st.renderRun?.status || '').toLowerCase();
+        const full = st.renderRun && String(st.renderRun.source || '') === 'trad_seo' && stRun !== 'cancelled';
         if (!full) {
           banner.style.display = 'none';
           banner.textContent = '';
@@ -98181,17 +98215,12 @@ Confidence: ${c}`;
         return 'fail';
       }
       if (key === 'thin_content_guardrail') {
-        if (extractSignal) {
-          if (extractSignal.excludedFromAudit === true) return 'pass';
-          if (extractSignal.requestOk === false) return 'warn';
-          if (extractSignal.pass === true) return 'pass';
-          const exScore = traditionalSeoToNum(extractSignal.score, 0);
-          if (exScore >= 50) return 'warn';
-          return 'fail';
-        }
-        if (impressions >= 50 && clicks === 0) return 'warn';
-        if (impressions > 0 && impressions < 8) return 'warn';
-        return 'pass';
+        if (extractSignal?.excludedFromAudit === true) return 'pass';
+        if (!extractSignal || typeof extractSignal.seoMainWordCount !== 'number') return 'not_checked';
+        const words = extractSignal.seoMainWordCount;
+        if (words >= 300) return 'pass';
+        if (words >= 150) return 'warn';
+        return 'fail';
       }
       if (key === 'content_freshness_last_updated') {
         if (!extractSignal || extractSignal.requestOk === false) return 'warn';
@@ -98248,8 +98277,8 @@ Confidence: ${c}`;
         if (traditionalSeoShouldExcludeUrlFromTraditionalAudit(url)) return 'pass';
         if (extractSignal?.excludedFromAudit === true) return 'pass';
         if (!extractSignal || extractSignal.requestOk === false) return 'warn';
-        const c = traditionalSeoToNum(extractSignal.seoH1Count, -1);
-        if (c < 0) return 'warn';
+        const c = traditionalSeoToNum(extractSignal.seoH1Count, NaN);
+        if (!Number.isFinite(c)) return 'not_checked';
         if (c === 1) return 'pass';
         return 'fail';
       }
@@ -98257,7 +98286,8 @@ Confidence: ${c}`;
         if (traditionalSeoShouldExcludeUrlFromTraditionalAudit(url)) return 'pass';
         if (extractSignal?.excludedFromAudit === true) return 'pass';
         if (!extractSignal || extractSignal.requestOk === false) return 'warn';
-        const c = traditionalSeoToNum(extractSignal.seoH1Count, -1);
+        const c = traditionalSeoToNum(extractSignal.seoH1Count, NaN);
+        if (!Number.isFinite(c)) return 'not_checked';
         if (c <= 0) return 'fail';
         const longest = traditionalSeoToNum(extractSignal.seoLongestH1Length, 0);
         const firstLen = traditionalSeoToNum(extractSignal.seoFirstH1Length, 0);
@@ -99358,6 +99388,15 @@ Confidence: ${c}`;
           ? ' Long schema-only text is not failed (often JSON-LD ≠ <meta>); refresh extract to score real meta length.'
           : '';
         return `Length ${len} chars (target 150–165; entities + whitespace normalized). ${src}.${alt}${tail}`;
+      }
+      if (rk === 'thin_content_guardrail') {
+        if (ex?.excludedFromAudit === true) return 'Page excluded from extractability scope.';
+        if (!ex || typeof ex.seoMainWordCount !== 'number') {
+          return 'Input missing: rendered main-text word count was not stored. Re-audit the page.';
+        }
+        const n = ex.seoMainWordCount;
+        const band = n >= 300 ? 'threshold met' : (n >= 150 ? 'below 300-word pass' : 'thin');
+        return `Rendered main text: ${n.toLocaleString('en-GB')} words (${band}; pass ≥300, warn 150–299, fail <150).`;
       }
       if (rk === 'title_tag_present') {
         const htmlLen = traditionalSeoToNum(ex?.seoTitleTagLength, NaN);

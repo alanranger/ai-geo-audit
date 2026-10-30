@@ -24,6 +24,21 @@ test('code_blocks_intact passes balanced inline CSS', () => {
   assert.equal(codeBlocksIntact(ok).status, 'pass');
 });
 
+test('code_blocks_intact parses JS with braces inside strings and regex', () => {
+  const ok = '<script>const re = /{/; const s = "function(){ return 1 }"; const n = 1;</script>';
+  assert.equal(codeBlocksIntact(ok).status, 'pass');
+});
+
+test('code_blocks_intact parses CSS with braces inside strings', () => {
+  const ok = '<style>.x::before { content: "{"; color: red; }</style>';
+  assert.equal(codeBlocksIntact(ok).status, 'pass');
+});
+
+test('code_blocks_intact skips JSON-LD scripts', () => {
+  const ok = '<script type="application/ld+json">{"@type":"FAQPage","mainEntity":[]}</script>';
+  assert.equal(codeBlocksIntact(ok).status, 'pass');
+});
+
 test('hidden_tag_matches_lists fails when NOINDEX is still in 06', () => {
   const inCsv = new Set(['/photography-courses']);
   const render = { measure: { rawHtml: '<meta name="ROBOTS" content="NOINDEX">' }, xRobots: '' };
@@ -78,6 +93,15 @@ test('extractRowFromRendered keeps title and H1 signals', () => {
   assert.equal(row.requestOk, true);
   assert.ok(row.seoTitleTagLength > 10);
   assert.equal(row.url, COURSES);
+  assert.equal(typeof row.seoMainWordCount, 'number');
+  assert.ok(row.seoMainWordCount >= 2);
+});
+
+test('extractRowFromRendered decodes title entities before counting', () => {
+  const html = '<html><head><title>Workshops &amp; Courses</title></head><body><p>Hello world content here.</p></body></html>';
+  const row = extractRowFromRendered(COURSES, html, 200);
+  assert.equal(row.seoTitlePlain, 'Workshops & Courses');
+  assert.equal(row.seoTitleTagLength, 'Workshops & Courses'.length);
 });
 
 test('buildPlan is full 06 list, not a 25% blog rotation', () => {

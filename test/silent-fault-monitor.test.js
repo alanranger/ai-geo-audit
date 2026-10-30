@@ -76,6 +76,25 @@ test('A4: matching counts pass; mismatch on a blog is amber', () => {
   assert.equal(r.severity, 'amber');
 });
 
+test('A4: extra non-FAQ accordion questions do not overcount when FAQ section extracts 10', () => {
+  const html = `
+<h2>Photography classes near me — frequently asked questions</h2>
+${Array.from({ length: 10 }, (_, i) => `<p><strong>Question number ${i} about the course?</strong></p><p>${'Answer text for this FAQ item needs thirty plus characters.'.repeat(1)}</p>`).join('')}
+<li class="accordion-item"><span class="accordion-item__title">Which course should I start with?</span><div class="accordion-item__description"><p>Extra accordion.</p></div></li>
+<li class="accordion-item"><span class="accordion-item__title">Evening classes, Zoom, and mentoring — which format suits you?</span><div class="accordion-item__description"><p>Extra accordion two.</p></div></li>`;
+  const r = faqParityCheck(
+    'https://www.alanranger.com/course-finder-photography-classes-near-me',
+    'landing',
+    [faqNode(10)],
+    {
+      faqLabels: labels(10).concat(['Which course should I start with?', 'Evening classes, Zoom, and mentoring — which format suits you?']),
+      html,
+      bodyText: labels(10).join('\n')
+    }
+  );
+  assert.equal(r.status, 'pass');
+});
+
 test('A4: stale FAQPage (old questions, /photography-workshops case) and invisible FAQPage (10-basic case)', () => {
   const stale = faqParityCheck(ACADEMY, 'money', [faqNode(8, 'Are workshops worth it')], faqPage(9));
   assert.equal(stale.status, 'fault');
@@ -154,6 +173,7 @@ test('C2 + C3: Squarespace error text faults; third-party console noise is dropp
   assert.equal(errorTextCheck(ACADEMY, { bodyText: 'This block contains embedded code that has been disabled' }).status, 'fault');
   const errs = siteCodeErrors([
     'Cannot create a badge hook in this page! | Error at https://assets.squarespace.com/universal/x.js',
+    'Failed to execute loadSproutProductBadge on sprout-api.thegoodapi.com | mobileElement is not defined',
     "Cannot read properties of null (reading 'addEventListener') | TypeError at <anonymous>:1:78"
   ]);
   assert.deepEqual(errs, ["Cannot read properties of null (reading 'addEventListener')"]);
