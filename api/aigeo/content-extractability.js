@@ -155,8 +155,9 @@ function extractNoindexSignals(response, html = '') {
   const metaRobotsRaw = String(metaRobotsMatch?.[1] || '');
   const metaGoogleRaw = String(metaGoogleMatch?.[1] || '');
   const hasMetaRobotsNoindex = /\bnoindex\b/i.test(metaRobotsRaw) || /\bnoindex\b/i.test(metaGoogleRaw);
+  const hasChecklistClass = /category-1-page-field-checklists/i.test(htmlStr);
   return {
-    hasNoindex: hasXRobotsNoindex || hasMetaRobotsNoindex,
+    hasNoindex: hasXRobotsNoindex || hasMetaRobotsNoindex || hasChecklistClass,
     xRobotsTag: xRobotsRaw,
     metaRobots: metaRobotsRaw || metaGoogleRaw
   };
