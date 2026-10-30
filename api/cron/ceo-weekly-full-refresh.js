@@ -66,6 +66,9 @@ function emptyProgress(weekStart) {
     domain_strength: null,
     gsc: null,
     silent_faults: null,
+    trad_seo_render: null,
+    trad_seo_broken: null,
+    trad_seo_render_done_id: null,
     multi_ticks: 0
   };
 }
@@ -253,6 +256,8 @@ export default async function handler(req, res) {
       if (result.domain_strength) progress.domain_strength = result.domain_strength;
       if (result.gsc) progress.gsc = result.gsc;
       if (result.silent_faults) progress.silent_faults = result.silent_faults;
+      if (result.trad_seo_render) progress.trad_seo_render = result.trad_seo_render;
+      if (result.trad_seo_broken) progress.trad_seo_broken = result.trad_seo_broken;
 
       const stepDone = result.done !== false;
       if (stepDone) {
@@ -283,6 +288,11 @@ export default async function handler(req, res) {
         if (step.key === 'domain_strength') progress.domain_strength = null;
         if (step.key === 'gsc_url_inspection') progress.gsc = null;
         if (step.key === 'silent_faults') progress.silent_faults = null;
+        if (step.key === 'trad_seo_full') {
+          progress.trad_seo_render_done_id = progress.trad_seo_render?.runId || result.body?.run_id || progress.trad_seo_render_done_id;
+          progress.trad_seo_render = null;
+        }
+        if (step.key === 'trad_seo_broken_links') progress.trad_seo_broken = null;
         progress.step_index += 1;
         ran += 1;
       } else {

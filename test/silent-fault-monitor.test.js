@@ -150,17 +150,13 @@ test('parseJsonLd flattens @graph and counts bad blocks', () => {
   assert.equal(nodes.filter((n) => n['@type']).length, 2);
 });
 
-test('plan: money/landing every week; every blog post covered across the 4 slots', () => {
+test('plan: full 06 list every run (no 25% blog rotation)', () => {
   const blogs = Array.from({ length: 40 }, (_, i) => `https://www.alanranger.com/blog-on-photography/post-${i}`);
   const urls = [ACADEMY, 'https://www.alanranger.com/photography-courses-coventry', ...blogs];
-  const seen = new Set();
-  for (let w = 0; w < 4; w += 1) {
-    const week = new Date(Date.UTC(2026, 9, 26 + w * 7)).toISOString().slice(0, 10);
-    const { items } = buildPlan(urls, week);
-    assert.ok(items.some((i) => i.u === ACADEMY));
-    items.filter((i) => i.t === 'blog').forEach((i) => seen.add(i.u));
-  }
-  assert.equal(seen.size, blogs.length);
+  const { items } = buildPlan(urls, '2026-10-26');
+  assert.ok(items.some((i) => i.u === ACADEMY));
+  assert.equal(items.filter((i) => i.t === 'blog').length, blogs.length);
+  assert.equal(items.length, urls.length);
   assert.notEqual(rotationSlot('2026-10-26'), rotationSlot('2026-11-02'));
   assert.equal(pageTypeOf(ACADEMY), 'money');
   assert.equal(pageTypeOf(POST), 'blog');
@@ -178,7 +174,7 @@ test('policyFor: prefix intentional_noindex and retired redirects', () => {
 test('brief line: nothing when no red faults; names pages when red', () => {
   assert.equal(renderSilentFaultsLine({ red_count: 0, top_red: [] }), '');
   const html = renderSilentFaultsLine({ red_count: 4, top_red: [{ page: 'uk-bluebell-photography-guide', title: 'No page_entities row (blog)' }] });
-  assert.match(html, /Silent faults: 4 red/);
+  assert.match(html, /Traditional SEO: 4 red/);
   assert.match(html, /uk-bluebell-photography-guide/);
   assert.match(html, /\+3 more/);
 });

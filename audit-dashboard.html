@@ -210,6 +210,7 @@
   <script src="/lib/competitor-analysis-tab.js?v=ca-prog-20260719a"></script>
   <script src="/lib/strategy-tab.js?v=st-20261008-th-wrap"></script>
   <script src="/lib/silent-faults-tab.js?v=sf-20261027a"></script>
+  <script src="/lib/trad-seo-render-client.js?v=tsr-20261030a"></script>
   <script>
     // CRITICAL: Set up error capture IMMEDIATELY, before any other code runs
     // This must be the very first script to execute
@@ -2814,7 +2815,8 @@
       background: rgba(239, 68, 68, 0.14);
       color: #f87171;
     }
-    section[data-panel="traditional-seo"] .traditional-seo-status-pill[data-status="na"] {
+    section[data-panel="traditional-seo"] .traditional-seo-status-pill[data-status="na"],
+    section[data-panel="traditional-seo"] .traditional-seo-status-pill[data-status="not_checked"] {
       border-color: rgba(148, 163, 184, 0.35);
       background: rgba(51, 65, 85, 0.35);
       color: #94a3b8;
@@ -7753,7 +7755,7 @@
         <span class="aigeo-nav-icon">⚙️</span>
         <span>Configuration & Reporting</span>
       </button>
-      <button class="aigeo-nav-item" data-panel="silent-faults" title="Silent faults — faults that never throw an error: schema that disagrees with the rendered page, noindex/canonical/redirect problems, blocks that stopped rendering, dead tool keys and Supabase sync gaps. Open faults only; each closes itself when the page passes.">
+      <button class="aigeo-nav-item" data-panel="silent-faults" style="display:none" title="Silent faults — retired 30 Oct 2026; folded into Traditional SEO.">
         <span class="aigeo-nav-icon">🚨</span>
         <span>Silent faults</span>
       </button>
@@ -14224,22 +14226,21 @@
             <div style="font-weight: 700;">Traditional SEO — run controls</div>
           </div>
           <p class="traditional-seo-run-sequence-hint" id="traditional-seo-run-sequence-hint">
-            <strong>② (green)</strong> = quick rescore: saved audit + <strong>full extractability refresh</strong> for <em>every</em> URL (deduped), in <strong>batches of 25</strong>, then Traditional SEO scoring (including <strong>Broken links (404)</strong> checks on same-site outbound targets). Uses the <strong>GSC URL Inspection cache</strong> (Supabase + browser) for indexation — <strong>no</strong> live Search Console inspect API during ② (keeps runs fast).
-            <strong>① (amber)</strong> = full site audit refresh, <em>then</em> Traditional SEO in one go — same extract + scoring behaviour as <strong>②</strong> after the crawl — use after big site/schema changes. For fresh indexation data, run <strong>Refresh GSC URL Inspection</strong> separately.
-            After <strong>①</strong>, you do <strong>not</strong> need to click <strong>②</strong>.
-            <strong>Page reload</strong> restores the saved Traditional SEO matrix from the server/local cache only — it does <strong>not</strong> re-run extractability (use <strong>②</strong> when you need fresh HTML for every URL).
+            <strong>② (green)</strong> = instant rescore from the latest rendered snapshots — <strong>no site fetches</strong>. Uses the <strong>GSC URL Inspection cache</strong> (Supabase + browser) for indexation — <strong>no</strong> live Search Console inspect API during ②.
+            <strong>① (amber)</strong> = Chromium Googlebot-smartphone render of every 06 URL as a <strong>background job</strong> (progress survives closing the tab), then the broken-links job. After <strong>①</strong>, you do <strong>not</strong> need to click <strong>②</strong>.
+            <strong>Page reload</strong> restores the saved Traditional SEO matrix and any in-progress ① run.
             <strong>③ (blue)</strong> = <strong>keyword demand + KE enrich</strong> (Keywords Everywhere): volume, per-URL traffic, URL-keyword metrics, and page backlink samples for the results table. Domain-level KE samples are no longer shown as separate tiles — use the <strong>Backlinks (DataForSEO)</strong> tile for full-index totals when enabled. <strong>DFS full index</strong> / <strong>DFS new links</strong> run when <code>TRADITIONAL_SEO_BACKLINK_INDEX_SOURCE</code> is <code>dataforseo</code> or <code>both</code>. Does <em>not</em> change Traditional SEO pass/fail.
             <span style="display:block;margin-top:0.35rem;color:var(--dark-text-muted);font-size:0.82rem;"><strong>GSC vs KE:</strong> <strong>Clicks</strong> and <strong>Impr.</strong> come from your saved audit’s Google Search Console query-page export (same window as the main audit, typically the last <strong>28 days</strong> ending near the audit date — not “rolling live” after the audit). Keywords Everywhere <strong>Est. traf</strong> / <strong>URL traf</strong> are <strong>monthly model estimates</strong> from KE (UK routing), not the same period or methodology as GSC — use them as directional demand signals, not as “should match clicks”.</span>
           </p>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
             <button id="traditional-seo-run-audit-btn" class="btn traditional-seo-run-step2-btn" type="button" style="padding: 0.45rem 0.9rem;"
               aria-describedby="traditional-seo-run-sequence-hint"
-              title="Refetches extractability for every URL (batches of 25), then rescores Traditional SEO. Live GSC URL Inspection only for URLs that currently fail Indexed in Google (smarter/slower). Passes and warns use cache.">
+              title="Instant rescore from stored rendered snapshots. No fetches of alanranger.com. Live GSC URL Inspection only for URLs that currently fail Indexed in Google.">
               ② Score Traditional SEO only
             </button>
             <button id="traditional-seo-run-full-audit-btn" class="btn traditional-seo-run-step1-btn" type="button" style="padding: 0.45rem 0.9rem;"
               aria-describedby="traditional-seo-run-sequence-hint"
-              title="Long path: runs the full site audit first (refreshes inputs), then runs Traditional SEO scoring automatically. Use when schema, GSC, or crawl data may be out of date. You do not need to press ② afterwards.">
+              title="Background rendered audit of every 06 URL (Googlebot smartphone), then broken-links. Progress survives closing the tab. You do not need to press ② afterwards.">
               ① Full audit refresh + Traditional SEO
             </button>
             <button type="button" class="btn" id="traditional-seo-refresh-gsc-inspection-btn" style="padding: 0.45rem 0.9rem; border: 1px solid rgba(22, 163, 74, 0.55); background: rgba(22, 163, 74, 0.14); color: inherit; font-weight: 700;"
@@ -14286,6 +14287,8 @@
           <div id="traditional-seo-source-parity-panel" style="margin-bottom:0.75rem;padding:0.55rem 0.7rem;border:1px solid rgba(148,163,184,0.25);border-radius:8px;background:rgba(15,23,42,0.55);font-size:0.8rem;color:var(--dark-text-muted);">
             URL source parity: checking...
           </div>
+          <div id="traditional-seo-render-banner" style="display:none;margin-bottom:0.75rem;padding:0.55rem 0.7rem;border:1px solid rgba(251,191,36,0.35);border-radius:8px;background:rgba(245,158,11,0.08);font-size:0.8rem;color:var(--dark-text-muted);"></div>
+          <div id="traditional-seo-system-health" style="display:none;margin-bottom:0.75rem;padding:0.55rem 0.7rem;border:1px solid rgba(239,68,68,0.35);border-radius:8px;background:rgba(239,68,68,0.08);font-size:0.8rem;color:#fecaca;"></div>
           <div style="display: grid; grid-template-columns: repeat(6, minmax(140px, 1fr)); gap: 0.6rem; align-items: end;">
             <div>
               <label style="display:block;font-size:0.78rem;color:var(--dark-text-muted);margin-bottom:0.25rem;">Tier</label>
@@ -14321,6 +14324,7 @@
                 <option value="redirected">Redirected</option>
                 <option value="gone">Gone</option>
                 <option value="hidden">Hidden</option>
+                <option value="not_checked">Not checked</option>
               </select>
             </div>
             <div>
@@ -14399,7 +14403,8 @@
                   <th style="width: 10%;"><button type="button" class="traditional-seo-sort-btn" data-sort="tier">Tier <span class="sort-ind">↕</span></button></th>
                   <th style="width: 18%;"><button type="button" class="traditional-seo-sort-btn" data-sort="rule_name">Rule <span class="sort-ind">↕</span></button></th>
                   <th style="width: 10%;"><button type="button" class="traditional-seo-sort-btn" data-sort="status">Status <span class="sort-ind">↕</span></button></th>
-                  <th style="width: 21%;"><button type="button" class="traditional-seo-sort-btn" data-sort="url">URL <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 8%;"><button type="button" class="traditional-seo-sort-btn" data-sort="checked_on">Checked on <span class="sort-ind">↕</span></button></th>
+                  <th style="width: 18%;"><button type="button" class="traditional-seo-sort-btn" data-sort="url">URL <span class="sort-ind">↕</span></button></th>
                   <th style="width: 12%;"><button type="button" class="traditional-seo-sort-btn" data-sort="target_keyword">Target kw <span class="sort-ind">↕</span></button></th>
                   <th style="width: 5%;"><button type="button" class="traditional-seo-sort-btn" data-sort="internal_backlinks" title="Number of other crawled pages linking to this URL. Rebuilt by the full extractability refresh.">Int BL <span class="sort-ind">↕</span></button></th>
                   <th style="width: 5%;"><button type="button" class="traditional-seo-sort-btn" data-sort="internal_out_links" title="Outgoing internal links found in this page HTML during the full extractability refresh.">Int out <span class="sort-ind">↕</span></button></th>
@@ -14424,7 +14429,7 @@
                 </tr>
               </thead>
               <tbody id="traditional-seo-results-body">
-                <tr><td colspan="21" style="color: var(--dark-text-muted);">Run Traditional SEO Audit to populate this table.</td></tr>
+                <tr><td colspan="22" style="color: var(--dark-text-muted);">Run Traditional SEO Audit to populate this table.</td></tr>
               </tbody>
             </table>
           </div>
@@ -90948,7 +90953,8 @@ Confidence: ${c}`;
           { key: 'scenario_cockpit', label: 'Scenario Planning cockpit refresh', tiers: ['quick','standard','full'], dependsOn: [], runner: runGlobalStepScenarioCockpit },
           { key: 'money_pages', label: 'Reload Money Pages view', tiers: ['quick','standard','full'], dependsOn: ['audit_scan'], runner: runGlobalStepMoneyPages },
           { key: 'trad_seo_rescore', label: 'Traditional SEO rescore (cached extractability)', tiers: ['standard'], dependsOn: ['audit_scan'], runner: runGlobalStepTradSeoRescore },
-          { key: 'trad_seo_full', label: 'Traditional SEO + full extractability refresh', tiers: ['full'], dependsOn: ['audit_scan', 'schema_qa'], runner: runGlobalStepTradSeoFull },
+          { key: 'trad_seo_full', label: 'Traditional SEO rendered audit (all 06 URLs)', tiers: ['full'], dependsOn: ['audit_scan', 'schema_qa'], runner: runGlobalStepTradSeoFull },
+          { key: 'trad_seo_broken_links', label: 'Traditional SEO broken-links job', tiers: ['full'], dependsOn: ['trad_seo_full'], runner: runGlobalStepTradSeoBroken },
           { key: 'citation_consistency', label: 'Citation consistency refresh', tiers: ['full'], dependsOn: [], runner: runGlobalStepCitationConsistency },
           { key: 'mentions_baseline', label: 'Mentions baseline refresh', tiers: ['full'], dependsOn: [], runner: runGlobalStepMentionsBaseline },
           { key: 'ke_topup', label: 'Keywords Everywhere top-up (stale rows only)', tiers: ['standard','full'], dependsOn: [], runner: runGlobalStepKeTopup },
@@ -90957,7 +90963,7 @@ Confidence: ${c}`;
           { key: 'acquisition_channels', label: 'Acquisition channels (AI mentions + YouTube + GA4)', tiers: ['standard','full'], dependsOn: [], runner: runGlobalStepAcquisitionChannels },
           { key: 'update_tasks', label: 'Update all tasks with latest data', tiers: ['quick','standard','full'], dependsOn: ['audit_scan'], runner: runGlobalStepUpdateTasks },
           { key: 'academy_refresh', label: 'Academy refresh (Memberstack + weekly metrics)', tiers: ['full'], dependsOn: [], runner: runGlobalStepAcademyRefresh },
-          { key: 'silent_faults', label: 'Silent fault monitor (rendered pages + tools)', tiers: ['full'], dependsOn: [], runner: runGlobalStepSilentFaults },
+          { key: 'silent_faults', label: 'Silent fault monitor (retired — folded into Traditional SEO)', tiers: ['full'], dependsOn: [], runner: runGlobalStepSilentFaults },
           { key: 'ceo_weekly_email', label: 'CEO weekly HTML email', tiers: ['full'], dependsOn: [], runner: runGlobalStepCeoWeeklyEmail }
         ];
       }
@@ -91208,11 +91214,34 @@ Confidence: ${c}`;
       }
 
       async function runGlobalStepTradSeoFull() {
-        debugLog('[Global Run] [Traditional SEO full extractability] Starting...', 'info');
-        if (typeof window.runTraditionalSeoEvaluation !== 'function') throw new Error('runTraditionalSeoEvaluation function not available');
-        const result = await window.runTraditionalSeoEvaluation({ refreshAudit: false, refreshExtractability: true });
-        debugLog('[Global Run] [Traditional SEO full extractability] ✓ Completed', 'success');
-        return result;
+        debugLog('[Global Run] [Traditional SEO rendered audit] Starting...', 'info');
+        if (typeof window.tradSeoRenderStart !== 'function') throw new Error('tradSeoRenderStart missing');
+        let tick = await window.tradSeoRenderStart();
+        while (!tick.done && !tick.idle) {
+          const s = tick.summary || tick;
+          debugLog(`[Global Run] [Traditional SEO render] ${s.pages_checked || 0}/${s.pages_planned || '?'}`, 'info');
+          tick = await window.tradSeoRenderTick(tick.run_id);
+        }
+        if (typeof window.runTraditionalSeoEvaluation === 'function') {
+          await window.runTraditionalSeoEvaluation({ refreshAudit: false, refreshExtractability: false, skipBrokenLive: true });
+        }
+        debugLog('[Global Run] [Traditional SEO rendered audit] ✓ Completed', 'success');
+        return tick;
+      }
+
+      async function runGlobalStepTradSeoBroken() {
+        debugLog('[Global Run] [Traditional SEO broken links] Starting...', 'info');
+        if (typeof window.tradSeoBrokenTick !== 'function') throw new Error('tradSeoBrokenTick missing');
+        let tick = { done: false };
+        while (!tick.done) {
+          tick = await window.tradSeoBrokenTick();
+          debugLog(`[Global Run] [Traditional SEO broken links] remaining ${tick.remaining ?? 0}`, 'info');
+        }
+        if (typeof window.runTraditionalSeoEvaluation === 'function') {
+          await window.runTraditionalSeoEvaluation({ refreshAudit: false, refreshExtractability: false, skipBrokenLive: true });
+        }
+        debugLog('[Global Run] [Traditional SEO broken links] ✓ Completed', 'success');
+        return tick;
       }
 
       async function runGlobalStepCitationConsistency() {
@@ -91355,14 +91384,8 @@ Confidence: ${c}`;
 
       // Multi-tick: each POST renders pages for ~3 min and checkpoints; loops until the run is done.
       async function runGlobalStepSilentFaults() {
-        debugLog('[Global Run] [Silent faults] Starting (render ~160 pages + tool checks)...', 'info');
-        if (typeof window.sfRunMonitor !== 'function') throw new Error('silent-faults-tab.js not loaded');
-        const summary = await window.sfRunMonitor({
-          source: 'manual_full_refresh',
-          onProgress: (s) => debugLog(`[Global Run] [Silent faults] ${s.pages_checked || 0}/${s.pages_planned || '?'} pages checked${s.retry_pending ? ` · ${s.retry_pending} waiting on 429 retry` : ''}`, 'info')
-        });
-        debugLog(`[Global Run] [Silent faults] ✓ Done — ${summary?.pages_checked || 0} checked, ${summary?.pages_not_checked || 0} not checked`, 'success');
-        return summary;
+        debugLog('[Global Run] [Silent faults] Retired — folded into Traditional SEO', 'info');
+        return { ok: true, retired: true };
       }
 
       async function runGlobalStepCeoWeeklyEmail(ctx = {}) {
@@ -91427,7 +91450,7 @@ Confidence: ${c}`;
 
       async function confirmFullTierIfNeeded(tier) {
         if (tier !== 'full') return true;
-        const msg = 'Full refresh runs Schema QA (whole site), DFS backlink full index, Domain Strength, GSC URL Inspection, Traditional SEO + extractability, citation/mentions refresh, 13-month Squarespace/Stripe revenue sync, GA4 enquiry metrics, Academy weekly metrics, and the Silent fault monitor (renders ~160 pages, ~20 min).\n\nThis can take 50+ minutes and will consume DataForSEO credits.\n\nContinue?';
+        const msg = 'Full refresh runs Schema QA, DFS backlink full index, Domain Strength, GSC URL Inspection, Traditional SEO rendered audit (all 06 URLs) + broken-links, citation/mentions refresh, 13-month Squarespace/Stripe revenue sync, GA4 enquiry metrics, and Academy weekly metrics.\n\nThis can take several hours and will consume DataForSEO credits.\n\nContinue?';
         return window.confirm(msg);
       }
 
@@ -92166,6 +92189,13 @@ Confidence: ${c}`;
       gscIndexByUrlKey: null,
       /** Map: signal key → { kind: ok|broken|unknown, statusCode, url } for broken_links_no_404. */
       brokenLinkStatusByKey: null,
+      renderRun: null,
+      renderPages: [],
+      renderHealth: [],
+      checkedAtByUrl: null,
+      renderFindings: null,
+      renderOutcomeByUrl: null,
+      brokenByUrl: null,
       /** Domain-level KE cache row (Moz DA + referring domains sample) from keyword-target-metrics API. */
       keDomainMetrics: null,
       /** Domain-level DataForSEO backlinks/summary/live cache (Supabase via API). */
@@ -92363,7 +92393,24 @@ Confidence: ${c}`;
       { rule_key: 'content_freshness_last_updated', rule_name: 'Updated within 12 months', description: 'Pages should have a page date signal from HTML/meta or sitemap lastmod, and it should be within the last 12 months. Use manual bypass for utility pages you want excluded.', category: 'content', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 118 },
       { rule_key: 'image_alt_coverage', rule_name: 'Image alt attributes', description: 'All img tags should have a non-empty alt (Extractability HTML parse). Zero images on the page passes.', category: 'content', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 125 },
       { rule_key: 'external_links_new_tab', rule_name: 'External links open in new tab', description: 'Outbound links to other hosts should use target=_blank (parsed from Extractability HTML).', category: 'on-page', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 130 },
-      { rule_key: 'broken_links_no_404', rule_name: 'Broken links (404)', description: 'Each page’s same-site outbound links (from Extractability HTML) must not resolve to HTTP 404/410. Fail when any target is broken; warn when status cannot be confirmed. Checked during ② / ① Traditional SEO runs.', category: 'crawlability', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 135 }
+      { rule_key: 'broken_links_no_404', rule_name: 'Broken links (404)', description: 'Each page’s same-site outbound links (from the rendered snapshot) must not resolve to HTTP 404/410. Own paced job after ①, with its own Checked on. Fail when any target is broken; Not checked when Squarespace 429s.', category: 'crawlability', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.2, sort_order: 135 },
+      { rule_key: 'schema_body_coverage', rule_name: 'Schema body covers the post', description: 'BlogPosting articleBody is ≥ 80% of the post’s own rendered text. Fail if no BlogPosting on a blog URL.', category: 'schema', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 140 },
+      { rule_key: 'schema_body_starts_with_page', rule_name: 'Schema body starts with the post', description: 'First 12 words of the post appear in the first 40 of articleBody, or vice versa.', category: 'schema', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 141 },
+      { rule_key: 'schema_not_title_only', rule_name: 'Schema is not just the headline', description: 'Fail if articleBody or description equals the headline, or body ≤ 12 words.', category: 'schema', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.5, sort_order: 142 },
+      { rule_key: 'faq_schema_parity', rule_name: 'FAQ schema matches visible FAQs', description: 'Visible FAQ count equals FAQPage question count. Fail if ≥3 visible FAQs and no FAQPage, or if <50% of FAQPage questions appear on the page.', category: 'schema', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.1, sort_order: 143 },
+      { rule_key: 'academy_course_schema', rule_name: 'Academy page has Course schema', description: 'Only /free-online-photography-course: Course + CourseInstance + ≥2 Offers + AggregateRating.', category: 'schema', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.5, sort_order: 144 },
+      { rule_key: 'no_duplicate_schema', rule_name: 'No duplicate schema blocks', description: 'Fail if more than one FAQPage, or two JSON-LD nodes share the same @id.', category: 'schema', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 145 },
+      { rule_key: 'code_blocks_intact', rule_name: 'Code blocks intact', description: 'Inline style/script in raw HTML: balanced braces, no jammed #id#id selectors.', category: 'rendering', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.5, sort_order: 150 },
+      { rule_key: 'no_squarespace_error_text', rule_name: 'No Squarespace error messages', description: 'Fail if visible text includes Script Disabled, embedded code disabled, needs a storage option, or Something went wrong.', category: 'rendering', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.5, sort_order: 151 },
+      { rule_key: 'no_site_script_errors', rule_name: 'No script errors from site code', description: 'Uncaught errors from Alan’s code during render. Third-party noise ignored.', category: 'rendering', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 152 },
+      { rule_key: 'key_blocks_loaded', rule_name: 'Key page blocks loaded', description: 'Must-have selectors per page type, plus baseline regression: a block that rendered last run and is gone now. Empty data-wm-plugin=load fails.', category: 'rendering', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.35, sort_order: 153 },
+      { rule_key: 'hidden_tag_matches_lists', rule_name: 'Hidden status matches the lists', description: 'Fail if a money/landing page has noindex, or a noindex page is still in 06. Intentional hides live in page_indexability_policy.', category: 'indexation', severity: 'critical', scope: 'page', current_status: 'pass', enabled: true, weight: 3.0, sort_order: 160 }
+    ];
+    const TRADITIONAL_SEO_RENDER_RULE_KEYS = [
+      'schema_body_coverage', 'schema_body_starts_with_page', 'schema_not_title_only',
+      'faq_schema_parity', 'academy_course_schema', 'no_duplicate_schema',
+      'code_blocks_intact', 'no_squarespace_error_text', 'no_site_script_errors',
+      'key_blocks_loaded', 'hidden_tag_matches_lists'
     ];
 
     function traditionalSeoApiPath(path) {
@@ -92610,6 +92657,10 @@ Confidence: ${c}`;
         ]);
         traditionalSeoTabLoadSet('rules', 'done');
 
+        let renderSnap = null;
+        if (typeof window.tradSeoRenderLoad === 'function') {
+          renderSnap = await window.tradSeoRenderLoad({ health: true }).catch(() => null);
+        }
         traditionalSeoTabLoadSet('table', 'running', 'Restoring saved evaluation…');
         await traditionalSeoEnsureDisavowLoadedUi();
         if (!TRADITIONAL_SEO_STATE.evaluationRows?.length) {
@@ -92618,6 +92669,12 @@ Confidence: ${c}`;
         }
         const gscServerN = await traditionalSeoHydrateGscCacheFromServer();
         if (!gscServerN) traditionalSeoHydrateGscIndexFromStorage();
+        const renderDoneAt = Date.parse(renderSnap?.run?.finished_at || 0);
+        const lastEvalAt = Date.parse(TRADITIONAL_SEO_STATE.lastEvaluationAt || 0);
+        if (renderSnap?.run && renderSnap.run.status !== 'running' && Number.isFinite(renderDoneAt) && renderDoneAt > (lastEvalAt || 0)) {
+          traditionalSeoTabLoadSet('table', 'running', 'Scoring from rendered snapshots…');
+          await runTraditionalSeoEvaluation({ refreshAudit: false, refreshExtractability: false, skipBrokenLive: true });
+        }
         const hasRows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) && TRADITIONAL_SEO_STATE.evaluationRows.length;
         if (hasRows) {
           if (payload) await traditionalSeoHydrateSignalMapsFromSavedPayloads(payload);
@@ -94912,7 +94969,7 @@ Confidence: ${c}`;
       (Array.isArray(hits) ? hits : []).forEach((row) => {
         if (String(row?.tier || '').toLowerCase() === 'sitewide') return;
         const st = String(row?.status || 'fail').toLowerCase();
-        if (st === 'na') return;
+        if (st === 'na' || st === 'not_checked') return;
         const w = Math.max(0, traditionalSeoToNum(row?.rule_weight, 1));
         weightedTotal += w;
         weightedAchieved += w * traditionalSeoScorePoints(st);
@@ -95198,22 +95255,22 @@ Confidence: ${c}`;
           }
         });
         const urlsArg = urlsPayload.length ? urlsPayload : [url];
-        const res = await fetch(traditionalSeoApiPath('/api/aigeo/content-extractability'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode: 'full', tier: 'all', urls: urlsArg })
-        });
-        const payload = await res.json();
-        if (!res.ok || String(payload?.status || '').toLowerCase() !== 'ok') {
-          throw new Error(payload?.message || `HTTP ${res.status}`);
+        if (typeof window.tradSeoRecheckUrl !== 'function') throw new Error('tradSeoRecheckUrl missing');
+        const payload = await window.tradSeoRecheckUrl(urlsArg[0]);
+        if (payload?.page?.extract_row) {
+          traditionalSeoMergeExtractabilityRowsIntoCache(propertyUrl, [payload.page.extract_row]);
         }
-        await traditionalSeoMergeExtractabilityForUrl(propertyUrl, urlsArg[0], payload);
+        if (typeof window.tradSeoRenderLoad === 'function') {
+          await window.tradSeoRenderLoad({ health: false });
+        }
         if (typeof window.showStatus === 'function') {
-          window.showStatus('Page refreshed. Re-scoring this URL only…', 'info');
+          window.showStatus('Page rendered. Re-scoring this URL only…', 'info');
         }
         await runTraditionalSeoEvaluation({
           refreshAudit: false,
           onlyRescorePageUrls: urlsArg,
+          refreshExtractability: false,
+          skipBrokenLive: true,
           runGscUrlInspection: true,
           forceGscRefresh: true
         });
@@ -95260,6 +95317,7 @@ Confidence: ${c}`;
         enabledCount += 1;
         const weight = Math.max(0, traditionalSeoToNum(rule?.weight, 1));
         const status = String(rule?.current_status || 'fail').toLowerCase();
+        if (status === 'na' || status === 'not_checked') return;
         weightedTotal += weight;
         weightedAchieved += weight * traditionalSeoScorePoints(status);
         if (status === 'pass') passCount += 1;
@@ -96235,6 +96293,7 @@ Confidence: ${c}`;
       if (normalized === 'redirected') label = 'Redirected';
       if (normalized === 'gone') label = 'Gone';
       if (normalized === 'hidden') label = 'Hidden (noindex)';
+      if (normalized === 'not_checked') label = 'Not checked';
       if (extraLabel) label = `${label} ${extraLabel}`;
       return `<span class="traditional-seo-status-pill" data-status="${normalized}">${escapeHtml(label)}</span>`;
     }
@@ -96285,7 +96344,18 @@ Confidence: ${c}`;
           'keyword_in_intro',
           'internal_links_minimum',
           'content_freshness_last_updated',
-          'broken_links_no_404'
+          'broken_links_no_404',
+          'schema_body_coverage',
+          'schema_body_starts_with_page',
+          'schema_not_title_only',
+          'faq_schema_parity',
+          'academy_course_schema',
+          'no_duplicate_schema',
+          'code_blocks_intact',
+          'no_squarespace_error_text',
+          'no_site_script_errors',
+          'key_blocks_loaded',
+          'hidden_tag_matches_lists'
         ]);
         if (canonicalRuleCopy.has(merged.rule_key)) {
           merged.rule_name = baseRule.rule_name;
@@ -96808,7 +96878,7 @@ Confidence: ${c}`;
       if (s === 'fail') return 0;
       if (s === 'warn') return 1;
       if (s === 'pass') return 2;
-      if (s === 'na') return 3;
+      if (s === 'na' || s === 'not_checked') return 3;
       if (s === 'redirected' || s === 'gone' || s === 'hidden') return 4;
       return 5;
     }
@@ -97900,6 +97970,74 @@ Confidence: ${c}`;
       }, extractSignal);
     }
 
+    function traditionalSeoRenderLookupKey(url) {
+      const prop = traditionalSeoEffectivePropertyUrl();
+      return traditionalSeoSignalMapKey(url, prop) || String(url || '').trim();
+    }
+
+    function traditionalSeoRenderMapGet(map, url) {
+      if (!(map instanceof Map) || !url) return null;
+      if (map.has(url)) return map.get(url);
+      const key = traditionalSeoRenderLookupKey(url);
+      if (map.has(key)) return map.get(key);
+      for (const [k, v] of map.entries()) {
+        if (traditionalSeoRenderLookupKey(k) === key) return v;
+      }
+      return null;
+    }
+
+    function traditionalSeoCheckedOnForUrl(url) {
+      const hit = traditionalSeoRenderMapGet(TRADITIONAL_SEO_STATE.checkedAtByUrl, url);
+      if (!hit) return '';
+      return typeof hit === 'string' ? hit : String(hit.checked_at || '');
+    }
+
+    window.tradSeoApplyRenderSnapshot = function tradSeoApplyRenderSnapshot(body) {
+      const st = TRADITIONAL_SEO_STATE;
+      st.renderRun = body?.run || null;
+      st.renderPages = Array.isArray(body?.pages) ? body.pages : [];
+      st.renderHealth = Array.isArray(body?.health) ? body.health : [];
+      st.checkedAtByUrl = new Map();
+      st.renderFindings = new Map();
+      st.renderOutcomeByUrl = new Map();
+      st.brokenByUrl = new Map();
+      const extractRows = [];
+      st.renderPages.forEach((p) => {
+        const u = String(p.page_url || '');
+        if (!u) return;
+        st.checkedAtByUrl.set(u, p.checked_at);
+        st.renderFindings.set(u, p.findings || {});
+        st.renderOutcomeByUrl.set(u, p.outcome);
+        if (p.extract_row && p.outcome === 'checked') extractRows.push(p.extract_row);
+      });
+      (body?.broken || []).forEach((b) => {
+        if (b?.page_url) st.brokenByUrl.set(b.page_url, b);
+      });
+      if (extractRows.length) {
+        traditionalSeoMergeExtractabilityRowsIntoCache(traditionalSeoEffectivePropertyUrl(), extractRows);
+      }
+      const healthEl = document.getElementById('traditional-seo-system-health');
+      if (healthEl) {
+        const rows = st.renderHealth.filter((h) => h && h.title);
+        if (!rows.length) {
+          healthEl.style.display = 'none';
+          healthEl.innerHTML = '';
+        } else {
+          healthEl.style.display = 'block';
+          healthEl.innerHTML = `<strong>System health</strong> — ${rows.map((h) => `${h.check || ''}: ${h.title}`).join(' · ')}`;
+        }
+      }
+      const banner = document.getElementById('traditional-seo-render-banner');
+      if (banner && st.renderRun) {
+        const started = st.renderRun.started_at || st.renderRun.finished_at;
+        const checked = st.renderRun.pages_checked || 0;
+        const planned = st.renderRun.pages_planned || 0;
+        const re = st.renderPages.filter((p) => p.outcome === 'checked').length;
+        banner.style.display = 'block';
+        banner.textContent = `Full audit: ${formatTraditionalSeoTimestamp(started)} · ${checked}/${planned} pages · ${re} checked`;
+      }
+    };
+
     function traditionalSeoRuleStatusForUrl(rule, url, tier, metric, context) {
       const key = String(rule?.rule_key || '').toLowerCase();
       const propertyUrl = String(context?.propertyUrl || '').trim();
@@ -97917,6 +98055,16 @@ Confidence: ${c}`;
       const schemaSignal = traditionalSeoSignalMapGetWithUrlAliases(maps.schemaPage, url, propertyUrl);
       const techSignal = traditionalSeoSignalMapGet(maps.techIndexability, url, propertyUrl);
       const extractSignal = traditionalSeoSignalMapGet(maps.extractability, url, propertyUrl);
+      const renderOutcome = traditionalSeoRenderMapGet(TRADITIONAL_SEO_STATE.renderOutcomeByUrl, url);
+      if (String(tier || '').toLowerCase() !== 'sitewide' && renderOutcome === 'not_checked') return 'not_checked';
+      const renderFinding = (() => {
+        const pack = traditionalSeoRenderMapGet(TRADITIONAL_SEO_STATE.renderFindings, url);
+        return pack && typeof pack === 'object' ? pack[key] : null;
+      })();
+      if (TRADITIONAL_SEO_RENDER_RULE_KEYS.includes(key)) {
+        if (renderFinding?.status) return String(renderFinding.status).toLowerCase();
+        return renderOutcome === 'checked' ? 'pass' : 'warn';
+      }
       const gscInspectSignal = traditionalSeoSignalMapGet(maps.gscIndexInspect, url, propertyUrl);
       const qaSignal = traditionalSeoSignalMapGetWithUrlAliases(maps.qaGate, url, propertyUrl);
       // Redirected / gone pages: never score content rules (listing HTML must not fail K1/H1).
@@ -98187,6 +98335,15 @@ Confidence: ${c}`;
       if (key === 'broken_links_no_404') {
         if (traditionalSeoShouldExcludeUrlFromTraditionalAudit(url)) return 'pass';
         if (extractSignal?.excludedFromAudit === true) return 'pass';
+        const storedBroken = traditionalSeoRenderMapGet(TRADITIONAL_SEO_STATE.brokenByUrl, url);
+        if (storedBroken) {
+          const st = String(storedBroken.status || storedBroken.outcome || '').toLowerCase();
+          if (st === 'not_checked') return 'not_checked';
+          if (st === 'fail') return 'fail';
+          if (st === 'pass') return 'pass';
+          return 'warn';
+        }
+        if (context?.skipBrokenLive === true) return 'not_checked';
         if (!extractSignal || extractSignal.requestOk === false) return 'warn';
         const targets = Array.isArray(extractSignal.seoInternalLinkTargets)
           ? extractSignal.seoInternalLinkTargets
@@ -98342,7 +98499,7 @@ Confidence: ${c}`;
         b.total += 1;
         if (s === 'pass') b.pass += 1;
         else if (s === 'warn') b.warn += 1;
-        else if (s === 'na') b.na += 1;
+        else if (s === 'na' || s === 'not_checked') b.na += 1;
         else b.fail += 1;
       });
       const worstRank = { fail: 0, warn: 1, pass: 2 };
@@ -99145,6 +99302,12 @@ Confidence: ${c}`;
 
     function traditionalSeoModalNoteForRule(row, rule, pageUrl) {
       const rk = String(row?.rule_key || '');
+      const renderPack = traditionalSeoRenderMapGet(TRADITIONAL_SEO_STATE.renderFindings, pageUrl);
+      if (renderPack?.[rk]?.note) return String(renderPack[rk].note);
+      if (rk === 'broken_links_no_404') {
+        const broken = traditionalSeoRenderMapGet(TRADITIONAL_SEO_STATE.brokenByUrl, pageUrl);
+        if (broken?.note) return String(broken.note);
+      }
       const base = String(rule?.description || '').trim() || '—';
       const prop = String(TRADITIONAL_SEO_STATE.lastPropertyUrl || '').trim() || traditionalSeoPropertyUrl();
       const maps = TRADITIONAL_SEO_STATE.lastSignalMaps || {};
@@ -99580,7 +99743,10 @@ Confidence: ${c}`;
       if (hintEl) {
         hintEl.textContent = 'Score uses applicable rule weights only (pass=1, warn=0.5, fail=0; n/a excluded). Admin bypasses force pass per URL and persist after save.';
       }
-      const modalLastTxt = traditionalSeoEvalRunSpanText(TRADITIONAL_SEO_STATE.lastEvaluationAt);
+      const checkedOn = traditionalSeoCheckedOnForUrl(target);
+      const modalLastTxt = checkedOn
+        ? `Checked on ${formatTraditionalSeoTimestamp(checkedOn)}`
+        : traditionalSeoEvalRunSpanText(TRADITIONAL_SEO_STATE.lastEvaluationAt);
       const reauditLastEl = document.getElementById('traditional-seo-page-modal-reaudit-last');
       const closeLastEl = document.getElementById('traditional-seo-page-modal-close-last');
       if (reauditLastEl) {
@@ -99892,7 +100058,7 @@ Confidence: ${c}`;
         ruleMap.forEach((st) => {
           if (st === 'pass') pass += 1;
           else if (st === 'warn') warn += 1;
-          else if (st === 'na') na += 1;
+          else if (st === 'na' || st === 'not_checked') na += 1;
           else fail += 1;
         });
         const gsc = gscRollup.get(rk) || { clicks: 0, impressions: 0, tier: '', target_keyword: '' };
@@ -100505,7 +100671,7 @@ Confidence: ${c}`;
         return true;
       });
 
-      const statusOrder = { fail: 0, warn: 1, pass: 2, na: 3, redirected: 4, gone: 5, hidden: 6 };
+      const statusOrder = { fail: 0, warn: 1, pass: 2, na: 3, not_checked: 3, redirected: 4, gone: 5, hidden: 6 };
       const sortKey = String(TRADITIONAL_SEO_STATE.sort?.key || 'status');
       const sortDirection = String(TRADITIONAL_SEO_STATE.sort?.direction || 'asc');
       filtered.sort((a, b) => {
@@ -100846,7 +101012,7 @@ Confidence: ${c}`;
           const emptyHint = !allRows.length
             ? 'No Traditional SEO results yet. Run <strong>② Score Traditional SEO</strong> or <strong>① Full audit + Traditional SEO</strong> first. Then use <strong>③</strong> to refresh keyword demand (Keywords Everywhere).'
             : 'No rows match current filters.';
-          body.innerHTML = `<tr><td colspan="21" style="color: var(--dark-text-muted);">${emptyHint}</td></tr>`;
+          body.innerHTML = `<tr><td colspan="22" style="color: var(--dark-text-muted);">${emptyHint}</td></tr>`;
         } else {
           const scoreMap = TRADITIONAL_SEO_STATE.pageScoreByUrl instanceof Map ? TRADITIONAL_SEO_STATE.pageScoreByUrl : null;
           const isSummaryRow = (r) => String(r?.rule_key || '') === '__page_summary__';
@@ -100958,6 +101124,7 @@ Confidence: ${c}`;
             <td>${tierLabel}</td>
             <td>${ruleCell}</td>
             <td>${statusCell}</td>
+            <td class="traditional-seo-metric-cell">${escapeHtml(formatTraditionalSeoTimestamp(traditionalSeoCheckedOnForUrl(displayUrl) || traditionalSeoCheckedOnForUrl(urlRaw)))}</td>
             <td style="word-break: break-all;">${urlCell}</td>
             <td style="font-size:0.76rem;color:var(--dark-text);max-width:12rem;">${kwCell || '—'}</td>
             <td class="traditional-seo-metric-cell">${escapeHtml(traditionalSeoCountCell(internalBacklinksN))}</td>
@@ -101395,7 +101562,7 @@ Confidence: ${c}`;
         if (propertyUrl) TRADITIONAL_SEO_STATE.lastPropertyUrl = propertyUrl;
         await traditionalSeoEnsureRuleOverridesLoaded();
 
-        if (String(ruleKey || '') === 'broken_links_no_404') {
+        if (String(ruleKey || '') === 'broken_links_no_404' && !(TRADITIONAL_SEO_STATE.brokenByUrl instanceof Map && TRADITIONAL_SEO_STATE.brokenByUrl.size)) {
           traditionalSeoEvalProgressStage('Checking same-site outbound links for 404/410…', 82);
           await traditionalSeoEnsureBrokenLinkStatuses(signalMaps, propertyUrl, (ev) => {
             if (!ev || !ev.total) return;
@@ -101670,6 +101837,7 @@ Confidence: ${c}`;
       const refreshAudit = options?.refreshAudit === true;
       /** Full-site HTML extract refresh is expensive; only ② / save / full-audit paths pass true. */
       const refreshExtractability = options?.refreshExtractability === true;
+      const skipBrokenLive = options?.skipBrokenLive === true || refreshExtractability !== true;
       /** Opt-in: live Search Console URL Inspection API during this run (slow). Use Refresh GSC URL Inspection instead for routine updates. */
       const runGscUrlInspection = options?.runGscUrlInspection === true;
       /**
@@ -101871,7 +102039,7 @@ Confidence: ${c}`;
         TRADITIONAL_SEO_STATE.sourceParity = sourceParity;
         renderTraditionalSeoSourceParity(sourceParity);
         const rules = collectTraditionalSeoRulesFromTable().filter((rule) => rule.enabled !== false);
-        if (rules.some((r) => String(r.rule_key) === 'broken_links_no_404')) {
+        if (rules.some((r) => String(r.rule_key) === 'broken_links_no_404') && !skipBrokenLive) {
           traditionalSeoEvalProgressStage('Checking same-site outbound links for 404/410…', 86);
           await traditionalSeoEnsureBrokenLinkStatuses(
             signalMaps,
@@ -101895,7 +102063,8 @@ Confidence: ${c}`;
           propertyUrl,
           evaluatedUrls: urls,
           signalMaps,
-          targetKeywordByUrl: keywordLookup
+          targetKeywordByUrl: keywordLookup,
+          skipBrokenLive
         };
 
         const pageRules = rules.filter((r) => String(r.scope || 'page').toLowerCase() !== 'sitewide');
@@ -102285,6 +102454,33 @@ Confidence: ${c}`;
       void traditionalSeoRefreshLastRunDisplay();
     }
 
+    async function traditionalSeoRunRenderedAudit() {
+      if (typeof window.tradSeoRenderLoop !== 'function') throw new Error('tradSeoRenderLoop missing');
+      const runBtn = document.getElementById('traditional-seo-run-audit-btn');
+      const runFullBtn = document.getElementById('traditional-seo-run-full-audit-btn');
+      if (runBtn) runBtn.disabled = true;
+      if (runFullBtn) runFullBtn.disabled = true;
+      traditionalSeoEvalProgressOpen(true, 'Rendered Traditional SEO audit');
+      try {
+        const existing = localStorage.getItem('trad_seo_render_run_id');
+        await window.tradSeoRenderLoop((sum) => {
+          const checked = Number(sum?.pages_checked || sum?.done || 0);
+          const planned = Number(sum?.pages_planned || sum?.total || 0);
+          const phase = sum?.phase === 'broken_links' ? 'Broken links' : 'Rendering';
+          const pct = planned > 0 ? 15 + Math.round((70 * checked) / planned) : 20;
+          traditionalSeoEvalProgressStage(`${phase} ${checked}/${planned || '?'}`, pct);
+        }, existing);
+        await runTraditionalSeoEvaluation({
+          refreshAudit: false,
+          refreshExtractability: false,
+          skipBrokenLive: true
+        });
+      } finally {
+        if (runBtn) runBtn.disabled = false;
+        if (runFullBtn) runFullBtn.disabled = false;
+      }
+    }
+
     function wireTraditionalSeoButtons() {
       traditionalSeoEvalSummaryModalWireOnce();
       const rulesToggle = document.getElementById('traditional-seo-rules-toggle');
@@ -102360,7 +102556,8 @@ Confidence: ${c}`;
             applyTraditionalSeoPayload(payload);
             await runTraditionalSeoEvaluation({
               refreshAudit: false,
-              refreshExtractability: true
+              refreshExtractability: false,
+              skipBrokenLive: true
             });
             if (typeof window.showStatus === 'function') {
               window.showStatus('Traditional SEO rules saved and rescored.', 'success');
@@ -102380,7 +102577,8 @@ Confidence: ${c}`;
           traditionalSeoDbg('Button ② clicked (Score Traditional SEO only)');
           await runTraditionalSeoEvaluation({
             refreshAudit: false,
-            refreshExtractability: true,
+            refreshExtractability: false,
+            skipBrokenLive: true,
             runGscForFailsOnly: true
           });
         });
@@ -102388,10 +102586,7 @@ Confidence: ${c}`;
       if (runFullBtn && !runFullBtn.dataset.wired) {
         runFullBtn.dataset.wired = '1';
         runFullBtn.addEventListener('click', async () => {
-          await runTraditionalSeoEvaluation({
-            refreshAudit: true,
-            refreshExtractability: true
-          });
+          await traditionalSeoRunRenderedAudit();
         });
       }
       const gscInspectBtn = document.getElementById('traditional-seo-refresh-gsc-inspection-btn');

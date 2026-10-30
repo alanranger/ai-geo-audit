@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-30] - Fault monitor folded into Traditional SEO (rendered ① / instant ②)
+
+**Change:** Silent faults as a separate dashboard section is retired. Traditional SEO ① is a Chromium Googlebot-smartphone render of every 06 URL (background ticks, survives tab close via `/api/cron/trad-seo-render-tick`), then a paced broken-links job. ② scores from stored snapshots with no alanranger.com fetches. New rules A1–A6 / C1–C3 / hidden-tag / code-blocks; Not checked excluded from the score; system health is problems-only and out of the SEO score. Monday sequence inserts `trad_seo_broken_links` after `trad_seo_full` without reordering other steps; `silent_faults` stays as a no-op before the email.
+
+**Files:** `lib/fault-monitor/*`, `lib/trad-seo-render/*`, `lib/trad-seo-render-client.js`, `api/aigeo/traditional-seo-render.js`, `api/cron/trad-seo-render-tick.js`, `api/cron/ceo-weekly-full-refresh.js`, `lib/ceo-weekly/dashboard-full-catalog.js`, `audit-dashboard.html`, `vercel.json`, `migrations/20261030_traditional_seo_render.sql`, `test/trad-seo-render-rules.test.js`, `Docs/CHANGELOG.md`
+
 ## [2026-10-28] - Skip ProductList-title H1s only when the product loader is in the HTML
 
 **Change:** Extractability ignores Squarespace `h1.ProductList-title` cards only when the raw HTML contains `product-page-loader.js`. If that script line is missing, those H1s count and `single_h1` fails. The mobile/desktop `ProductItem-details-title` pair still counts as one; K3 still uses the product title.
