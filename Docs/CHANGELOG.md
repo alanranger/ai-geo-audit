@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-30] - Traditional SEO: missing render is Not checked; hidden-status checks the live tag
+
+**Change:** A URL with no Chromium render in the current run is **Not checked** for render-dependent rules (excluded from the score; never warn/fail). GSC inspection, slug, sitewide robots/sitemap/HTTPS, and schema-scanner rules still score. `hidden_tag_matches_lists` now compares the live robots tag with `page_indexability_policy`: policy-hidden + visible page → warn “Policy says hidden, page is visible”; money/landing hidden without policy → fail; noindex still in 06 → fail. Policy rows 4 and 5 (`/photo-workshops-uk`, `/photography-services-near-me`) retired to `indexed` (rows kept as backup). Id 3 beginners prefix untouched.
+
+**Files:** `audit-dashboard.html`, `lib/trad-seo-render/findings.js`, `test/trad-seo-render-rules.test.js`, `migrations/20261030_retire_store_noindex_policy.sql`, `Docs/CHANGELOG.md`
+
 ## [2026-10-30] - Fault monitor folded into Traditional SEO (rendered ① / instant ②)
 
 **Change:** Silent faults as a separate dashboard section is retired. Traditional SEO ① is a Chromium Googlebot-smartphone render of every 06 URL (background ticks, survives tab close via `/api/cron/trad-seo-render-tick`), then a paced broken-links job. ② scores from stored snapshots with no alanranger.com fetches. New rules A1–A6 / C1–C3 / hidden-tag / code-blocks; Not checked excluded from the score; system health is problems-only and out of the SEO score. Monday sequence inserts `trad_seo_broken_links` after `trad_seo_full` without reordering other steps; `silent_faults` stays as a no-op before the email.

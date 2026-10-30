@@ -30,6 +30,34 @@ test('hidden_tag_matches_lists fails when NOINDEX is still in 06', () => {
   assert.equal(hit.status, 'fail');
 });
 
+test('hidden_tag_matches_lists warns when policy says hidden but page is visible', () => {
+  const inCsv = new Set(['/photo-workshops-uk']);
+  const render = { measure: { rawHtml: '<meta name="robots" content="index,follow">' }, xRobots: '' };
+  const hit = hiddenTagFinding(
+    'https://www.alanranger.com/photo-workshops-uk',
+    'money',
+    render,
+    inCsv,
+    true
+  );
+  assert.equal(hit.status, 'warn');
+  assert.equal(hit.note, 'Policy says hidden, page is visible');
+});
+
+test('hidden_tag_matches_lists passes Indexable when visible and no hide policy', () => {
+  const inCsv = new Set(['/photo-workshops-uk']);
+  const render = { measure: { rawHtml: '<title>Workshops</title>' }, xRobots: '' };
+  const hit = hiddenTagFinding(
+    'https://www.alanranger.com/photo-workshops-uk',
+    'money',
+    render,
+    inCsv,
+    false
+  );
+  assert.equal(hit.status, 'pass');
+  assert.equal(hit.note, 'Indexable');
+});
+
 test('findingsFromPage maps A3 to schema_not_title_only fail', () => {
   const out = findingsFromPage({
     url: POST,

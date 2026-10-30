@@ -92404,7 +92404,7 @@ Confidence: ${c}`;
       { rule_key: 'no_squarespace_error_text', rule_name: 'No Squarespace error messages', description: 'Fail if visible text includes Script Disabled, embedded code disabled, needs a storage option, or Something went wrong.', category: 'rendering', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.5, sort_order: 151 },
       { rule_key: 'no_site_script_errors', rule_name: 'No script errors from site code', description: 'Uncaught errors from Alan’s code during render. Third-party noise ignored.', category: 'rendering', severity: 'medium', scope: 'page', current_status: 'pass', enabled: true, weight: 1.0, sort_order: 152 },
       { rule_key: 'key_blocks_loaded', rule_name: 'Key page blocks loaded', description: 'Must-have selectors per page type, plus baseline regression: a block that rendered last run and is gone now. Empty data-wm-plugin=load fails.', category: 'rendering', severity: 'high', scope: 'page', current_status: 'pass', enabled: true, weight: 1.35, sort_order: 153 },
-      { rule_key: 'hidden_tag_matches_lists', rule_name: 'Hidden status matches the lists', description: 'Fail if a money/landing page has noindex, or a noindex page is still in 06. Intentional hides live in page_indexability_policy.', category: 'indexation', severity: 'critical', scope: 'page', current_status: 'pass', enabled: true, weight: 3.0, sort_order: 160 }
+      { rule_key: 'hidden_tag_matches_lists', rule_name: 'Hidden status matches the lists', description: 'Compares the live robots tag with policy. Fail if a money/landing page has noindex, or a noindex page is still in 06. Warn if policy says hidden but the page is visible. Policy alone is never a pass.', category: 'indexation', severity: 'critical', scope: 'page', current_status: 'pass', enabled: true, weight: 3.0, sort_order: 160 }
     ];
     const TRADITIONAL_SEO_RENDER_RULE_KEYS = [
       'schema_body_coverage', 'schema_body_starts_with_page', 'schema_not_title_only',
@@ -92412,6 +92412,20 @@ Confidence: ${c}`;
       'code_blocks_intact', 'no_squarespace_error_text', 'no_site_script_errors',
       'key_blocks_loaded', 'hidden_tag_matches_lists'
     ];
+    const TRADITIONAL_SEO_NO_RENDER_RULE_KEYS = [
+      'gsc_url_indexed', 'google_gsc_visible', 'url_slug_word_count', 'keyword_slug_tokens',
+      'https_enforced', 'sitemap_declared', 'robots_fetchable', 'schema_qa_gate_page',
+      'service_schema_product_page', 'localbusiness_schema_page', 'indexable_status',
+      'schema_present_core'
+    ];
+
+    function traditionalSeoUrlHasCurrentRunRender(url) {
+      return traditionalSeoRenderMapGet(TRADITIONAL_SEO_STATE.renderOutcomeByUrl, url) === 'checked';
+    }
+
+    function traditionalSeoRuleNeedsCurrentRender(key) {
+      return !TRADITIONAL_SEO_NO_RENDER_RULE_KEYS.includes(String(key || '').toLowerCase());
+    }
 
     function traditionalSeoApiPath(path) {
       if (typeof window.apiUrl === 'function') return window.apiUrl(path);
@@ -98056,14 +98070,18 @@ Confidence: ${c}`;
       const techSignal = traditionalSeoSignalMapGet(maps.techIndexability, url, propertyUrl);
       const extractSignal = traditionalSeoSignalMapGet(maps.extractability, url, propertyUrl);
       const renderOutcome = traditionalSeoRenderMapGet(TRADITIONAL_SEO_STATE.renderOutcomeByUrl, url);
-      if (String(tier || '').toLowerCase() !== 'sitewide' && renderOutcome === 'not_checked') return 'not_checked';
+      if (String(tier || '').toLowerCase() !== 'sitewide'
+          && traditionalSeoRuleNeedsCurrentRender(key)
+          && renderOutcome !== 'checked') {
+        return 'not_checked';
+      }
       const renderFinding = (() => {
         const pack = traditionalSeoRenderMapGet(TRADITIONAL_SEO_STATE.renderFindings, url);
         return pack && typeof pack === 'object' ? pack[key] : null;
       })();
       if (TRADITIONAL_SEO_RENDER_RULE_KEYS.includes(key)) {
         if (renderFinding?.status) return String(renderFinding.status).toLowerCase();
-        return renderOutcome === 'checked' ? 'pass' : 'warn';
+        return 'pass';
       }
       const gscInspectSignal = traditionalSeoSignalMapGet(maps.gscIndexInspect, url, propertyUrl);
       const qaSignal = traditionalSeoSignalMapGetWithUrlAliases(maps.qaGate, url, propertyUrl);
@@ -98374,8 +98392,8 @@ Confidence: ${c}`;
         .filter((row) => String(row.rule_key) === String(ruleKey))
         .filter((row) => String(row?.tier || '').toLowerCase() !== 'sitewide')
         .map((row) => String(row.status || 'fail').toLowerCase())
-        .filter((s) => s !== 'na');
-      if (!statuses.length) return 'pass';
+        .filter((s) => s !== 'na' && s !== 'not_checked');
+      if (!statuses.length) return 'not_checked';
       if (statuses.includes('fail')) return 'fail';
       if (statuses.includes('warn')) return 'warn';
       return 'pass';
@@ -98448,6 +98466,10 @@ Confidence: ${c}`;
           signalMaps: TRADITIONAL_SEO_STATE.lastSignalMaps
         }).lifecycle;
         if (life === 'redirected' || life === 'gone' || life === 'hidden') return;
+        if (!traditionalSeoUrlHasCurrentRunRender(u)) {
+          rankByUrl.set(u, 3);
+          return;
+        }
         const st = String(row?.status || 'fail').toLowerCase();
         const rank = traditionalSeoStatusRank(st);
         const prev = rankByUrl.get(u);
@@ -98456,10 +98478,12 @@ Confidence: ${c}`;
       let failU = 0;
       let warnU = 0;
       let passU = 0;
+      let notCheckedU = 0;
       rankByUrl.forEach((rank) => {
         if (rank === 0) failU += 1;
         else if (rank === 1) warnU += 1;
         else if (rank === 2) passU += 1;
+        else notCheckedU += 1;
       });
       const totalU = rankByUrl.size;
       const sw = (Array.isArray(rows) ? rows : []).filter((r) => String(r?.tier || '').toLowerCase() === 'sitewide').length;
@@ -98468,6 +98492,7 @@ Confidence: ${c}`;
         `<span class="traditional-seo-health-chip">URLs w/ any <strong>fail</strong>: <strong>${failU}</strong></span>`,
         `<span class="traditional-seo-health-chip">URLs worst <strong>warn</strong> (no fail): <strong>${warnU}</strong></span>`,
         `<span class="traditional-seo-health-chip">URLs all <strong>pass</strong>: <strong>${passU}</strong></span>`,
+        `<span class="traditional-seo-health-chip">URLs <strong>Not checked</strong>: <strong>${notCheckedU}</strong></span>`,
         `<span class="traditional-seo-health-chip">Site-wide rows: <strong>${sw}</strong></span>`
       ].join('');
     }
@@ -100067,6 +100092,7 @@ Confidence: ${c}`;
         const dispUrl = traditionalSeoLandingRollupDisplayUrl(rk, prop);
         const lifeInfo = traditionalSeoExtractLifecycleForUrl(dispUrl, { propertyUrl: prop, signalMaps: TRADITIONAL_SEO_STATE.lastSignalMaps });
         let worst = fail > 0 ? 'fail' : warn > 0 ? 'warn' : (pass > 0 ? 'pass' : (notChecked > 0 ? 'not_checked' : (na > 0 ? 'na' : 'pass')));
+        if (!traditionalSeoUrlHasCurrentRunRender(dispUrl)) worst = 'not_checked';
         if (lifeInfo.lifecycle === 'redirected') worst = 'redirected';
         if (lifeInfo.lifecycle === 'gone') worst = 'gone';
         if (lifeInfo.lifecycle === 'hidden') worst = 'hidden';
