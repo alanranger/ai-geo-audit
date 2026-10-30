@@ -4,6 +4,7 @@ import { codeBlocksIntact } from '../lib/trad-seo-render/code-blocks.js';
 import { findingsFromPage, hiddenTagFinding } from '../lib/trad-seo-render/findings.js';
 import { extractRowFromRendered } from '../lib/trad-seo-render/extract-row.js';
 import { buildPlan, buildFullPlan } from '../lib/fault-monitor/plan.js';
+import { isFullTradSeoSource } from '../lib/trad-seo-render/run-kind.js';
 
 const POST = 'https://www.alanranger.com/blog-on-photography/how-to-find-your-photography-style';
 const COURSES = 'https://www.alanranger.com/photography-courses';
@@ -86,4 +87,11 @@ test('buildPlan is full 06 list, not a 25% blog rotation', () => {
   const full = buildFullPlan(urls);
   assert.equal(items.length, full.items.length);
   assert.equal(items.length, urls.length);
+});
+
+test('only source trad_seo counts as a full ① run', () => {
+  assert.equal(isFullTradSeoSource('trad_seo'), true);
+  assert.equal(isFullTradSeoSource('trad_seo_playwright'), false);
+  assert.equal(isFullTradSeoSource('trad_seo_sample'), false);
+  assert.equal(isFullTradSeoSource('cursor_e2e_test'), false);
 });

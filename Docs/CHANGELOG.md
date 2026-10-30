@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-10-30] - ① Full audit never resumes a Playwright/sample run
+
+**Change:** Pressing ① always starts a new `trad_seo` run of every 06 URL, unless a **full** run is already `running` (then it resumes that one). `trad_seo_playwright` / sample runs are not the “last coherent run”, are not stored as the resume id, and do not drive the Full audit banner or the cron tick. Progress shows `rendering x / N pages` with ETA. Stop / Cancel marks the run `cancelled`.
+
+**Files:** `lib/trad-seo-render/run-kind.js`, `lib/trad-seo-render-client.js`, `lib/fault-monitor/store.js`, `api/aigeo/traditional-seo-render.js`, `api/cron/trad-seo-render-tick.js`, `audit-dashboard.html`, `test/trad-seo-render-rules.test.js`, `Docs/CHANGELOG.md`
+
 ## [2026-10-30] - no_duplicate_schema: shared @id with the same type is not a duplicate
 
 **Change:** A6 / `no_duplicate_schema` no longer fails when landing-page schema and the site-wide footer graph both use `https://www.alanranger.com/#person` (Google merges same-@id nodes). Fail only for >1 FAQPage, >1 HowTo, or the same `@id` used with a different `@type`. Organization+LocalBusiness vs Organization on one `@id` is a match (one type set contains the other).

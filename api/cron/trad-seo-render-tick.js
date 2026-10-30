@@ -6,7 +6,8 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 import { createClient } from '@supabase/supabase-js';
 import { authoriseCron, sendJson } from '../../lib/ceo-weekly/shared.js';
-import { latestTradSeoRun } from '../../lib/fault-monitor/store.js';
+import { latestRunningTradSeoRun, latestTradSeoRun } from '../../lib/fault-monitor/store.js';
+import { isFullTradSeoSource } from '../../lib/trad-seo-render/run-kind.js';
 import { tickRun } from '../../lib/fault-monitor/runner.js';
 import { loadBrokenPages, tickBrokenLinks } from '../../lib/trad-seo-render/broken-job.js';
 import { loadRunPages } from '../../lib/trad-seo-render/pages-store.js';
@@ -22,8 +23,8 @@ export default async function handler(req, res) {
   if (!['GET', 'POST'].includes(req.method)) return sendJson(res, 405, { error: 'method_not_allowed' });
   if (!authoriseCron(req)) return sendJson(res, 401, { error: 'unauthorized' });
   const sb = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
-  const latest = await latestTradSeoRun(sb);
-  if (!latest) return sendJson(res, 200, { ok: true, idle: true });
+  const latest = await latestRunningTradSeoRun(sb) || await latestTradSeoRun(sb);
+  if (!latest || !isFullTradSeoSource(latest.source)) return sendJson(res, 200, { ok: true, idle: true });
   if (latest.status === 'running') {
     const tick = await tickRun(sb, latest.id, { budgetMs: 200000 });
     return sendJson(res, 200, { ok: true, phase: 'render', run_id: latest.id, ...tick });

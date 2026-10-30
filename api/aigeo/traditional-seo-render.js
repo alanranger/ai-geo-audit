@@ -3,7 +3,8 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 import { createClient } from '@supabase/supabase-js';
 import { londonWeekStartYmd, sendJson } from '../../lib/ceo-weekly/shared.js';
 import { recheckUrl, startRun, tickRun, tickSummary } from '../../lib/fault-monitor/runner.js';
-import { latestTradSeoRun, loadRun } from '../../lib/fault-monitor/store.js';
+import { latestAnyTradSeoRun, latestRunningTradSeoRun, latestTradSeoRun, loadRun, saveRun } from '../../lib/fault-monitor/store.js';
+import { isFullTradSeoSource } from '../../lib/trad-seo-render/run-kind.js';
 import { loadFaultSummary } from '../../lib/fault-monitor/brief.js';
 import { runSiteChecks } from '../../lib/fault-monitor/site-checks.js';
 import { loadRunPages, loadLatestPage } from '../../lib/trad-seo-render/pages-store.js';
@@ -36,7 +37,8 @@ function healthRows(findings) {
 
 async function handleGet(sb, req, res) {
   const runId = String(req.query?.runId || '').trim();
-  const run = runId ? await loadRun(sb, runId) : await latestTradSeoRun(sb);
+  let run = runId ? await loadRun(sb, runId) : await latestTradSeoRun(sb);
+  if (!run && !runId) run = await latestAnyTradSeoRun(sb);
   const pages = run ? await loadRunPages(sb, run.id) : [];
   const broken = run ? await loadBrokenPages(sb, run.id) : [];
   const summary = await loadFaultSummary(sb).catch(() => null);
@@ -71,20 +73,28 @@ async function handleGet(sb, req, res) {
 }
 
 async function handleStart(sb, body, res) {
+  const source = String(body.source || 'trad_seo').slice(0, 40);
+  if (isFullTradSeoSource(source)) {
+    const running = await latestRunningTradSeoRun(sb);
+    if (running) {
+      return sendJson(res, 200, { ok: true, run_id: running.id, resumed: true, ...tickSummary(running) });
+    }
+    const run = await startRun(sb, { source: 'trad_seo', weekStart: londonWeekStartYmd(), urls: [] });
+    return sendJson(res, 200, { ok: true, run_id: run.id, resumed: false, ...tickSummary(run) });
+  }
   const urls = Array.isArray(body.urls) ? body.urls.filter((u) => /^https:\/\/(www\.)?alanranger\.com/i.test(u)) : [];
-  const forceNotChecked = Array.isArray(body.forceNotChecked) && playwrightSource(body.source)
+  const forceNotChecked = Array.isArray(body.forceNotChecked) && playwrightSource(source)
     ? body.forceNotChecked
     : [];
-  const source = String(body.source || (urls.length ? 'trad_seo_sample' : 'trad_seo')).slice(0, 40);
   const run = await startRun(sb, { source, weekStart: londonWeekStartYmd(), urls, forceNotChecked });
-  return sendJson(res, 200, { ok: true, run_id: run.id, ...tickSummary(run) });
+  return sendJson(res, 200, { ok: true, run_id: run.id, resumed: false, ...tickSummary(run) });
 }
 
 async function handleTick(sb, body, res) {
   let runId = body.runId || null;
   if (!runId) {
-    const latest = await latestTradSeoRun(sb);
-    if (latest?.status !== 'running') {
+    const latest = await latestRunningTradSeoRun(sb);
+    if (!latest) {
       return sendJson(res, 200, { ok: true, done: true, idle: true });
     }
     runId = latest.id;
@@ -104,9 +114,29 @@ async function handleRecheck(sb, body, res) {
   return sendJson(res, 200, { ok: true, url, ...result, page });
 }
 
+async function handleCancel(sb, body, res) {
+  const runId = body.runId || (await latestRunningTradSeoRun(sb))?.id;
+  if (!runId) return sendJson(res, 200, { ok: true, cancelled: false, idle: true });
+  const run = await loadRun(sb, runId);
+  if (!run) return sendJson(res, 404, { ok: false, error: 'run_not_found' });
+  if (run.status === 'running') {
+    await saveRun(sb, runId, {
+      status: 'cancelled',
+      finished_at: new Date().toISOString(),
+      error: 'cancelled_by_user'
+    });
+  }
+  return sendJson(res, 200, { ok: true, run_id: runId, cancelled: true, status: 'cancelled' });
+}
+
 async function handleBrokenTick(sb, body, res) {
-  const runId = body.runId || (await latestTradSeoRun(sb))?.id;
+  const explicit = body.runId || null;
+  const runId = explicit || (await latestRunningTradSeoRun(sb))?.id || (await latestTradSeoRun(sb))?.id;
   if (!runId) return sendJson(res, 400, { ok: false, error: 'no_run' });
+  const run = await loadRun(sb, runId);
+  if (run && !explicit && !isFullTradSeoSource(run.source)) {
+    return sendJson(res, 200, { ok: true, idle: true, done: true, run_id: runId });
+  }
   const pages = await loadRunPages(sb, runId);
   const already = await loadBrokenPages(sb, runId);
   const doneKeys = new Set(already.map((r) => r.page_url));
@@ -123,6 +153,7 @@ async function handleBrokenTick(sb, body, res) {
 const ACTIONS = {
   start: handleStart,
   tick: handleTick,
+  cancel: handleCancel,
   recheck: handleRecheck,
   'broken-tick': handleBrokenTick
 };

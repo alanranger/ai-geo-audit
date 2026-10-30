@@ -210,7 +210,7 @@
   <script src="/lib/competitor-analysis-tab.js?v=ca-prog-20260719a"></script>
   <script src="/lib/strategy-tab.js?v=st-20261008-th-wrap"></script>
   <script src="/lib/silent-faults-tab.js?v=sf-20261027a"></script>
-  <script src="/lib/trad-seo-render-client.js?v=tsr-20261030a"></script>
+  <script src="/lib/trad-seo-render-client.js?v=tsr-20261030b"></script>
   <script>
     // CRITICAL: Set up error capture IMMEDIATELY, before any other code runs
     // This must be the very first script to execute
@@ -98042,13 +98042,19 @@ Confidence: ${c}`;
         }
       }
       const banner = document.getElementById('traditional-seo-render-banner');
-      if (banner && st.renderRun) {
-        const started = st.renderRun.started_at || st.renderRun.finished_at;
-        const checked = st.renderRun.pages_checked || 0;
-        const planned = st.renderRun.pages_planned || 0;
-        const re = st.renderPages.filter((p) => p.outcome === 'checked').length;
-        banner.style.display = 'block';
-        banner.textContent = `Full audit: ${formatTraditionalSeoTimestamp(started)} · ${checked}/${planned} pages · ${re} checked`;
+      if (banner) {
+        const full = st.renderRun && String(st.renderRun.source || '') === 'trad_seo';
+        if (!full) {
+          banner.style.display = 'none';
+          banner.textContent = '';
+        } else {
+          const started = st.renderRun.started_at || st.renderRun.finished_at;
+          const checked = st.renderRun.pages_checked || 0;
+          const planned = st.renderRun.pages_planned || 0;
+          const re = st.renderPages.filter((p) => p.outcome === 'checked').length;
+          banner.style.display = 'block';
+          banner.textContent = `Full audit: ${formatTraditionalSeoTimestamp(started)} · ${checked}/${planned} pages · ${re} checked`;
+        }
       }
     };
 
@@ -101305,10 +101311,15 @@ Confidence: ${c}`;
         cancelBtn.textContent = 'Stop / Cancel';
         cancelBtn.onclick = () => {
           TRADITIONAL_SEO_EVAL_PROGRESS.cancelled = true;
+          window.__tradSeoCancelRender = true;
           cancelBtn.disabled = true;
           cancelBtn.textContent = 'Stopping…';
           if (subtitle) subtitle.textContent = 'Cancel requested — stopping after current batch…';
           traditionalSeoDbg('Traditional SEO cancel requested by user', 'warn');
+          if (typeof window.tradSeoRenderCancel === 'function') {
+            const id = localStorage.getItem('trad_seo_render_run_id');
+            window.tradSeoRenderCancel(id).catch(() => {});
+          }
         };
       }
       traditionalSeoEvalProgressPaint();
@@ -102488,21 +102499,27 @@ Confidence: ${c}`;
       const runFullBtn = document.getElementById('traditional-seo-run-full-audit-btn');
       if (runBtn) runBtn.disabled = true;
       if (runFullBtn) runFullBtn.disabled = true;
+      window.__tradSeoCancelRender = false;
       traditionalSeoEvalProgressOpen(true, 'Rendered Traditional SEO audit');
       try {
-        const existing = localStorage.getItem('trad_seo_render_run_id');
-        await window.tradSeoRenderLoop((sum) => {
+        const result = await window.tradSeoRenderLoop((sum) => {
           const checked = Number(sum?.pages_checked || sum?.done || 0);
           const planned = Number(sum?.pages_planned || sum?.total || 0);
-          const phase = sum?.phase === 'broken_links' ? 'Broken links' : 'Rendering';
-          const pct = planned > 0 ? 15 + Math.round((70 * checked) / planned) : 20;
-          traditionalSeoEvalProgressStage(`${phase} ${checked}/${planned || '?'}`, pct);
-        }, existing);
+          traditionalSeoEvalProgressTrack(checked, planned);
+          const phase = sum?.phase === 'broken_links' ? 'checking broken links' : 'rendering';
+          const pct = planned > 0 ? Math.max(8, Math.round((80 * checked) / planned)) : 8;
+          traditionalSeoEvalProgressStage(`${phase} ${checked} / ${planned || '?'} pages`, pct);
+        });
+        if (result?.cancelled || TRADITIONAL_SEO_EVAL_PROGRESS.cancelled) {
+          traditionalSeoEvalProgressStage('Cancelled — full audit did not finish', 91);
+          return result;
+        }
         await runTraditionalSeoEvaluation({
           refreshAudit: false,
           refreshExtractability: false,
           skipBrokenLive: true
         });
+        return result;
       } finally {
         if (runBtn) runBtn.disabled = false;
         if (runFullBtn) runFullBtn.disabled = false;
