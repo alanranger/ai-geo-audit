@@ -125,13 +125,27 @@ async function handlePost(req, res, supabase) {
   if (propertyUrl) query = query.eq('property_url', propertyUrl);
   const { data, error } = await query;
   if (error) throw error;
+
+  let csv09 = null;
+  try {
+    const { buildCsv09Body, loadLocked } = await import('../../lib/configIntegrity/checks.mjs');
+    const { commitCsv09 } = await import('../../lib/commit-09-csv.mjs');
+    const { runIntegrityCheck } = await import('../../lib/configIntegrity/runIntegrityCheck.mjs');
+    const csv = buildCsv09Body(data || [], loadLocked());
+    csv09 = await commitCsv09(csv, 'chore(seo): save 09-url-target-keywords.csv after keyword override');
+    await runIntegrityCheck({ persist: true, csv09Disk: csv, runSource: 'override-09-commit' });
+  } catch (err) {
+    csv09 = { error: String(err?.message || err) };
+  }
+
   return sendJson(res, 200, {
     status: 'ok',
     overrides: Array.isArray(data) ? data : [],
     meta: {
       generatedAt: new Date().toISOString(),
+      csv09,
       csvExportReminder:
-        'Overrides SoT is traditional_seo_target_keyword_overrides. Run: node scripts/export-09-url-target-keywords.mjs then commit config/09-url-target-keywords.csv (clears integrity check 6).'
+        '09 CSV saves itself when you change a keyword. Export 09 keywords is the catch-up button if health still says out of sync.'
     }
   });
 }

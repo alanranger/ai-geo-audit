@@ -14288,7 +14288,7 @@
               ③ Refresh keyword demand (KE)
             </button>
             <button type="button" class="btn" id="traditional-seo-export-09-btn" style="padding: 0.45rem 0.9rem; border: 1px solid rgba(167, 139, 250, 0.55); background: rgba(139, 92, 246, 0.16); color: inherit;"
-              title="Download config/09-url-target-keywords.csv from the live DB overrides. Save over config/09-url-target-keywords.csv in AI GEO Audit and commit to clear the D4 health line.">
+              title="Writes config/09-url-target-keywords.csv to GitHub and clears the system-health line. No Save As.">
               Export 09 keywords
             </button>
             <div style="display:flex;flex-direction:column;align-items:flex-start;gap:0.15rem;">
@@ -92474,19 +92474,25 @@ Confidence: ${c}`;
       const btn = document.getElementById('traditional-seo-export-09-btn');
       if (btn) btn.disabled = true;
       try {
-        const res = await fetch(traditionalSeoApiPath('/api/aigeo/export-09-url-target-keywords'));
-        if (!res.ok) throw new Error(`export 09 HTTP ${res.status}`);
-        const blob = await res.blob();
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = '09-url-target-keywords.csv';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        const res = await fetch(traditionalSeoApiPath('/api/aigeo/export-09-url-target-keywords'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ commit: 1, propertyUrl: traditionalSeoEffectivePropertyUrl() })
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body.status === 'error') {
+          throw new Error(body.message || `export 09 HTTP ${res.status}`);
+        }
+        const msg = body.message || 'Saved and committed — 09 is now in sync';
+        traditionalSeoDbg(msg, 'info');
+        if (btn) btn.title = msg;
+        window.alert(msg);
+        if (typeof window.tradSeoRenderLoad === 'function') {
+          void window.tradSeoRenderLoad({ health: true });
+        }
       } catch (err) {
         traditionalSeoDbg(`Export 09 failed: ${String(err?.message || err)}`, 'error');
-        window.alert('Export 09 keywords failed. Run: node scripts/export-09-url-target-keywords.mjs');
+        window.alert('Export 09 keywords failed: ' + String(err?.message || err));
       } finally {
         if (btn) btn.disabled = false;
       }

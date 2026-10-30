@@ -1,7 +1,7 @@
 // Script to backfill backlink scores for Dec 13 and Dec 15
 // This fixes Authority scores that dropped due to missing backlink CSV
 const supabaseUrl = 'https://igzvwbvgvmzvvzoclufx.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlnenZ3YnZndm16dnZ6b2NsdWZ4Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NzY3NzkyOCwiZXhwIjoyMDczMjUzOTI4fQ.W9tkTSYu6Wml0mUr-gJD6hcLMZDcbaYYaOsyDXuwd8M';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 async function backfillBacklinks() {
   console.log('=== Backfilling Backlink Scores for Dec 13 & 15 ===\n');

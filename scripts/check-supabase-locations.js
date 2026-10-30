@@ -1,6 +1,6 @@
 // Quick script to check what's stored in Supabase for locations and service_areas
 const supabaseUrl = 'https://igzvwbvgvmzvvzoclufx.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlnenZ3YnZndm16dnZ6b2NsdWZ4Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NzY3NzkyOCwiZXhwIjoyMDczMjUzOTI4fQ.W9tkTSYu6Wml0mUr-gJD6hcLMZDcbaYYaOsyDXuwd8M';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 async function checkSupabase() {
   console.log('=== Checking Supabase audit_results table ===\n');

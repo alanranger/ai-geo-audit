@@ -8,11 +8,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
+import { loadLocalSupabaseEnv, isLegacyJwt } from '../lib/load-local-supabase-env.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-dotenv.config({ path: path.join(root, '.env.local') });
-dotenv.config({ path: path.join(root, '.env') });
+const env = loadLocalSupabaseEnv(root);
 
 const PROPERTY = 'https://www.alanranger.com';
 const lockedPath = path.join(root, 'config/keyword-tracking-locations-and-class-LOCKED-v12.csv');
@@ -22,10 +21,14 @@ const outDrive = path.join(
   'C:/Users/alan/Google Drive/Claude shared resources/Cursor Outputs for Claude/09-url-target-keywords.csv'
 );
 
-const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseUrl = env.url;
+const supabaseKey = env.key;
 if (!supabaseUrl || !supabaseKey) {
   console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+  process.exit(1);
+}
+if (isLegacyJwt(supabaseKey)) {
+  console.error('Legacy API keys are disabled. Use sb_secret from .env.vercel.prod (not the JWT in .env.local).');
   process.exit(1);
 }
 

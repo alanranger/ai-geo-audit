@@ -23,6 +23,7 @@ test('D4 names the Export 09 keywords button', () => {
   }]);
   assert.equal(rows.length, 1);
   assert.match(rows[0].fix, /Export 09 keywords/);
+  assert.match(rows[0].fix, /saves and commits by itself/);
   assert.match(rows[0].fix, /node scripts\/export-09-url-target-keywords\.mjs/);
 });
 

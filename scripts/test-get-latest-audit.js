@@ -10,7 +10,7 @@
 const PROPERTY_URL = 'https://www.alanranger.com';
 const API_BASE_URL = 'https://ai-geo-audit.vercel.app'; // Deployed endpoint
 const SUPABASE_URL = 'https://igzvwbvgvmzvvzoclufx.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlnenZ3YnZndm16dnZ6b2NsdWZ4Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NzY3NzkyOCwiZXhwIjoyMDczMjUzOTI4fQ.W9tkTSYu6Wml0mUr-gJD6hcLMZDcbaYYaOsyDXuwd8M';
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 console.log('🧪 Testing get-latest-audit endpoint...\n');
 console.log(`Property URL: ${PROPERTY_URL}`);
