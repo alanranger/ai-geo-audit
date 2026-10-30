@@ -33,6 +33,7 @@ function png(name) {
 
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const page = await browser.newPage({ viewport: { width: 1500, height: 980 } });
+page.setDefaultTimeout(180000);
 const report = { url: '', ok: false, steps: [], siteFetchesOnScore: [] };
 
 async function waitForBuild() {
@@ -79,10 +80,11 @@ try {
       localStorage.setItem('trad_seo_force_not_checked', JSON.stringify([force]));
     }, { sample: SAMPLE, force: FORCE_429 });
     await page.waitForSelector('#traditional-seo-page-modal-reaudit', { state: 'visible', timeout: 90000 });
+    await page.waitForFunction(() => /Re-auditing/i.test(document.getElementById('traditional-seo-page-modal-reaudit')?.textContent || ''), null, { timeout: 90000 });
     await page.waitForFunction(() => {
       const b = document.getElementById('traditional-seo-page-modal-reaudit');
-      return b && !b.disabled && /Re-audit page/i.test(b.textContent || '');
-    }, { timeout: 180000 });
+      return !!(b && !b.disabled && /Re-audit page/i.test(b.textContent || ''));
+    }, null, { timeout: 180000 });
     report.steps.push(`reaudit ${url}`);
   }
   const tabUrl = `${BASE}/audit-dashboard.html?cb=${Date.now()}#traditional-seo`;
@@ -105,8 +107,8 @@ try {
   report.steps.push('clicked ① sample');
   await page.waitForFunction(() => {
     const b = document.getElementById('traditional-seo-render-banner');
-    return b && /pages/i.test(b.textContent || '');
-  }, { timeout: 120000 }).catch(() => null);
+    return !!(b && /pages/i.test(b.textContent || ''));
+  }, null, { timeout: 120000 }).catch(() => null);
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#traditional-seo-run-full-audit-btn', { timeout: 60000 });
