@@ -34537,7 +34537,7 @@
         '<details class="config-integrity-key">' +
         '<summary>Key — Check / Severity / Stream / Status</summary>' +
         '<ul>' +
-        '<li><strong>Check 1–6</strong> — integrity suite (1/4/6 structural red; 2/3/5 advisory amber). Check 3 = Google ranks a different URL than locked target.</li>' +
+        '<li><strong>Check 1–8</strong> — integrity suite (1/4/6 structural red; 2/3/5/7/8 advisory amber). Check 3 = Google ranks a different URL than locked target. Check 7 = money-page keyword missing from Ranking &amp; AI. Check 8 = keep tracking or drop an old money-page keyword.</li>' +
         '<li><strong>Status</strong> — Auto from action text + page audit. Once you record progress (keep / accept / parking), Decision needed is overridden: Strengthen, Awaiting recrawl, or Parked. Wins only when ranking best_url matches locked target (Confirmed wins panel).</li>' +
         '<li><strong>Sort</strong> — Within each status band, rows are grouped by <em>Ranks now (from)</em> so one page’s fixes sit together. Secondary sort is volume/keyword inside that pack.</li>' +
         '<li><strong>Stream</strong> — Hub / Swap / Blog / Config work grouping (not a dashboard panel).</li>' +
@@ -34649,7 +34649,12 @@
           '<td>' + checkedCell + '</td>' +
           '<td>' + indexReqCell + '</td>' +
           '<td class="ci-work-cell">' + workCell + '</td>' +
-          '<td class="ci-action" title="' + meaningTitle + '">' + escapeHtml(integrityActionDisplay(r)) + '</td>' +
+          '<td class="ci-action" title="' + meaningTitle + '">' + escapeHtml(integrityActionDisplay(r))
+          + (Number(r.check) === 8 || r.keep_drop
+            ? ' <button type="button" class="ci-keep-drop" data-action="keep" data-keyword="' + escapeHtml(String(r.subject || '')) + '">Keep</button>'
+              + ' <button type="button" class="ci-keep-drop" data-action="drop" data-keyword="' + escapeHtml(String(r.subject || '')) + '">Drop</button>'
+            : '')
+          + '</td>' +
           '</tr>'
         );
       };
@@ -34729,6 +34734,28 @@
           let decisionType = wrap.querySelector('.ci-work-decision')?.value || 'none';
           if (progress === 'parked') decisionType = 'parked';
           void saveConfigIntegrityWorkState(id, progress, note, decisionType, btn);
+        };
+      });
+      panel.querySelectorAll('.ci-keep-drop').forEach((btn) => {
+        btn.onclick = async () => {
+          const keyword = btn.getAttribute('data-keyword') || '';
+          const action = btn.getAttribute('data-action') || '';
+          btn.disabled = true;
+          try {
+            const resp = await fetch(typeof window.apiUrl === 'function'
+              ? window.apiUrl('/api/keywords/orphan-decision')
+              : '/api/keywords/orphan-decision', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ keyword, action })
+            });
+            const json = await resp.json().catch(() => ({}));
+            if (!resp.ok || json.status === 'error') throw new Error(json.message || 'Keep/Drop failed');
+            if (typeof refreshConfigIntegrityUI === 'function') void refreshConfigIntegrityUI({ triggerRun: true, runSource: 'orphan-decision' });
+          } catch (err) {
+            window.alert(String(err.message || err));
+            btn.disabled = false;
+          }
         };
       });
 
@@ -84481,6 +84508,7 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
                   const keywordsText = data.keywords.join('\n');
                   if (typeof debugLog === 'function') debugLog(`[Edit Keywords] Setting textarea value, length: ${keywordsText.length}`, 'info');
                   textarea.value = keywordsText;
+                  window.__editKeywordsLoaded = data.keywords.slice();
                   textarea.disabled = false;
                   textarea.style.color = '#1e293b';
                   textarea.style.backgroundColor = '#ffffff';
@@ -84558,6 +84586,28 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
                 statusEl.style.color = '#dc2626';
               }
               return;
+            }
+
+            const prevList = Array.isArray(window.__editKeywordsLoaded)
+              ? window.__editKeywordsLoaded
+              : [];
+            const nextSet = new Set(keywords.map((k) => k.toLowerCase()));
+            const removed = prevList.filter((k) => !nextSet.has(String(k).toLowerCase()));
+            if (removed.length) {
+              try {
+                const ovResp = await fetch(apiUrl('/api/aigeo/traditional-seo-target-keyword-overrides?propertyUrl=' + encodeURIComponent('https://www.alanranger.com')));
+                const ovJson = await ovResp.json().catch(() => ({}));
+                const protectedSet = new Set((ovJson.overrides || [])
+                  .filter((r) => String(r.target_class || '').toLowerCase() === 'tracked')
+                  .map((r) => String(r.target_keyword || '').trim().toLowerCase()));
+                const hits = removed.filter((k) => protectedSet.has(String(k).toLowerCase()));
+                if (hits.length && !window.confirm(
+                  'These keywords belong to tracked money pages:\n' + hits.join('\n')
+                  + '\n\nRemove them from Ranking & AI anyway? Rank history is kept.'
+                )) {
+                  return;
+                }
+              } catch (_e) { /* warn is best-effort */ }
             }
 
             saveBtn.disabled = true;

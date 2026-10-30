@@ -16,7 +16,7 @@ import {
   persistLockedToSupabase,
   writeLockedConfigFiles,
 } from '../../lib/keyword-ranking/locked-config-persist.js';
-import { filterTrackedKeywords, resolveTrackedSegment } from '../../lib/keyword-ranking/tracked-set-v3.js';
+import { isRemovedFromTracking, resolveTrackedSegment } from '../../lib/keyword-ranking/tracked-set-v3.js';
 
 export const config = { maxDuration: 30 };
 
@@ -140,23 +140,47 @@ export default async function handler(req, res) {
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     const { csv, replaceAll = false, writeFiles = false, version = 'v3' } = body || {};
-    if (!csv || typeof csv !== 'string') {
+    const dropKeywords = Array.isArray(body?.dropKeywords) ? body.dropKeywords : [];
+    if ((!csv || typeof csv !== 'string') && !dropKeywords.length) {
       return res.status(400).json({ status: 'error', message: 'csv field is required' });
     }
 
-    const parsed = detectAndParseTrackingCsv(csv);
-    if (!parsed.rows.length) {
+    const parsed = detectAndParseTrackingCsv(csv || '');
+    if (!parsed.rows.length && !dropKeywords.length) {
       return res.status(400).json({ status: 'error', message: 'No keywords found in CSV' });
     }
 
     const propertyUrl = propertyUrlFromEnv();
+    if (dropKeywords.length && body?.confirmDropProtected !== true) {
+      const ovUrl = `${supabaseUrl}/rest/v1/traditional_seo_target_keyword_overrides?property_url=eq.${encodeURIComponent(propertyUrl)}&target_class=eq.tracked&select=target_keyword,page_url`;
+      const ovResp = await fetch(ovUrl, {
+        headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
+      });
+      const ovRows = ovResp.ok ? await ovResp.json() : [];
+      const dropSet = new Set(dropKeywords.map((k) => String(k || '').trim().toLowerCase().replace(/\s+/g, ' ')));
+      const protectedHits = (Array.isArray(ovRows) ? ovRows : [])
+        .filter((r) => dropSet.has(String(r.target_keyword || '').trim().toLowerCase().replace(/\s+/g, ' ')))
+        .map((r) => r.target_keyword);
+      if (protectedHits.length) {
+        return res.status(409).json({
+          status: 'error',
+          code: 'protected_tracked_page',
+          keywords: protectedHits,
+          message: 'That keyword is a tracked money-page target. Confirm to remove it from Ranking & AI (rank history is kept).',
+        });
+      }
+    }
     const existing = loadExistingLockedByKeyword();
     const override = await fetchSupabaseLockedOverride(supabaseUrl, supabaseKey, propertyUrl);
     const base = override?.by_keyword ? { ...existing, ...override.by_keyword } : existing;
     const merged = upsertTrackingRows(base, parsed.rows, { replaceAll });
-    const keywords = filterTrackedKeywords(
-      Object.values(merged.byKeyword).map((r) => r.keyword)
-    );
+    for (const kw of dropKeywords) {
+      delete merged.byKeyword[String(kw || '').trim().toLowerCase().replace(/\s+/g, ' ')];
+    }
+    merged.census = censusFromByKeyword(merged.byKeyword);
+    const keywords = Object.values(merged.byKeyword)
+      .map((r) => r.keyword)
+      .filter((kw) => kw && !isRemovedFromTracking(kw));
 
     const sourceName = `keyword-tracking-locations-and-class-LOCKED-${version}.csv`;
     let filesWritten = null;

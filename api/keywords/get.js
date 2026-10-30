@@ -12,8 +12,11 @@
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { filterTrackedKeywords } from '../../lib/keyword-ranking/tracked-set-v3.js';
-import { fetchSupabaseLockedOverride } from '../../lib/keyword-ranking/locked-config-persist.js';
+import { isRemovedFromTracking } from '../../lib/keyword-ranking/tracked-set-v3.js';
+import {
+  fetchSupabaseLockedOverride,
+  mergeLockedByKeyword,
+} from '../../lib/keyword-ranking/locked-config-persist.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
@@ -36,11 +39,11 @@ function resolvePropertyUrl() {
 }
 
 function dedupeSortKeywords(keywords) {
-  return filterTrackedKeywords([...new Set(
+  return [...new Set(
     (keywords || [])
       .map((kw) => String(kw || '').trim())
-      .filter((kw) => kw.length > 0)
-  )]).sort((a, b) => a.localeCompare(b));
+      .filter((kw) => kw.length > 0 && !isRemovedFromTracking(kw))
+  )].sort((a, b) => a.localeCompare(b));
 }
 
 async function sbFetch(url, supabaseKey, timeoutMs = 8000) {
@@ -192,15 +195,20 @@ export default async function handler(req, res) {
     const propertyUrl = resolvePropertyUrl();
 
     let result = loadLockedTrackedKeywords();
-    if (!result && supabaseUrl && supabaseKey) {
+    if (supabaseUrl && supabaseKey) {
       const override = await fetchSupabaseLockedOverride(supabaseUrl, supabaseKey, propertyUrl);
       if (override?.by_keyword) {
-        const keywords = dedupeSortKeywords(Object.values(override.by_keyword).map((r) => r.keyword));
+        const staticBy = {};
+        for (const kw of result?.keywords || []) {
+          staticBy[String(kw).toLowerCase().replace(/\s+/g, ' ')] = { keyword: kw };
+        }
+        const merged = mergeLockedByKeyword(staticBy, override.by_keyword);
+        const keywords = dedupeSortKeywords(Object.values(merged).map((r) => r.keyword || r));
         if (keywords.length) {
           result = {
             keywords,
-            auditDate: override.updated_at || null,
-            source: 'supabase_locked_override',
+            auditDate: override.updated_at || result?.auditDate || null,
+            source: result ? 'locked_json+supabase_override' : 'supabase_locked_override',
           };
         }
       }

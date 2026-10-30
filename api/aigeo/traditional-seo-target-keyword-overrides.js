@@ -68,6 +68,23 @@ async function handlePost(req, res, supabase) {
     }
   } catch { /* ignore */ }
 
+  const { data: existingRows, error: existingErr } = await supabase
+    .from('traditional_seo_target_keyword_overrides')
+    .select('page_url, target_keyword, target_class, notes')
+    .eq('property_url', propertyUrl)
+    .in('page_url', apexTwin ? [pageUrl, apexTwin] : [pageUrl])
+    .limit(2);
+  if (existingErr) throw existingErr;
+  const previousByPage = new Map();
+  for (const row of existingRows || []) {
+    try {
+      const { normalizePagePath } = await import('../../lib/pagesMaster.js');
+      previousByPage.set(normalizePagePath(row.page_url), row);
+    } catch {
+      previousByPage.set(String(row.page_url || ''), row);
+    }
+  }
+
   // Empty keyword with no class → delete (legacy clear). With class → upsert cleared row.
   if (!targetKeyword && !targetClass) {
     const del = await supabase
@@ -79,13 +96,6 @@ async function handlePost(req, res, supabase) {
   } else {
     // SAFETY: modal "Save keyword" only sends targetKeyword. Preserve curated
     // target_class + notes on update. New rows get a safe default class.
-    const { data: existingRows, error: existingErr } = await supabase
-      .from('traditional_seo_target_keyword_overrides')
-      .select('page_url, target_class, notes')
-      .eq('property_url', propertyUrl)
-      .in('page_url', apexTwin ? [pageUrl, apexTwin] : [pageUrl])
-      .limit(2);
-    if (existingErr) throw existingErr;
     const list = Array.isArray(existingRows) ? existingRows : [];
     const existing = list.find((r) => r.page_url === pageUrl) || list[0] || null;
 
@@ -127,6 +137,17 @@ async function handlePost(req, res, supabase) {
   if (error) throw error;
 
   let csv09 = null;
+  let rankingSync = null;
+  try {
+    const { syncTrackedPageKeywords } = await import('../../lib/keyword-ranking/sync-tracked-page-keywords.mjs');
+    rankingSync = await syncTrackedPageKeywords({
+      overrides: data || [],
+      previousByPage,
+      propertyUrl,
+    });
+  } catch (err) {
+    rankingSync = { error: String(err?.message || err) };
+  }
   try {
     const { buildCsv09Body, loadLocked } = await import('../../lib/configIntegrity/checks.mjs');
     const { commitCsv09 } = await import('../../lib/commit-09-csv.mjs');
@@ -144,6 +165,7 @@ async function handlePost(req, res, supabase) {
     meta: {
       generatedAt: new Date().toISOString(),
       csv09,
+      rankingSync,
       csvExportReminder:
         '09 CSV saves itself when you change a keyword. Export 09 keywords is the catch-up button if health still says out of sync.'
     }
