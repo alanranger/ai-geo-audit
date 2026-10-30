@@ -32,9 +32,8 @@ async function waitForBuild() {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 });
     const has = await page.locator(`#${MARKER}`).count();
     const chip = await page.evaluate(() => {
-      const src = document.documentElement.innerHTML;
-      return src.includes('traditionalSeoUrlHasCurrentRunRender')
-        && src.includes('Policy says hidden but the page is visible');
+      const scripts = Array.from(document.scripts).map((s) => s.textContent || '').join('\n');
+      return scripts.includes('traditionalSeoUrlHasCurrentRunRender');
     });
     if (has && chip) {
       report.url = url;
@@ -81,8 +80,11 @@ try {
     await page.locator('#traditional-seo-run-audit-btn').click();
     report.steps.push('clicked ②');
     await page.waitForFunction(() => {
+      const rows = window.TRADITIONAL_SEO_STATE?.evaluationRows;
       const el = document.getElementById('traditional-seo-url-health');
-      return !!(el && /Page URLs:/i.test(el.textContent || '') && /Not checked/i.test(el.textContent || ''));
+      const t = el?.textContent || '';
+      const n = Number((t.match(/Page URLs:\s*(\d+)/i) || [])[1] || 0);
+      return Array.isArray(rows) && rows.length > 1000 && n > 50;
     }, null, { timeout: 180000 });
     report.steps.push('② finished');
     report.urlHealth = await page.locator('#traditional-seo-url-health').innerText();
