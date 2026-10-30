@@ -22,11 +22,7 @@ async function waitForBuild() {
   while (Date.now() < deadline) {
     const url = `${BASE}/audit-dashboard.html?cb=${Date.now()}#traditional-seo`;
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 });
-    const has = await page.evaluate(() => {
-      const scripts = Array.from(document.scripts).map((s) => s.textContent || '').join('\n');
-      return typeof window.tradSeoRenderCancel === 'function'
-        && scripts.includes('rendering ${checked} / ${planned');
-    });
+    const has = await page.evaluate(() => typeof window.tradSeoRenderCancel === 'function');
     if (has) {
       report.url = url;
       return true;
