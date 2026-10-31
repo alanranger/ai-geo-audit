@@ -11,6 +11,7 @@ import { urlsFromCsv } from '../lib/fault-monitor/sync-check.js';
 import { filterNotPublishedToCsv01, slugOfNotPublished } from '../lib/fault-monitor/site-checks.js';
 import { buildRow } from '../api/aigeo/tool-run-report.js';
 import { faultKey } from '../lib/fault-monitor/store.js';
+import { waitForExpectedBlocks } from '../lib/fault-monitor/renderer.js';
 
 const POST = 'https://www.alanranger.com/blog-on-photography/uk-bluebell-photography-guide';
 const HEADLINE = 'Bluebell Photography in the UK: A Practical Field Guide';
@@ -269,4 +270,20 @@ test('tool-run-report rows are capped and typed', () => {
 
 test('fault keys normalise URLs', () => {
   assert.equal(faultKey('A1', `${POST}/`), faultKey('A1', POST.replace('www.', '')));
+});
+
+test('block wait passes the class list as the page-function argument (puppeteer order)', async () => {
+  let received;
+  const page = {
+    // puppeteer signature: waitForFunction(fn, options, ...args)
+    waitForFunction: async (fn, options, arg) => {
+      received = { options, arg };
+      globalThis.document = { querySelector: () => ({}) };
+      try { return fn(arg); } finally { delete globalThis.document; }
+    }
+  };
+  const renderer = { waitFor: (p, fn, arg, timeout) => p.waitForFunction(fn, { timeout }, arg) };
+  await waitForExpectedBlocks(renderer, page, ['ar-academy-lesson', 'not-a-block']);
+  assert.deepEqual(received.arg, ['ar-academy-lesson']);
+  assert.equal(typeof received.options.timeout, 'number');
 });
