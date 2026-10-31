@@ -8,6 +8,7 @@ import { buildPlan, pageTypeOf, policyFor, rotationSlot } from '../lib/fault-mon
 import { questionLabels, parseJsonLd } from '../lib/fault-monitor/text.js';
 import { renderSilentFaultsLine } from '../lib/fault-monitor/brief.js';
 import { urlsFromCsv } from '../lib/fault-monitor/sync-check.js';
+import { filterNotPublishedToCsv01, slugOfNotPublished } from '../lib/fault-monitor/site-checks.js';
 import { buildRow } from '../api/aigeo/tool-run-report.js';
 import { faultKey } from '../lib/fault-monitor/store.js';
 
@@ -227,6 +228,18 @@ test('brief line: nothing when no red faults; names pages when red', () => {
   assert.match(html, /Traditional SEO: 4 red/);
   assert.match(html, /uk-bluebell-photography-guide/);
   assert.match(html, /\+3 more/);
+});
+
+test('D2 ignores NOT published slugs that have left CSV 01', () => {
+  const keys = ['alanranger.com/blog-on-photography/still-a-post'];
+  assert.deepEqual(
+    filterNotPublishedToCsv01(
+      ['still-a-post', 'lee-filter-15-percent-off', 'photography-light-review-kf-pl60b'],
+      keys
+    ),
+    ['still-a-post']
+  );
+  assert.equal(slugOfNotPublished('https://www.alanranger.com/blog-on-photography/lee-filter-15-percent-off/'), 'lee-filter-15-percent-off');
 });
 
 test('D5 source CSV parsing reads the URL column and normalises', () => {
