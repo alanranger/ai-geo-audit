@@ -230,6 +230,19 @@ test('brief line: nothing when no red faults; names pages when red', () => {
   assert.match(html, /\+3 more/);
 });
 
+test('A4 loader rule: all schema questions visible + section count match passes', () => {
+  const ok = faqParityCheck(ACADEMY, 'money', [], { faqVisibility: { total: 10, visible: 10 }, faqSectionCount: 10 });
+  assert.equal(ok.status, 'pass');
+  const noSection = faqParityCheck(ACADEMY, 'money', [], { faqVisibility: { total: 5, visible: 5 }, faqSectionCount: null });
+  assert.equal(noSection.status, 'pass');
+});
+
+test('A4 loader rule: hidden schema question, section mismatch, or missing FAQPage fail', () => {
+  assert.equal(faqParityCheck(ACADEMY, 'money', [], { faqVisibility: { total: 12, visible: 11 }, faqSectionCount: 12 }).status, 'fault');
+  assert.equal(faqParityCheck(ACADEMY, 'money', [], { faqVisibility: { total: 10, visible: 10 }, faqSectionCount: 12 }).status, 'fault');
+  assert.equal(faqParityCheck(ACADEMY, 'money', [], { faqVisibility: { total: 0, visible: 0 }, faqSectionCount: 7 }).status, 'fault');
+});
+
 test('D2 ignores NOT published slugs that have left CSV 01', () => {
   const keys = ['alanranger.com/blog-on-photography/still-a-post'];
   assert.deepEqual(

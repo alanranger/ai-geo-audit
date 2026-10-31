@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { codeBlocksIntact } from '../lib/trad-seo-render/code-blocks.js';
-import { findingsFromPage, hiddenTagFinding } from '../lib/trad-seo-render/findings.js';
+import { findingsFromPage, hiddenTagFinding, thinContentFinding } from '../lib/trad-seo-render/findings.js';
 import { extractRowFromRendered } from '../lib/trad-seo-render/extract-row.js';
 import { buildPlan, buildFullPlan } from '../lib/fault-monitor/plan.js';
 import { isFullTradSeoSource } from '../lib/trad-seo-render/run-kind.js';
@@ -136,4 +136,17 @@ test('only source trad_seo counts as a full ① run', () => {
   assert.equal(isFullTradSeoSource('trad_seo_playwright'), false);
   assert.equal(isFullTradSeoSource('trad_seo_sample'), false);
   assert.equal(isFullTradSeoSource('cursor_e2e_test'), false);
+});
+
+test('thin content: listing pages exempt; rendered content words decide the rest', () => {
+  assert.equal(thinContentFinding('https://www.alanranger.com/blog-on-photography', 32).status, 'pass');
+  assert.equal(thinContentFinding('https://www.alanranger.com/photographic-workshops-near-me', 29).status, 'pass');
+  assert.equal(thinContentFinding('https://www.alanranger.com/blog-on-photography/a-christmas-day-memory-crisis', 122).status, 'fail');
+  assert.equal(thinContentFinding('https://www.alanranger.com/blog-on-photography/x', 231).status, 'warn');
+  assert.equal(thinContentFinding('https://www.alanranger.com/photography-tuition-services', 2103).status, 'pass');
+});
+
+test('extract row prefers rendered content words over the HTML article guess', () => {
+  const row = extractRowFromRendered('https://www.alanranger.com/x', '<html><body><main><p>one two</p></main></body></html>', 200, { contentWords: 1625 });
+  assert.equal(row.seoMainWordCount, 1625);
 });
