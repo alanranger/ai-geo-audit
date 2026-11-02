@@ -288,7 +288,7 @@ export default async function handler(req, res) {
         if (step.key === 'domain_strength') progress.domain_strength = null;
         if (step.key === 'gsc_url_inspection') progress.gsc = null;
         if (step.key === 'silent_faults') progress.silent_faults = null;
-        if (step.key === 'trad_seo_full') {
+        if (step.key === 'trad_seo_render') {
           progress.trad_seo_render_done_id = progress.trad_seo_render?.runId || result.body?.run_id || progress.trad_seo_render_done_id;
           progress.trad_seo_render = null;
         }

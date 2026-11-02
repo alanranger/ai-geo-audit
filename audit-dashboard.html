@@ -91041,8 +91041,9 @@ Confidence: ${c}`;
           { key: 'scenario_cockpit', label: 'Scenario Planning cockpit refresh', tiers: ['quick','standard','full'], dependsOn: [], runner: runGlobalStepScenarioCockpit },
           { key: 'money_pages', label: 'Reload Money Pages view', tiers: ['quick','standard','full'], dependsOn: ['audit_scan'], runner: runGlobalStepMoneyPages },
           { key: 'trad_seo_rescore', label: 'Traditional SEO rescore (cached extractability)', tiers: ['standard'], dependsOn: ['audit_scan'], runner: runGlobalStepTradSeoRescore },
-          { key: 'trad_seo_full', label: 'Traditional SEO rendered audit (all 06 URLs)', tiers: ['full'], dependsOn: ['audit_scan', 'schema_qa'], runner: runGlobalStepTradSeoFull },
-          { key: 'trad_seo_broken_links', label: 'Traditional SEO broken-links job', tiers: ['full'], dependsOn: ['trad_seo_full'], runner: runGlobalStepTradSeoBroken },
+          { key: 'content_extractability_sync', label: 'Content extractability + schema QA sync (all tiers)', tiers: ['full'], dependsOn: ['audit_scan', 'schema_qa'], runner: runGlobalStepContentExtractability },
+          { key: 'trad_seo_render', label: 'Traditional SEO rendered audit ① (all 06 URLs)', tiers: ['full'], dependsOn: ['audit_scan', 'schema_qa'], runner: runGlobalStepTradSeoFull },
+          { key: 'trad_seo_broken_links', label: 'Traditional SEO broken-links job', tiers: ['full'], dependsOn: ['trad_seo_render'], runner: runGlobalStepTradSeoBroken },
           { key: 'citation_consistency', label: 'Citation consistency refresh', tiers: ['full'], dependsOn: [], runner: runGlobalStepCitationConsistency },
           { key: 'mentions_baseline', label: 'Mentions baseline refresh', tiers: ['full'], dependsOn: [], runner: runGlobalStepMentionsBaseline },
           { key: 'ke_topup', label: 'Keywords Everywhere top-up (stale rows only)', tiers: ['standard','full'], dependsOn: [], runner: runGlobalStepKeTopup },
@@ -91298,6 +91299,15 @@ Confidence: ${c}`;
         if (typeof window.runTraditionalSeoEvaluation !== 'function') throw new Error('runTraditionalSeoEvaluation function not available');
         const result = await window.runTraditionalSeoEvaluation({ refreshAudit: false, refreshExtractability: false });
         debugLog('[Global Run] [Traditional SEO rescore] ✓ Completed', 'success');
+        return result;
+      }
+
+      // Restored 2 Nov 2026 (dropped by e572c2ea): the same step as the Monday cron's content_extractability_sync.
+      async function runGlobalStepContentExtractability() {
+        debugLog('[Global Run] [Content extractability + schema QA sync] Starting...', 'info');
+        if (typeof window.runTraditionalSeoEvaluation !== 'function') throw new Error('runTraditionalSeoEvaluation function not available');
+        const result = await window.runTraditionalSeoEvaluation({ refreshAudit: false, refreshExtractability: true });
+        debugLog('[Global Run] [Content extractability + schema QA sync] ✓ Completed', 'success');
         return result;
       }
 
