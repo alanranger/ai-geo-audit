@@ -10,9 +10,9 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 import { createClient } from '@supabase/supabase-js';
 import { londonWeekStartYmd, sendJson } from '../../lib/ceo-weekly/shared.js';
 import { recheckUrl, startRun, tickRun, tickSummary } from '../../lib/fault-monitor/runner.js';
-import { faultKey, latestRun, loadOpenFindings, resolveKeys } from '../../lib/fault-monitor/store.js';
+import { faultKey, latestRun, loadCurrentFindings, loadOpenFindings, resolveKeys } from '../../lib/fault-monitor/store.js';
 import { urlKey } from '../../lib/fault-monitor/prefetch.js';
-import { loadFaultSummary } from '../../lib/fault-monitor/brief.js';
+import { summariseFindings } from '../../lib/fault-monitor/brief.js';
 
 function need(key) {
   const v = process.env[key];
@@ -25,13 +25,13 @@ function supabase() {
 }
 
 async function handleGet(sb, res) {
-  const [findings, run, summary] = await Promise.all([loadOpenFindings(sb), latestRun(sb), loadFaultSummary(sb)]);
+  const [{ current, stale, run: fullRun }, run] = await Promise.all([loadCurrentFindings(sb), latestRun(sb)]);
   const runStart = run ? Date.parse(run.started_at) : 0;
-  const rows = findings.map((f) => ({ ...f, not_rechecked: runStart > 0 && Date.parse(f.last_checked) < runStart }));
+  const rows = current.map((f) => ({ ...f, not_rechecked: runStart > 0 && Date.parse(f.last_checked) < runStart }));
   return sendJson(res, 200, {
     ok: true,
     run: run ? { ...tickSummary(run), started_at: run.started_at, finished_at: run.finished_at, rotation_slot: run.rotation_slot, source: run.source, not_checked: run.not_checked || [] } : null,
-    summary,
+    summary: summariseFindings(current, stale, fullRun),
     findings: rows
   });
 }

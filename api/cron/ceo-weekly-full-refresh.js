@@ -53,6 +53,14 @@ function cronHeaders() {
   return h;
 }
 
+/** End state: sent, held by the sense-check (Alan got the short note), or failed. */
+export function finalOutcome(progress) {
+  const partial = progress.failed_keys.length ? `partial:${progress.failed_keys.join(',')}` : null;
+  if (progress.email_sent) return { state: 'done', error: null, runStatus: partial ? 'partial' : 'ok', runError: partial };
+  if (progress.email_held) return { state: 'held', error: 'brief_held_by_sense_check', runStatus: 'held', runError: 'brief_held_by_sense_check' };
+  return { state: 'failed', error: 'full_refresh_email_failed', runStatus: 'partial', runError: 'full_refresh_email_failed' };
+}
+
 function emptyProgress(weekStart) {
   return {
     week_start: weekStart,
@@ -156,7 +164,7 @@ export default async function handler(req, res) {
       });
     }
 
-    if (!forceRestart && progress.step_index >= allSteps.length && !progress.email_sent) {
+    if (!forceRestart && progress.step_index >= allSteps.length && !progress.email_sent && !progress.email_held) {
       progress.step_index = allSteps.length - 1;
       progress.steps = (progress.steps || []).filter((s) => s.key !== 'ceo_weekly_email');
     }
@@ -195,8 +203,7 @@ export default async function handler(req, res) {
       } else if (step.key === 'ranking_ai' && rankingTicksExceeded(progress)) {
         result = abortRankingResult('ranking_aborted_max_ticks');
       } else if (step.kind === 'email') {
-        const criticalFailed = progress.failed_keys.includes('audit_scan')
-          || progress.failed_keys.includes('ranking_ai');
+        const criticalFailed = ['audit_scan', 'ranking_ai', 'ceo_brief_sense_check'].some((k) => progress.failed_keys.includes(k));
         const partial = progress.failed_keys.length > 0;
         const report = await runCeoWeeklyReport({
           weekStart,
@@ -215,9 +222,8 @@ export default async function handler(req, res) {
             finished_at: new Date().toISOString()
           }
         });
-        const ok = report?.mode === 'report'
-          || report?.mode === 'already_sent'
-          || report?.mode === 'fail_safe';
+        const held = report?.mode === 'held';
+        const ok = held || ['report', 'already_sent', 'fail_safe'].includes(report?.mode);
         result = {
           ok,
           done: true,
@@ -228,7 +234,8 @@ export default async function handler(req, res) {
             ? (report?.gate?.reason || 'fail_safe')
             : null
         };
-        if (ok) progress.email_sent = true;
+        if (held) progress.email_held = true;
+        else if (ok) progress.email_sent = true;
       } else {
         if (step.key === 'ranking_ai' && !progress.ranking_started_at) {
           progress.ranking_started_at = new Date().toISOString();
@@ -258,6 +265,7 @@ export default async function handler(req, res) {
       if (result.silent_faults) progress.silent_faults = result.silent_faults;
       if (result.trad_seo_render) progress.trad_seo_render = result.trad_seo_render;
       if (result.trad_seo_broken) progress.trad_seo_broken = result.trad_seo_broken;
+      if (result.brief_gate) progress.brief_gate = result.brief_gate;
 
       const stepDone = result.done !== false;
       if (stepDone) {
@@ -314,29 +322,26 @@ export default async function handler(req, res) {
 
     const done = progress.step_index >= allSteps.length;
     if (done) {
+      const outcome = finalOutcome(progress);
       await saveState(sb, {
-        state: progress.email_sent ? 'done' : 'failed',
+        state: outcome.state,
         finished_at: new Date().toISOString(),
         last_success_at: progress.email_sent ? new Date().toISOString() : state?.last_success_at || null,
         last_details: progress,
-        last_error: progress.email_sent ? null : 'full_refresh_email_failed'
+        last_error: outcome.error
       });
       await sb.from('ceo_weekly_refresh_runs').upsert({
         week_start: weekStart,
-        status: progress.email_sent
-          ? (progress.failed_keys.length ? 'partial' : 'ok')
-          : 'partial',
+        status: outcome.runStatus,
         steps: progress.steps,
         finished_at: new Date().toISOString(),
-        error: progress.email_sent
-          ? (progress.failed_keys.length ? `partial:${progress.failed_keys.join(',')}` : null)
-          : 'full_refresh_email_failed'
+        error: outcome.runError
       }, { onConflict: 'week_start' });
     }
 
     return sendJson(res, 200, {
       ok: true,
-      status: done ? (progress.email_sent ? 'done' : 'failed') : 'continue',
+      status: done ? finalOutcome(progress).state : 'continue',
       weekStart,
       next_step: done ? null : allSteps[progress.step_index]?.key,
       progress

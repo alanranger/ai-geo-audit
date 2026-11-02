@@ -2,6 +2,18 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-11-02] - CEO brief: Traditional SEO from the current ① only; pre-send sense-check gate; DFS spending guard
+
+**Problem:** the 2 Nov brief said "Traditional SEO: 55 red". All 55 (A2 × 35, A3 × 20) were checklist posts last seen 30 Oct by the retired monitor; today's ① never re-checked them. Separately, the morning's broken ranking figures would have gone out with no sense-check.
+
+**Changes:**
+- `lib/fault-monitor/store.js` `loadCurrentFindings` / `currentOnly`: a finding is open only if the latest finished full ① (`fault_monitor_runs` source `trad_seo`, status `done`) re-checked it. Used by the brief (`loadFaultSummary`), the Traditional SEO API summary and the dashboard GET (`api/aigeo/silent-fault-monitor.js`). The 55 stale findings were closed with `detail.resolved_reason` "stale: retired monitor, checklist noindexed" (backup `fault_monitor_findings_stale_bak_20261102`).
+- `lib/fault-monitor/page-checks.js`: A2/A3 skip checklist posts and intentionally-noindex pages (`isIntentionallyHidden`, same rule as B1).
+- Pre-send sense-check: new Monday step `ceo_brief_sense_check` (kind `brief_gate`, before `ceo_weekly_email`; dashboard Full list too). `lib/ceo-weekly/brief-gate.js` + thresholds in `brief-gate-config.js`: surface / top-of-page move > 30% vs the last complete ranking audit; top-10 drop > a third; `ranking_quality` not complete or > 10% owner slots on google.com; a red/amber finding in the brief older than the latest ①; a brief source step that did not refresh. A failure opens a hold (`ceo_brief_holds`, `migrations/ceo_brief_holds_20261102.sql`). While held, `runCeoWeeklyReport` (every send path, incl. the 20:00 rescue) sends Alan one short "held while figures are checked" note (no figures) and keeps the built brief; the refresh ends in state `held`. Dashboard banner + **Send anyway** (`POST /api/aigeo/ceo-brief-gate {action:'send-anyway'}`). The PC handoff cycle writes `ALERT-ceo-brief-held-LATEST.md` for Claude (`Chat AI Bot/scripts/claude-cursor-handoff/export-ceo-brief-holds.mjs`).
+- DFS spending guard: `lib/keyword-ranking/dfs-approval-gate.js`, `scripts/dfs-estimate.mjs`; `serp-rank-test` refuses over-$1 unscheduled batches (preview deployments, or `x-dfs-context: test|preview|rerun`) without `dfs_approval: "QUESTION-…"`.
+
+**Tests:** `test/ceo-brief-gate.test.js` (broken 2 Nov figures hold, corrected pass, terminal held state), `test/dfs-approval-gate.test.js`, A2/A3 skip in `test/silent-fault-monitor.test.js`; replay on real data `node scripts/replay-ceo-brief-gate.mjs`.
+
 ## [2026-11-02] - Ranking table: "legacy quality unavailable" on every row (serp_features cut to 4 keys)
 
 **Cause:** `api/supabase/get-latest-audit.js` cut any `serp_features` with more than 10 keys down to `ai_overview`, `local_pack`, `people_also_ask`, `featured_snippet`. Current rows have 26 keys, so `capture_status` (and `confirmation_state`) never reached the dashboard and `rankingCaptureQualityKind` fell back to `legacy_unverified` on all 94 rows of 2 Nov.

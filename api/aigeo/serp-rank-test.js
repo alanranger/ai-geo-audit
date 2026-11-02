@@ -23,6 +23,7 @@ import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-loca
 import { getBusinessDevice } from '../../lib/keyword-ranking/business-location.js';
 import { resolveSerpRedirects } from '../../lib/keyword-ranking/serp-redirect-owner.js';
 import { loadRedirectLookups, applyRedirectLookups } from '../../lib/keyword-ranking/redirect-lookups.js';
+import { batchEstimateUsd, dfsApprovalGate, unscheduledContext } from '../../lib/keyword-ranking/dfs-approval-gate.js';
 import {
   preflightLocalCapture,
   resolveLocalCaptureFields,
@@ -780,6 +781,14 @@ export default async function handler(req, res) {
   const expandAiOverview = /^(1|true|yes)$/i.test(String(body?.ai_overview ?? req.query.ai_overview ?? ''));
   console.log(`[Handler] Using SERP depth: ${depth}, expand_ai_overview: ${expandAiOverview}`);
 
+  const dfsGate = dfsApprovalGate({
+    estimateUsd: batchEstimateUsd({ keywordCount: keywords.length, aiOverview: expandAiOverview,
+      priorSpendUsd: body?.spend_state?.cost_usd_used, plannedKeywords: body?.dfs_batch_keywords }),
+    context: unscheduledContext({ vercelEnv: process.env.VERCEL_ENV, header: req.headers?.['x-dfs-context'] }),
+    approval: body?.dfs_approval,
+  });
+  if (!dfsGate.ok) return res.status(402).json({ error: 'dfs_approval_required', dfs_gate: dfsGate });
+
   // Always resolve from the locked server-side map. Never trust client
   // `locations` — a bad/empty client map previously forced 90/90 UK unmapped
   // (SPA rewrite served HTML for the locked JSON, then the API honoured it).
@@ -1188,6 +1197,7 @@ export default async function handler(req, res) {
         dfs_fatal_reason: dfsFatalReason,
       },
       spend_limits: spend.snapshot(),
+      dfs_gate: dfsGate,
       preflight: localPreflight,
       per_keyword: perKeyword,
     });

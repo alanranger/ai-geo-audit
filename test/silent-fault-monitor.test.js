@@ -51,6 +51,21 @@ test('A2 tolerates a body that starts with hero text before the intro', () => {
   assert.equal(byCheck(r, 'A2').status, 'pass');
 });
 
+test('A2/A3 skip checklist posts and intentionally-noindex pages (same rule as B1); other posts still checked', () => {
+  const cut = REST.split(' ').slice(60).join(' ');
+  const checklistHtml = blogHtml().replace('<body>', '<body class="category-1-page-field-checklists">');
+  const viaPage = runPageChecks({ url: POST, pageType: 'blog', prefetch: { status: 200 }, policy: {},
+    render: { measure: { html: checklistHtml, ldTexts: [JSON.stringify(posting(cut))], robots: 'noindex' }, pageErrors: [] } });
+  assert.equal(byCheck(viaPage.results, 'A2').status, 'pass');
+  assert.equal(byCheck(viaPage.results, 'A3').status, 'pass');
+  assert.equal(byCheck(viaPage.results, 'B1').status, 'pass');
+  const viaPolicy = blogPostingChecks(POST, [posting(`${HEADLINE}.`)], blogHtml(), { hidden: true });
+  assert.equal(byCheck(viaPolicy, 'A3').status, 'pass');
+  const normal = runPageChecks({ url: POST, pageType: 'blog', prefetch: { status: 200 }, policy: {},
+    render: { measure: { html: blogHtml(), ldTexts: [JSON.stringify(posting(cut))], robots: '' }, pageErrors: [] } });
+  assert.equal(byCheck(normal.results, 'A2').status, 'fault', 'an indexable post with a dropped intro still faults');
+});
+
 test('A1 faults when there is no BlogPosting at all', () => {
   const r = blogPostingChecks(POST, [{ '@type': 'Article' }], blogHtml());
   assert.equal(byCheck(r, 'A1').status, 'fault');

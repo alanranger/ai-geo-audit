@@ -13,16 +13,11 @@ const arg = (name, dflt) => (process.argv.find((a) => a.startsWith(`--${name}=`)
 const URL = arg('url', 'https://ai-geo-audit.vercel.app/audit-dashboard.html');
 const LEGACY = /legacy quality unavailable/;
 
-async function cellTexts(page) {
-  const texts = [];
-  for (let i = 0; i < 20; i += 1) {
-    texts.push(...await page.locator('.kw-last-checked-time').allTextContents());
-    const next = page.locator('#ranking-pagination-next');
-    if (!(await next.count()) || await next.isDisabled()) break;
-    await next.click();
-    await page.waitForTimeout(300);
-  }
-  return texts;
+/** Every row on one page ("all" rows per page), so no row is missed by paging. */
+async function cellTexts(page, expected) {
+  await page.selectOption('#ranking-rows-per-page', 'all');
+  await page.waitForFunction((n) => document.querySelectorAll('.kw-last-checked-time').length >= n, expected, { timeout: 30000 }).catch(() => {});
+  return page.locator('.kw-last-checked-time').allTextContents();
 }
 
 const browser = await chromium.launch();
@@ -36,12 +31,12 @@ try {
   const rows = await page.evaluate(() => window.rankingAiData.map((r) => ({
     keyword: r.keyword, status: r.serp_features?.capture_status || null,
   })));
-  const texts = await cellTexts(page);
+  const texts = await cellTexts(page, rows.length);
   const legacyCells = texts.filter((t) => LEGACY.test(t));
   const noStatus = rows.filter((r) => !r.status);
   console.log(JSON.stringify({ url: URL, rows: rows.length, rows_without_capture_status: noStatus.length,
     cells_checked: texts.length, legacy_cells: legacyCells.length, sample: texts.slice(0, 3) }, null, 2));
-  const ok = rows.length > 0 && noStatus.length === 0 && legacyCells.length === 0 && texts.length > 0;
+  const ok = rows.length > 0 && noStatus.length === 0 && legacyCells.length === 0 && texts.length === rows.length;
   console.log(ok ? 'PASS' : 'FAIL');
   process.exitCode = ok ? 0 : 1;
 } finally {
