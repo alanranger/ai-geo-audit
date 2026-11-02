@@ -114,11 +114,19 @@ test('card B sales list: grouped by label, £ desc, ties in sheet category order
 test('rendered brief: new section order, no retired blocks', () => {
   const html = renderCeoWeeklyHtml({
     generated_at: '2026-11-02T14:42:00Z', strategy: { error: 'x' }, section_g: { error: 'x' },
-    front: { tiles: [{ value: '1', label: 'x', sub: 'y', section: 1, tone: 'grey' }] }
+    front: { tiles: [{ value: '1', label: 'x', sub: 'y', section: 1, tone: 'grey' }] },
+    pipeline: {
+      windows: [{ key: 'w0', head: 'Next 30 days', rows: [], people: 0, events: 0, taken: 0, due: 0 }],
+      totals: { events: 0, people: 0, taken: 0, due: 0 }, flags: []
+    },
+    sales_tab: buildSalesTab({ targets: TARGETS, monthRows: [], gpRates: {}, asOfYmd: '2026-11-02' }),
+    system_health: [{ state: 'ok', text: 'Figures checked before sending' }]
   });
+  assert.ok(html.includes("PIPELINE · WHAT'S BOOKED AHEAD") && html.includes('YOUR TARGETS') && html.includes('Figures checked before sending'));
   const order = ['HEADLINES', '1 · Operations', '2 · Revenue &amp; GP', '3 · Strategy', '4 · SEO &amp; AI visibility', '5 · System health'];
   const at = order.map((s) => html.indexOf(s));
   assert.ok(at.every((i, k) => i >= 0 && (k === 0 || i > at[k - 1])), `order ${at}`);
+  assert.equal((html.match(/NEW ·/g) || []).length, 0, 'mockup-only "NEW ·" badges');
   for (const retired of ['EXECUTIVE SUMMARY', 'BIGGEST WINS', 'DO THIS WEEK', 'DEEPER ANALYSIS', 'Upcoming events', 'Batsford: AM and PM', 'no sales in 14 days', 'A · The website', 'G · Profit levers', 'Traditional SEO: ']) {
     assert.equal(html.includes(retired), false, retired);
   }

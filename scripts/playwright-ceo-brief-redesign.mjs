@@ -25,7 +25,7 @@ const RETIRED = [
   'EXECUTIVE SUMMARY', 'BIGGEST WINS', 'BIGGEST WORRIES', 'DO THIS WEEK', 'DEEPER ANALYSIS', 'Upcoming events',
   'Batsford: AM and PM sessions', 'no sales in 14 days', 'STRATEGY · WHERE YOU STAND', 'Traditional SEO: ',
   'A · The website', 'B · The money', 'C · The AI front', 'D · The Academy', 'G · Profit levers', 'E · Ranking changes',
-  'F · SEO health', 'MOCKUP v7'
+  'F · SEO health', 'MOCKUP v7', 'NEW ·'
 ];
 
 async function shoot(page, file, width) {
