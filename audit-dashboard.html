@@ -7876,6 +7876,42 @@
       </button>
     </aside>
     <main class="aigeo-main">
+  <div id="ceo-brief-hold-banner" style="display:none;margin:0 0 1rem;padding:0.85rem 1rem;border-left:4px solid #d92d20;background:#fef3f2;border-radius:8px;color:#7a271a;font-size:0.9rem;line-height:1.5;">
+    <b>This week's CEO brief is held while figures are checked.</b>
+    <div id="ceo-brief-hold-reasons" style="margin:0.35rem 0 0.6rem;"></div>
+    <button type="button" id="ceo-brief-send-anyway" class="btn btn-secondary">Send anyway</button>
+    <span id="ceo-brief-hold-status" style="margin-left:0.6rem;"></span>
+  </div>
+  <script>
+    (function () {
+      const $ = (id) => document.getElementById(id);
+      const api = (p) => (window.apiUrl ? window.apiUrl(p) : p);
+      async function refresh() {
+        try {
+          const r = await fetch(api('/api/aigeo/ceo-brief-gate?holdOnly=1'), { cache: 'no-store' });
+          const body = await r.json();
+          const hold = body && body.hold;
+          $('ceo-brief-hold-banner').style.display = hold ? 'block' : 'none';
+          if (!hold) return;
+          $('ceo-brief-hold-banner').dataset.weekStart = hold.week_start;
+          $('ceo-brief-hold-reasons').textContent = (hold.failures || []).map((f) => f.detail).join(' · ');
+        } catch (e) { /* banner stays hidden */ }
+      }
+      async function sendAnyway() {
+        const weekStart = $('ceo-brief-hold-banner').dataset.weekStart;
+        if (!window.confirm('Send this week\'s CEO brief as built, even though the sense-check held it?')) return;
+        $('ceo-brief-send-anyway').disabled = true;
+        $('ceo-brief-hold-status').textContent = 'Sending…';
+        const r = await fetch(api('/api/aigeo/ceo-brief-gate'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'send-anyway', weekStart }) });
+        const body = await r.json().catch(() => ({}));
+        $('ceo-brief-hold-status').textContent = body.ok ? 'Sent.' : `Not sent: ${body.error || body.mode || r.status}`;
+        $('ceo-brief-send-anyway').disabled = false;
+        if (body.ok) refresh();
+      }
+      window.refreshCeoBriefHoldBanner = refresh;
+      document.addEventListener('DOMContentLoaded', () => { $('ceo-brief-send-anyway').addEventListener('click', sendAnyway); refresh(); });
+    })();
+  </script>
   <style>
     .aigeo-tab-load {
       position: sticky; top: 0; z-index: 1200;
@@ -91055,6 +91091,7 @@ Confidence: ${c}`;
           { key: 'update_tasks', label: 'Update all tasks with latest data', tiers: ['quick','standard','full'], dependsOn: ['audit_scan'], runner: runGlobalStepUpdateTasks },
           { key: 'academy_refresh', label: 'Academy refresh (Memberstack + weekly metrics)', tiers: ['full'], dependsOn: [], runner: runGlobalStepAcademyRefresh },
           { key: 'silent_faults', label: 'Silent fault monitor (retired — folded into Traditional SEO)', tiers: ['full'], dependsOn: [], runner: runGlobalStepSilentFaults },
+          { key: 'ceo_brief_sense_check', label: 'CEO brief sense-check (holds the email if figures look wrong)', tiers: ['full'], dependsOn: [], runner: runGlobalStepBriefSenseCheck },
           { key: 'ceo_weekly_email', label: 'CEO weekly HTML email', tiers: ['full'], dependsOn: [], runner: runGlobalStepCeoWeeklyEmail }
         ];
       }
@@ -91486,6 +91523,22 @@ Confidence: ${c}`;
       async function runGlobalStepSilentFaults() {
         debugLog('[Global Run] [Silent faults] Retired — folded into Traditional SEO', 'info');
         return { ok: true, retired: true };
+      }
+
+      // Same sense-check as the Monday cron; a hold makes the next step send only Alan's short "held" note.
+      async function runGlobalStepBriefSenseCheck(ctx = {}) {
+        const steps = (Array.isArray(ctx.steps) ? ctx.steps : []).map((s) => ({ key: s.key, ok: s.status === 'Done' }));
+        const res = await fetch(apiUrl('/api/aigeo/ceo-brief-gate'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'assess', steps })
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body.ok === false) return { success: false, error: body?.error || `HTTP ${res.status}` };
+        const why = (body.failures || []).map((f) => f.detail).join(' | ');
+        debugLog(body.held ? `[Global Run] [CEO brief sense-check] HELD — ${why}` : '[Global Run] [CEO brief sense-check] passed', body.held ? 'warn' : 'success');
+        if (typeof window.refreshCeoBriefHoldBanner === 'function') window.refreshCeoBriefHoldBanner();
+        return body;
       }
 
       async function runGlobalStepCeoWeeklyEmail(ctx = {}) {
