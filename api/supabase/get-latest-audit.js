@@ -8,6 +8,7 @@
 import { filterTrackedRows, filterTrackedKeywords } from '../../lib/keyword-ranking/tracked-set-v3.js';
 import { coalesceSearchVolume } from '../../lib/keyword-ranking/ke-search-volumes.js';
 import { resolveRowsClassificationAtRender } from '../../lib/keyword-ranking/resolve-classification-at-render.js';
+import { compactSerpFeatures } from '../../lib/keyword-ranking/compact-serp-features.js';
 import { computeTopOfPageRollup } from '../../lib/audit/topOfPage.js';
 import lockedLocationsJson from '../../lib/keyword-ranking/keyword-tracking-locations-LOCKED.json' with { type: 'json' };
 
@@ -508,27 +509,7 @@ export default async function handler(req, res) {
               competitorCounts = Object.fromEntries(entries);
             }
 
-            let serpFeatures = row.serp_features || {};
-            if (typeof serpFeatures === 'string') {
-              try {
-                serpFeatures = JSON.parse(serpFeatures);
-              } catch (e) {
-                serpFeatures = {};
-              }
-            }
-            if (typeof serpFeatures !== 'object' || serpFeatures === null) serpFeatures = {};
-            
-            // Truncate serp_features if it's too large (limit to essential fields only)
-            if (Object.keys(serpFeatures).length > 10) {
-              const essentialFields = ['ai_overview', 'local_pack', 'people_also_ask', 'featured_snippet'];
-              const truncated = {};
-              essentialFields.forEach(field => {
-                if (serpFeatures[field] !== undefined) {
-                  truncated[field] = serpFeatures[field];
-                }
-              });
-              serpFeatures = truncated;
-            }
+            const serpFeatures = compactSerpFeatures(row.serp_features);
 
             let aiEngines = row.ai_engines || null;
             if (typeof aiEngines === 'string') {

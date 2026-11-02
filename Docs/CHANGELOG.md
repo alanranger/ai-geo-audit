@@ -2,6 +2,12 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-11-02] - Ranking table: "legacy quality unavailable" on every row (serp_features cut to 4 keys)
+
+**Cause:** `api/supabase/get-latest-audit.js` cut any `serp_features` with more than 10 keys down to `ai_overview`, `local_pack`, `people_also_ask`, `featured_snippet`. Current rows have 26 keys, so `capture_status` (and `confirmation_state`) never reached the dashboard and `rankingCaptureQualityKind` fell back to `legacy_unverified` on all 94 rows of 2 Nov.
+
+**Change:** `lib/keyword-ranking/compact-serp-features.js` keeps every field and caps only `confirmation_observations` (latest 3). The dashboard no longer reuses a localStorage `rankingAiData` copy whose rows all lack `capture_status`. Tests: `test/compact-serp-features.test.js`; Playwright `scripts/playwright-ranking-quality-cells.mjs` (Ranking tab, no DataForSEO calls) asserts 0 "legacy quality unavailable" cells.
+
 ## [2026-11-02] - Ranking: resolve Google redirect links (google.com/goto) to the real site before ownership
 
 **Problem:** from about 1 Nov, DataForSEO returns many SERP items with `url: https://google.com/goto?url=<opaque token>` and `domain: google.com`; the real site is only in `breadcrumb` / `website_name`. Ownership matched on domain/url, so our results read as google.com (2 Nov: 1,174 of 2,023 owner slots on google.com; top-10 41 → 14).
