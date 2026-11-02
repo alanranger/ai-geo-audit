@@ -33,7 +33,7 @@ Aliases: `npm run export:google`, `npm run snapshot:dashboard` (same command).
 
 ## Critical gotchas
 
-- **DataForSEO spending for tests, previews and re-runs (Alan, 2 Nov 2026):** state the estimated cost first (`node scripts/dfs-estimate.mjs --keywords=N --aio --context=test|preview|rerun`). Anything over **$1** needs approval in a Claude QUESTION file before it runs; pass that file name as `dfs_approval`. `serp-rank-test` refuses (402) over-$1 batches on preview deployments or with header `x-dfs-context: test|preview|rerun` unless approved. Scheduled runs and Alan's dashboard button are not affected. Don't produce spend breakdowns unless asked.
+- **DataForSEO spending for tests, previews and re-runs (Alan, 2 Nov 2026):** state the estimated cost first (`node scripts/dfs-estimate.mjs --keywords=N --aio --context=test|preview|rerun`). Anything over **$1** needs approval in a Claude QUESTION file before it runs; pass that file name as `dfs_approval`. `serp-rank-test` refuses (402) over-$1 batches on preview deployments or with header `x-dfs-context: test|preview|rerun` unless approved; the estimate is cumulative across requests (`spend_state`) or the declared `dfs_batch_keywords`, as each request takes at most 20 keywords. Scheduled runs and Alan's dashboard button are not affected. Don't produce spend breakdowns unless asked.
 
 - **Vercel deploys from Git.** If the user only edits files in Dropbox, **nothing reaches production** until `git commit` + `git push` to `main` (repo: `ai-geo-audit`).
 - **Supabase project:** production dashboard uses **`igzvwbvgvmzvvzoclufx`** (MCP: `user-supabase-ai-chat`). Do not confuse with **`user-supabase-academy`** (`dqrtcsvqsfgbqmnonkpt`).

@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dfsApprovalGate, estimateSerpBatchUsd, unscheduledContext } from '../lib/keyword-ranking/dfs-approval-gate.js';
+import { batchEstimateUsd, dfsApprovalGate, estimateSerpBatchUsd, unscheduledContext } from '../lib/keyword-ranking/dfs-approval-gate.js';
+
+test('the batch estimate is cumulative across requests (20 keywords max each) or the declared plan', () => {
+  assert.equal(batchEstimateUsd({ keywordCount: 20, aiOverview: true }), 0.5, 'one request alone stays under $1');
+  assert.equal(batchEstimateUsd({ keywordCount: 20, aiOverview: true, priorSpendUsd: 0.6 }), 1.1, 'third request of a re-run crosses $1');
+  assert.equal(batchEstimateUsd({ keywordCount: 20, aiOverview: true, plannedKeywords: 94 }), 2.35, 'a declared 94-keyword plan is judged up front');
+});
 
 test('estimate: 94 keywords with AI Overview ≈ $2.35; 5 keywords ≈ $0.13', () => {
   assert.equal(estimateSerpBatchUsd(94, { aiOverview: true }), 2.35);

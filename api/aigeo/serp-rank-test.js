@@ -23,7 +23,7 @@ import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-loca
 import { getBusinessDevice } from '../../lib/keyword-ranking/business-location.js';
 import { resolveSerpRedirects } from '../../lib/keyword-ranking/serp-redirect-owner.js';
 import { loadRedirectLookups, applyRedirectLookups } from '../../lib/keyword-ranking/redirect-lookups.js';
-import { dfsApprovalGate, estimateSerpBatchUsd, unscheduledContext } from '../../lib/keyword-ranking/dfs-approval-gate.js';
+import { batchEstimateUsd, dfsApprovalGate, unscheduledContext } from '../../lib/keyword-ranking/dfs-approval-gate.js';
 import {
   preflightLocalCapture,
   resolveLocalCaptureFields,
@@ -782,7 +782,8 @@ export default async function handler(req, res) {
   console.log(`[Handler] Using SERP depth: ${depth}, expand_ai_overview: ${expandAiOverview}`);
 
   const dfsGate = dfsApprovalGate({
-    estimateUsd: estimateSerpBatchUsd(keywords.length, { aiOverview: expandAiOverview }),
+    estimateUsd: batchEstimateUsd({ keywordCount: keywords.length, aiOverview: expandAiOverview,
+      priorSpendUsd: body?.spend_state?.cost_usd_used, plannedKeywords: body?.dfs_batch_keywords }),
     context: unscheduledContext({ vercelEnv: process.env.VERCEL_ENV, header: req.headers?.['x-dfs-context'] }),
     approval: body?.dfs_approval,
   });
