@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-11-02] - Monday + dashboard Full refresh: extractability + schema QA sync step restored
+
+**Problem:** `e572c2ea` (30 Oct) changed the `trad_seo_full` step from the extractability + schema QA sync (`runTradSeoFull` / dashboard `runTraditionalSeoEvaluation({refreshExtractability:true})`) into the rendered ①, so the extractability refresh stopped running on Mondays and from the Full refresh button.
+
+**Change:** new step `content_extractability_sync` (`kind: 'trad_seo_full'`, after `audit_scan` + `schema_qa`, before ①) in the Monday catalog and the dashboard list; the rendered ① step key is now `trad_seo_render` (broken links depends on it; the cron's done-id hook follows the key). Guard tests: every step kind has a runner and every runner is used (retired ones named), each step dispatches to its own runner, and the dashboard Full list equals the Monday catalog.
+
+**Files:** `lib/ceo-weekly/dashboard-full-catalog.js`, `api/cron/ceo-weekly-full-refresh.js`, `audit-dashboard.html`, `test/ceo-monday-catalog-guard.test.js`, `Docs/CHANGELOG.md`
+
 ## [2026-11-02] - Monday Full refresh: ① starts again, broken-links step can finish (+ P24 vendored FAQ extractor)
 
 **Problem (2 Nov):** the Monday refresh sat on `trad_seo_broken_links` from 01:04, and no ① ran. (1) Since `e572c2ea` (30 Oct) the Monday ① step only POSTed `{action:'tick', runId:null}`, which answers "idle, done" when nothing is running, so ① was never started. (2) `broken-tick` replied `{ done: tick.remaining <= 0, ...tick }`; `tickBrokenLinks` returns `done` as a COUNT, so with nothing left the reply was `done: 0` and the step waited forever. The same spread was in the */5 render cron reply.
