@@ -9,7 +9,7 @@ import { loadFaultSummary } from '../../lib/fault-monitor/brief.js';
 import { runSiteChecks } from '../../lib/fault-monitor/site-checks.js';
 import { groupHealthRows } from '../../lib/fault-monitor/health-panel.js';
 import { loadRunPages, loadLatestPage } from '../../lib/trad-seo-render/pages-store.js';
-import { loadBrokenPages, tickBrokenLinks } from '../../lib/trad-seo-render/broken-job.js';
+import { brokenTickReply, loadBrokenPages, tickBrokenLinks } from '../../lib/trad-seo-render/broken-job.js';
 
 function need(key) {
   const v = process.env[key];
@@ -141,7 +141,7 @@ async function handleBrokenTick(sb, body, res) {
       ? body.forceNotChecked
       : []
   });
-  return sendJson(res, 200, { ok: true, run_id: runId, done: tick.remaining <= 0, ...tick });
+  return sendJson(res, 200, brokenTickReply(runId, tick));
 }
 
 const ACTIONS = {

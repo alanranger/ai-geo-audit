@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-11-02] - Monday Full refresh: ① starts again, broken-links step can finish (+ P24 vendored FAQ extractor)
+
+**Problem (2 Nov):** the Monday refresh sat on `trad_seo_broken_links` from 01:04, and no ① ran. (1) Since `e572c2ea` (30 Oct) the Monday ① step only POSTed `{action:'tick', runId:null}`, which answers "idle, done" when nothing is running, so ① was never started. (2) `broken-tick` replied `{ done: tick.remaining <= 0, ...tick }`; `tickBrokenLinks` returns `done` as a COUNT, so with nothing left the reply was `done: 0` and the step waited forever. The same spread was in the */5 render cron reply.
+
+**Change:** the Monday ① step sends `start` (source `trad_seo`: joins a running full ①, never a second one) and then ticks that run id until done. `brokenTickReply()` builds the reply with the count as `checked` and `done` as the boolean (API + cron). P24: `lib/fault-monitor/vendor/faq-extraction.mjs` byte-identical to Schema Tools (icon-label strip). No test covered the Monday step runners or the reply shape; added `test/ceo-monday-trad-seo-steps.test.js`.
+
+**Files:** `lib/ceo-weekly/dashboard-full-catalog.js`, `lib/trad-seo-render/broken-job.js`, `api/aigeo/traditional-seo-render.js`, `api/cron/trad-seo-render-tick.js`, `lib/fault-monitor/vendor/faq-extraction.mjs`, `test/ceo-monday-trad-seo-steps.test.js`, `Docs/CHANGELOG.md`
+
 ## [2026-10-30] - ① Full audit never resumes a Playwright/sample run
 
 **Change:** Pressing ① always starts a new `trad_seo` run of every 06 URL, unless a **full** run is already `running` (then it resumes that one). `trad_seo_playwright` / sample runs are not the “last coherent run”, are not stored as the resume id, and do not drive the Full audit banner or the cron tick. Progress shows `rendering x / N pages` with ETA. Stop / Cancel marks the run `cancelled`.

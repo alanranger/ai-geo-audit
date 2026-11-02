@@ -9,7 +9,7 @@ import { authoriseCron, sendJson } from '../../lib/ceo-weekly/shared.js';
 import { latestRunningTradSeoRun, latestTradSeoRun } from '../../lib/fault-monitor/store.js';
 import { isFullTradSeoSource } from '../../lib/trad-seo-render/run-kind.js';
 import { tickRun } from '../../lib/fault-monitor/runner.js';
-import { loadBrokenPages, tickBrokenLinks } from '../../lib/trad-seo-render/broken-job.js';
+import { brokenTickReply, loadBrokenPages, tickBrokenLinks } from '../../lib/trad-seo-render/broken-job.js';
 import { loadRunPages } from '../../lib/trad-seo-render/pages-store.js';
 
 function need(key) {
@@ -35,5 +35,5 @@ export default async function handler(req, res) {
   const remaining = pages.filter((p) => !doneKeys.has(p.page_url));
   if (!remaining.length) return sendJson(res, 200, { ok: true, idle: true, run_id: latest.id });
   const tick = await tickBrokenLinks(sb, latest.id, remaining, { budgetMs: 180000 });
-  return sendJson(res, 200, { ok: true, phase: 'broken_links', run_id: latest.id, done: tick.remaining <= 0, ...tick });
+    return sendJson(res, 200, { phase: 'broken_links', ...brokenTickReply(latest.id, tick) });
 }
