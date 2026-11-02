@@ -6,7 +6,9 @@ import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
-import { buildStrategyBrief, renderStrategyBriefHtml } from '../lib/ceo-weekly/strategyScorecard.js';
+import {
+  buildStrategyBrief, renderStrategyTilesHtml, renderFillRunRateHtml, renderPushThreeHtml
+} from '../lib/ceo-weekly/strategyScorecard.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 for (const name of ['.env.vercel.prod', '.env.local', '.env']) {
@@ -28,7 +30,7 @@ const sb = createClient(
   { auth: { persistSession: false } }
 );
 const brief = await buildStrategyBrief(sb, 'https://www.alanranger.com');
-const section = renderStrategyBriefHtml(brief);
+const section = renderStrategyTilesHtml(brief) + renderFillRunRateHtml(brief) + renderPushThreeHtml(brief);
 const html = `<!doctype html><html><head><meta charset="utf-8"><title>Strategy Scorecard preview</title></head>
 <body style="margin:0;padding:24px;background:#eef1f5;font-family:Arial,Helvetica,sans-serif">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" align="center" style="width:600px;background:#fff;border-radius:14px;overflow:hidden">

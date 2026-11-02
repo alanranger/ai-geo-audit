@@ -68,6 +68,7 @@ import {
 } from '../../lib/booking-sheet-truth-parser.mjs';
 import { parseWorkshopsTab, persistWorkshopAttendees } from '../../lib/booking-sheet-workshops.mjs';
 import { parseWorkshopCosts, persistWorkshopCostModel } from '../../lib/booking-sheet-workshop-costs.mjs';
+import { parseSalesTargets, persistSalesTargets } from '../../lib/booking-sheet-sales-targets.mjs';
 import {
   parsePlansTab,
   persistPlans,
@@ -239,6 +240,13 @@ export default async function handler(req, res) {
       workshopCosts = { written: 0, error: costErr.message || String(costErr) };
     }
 
+    let salesTargets = { written: 0, warnings: [], error: null };
+    try {
+      salesTargets = { ...(await persistSalesTargets(supabase, property, parseSalesTargets(wb))), error: null };
+    } catch (targetErr) {
+      salesTargets = { written: 0, warnings: [], error: targetErr.message || String(targetErr) };
+    }
+
     // Persist date-quality flag for Strategy / Monday brief
     await supabase.from('booking_sheet_sheet_presence').upsert({
       property_url: property,
@@ -286,6 +294,9 @@ export default async function handler(req, res) {
       courses_error: courses.error,
       workshop_cost_model_written: workshopCosts.written,
       workshop_cost_model_error: workshopCosts.error,
+      sales_targets_written: salesTargets.written,
+      sales_targets_error: salesTargets.error,
+      sales_targets_warnings: salesTargets.warnings,
       workshop_date_null_pct: workshops.dateNullPct || 0,
       courses_date_null_pct: courses.dateNullPct || 0,
       attendee_date_health: dateHealth,
