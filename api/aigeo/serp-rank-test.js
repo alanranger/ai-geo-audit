@@ -21,6 +21,7 @@
 import { extractCitationsFromDfsResult } from '../../lib/ai-citation-extract.js';
 import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
 import { getBusinessDevice } from '../../lib/keyword-ranking/business-location.js';
+import { resolveSerpRedirects } from '../../lib/keyword-ranking/serp-redirect-owner.js';
 import {
   preflightLocalCapture,
   resolveLocalCaptureFields,
@@ -498,7 +499,8 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
 
     const task = data.tasks?.[0];
     const result = task?.result?.[0];
-    const items = result?.items ?? [];
+    // Google redirect links (url google.com/goto?url=…) resolved to the real site before any ownership decision.
+    const items = resolveSerpRedirects(result?.items ?? [], targetRoot);
     const taskStatus = task?.status_code;
     // 200xx = Ok. 40106 = partial crawl — still usable when items[] is present
     // (depth-50 AIO-expand often 40106/40101; recovery retry drops expand).
@@ -546,7 +548,7 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
     const classInfo = resolveKeywordClass(keyword);
 
     // Phase 1: extract Google AI Overview citations from the same response.
-    const aiOverviewCitations = extractCitationsFromDfsResult(result);
+    const aiOverviewCitations = extractCitationsFromDfsResult({ ...result, items });
 
     const serpSurfaceStack = buildSerpSurfaceStack(items, targetRoot);
 

@@ -2,6 +2,14 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-11-02] - Ranking: resolve Google redirect links (google.com/goto) to the real site before ownership
+
+**Problem:** from about 1 Nov, DataForSEO returns many SERP items with `url: https://google.com/goto?url=<opaque token>` and `domain: google.com`; the real site is only in `breadcrumb` / `website_name`. Ownership matched on domain/url, so our results read as google.com (2 Nov: 1,174 of 2,023 owner slots on google.com; top-10 41 → 14).
+
+**Change:** `lib/keyword-ranking/serp-redirect-owner.js` resolves every item (and nested local-pack / AIO references) before any ownership or competitor decision: decodable target → breadcrumb host + path → website_name (platforms; our site name as a last resort). Applied in `fetchSerpForKeyword` (`api/aigeo/serp-rank-test.js`, also used by the local grid) including the AIO citation extract. Guard: acceptance check `owner_domain_google` fails the run (ranking_quality incomplete) when more than 10% of owner slots are on google.com. Tests: `test/serp-redirect-owner.test.js` (real items from 2 Nov).
+
+**Files:** `lib/keyword-ranking/serp-redirect-owner.js`, `api/aigeo/serp-rank-test.js`, `lib/keyword-ranking/ranking-acceptance-gate.js`, `test/serp-redirect-owner.test.js`, `Docs/CHANGELOG.md`
+
 ## [2026-11-02] - Monday + dashboard Full refresh: extractability + schema QA sync step restored
 
 **Problem:** `e572c2ea` (30 Oct) changed the `trad_seo_full` step from the extractability + schema QA sync (`runTradSeoFull` / dashboard `runTraditionalSeoEvaluation({refreshExtractability:true})`) into the rendered ①, so the extractability refresh stopped running on Mondays and from the Full refresh button.
