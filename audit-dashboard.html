@@ -72858,8 +72858,10 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
           const tooFew = parsed.combinedRows.length < 10;
           const stacksOk = parsed.combinedRows.filter((r) => Array.isArray(r.serp_surface_stack) && r.serp_surface_stack.length > 0).length;
           const missingStacks = stacksOk < Math.max(1, Math.floor(parsed.combinedRows.length * 0.5));
+          // Rows cached before 2 Nov 2026 had serp_features cut to 4 keys (no capture_status).
+          const missingQuality = parsed.combinedRows.every((r) => !r?.serp_features?.capture_status);
           let useCache = true;
-          if (staleMaster || tooFew || hasMissingVolume || missingStacks || (hasCitations && !hasCitationUrls)) {
+          if (staleMaster || tooFew || hasMissingVolume || missingStacks || missingQuality || (hasCitations && !hasCitationUrls)) {
             useCache = false;
           } else if (parsed.timestamp) {
             const hoursDiff = (Date.now() - new Date(parsed.timestamp).getTime()) / (1000 * 60 * 60);
