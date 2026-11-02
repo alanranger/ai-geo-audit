@@ -15,7 +15,7 @@ const REQUIRED = [
   'HEADLINES', 'GP, 3-month average', 'Sales year to date', 'People per event, next 90 days', 'Bookings per 1,000 search visits',
   'Academy, ', 'Google clicks to booking pages', 'Visits from AI assistants', 'AI answers naming you',
   'A · WHERE YOU STAND', 'B · WHAT CHANGED SINCE LAST MONDAY', "C · THIS WEEK'S ACTIONS",
-  '1 · Operations', "PIPELINE · WHAT'S BOOKED AHEAD", 'Push these 3 this week',
+  '1 · Operations', "PIPELINE · WHAT'S BOOKED AHEAD",
   '2 · Revenue & GP', 'THIS MONTH & YEAR TO DATE · YOUR TARGETS', 'Money signals', 'The Academy',
   '3 · Strategy', 'Fill rate', 'Run rate', 'Profit levers scorecard',
   '4 · SEO & AI visibility', 'The website', 'Ranking changes', 'The AI front', 'Backlinks & authority', 'SEO health',
@@ -25,7 +25,7 @@ const RETIRED = [
   'EXECUTIVE SUMMARY', 'BIGGEST WINS', 'BIGGEST WORRIES', 'DO THIS WEEK', 'DEEPER ANALYSIS', 'Upcoming events',
   'Batsford: AM and PM sessions', 'no sales in 14 days', 'STRATEGY · WHERE YOU STAND', 'Traditional SEO: ',
   'A · The website', 'B · The money', 'C · The AI front', 'D · The Academy', 'G · Profit levers', 'E · Ranking changes',
-  'F · SEO health', 'MOCKUP v7', 'NEW ·'
+  'F · SEO health', 'MOCKUP v7', 'NEW ·', 'Push these 3 this week'
 ];
 
 async function shoot(page, file, width) {
@@ -38,12 +38,27 @@ const browser = await chromium.launch();
 const page = await browser.newPage();
 await page.goto(`file:///${path.resolve(previewFile).replace(/\\/g, '/')}`);
 const bodyText = await page.evaluate(() => document.body.innerText);
-const tiles = await page.evaluate(() => [...document.querySelectorAll('td[width="25%"] > div[style*="height:132px"]')].length);
+const tiles = await page.evaluate(() => document.querySelectorAll('td.hl-tile').length);
 const missing = REQUIRED.filter((s) => !bodyText.includes(s));
 const retired = RETIRED.filter((s) => bodyText.includes(s));
 const order = ['HEADLINES', '1 · Operations', '2 · Revenue & GP', '3 · Strategy', '4 · SEO & AI visibility', '5 · System health'].map((s) => bodyText.indexOf(s));
 const inOrder = order.every((v, i) => v >= 0 && (i === 0 || v > order[i - 1]));
 console.log(JSON.stringify({ tiles, missing, retired_present: retired, sections_in_order: inOrder }, null, 1));
+
+/** No tile content may spill outside its tile box (task 17 item 1). */
+async function tileOverflow(width) {
+  await page.setViewportSize({ width, height: 900 });
+  await page.goto(`file:///${path.resolve(previewFile).replace(/\\/g, '/')}`);
+  return page.evaluate(() => [...document.querySelectorAll('td.hl-tile')].flatMap((td, i) => {
+    const box = td.getBoundingClientRect();
+    return [...td.querySelectorAll('*')].filter((el) => {
+      const r = el.getBoundingClientRect();
+      return r.bottom > box.bottom + 0.5 || r.right > box.right + 0.5 || r.left < box.left - 0.5 || r.top < box.top - 0.5;
+    }).map((el) => `tile ${i + 1}: "${el.textContent.trim().slice(0, 30)}"`);
+  }));
+}
+const overflow = { 600: await tileOverflow(600), 375: await tileOverflow(375) };
+console.log(JSON.stringify({ tile_overflow: overflow }));
 
 const shots = [];
 for (const width of [600, 375]) {
@@ -58,6 +73,6 @@ await page.goto(`file:///${boardFile.replace(/\\/g, '/')}`);
 await page.screenshot({ path: pngOut, fullPage: true });
 fs.unlinkSync(boardFile);
 await browser.close();
-const ok = tiles === 8 && !missing.length && !retired.length && inOrder;
+const ok = tiles === 8 && !missing.length && !retired.length && inOrder && !overflow[600].length && !overflow[375].length;
 console.log(`${ok ? 'PASS' : 'FAIL'} · screenshot ${pngOut}`);
 process.exitCode = ok ? 0 : 1;

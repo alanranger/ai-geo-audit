@@ -6,6 +6,12 @@ import {
   tileTone, buildTriggers, watchedPageTrigger, weekSalesSummary, saleLabel, dayLabel
 } from '../lib/ceo-weekly/front-page.js';
 import { renderCeoWeeklyHtml } from '../lib/ceo-weekly/email.js';
+import { backlinksComparable, seoHealthComparable } from '../lib/ceo-weekly/comparability.js';
+import { assessBriefGate } from '../lib/ceo-weekly/brief-gate.js';
+import { websiteSubtitle, backlinksSubtitle, seoHealthSubtitle, openFailsText } from '../lib/ceo-weekly/subtitles.js';
+import { weeksRunning, lastmodFromSitemap } from '../lib/ceo-weekly/front-page.js';
+import { returningClients } from '../lib/strategy-summary.mjs';
+import { houseDates } from '../lib/ceo-weekly/strategyScorecard.js';
 
 // Sales 2026 tab cells as uploaded 2 Nov 2026 (weights are the tab's own, row 2).
 const TARGETS = {
@@ -127,7 +133,65 @@ test('rendered brief: new section order, no retired blocks', () => {
   const at = order.map((s) => html.indexOf(s));
   assert.ok(at.every((i, k) => i >= 0 && (k === 0 || i > at[k - 1])), `order ${at}`);
   assert.equal((html.match(/NEW ·/g) || []).length, 0, 'mockup-only "NEW ·" badges');
-  for (const retired of ['EXECUTIVE SUMMARY', 'BIGGEST WINS', 'DO THIS WEEK', 'DEEPER ANALYSIS', 'Upcoming events', 'Batsford: AM and PM', 'no sales in 14 days', 'A · The website', 'G · Profit levers', 'Traditional SEO: ']) {
+  for (const retired of ['EXECUTIVE SUMMARY', 'BIGGEST WINS', 'DO THIS WEEK', 'DEEPER ANALYSIS', 'Upcoming events', 'Batsford: AM and PM', 'no sales in 14 days', 'Push these 3 this week', 'A · The website', 'G · Profit levers', 'Traditional SEO: ']) {
     assert.equal(html.includes(retired), false, retired);
   }
+});
+
+// ---- task 17 ----
+test('17.14b: booked >= places is "Full" (over-subscribed is fine)', () => {
+  assert.equal(fillLabel(5, 4), 'Full');
+  assert.equal(fillLabel(4, 4), 'Full');
+});
+
+test('17.13: Nov target column = J × 12 × Nov weighting and sums to the seasonal £5,850', () => {
+  const s = buildSalesTab({ targets: TARGETS, monthRows: [], gpRates: {}, asOfYmd: '2026-11-02' });
+  assert.equal(s.categories.reduce((a, c) => a + c.target_month, 0), 5850);
+  assert.equal(s.categories.find((c) => c.label === 'Courses/masterclasses').target_month, 799);
+});
+
+test('17.5/6: a changed basis withholds the delta and the gate labels it; same-basis implausible swing holds', () => {
+  const rebuilt = backlinksComparable({ basis: { filters_version: 'v1', ingest: 'full', last_full_at: '2026-11-02T00:08Z' }, referring_domains: 422, backlinks: 2005 }, { referring_domains: 3032, backlinks: 4756 });
+  assert.equal(rebuilt.ok, false);
+  assert.match(rebuilt.reason, /rebuilt 2 Nov/);
+  const same = backlinksComparable({ basis: { filters_version: 'v1', ingest: 'full' }, referring_domains: 422, backlinks: 2005 }, { referring_domains: 3032, backlinks: 4756, index_basis: { filters_version: 'v1', ingest: 'full' } });
+  assert.equal(same.implausible, true);
+  assert.equal(seoHealthComparable({ score: 61, evaluated_urls: 478 }, { score: 100 }).ok, false);
+  const base = { current: null, previous: null, rankingRows: [], shownFindings: [], steps: [] };
+  const labelled = assessBriefGate({ ...base, blocks: { backlinks: { comparable: rebuilt }, seo_health: { comparable: { ok: true } } } }, { maxDialMoveShare: 1, maxTop10DropShare: 1, maxGoogleOwnerShare: 1, requiredSteps: [] });
+  assert.equal(labelled.checks.find((c) => c.id === 'backlinks_swing').ok, true);
+  assert.match(labelled.checks.find((c) => c.id === 'backlinks_swing').detail, /withheld and labelled/);
+  const held = assessBriefGate({ ...base, blocks: { backlinks: { comparable: same }, seo_health: { comparable: { ok: true } } } }, { maxDialMoveShare: 1, maxTop10DropShare: 1, maxGoogleOwnerShare: 1, requiredSteps: [] });
+  assert.equal(held.checks.find((c) => c.id === 'backlinks_swing').ok, false);
+});
+
+test('17.7/8: subtitles come from the figures; every hygiene fail is listed', () => {
+  assert.equal(websiteSubtitle({ google_organic: { wow: { label: '▼ 16.5%' } }, direct: { wow: { label: '▲ 6.1%' } } }), 'Google organic ▼ 16.5% · direct ▲ 6.1% (last 28 days vs prior 28).');
+  assert.match(backlinksSubtitle({ referring_domains: 422, wow: { referring_domains: { withheld: true, reason: 'index rebuilt' } } }), /week-on-week not shown: index rebuilt/);
+  assert.equal(seoHealthSubtitle({ score: 61, hygiene: { fail: 2, warn: 16 } }), 'Health 61/100 · 2 hygiene fails, 16 warn.');
+  assert.equal(openFailsText({ fail_rules: ['URL slug word count (3–6)', 'Thin content guardrail'] }), 'URL slug word count (3–6) · Thin content guardrail');
+});
+
+test('17.11: returning clients = last-12-month sales from clients first seen before the window; pace vs target', () => {
+  const txns = [
+    { client_name: 'A', txn_date: '2024-03-01', amount: 100 },
+    { client_name: 'A', txn_date: '2026-06-01', amount: 300 },
+    { client_name: 'B', txn_date: '2026-05-01', amount: 500 },
+    { client_name: 'C', txn_date: '2025-01-10', amount: 50 },
+    { client_name: 'C', txn_date: '2026-07-01', amount: 200, is_jlr: true }
+  ];
+  const r = returningClients(txns, new Date('2026-11-02T12:00:00Z'));
+  assert.equal(r.r12, 300);
+  assert.equal(r.yoy_ready, false);
+  assert.equal(r.ytd, 300);
+  assert.ok(r.pace > 350 && r.pace < 360);
+});
+
+test('17e: weeks running; Q2 sitemap lastmod; 17.3 house dates', () => {
+  assert.equal(weeksRunning(null, '2026-11-09'), 1);
+  assert.equal(weeksRunning({ first_seen_week: '2026-10-26', last_seen_week: '2026-11-02' }, '2026-11-09'), 3);
+  assert.equal(weeksRunning({ first_seen_week: '2026-10-05', last_seen_week: '2026-10-12' }, '2026-11-09'), 1);
+  const xml = '<url><loc>https://www.alanranger.com/free-online-photography-course</loc><changefreq>daily</changefreq><priority>0.75</priority><lastmod>2026-10-28</lastmod></url>';
+  assert.equal(lastmodFromSitemap(xml, 'free-online-photography-course'), '2026-10-28');
+  assert.equal(houseDates('since 2026-10-07 · 8/11 events ran'), 'since 7 Oct · 8/11 events ran');
 });

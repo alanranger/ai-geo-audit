@@ -16,8 +16,7 @@ loadEnv(new URL('../.env.local', import.meta.url));
 // Same SMTP account as production ("same as Academy"); Vercel's pulled env file holds empty placeholders.
 loadEnv('G:/Dropbox/alan ranger photography/Website Code/Academy/alanranger-academy-assesment/.env.local', ['ORPHANED_EMAIL_FROM', 'ORPHANED_EMAIL_PASSWORD']);
 
-const { buildSectionG } = await import('../lib/ceo-weekly/sectionG.js');
-const { attachRedesign } = await import('../lib/ceo-weekly/redesign-data.js');
+const { rebuildForPreview } = await import('../lib/ceo-weekly/preview-rebuild.js');
 const { renderCeoWeeklyHtml, sendCeoWeeklyEmail } = await import('../lib/ceo-weekly/email.js');
 const { renderCeoWeeklyPdf, ceoWeeklyPdfFilename } = await import('../lib/ceo-weekly/html-to-pdf.js');
 const { CEO_REPORT_TO } = await import('../lib/ceo-weekly/shared.js');
@@ -48,9 +47,7 @@ async function state() {
 
 const before = await state();
 const { data } = await sb.from('ceo_weekly_report_snapshots').select('metrics').eq('week_start', week).maybeSingle();
-const metrics = data.metrics;
-metrics.section_g = await buildSectionG(sb, { propertyUrl: property, asOf: metrics.generated_at });
-await attachRedesign(sb, metrics, { propertyUrl: property, weekStart: week, asOf: metrics.generated_at });
+const metrics = await rebuildForPreview(sb, data.metrics, { week, propertyUrl: property });
 if (!metrics.brief_gate || metrics.brief_gate.held) {
   console.log(JSON.stringify({ sent: false, reason: 'sense-check gate did not pass', failures: metrics.brief_gate?.failures || null }, null, 1));
   process.exit(2);
@@ -58,7 +55,7 @@ if (!metrics.brief_gate || metrics.brief_gate.held) {
 const html = renderCeoWeeklyHtml(metrics);
 if (/NEW ·/.test(html)) throw new Error('NEW · badge present — refusing to send');
 const asOfLabel = new Date(metrics.generated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/London' });
-const subject = `TEST — new layout — CEO weekly health — as of ${asOfLabel}`;
+const subject = `${arg('subject-prefix', 'TEST — new layout v2 —')} CEO weekly health — as of ${asOfLabel}`;
 fs.mkdirSync('C:/TEMP/ceo-redesign', { recursive: true });
 fs.writeFileSync('C:/TEMP/ceo-redesign/test-email-as-sent.html', html, 'utf8');
 const pdfBuffer = await renderCeoWeeklyPdf(html).catch(() => null);

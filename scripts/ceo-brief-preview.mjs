@@ -5,8 +5,7 @@
 // computed as at the snapshot's generated_at. --live builds every metric fresh (no send, no snapshot write).
 import fs from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
-import { buildSectionG } from '../lib/ceo-weekly/sectionG.js';
-import { attachRedesign } from '../lib/ceo-weekly/redesign-data.js';
+import { rebuildForPreview } from '../lib/ceo-weekly/preview-rebuild.js';
 import { buildCeoWeeklyMetrics } from '../lib/ceo-weekly/metrics.js';
 import { renderCeoWeeklyHtml } from '../lib/ceo-weekly/email.js';
 
@@ -23,11 +22,7 @@ const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_R
 async function fromSnapshot() {
   const { data, error } = await sb.from('ceo_weekly_report_snapshots').select('metrics').eq('week_start', week).maybeSingle();
   if (error || !data?.metrics) throw new Error(`no snapshot metrics for ${week}`);
-  const metrics = data.metrics;
-  const asOf = metrics.generated_at;
-  metrics.section_g = await buildSectionG(sb, { propertyUrl: property, asOf });
-  await attachRedesign(sb, metrics, { propertyUrl: property, weekStart: week, asOf });
-  return metrics;
+  return rebuildForPreview(sb, data.metrics, { week, propertyUrl: property });
 }
 
 /** --mask-names: "Derek B." in the pipeline (preview files shared outside the email never carry full client names). */

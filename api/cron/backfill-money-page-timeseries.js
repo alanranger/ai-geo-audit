@@ -46,6 +46,7 @@
 import { getGSCAccessToken, normalizePropertyUrl, getGscDateRange } from '../aigeo/utils.js';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
+import { runPageQueryNightly, PAGE_QUERY_DAYS } from '../../lib/gsc-page-query-nightly.js';
 
 const ROW_LIMIT = 25000;
 const REQUEST_PAUSE_MS = 120;
@@ -233,10 +234,27 @@ async function runBackfill(req) {
       api_calls: apiCalls,
       error_message: errors > 0 ? `${errors} batch errors` : null
     });
-    return buildOkResponse({ siteUrl, startDate, endDate, runId, records, inserted, errors, collisions, apiCalls });
+    const pageQuery = await runPageQueryStep(supabase, { siteUrl, propertyUrl, endDate });
+    const ok = buildOkResponse({ siteUrl, startDate, endDate, runId, records, inserted, errors, collisions, apiCalls });
+    ok.body.data.page_query = pageQuery;
+    return ok;
   } catch (error) {
     await finishRunLog(supabase, runId, 'failed', { error_message: error?.message || String(error) });
     throw error;
+  }
+}
+
+/** gsc_page_query_daily: rolling 3 days ending on the page step's end date (separate run log, never fails the page step). */
+async function runPageQueryStep(supabase, { siteUrl, propertyUrl, endDate }) {
+  try {
+    const start = new Date(`${endDate}T12:00:00Z`);
+    start.setUTCDate(start.getUTCDate() - (PAGE_QUERY_DAYS - 1));
+    const token = await getGSCAccessToken();
+    return await runPageQueryNightly(supabase, {
+      siteUrl, propertyUrl: String(propertyUrl).replace(/\/+$/, ''), startDate: start.toISOString().slice(0, 10), endDate, token
+    });
+  } catch (e) {
+    return { error: e?.message || String(e) };
   }
 }
 

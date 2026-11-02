@@ -11,6 +11,7 @@ import { londonWeekStartYmd, sendJson, DEFAULT_PROPERTY } from '../../lib/ceo-we
 import { activeHold, releaseHold, runBriefSenseCheck } from '../../lib/ceo-weekly/brief-hold.js';
 import { assessBriefGate, loadBriefGateInputs } from '../../lib/ceo-weekly/brief-gate.js';
 import { loadCurrentFindings } from '../../lib/fault-monitor/store.js';
+import { weekOnWeekBlocks } from '../../lib/ceo-weekly/metrics.js';
 import { runCeoWeeklyReport } from '../../lib/ceo-weekly/report.js';
 
 const FLAG_KEY = 'ceo_monday_full_refresh';
@@ -48,8 +49,9 @@ async function handleGet(sb, req, res) {
 
 async function previewGate(sb, args) {
   const { current, run } = await loadCurrentFindings(sb);
+  const blocks = await weekOnWeekBlocks(sb, args.weekStart).catch((e) => ({ backlinks: { error: e.message }, seo_health: { error: e.message } }));
   const inputs = await loadBriefGateInputs(sb, { ...args, latestFullRunStart: run?.started_at || null,
-    shownFindings: current.filter((f) => f.severity === 'red' || f.severity === 'amber') });
+    shownFindings: current.filter((f) => f.severity === 'red' || f.severity === 'amber'), blocks });
   return { gate: assessBriefGate(inputs) };
 }
 
