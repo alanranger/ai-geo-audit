@@ -7,6 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveRedirectItem, resolveSerpRedirects, googleOwnerShare, breadcrumbTarget, decodeRedirectTarget } from '../lib/keyword-ranking/serp-redirect-owner.js';
 import { assessRankingAcceptance } from '../lib/keyword-ranking/ranking-acceptance-gate.js';
+import { loadOurPageTitles, applyOurPageTitles } from '../lib/keyword-ranking/our-page-titles.js';
 
 const T = 'alanranger.com';
 const ours = { type: 'organic', rank_group: 1, rank_absolute: 6, url: 'https://google.com/goto?url=CAESswEB6zswFdSGiU9fV20ZDFJ0vLV5', domain: 'google.com',
@@ -49,6 +50,18 @@ test('website_name is the last resort for our site; nested owners (local pack, A
   const out = resolveSerpRedirects(tree, T);
   assert.equal(out[0].items[0].domain, 'www.alanranger.com');
   assert.equal(out[1].references[0].domain, 'www.intotheblue.co.uk');
+});
+
+test('host-only breadcrumb on our site: the result title gives the real page (best_url)', async () => {
+  const rows = [{ url: 'https://www.alanranger.com/photography-courses-coventry', title: 'Photography Courses Coventry — Beginners, 1-2-1, RPS' }];
+  const fetchImpl = async () => ({ ok: true, json: async () => rows });
+  const titles = await loadOurPageTitles('test-root.com', { supabaseUrl: 'https://x', supabaseKey: 'k', fetchImpl });
+  const [o, r] = applyOurPageTitles([resolveRedirectItem(ours, T), resolveRedirectItem(rival, T)], T, titles);
+  assert.equal(o.url, 'https://www.alanranger.com/photography-courses-coventry');
+  assert.equal(o.redirect_resolved, 'breadcrumb+title');
+  assert.equal(r.domain, 'www.intotheblue.co.uk', 'competitors are not title-matched');
+  const failed = await loadOurPageTitles('other-root.com', { supabaseUrl: 'https://x', supabaseKey: 'k', fetchImpl: async () => { throw new Error('down'); } });
+  assert.equal(failed.size, 0, 'lookup failure keeps the host-only URL');
 });
 
 test('guard: more than 10% of owner slots on google.com marks the ranking run incomplete', () => {
