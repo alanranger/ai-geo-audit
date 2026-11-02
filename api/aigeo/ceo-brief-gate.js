@@ -2,7 +2,7 @@
  * Pre-send sense-check for the Monday CEO brief.
  *  GET  ?weekStart=[&holdOnly=1]             → any unreleased hold (dashboard banner) + this week's checks, not saved
  *  POST { action:'assess', weekStart, steps } → Monday refresh step: assess; opens a hold when a check fails
- *  POST { action:'send-anyway', weekStart }   → dashboard button: release the hold and send the brief as built
+ *  POST { action:'send-anyway', weekStart[, dryRun] } → dashboard button: release the hold and send the brief as built
  */
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -61,12 +61,14 @@ async function handleAssess(sb, body, res) {
   return sendJson(res, 200, { ok: true, weekStart, ...gate });
 }
 
+/** dryRun: builds the brief without sending and keeps the hold (for testing the button path). */
 async function handleSendAnyway(sb, body, res) {
   const weekStart = String(body.weekStart || '').trim() || londonWeekStartYmd();
-  const released = await releaseHold(sb, weekStart, 'alan_dashboard_send_anyway');
-  const report = await runCeoWeeklyReport({ weekStart, propertyUrl: body.propertyUrl || DEFAULT_PROPERTY, skipGate: true, forceResend: true, sendAnyway: true });
-  if (report?.mode === 'report') await markRefreshSent(sb, weekStart);
-  return sendJson(res, 200, { ok: report?.mode === 'report', weekStart, released: Boolean(released), mode: report?.mode, send: report?.send || null });
+  const dryRun = body.dryRun === true;
+  const released = dryRun ? null : await releaseHold(sb, weekStart, 'alan_dashboard_send_anyway');
+  const report = await runCeoWeeklyReport({ weekStart, propertyUrl: body.propertyUrl || DEFAULT_PROPERTY, skipGate: true, forceResend: true, sendAnyway: true, dryRun });
+  if (report?.mode === 'report' && !dryRun) await markRefreshSent(sb, weekStart);
+  return sendJson(res, 200, { ok: report?.mode === 'report', weekStart, dryRun, released: Boolean(released), mode: report?.mode, send: report?.send || null });
 }
 
 export default async function handler(req, res) {
