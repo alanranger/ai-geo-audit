@@ -92,9 +92,9 @@ test('sale-only matching ignores courses tracked on the Courses tab and runs > 4
 
 test('card C triggers: gift vouchers (Nov, last year < half the year before) and the watched page YoY slide', () => {
   const academy = { on_trial: 2, lost_7d: 6, converted_7d: 0, trial_ends: ['2026-11-08', '2026-11-16'] };
-  const t = buildTriggers({ asOfYmd: '2026-11-02', voucherByYear: { 2024: 1100, 2025: 100 }, voucherTarget: 83, academy, watched: [] });
+  const t = buildTriggers({ asOfYmd: '2026-11-02', voucherByYear: { 2024: 1100, 2025: 100 }, voucherTarget: 100, academy, watched: [] });
   assert.deepEqual(t.map((x) => x.key), ['gift_vouchers_christmas', 'academy_trial_nudge']);
-  assert.match(t[0].why, /Nov–Dec 2024 £1,100 · Nov–Dec 2025 £100 · voucher target £83\/mo/);
+  assert.match(t[0].why, /Nov–Dec 2024 £1,100 · Nov–Dec 2025 £100 · voucher target £100 this month/);
   assert.match(t[1].why, /0 of the last 6 trials converted \(7d\) · trials end 8 Nov and 16 Nov/);
   const monthly = [
     { mon: '2025-10', clicks: 1621, pos: 6.3 }, { mon: '2026-03', clicks: 950, pos: 10.6 },
