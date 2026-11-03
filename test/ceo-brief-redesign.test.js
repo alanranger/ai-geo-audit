@@ -154,7 +154,8 @@ test('17.5/6: a changed basis withholds the delta and the gate labels it; same-b
   const rebuilt = backlinksComparable({ basis: { filters_version: 'v1', ingest: 'full', last_full_at: '2026-11-02T00:08Z' }, referring_domains: 422, backlinks: 2005 }, { referring_domains: 3032, backlinks: 4756 });
   assert.equal(rebuilt.ok, false);
   assert.match(rebuilt.reason, /rebuilt 2 Nov/);
-  const same = backlinksComparable({ basis: { filters_version: 'v1', ingest: 'full' }, referring_domains: 422, backlinks: 2005 }, { referring_domains: 3032, backlinks: 4756, index_basis: { filters_version: 'v1', ingest: 'full' } });
+  const tag = 'dfs_domain_backlink_rows:v1:live-full';
+  const same = backlinksComparable({ basis: { tag }, referring_domains: 422, backlinks: 2005 }, { referring_domains: 3032, backlinks: 4756, index_basis: { tag } });
   assert.equal(same.implausible, true);
   assert.equal(seoHealthComparable({ score: 61, evaluated_urls: 478 }, { score: 100 }).ok, false);
   const base = { current: null, previous: null, rankingRows: [], shownFindings: [], steps: [] };
@@ -194,4 +195,36 @@ test('17e: weeks running; Q2 sitemap lastmod; 17.3 house dates', () => {
   const xml = '<url><loc>https://www.alanranger.com/free-online-photography-course</loc><changefreq>daily</changefreq><priority>0.75</priority><lastmod>2026-10-28</lastmod></url>';
   assert.equal(lastmodFromSitemap(xml, 'free-online-photography-course'), '2026-10-28');
   assert.equal(houseDates('since 2026-10-07 · 8/11 events ran'), 'since 7 Oct · 8/11 events ran');
+});
+
+// ---- QUESTION 2026-11-03 ----
+test('backlinks basis tag: same tag compares; a different tag gives "—"', async () => {
+  const { basisTag } = await import('../lib/ceo-weekly/backlink-basis.js');
+  const tag = basisTag({ filters_version: 'v1', last_ingest_action: 'full' });
+  assert.equal(tag, 'dfs_domain_backlink_rows:v1:live-full');
+  const same = backlinksComparable({ basis: { tag }, referring_domains: 430, backlinks: 2010 }, { referring_domains: 422, backlinks: 2005, index_basis: { tag } });
+  assert.equal(same.ok, true);
+  const other = basisTag({ filters_version: 'v2', last_ingest_action: 'full' });
+  const changed = backlinksComparable({ basis: { tag: other }, referring_domains: 430, backlinks: 2010 }, { referring_domains: 422, backlinks: 2005, index_basis: { tag } });
+  assert.equal(changed.ok, false);
+  assert.match(changed.reason, /basis changed/);
+});
+
+test('Sales tab: vouchers / Pick n Mix are cash in vs Inc target, transfers on their own grey line; totals reconcile', () => {
+  const rows = [
+    { month: 10, category_order: 8, revenue_amount: 1165 }, { month: 10, category_order: 9, revenue_amount: -745 },
+    { month: 10, category_order: 4, revenue_amount: 286 }, { month: 10, category_order: 5, revenue_amount: -1020 }
+  ];
+  const s = buildSalesTab({ targets: TARGETS, monthRows: rows, gpRates: {}, asOfYmd: '2026-11-02' });
+  const gv = s.categories.find((c) => c.label === 'Gift Vouchers (cash in)');
+  assert.equal(gv.target_month, 100);
+  assert.ok(gv.target_month > 0);
+  const transfers = s.categories.filter((c) => c.transfer);
+  assert.equal(transfers.length, 2);
+  assert.ok(transfers.every((t) => t.ytd_pct == null && t.target_month < 0));
+  assert.equal(s.categories.reduce((a, c) => a + c.target_month, 0), 5850);
+  assert.equal(s.ytd_actual, 1165 - 745 + 286 - 1020);
+  const html = renderCeoWeeklyHtml({ generated_at: '2026-11-02T14:42:00Z', strategy: { error: 'x' }, section_g: { error: 'x' }, sales_tab: s });
+  assert.match(html, /redeemed into event categories \(bookkeeping transfer\)/);
+  assert.doesNotMatch(html, /in − out/);
 });
