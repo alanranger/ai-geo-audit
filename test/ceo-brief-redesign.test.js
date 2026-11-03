@@ -12,6 +12,22 @@ import { websiteSubtitle, backlinksSubtitle, seoHealthSubtitle, openFailsText } 
 import { weeksRunning, lastmodFromSitemap, courseWeekItems } from '../lib/ceo-weekly/front-page.js';
 import { returningClients } from '../lib/strategy-summary.mjs';
 import { houseDates } from '../lib/ceo-weekly/strategyScorecard.js';
+import { applyWeekOneRule } from '../lib/ceo-weekly/sectionG.js';
+
+test('levers: month-so-far rows say Too early in working week 1 (prev month kept as a note); the 60-day row is still judged', () => {
+  const rows = [
+    { id: 'high_margin_share', prev: 67, target: 60, status: 'Off target' },
+    { id: 'direct_sales', prev: 3603, target: 5048, status: 'Off pace' },
+    { id: 'events_below_min', status: 'Off target' },
+    { id: 'brand_clicks', status: 'Too early' }
+  ];
+  assert.deepEqual(applyWeekOneRule(rows, '2026-11-02'), ['high_margin_share', 'direct_sales']);
+  assert.deepEqual(rows.map((r) => r.status), ['Too early', 'Too early', 'Off target', 'Too early']);
+  assert.equal(rows[0].detail, 'Prev: on target');
+  const wk2 = [{ id: 'high_margin_share', prev: 67, target: 60, status: 'Off target' }];
+  assert.deepEqual(applyWeekOneRule(wk2, '2026-11-09'), []);
+  assert.equal(wk2[0].status, 'Off target');
+});
 
 // Sales 2026 tab cells as uploaded 2 Nov 2026 (weights are the tab's own, row 2).
 const TARGETS = {
