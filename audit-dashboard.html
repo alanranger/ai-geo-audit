@@ -91068,6 +91068,7 @@ Confidence: ${c}`;
           { key: 'audit_scan', label: 'GSC & Backlink Audit', tiers: ['quick','standard','full'], dependsOn: [], runner: runGlobalStepAuditScan },
           { key: 'schema_qa', label: 'Schema QA gate (whole site)', tiers: ['full'], dependsOn: [], runner: runGlobalStepSchemaQa },
           { key: 'dfs_full_index', label: 'DataForSEO backlink full index', tiers: ['full'], dependsOn: [], runner: runGlobalStepDfsFullIndex },
+          { key: 'dfs_summary', label: 'DataForSEO backlink summary (spam score + domain rank)', tiers: ['full'], dependsOn: ['dfs_full_index'], runner: runGlobalStepDfsSummary },
           { key: 'revenue_sync', label: 'Revenue sync (Squarespace + Stripe)', tiers: ['quick','standard','full'], dependsOn: [], runner: runGlobalStepRevenueSync },
           { key: 'ga4_sync', label: 'GA4 enquiry metrics (28d)', tiers: ['full'], dependsOn: [], runner: runGlobalStepGa4Sync },
           { key: 'rf_summary', label: 'Revenue Funnel summary refresh', tiers: ['quick','standard','full'], dependsOn: [], runner: runGlobalStepRfSummary },
@@ -91422,6 +91423,20 @@ Confidence: ${c}`;
         const result = await window.traditionalSeoRunDfsDomainIngest('full');
         debugLog('[Global Run] [DataForSEO full index] ✓ Completed', 'success');
         return result;
+      }
+
+      /** Spam score + DFS domain rank fetched on the same run as the full index (one summary call, ~$0.024). */
+      async function runGlobalStepDfsSummary() {
+        debugLog('[Global Run] [DataForSEO backlink summary] Starting...', 'info');
+        const res = await fetch(apiUrl('/api/aigeo/dataforseo-backlink-summary'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'refresh', domain: 'alanranger.com', force: true })
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json.status === 'error') throw new Error(json.message || ('HTTP ' + res.status));
+        debugLog('[Global Run] [DataForSEO backlink summary] ✓ Completed', 'success');
+        return json;
       }
 
       async function runGlobalStepGscUrlInspection() {
