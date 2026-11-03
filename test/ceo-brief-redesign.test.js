@@ -9,7 +9,7 @@ import { renderCeoWeeklyHtml } from '../lib/ceo-weekly/email.js';
 import { backlinksComparable, seoHealthComparable } from '../lib/ceo-weekly/comparability.js';
 import { assessBriefGate } from '../lib/ceo-weekly/brief-gate.js';
 import { websiteSubtitle, backlinksSubtitle, seoHealthSubtitle, openFailsText } from '../lib/ceo-weekly/subtitles.js';
-import { weeksRunning, lastmodFromSitemap } from '../lib/ceo-weekly/front-page.js';
+import { weeksRunning, lastmodFromSitemap, courseWeekItems } from '../lib/ceo-weekly/front-page.js';
 import { returningClients } from '../lib/strategy-summary.mjs';
 import { houseDates } from '../lib/ceo-weekly/strategyScorecard.js';
 
@@ -90,12 +90,25 @@ test('sale-only matching ignores courses tracked on the Courses tab and runs > 4
   assert.equal(att.length, 0);
 });
 
+test('a course sale is not added again when the same client is on the Courses tab for an upcoming run (date booked mistyped)', () => {
+  const rows = [{ source: 'schedule', name: 'Lightroom course', date: '2026-11-12', who: [], booked: 0, taken: 0, cap: null }];
+  const courses = [{ from_date: '2026-11-12', date_booked: '2026-11-26', event_name: '3WK Lightroom Course', client_name: 'Pat Example', paid: 150 }];
+  const txns = [{ txn_date: '2026-10-30', client_name: 'Pat Example', amount: 100, event_label: 'Lightoom', is_jlr: true }];
+  const matched = [];
+  assert.equal(attachSaleOnlyCourses(rows, txns, courses, matched).length, 0);
+  assert.equal(rows[0].booked, 0);
+  const items = courseWeekItems({ sale_only_attached: [], sale_matched_courses: matched }, [], '2026-10-26', '2026-11-01');
+  assert.deepEqual(items, [{ name: 'Lightroom course', date: '2026-11-12', jlr: true, taken: 150, workshop: false }]);
+});
+
 test('card C triggers: gift vouchers (Nov, last year < half the year before) and the watched page YoY slide', () => {
   const academy = { on_trial: 2, lost_7d: 6, converted_7d: 0, trial_ends: ['2026-11-08', '2026-11-16'] };
   const t = buildTriggers({ asOfYmd: '2026-11-02', voucherByYear: { 2024: 1100, 2025: 100 }, voucherTarget: 100, academy, watched: [] });
   assert.deepEqual(t.map((x) => x.key), ['gift_vouchers_christmas', 'academy_trial_nudge']);
   assert.match(t[0].why, /Nov–Dec 2024 £1,100 · Nov–Dec 2025 £100 · voucher target £100 this month/);
   assert.match(t[1].why, /0 of the last 6 trials converted \(7d\) · trials end 8 Nov and 16 Nov/);
+  assert.equal(buildTriggers({ asOfYmd: '2026-11-02', voucherByYear: {}, academy: { ...academy, on_trial: 3, trial_ends: ['2026-11-08', '2026-11-16', '2026-11-17'] }, watched: [] })[0].why
+    .match(/trials end (.*)$/)[1], '8 Nov, 16 Nov and 17 Nov');
   const monthly = [
     { mon: '2025-10', clicks: 1621, pos: 6.3 }, { mon: '2026-03', clicks: 950, pos: 10.6 },
     { mon: '2026-04', clicks: 724, pos: 12.4 }, { mon: '2026-10', clicks: 141, pos: 18.4 }
