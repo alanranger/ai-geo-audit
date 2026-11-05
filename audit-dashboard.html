@@ -43044,6 +43044,7 @@
           if (radarTimestampContainer) {
             radarTimestampContainer.style.display = gscTimestamp ? 'block' : 'none';
           }
+          if (typeof window.updateRevenueSyncBanner === 'function') void window.updateRevenueSyncBanner(propertyUrl);
         } catch (e) {
           debugLog(`[updateAuditTimestamp] Error updating audit timestamps: ${e?.message || e}`, 'error');
           const cached = typeof loadAuditResultsSync === 'function' ? loadAuditResultsSync() : null;
@@ -94181,6 +94182,29 @@ Confidence: ${c}`;
       renderTraditionalSeoResultsTable();
       void traditionalSeoKeywordMetricsLookupIfNeededForRun();
       traditionalSeoHydrateGscIndexFromStorage();
+      void traditionalSeoDropOutOfScopeRows();
+    }
+
+    /**
+     * A saved rules run can hold URLs that have since left 06 (404, noindex, excluded). They are left out of every
+     * count, the coverage tile and the score; the saved run itself is not changed.
+     */
+    async function traditionalSeoDropOutOfScopeRows() {
+      const rows = TRADITIONAL_SEO_STATE.evaluationRows;
+      if (!Array.isArray(rows) || !rows.length || typeof fetchAndParseSiteUrlsCsv !== 'function') return;
+      const prop = String(traditionalSeoPropertyUrl() || '').trim();
+      const site = await fetchAndParseSiteUrlsCsv().catch(() => []);
+      if (!Array.isArray(site) || site.length < 50) return;
+      const keep = new Set([...site, prop].map((u) => traditionalSeoToComparableUrl(u, prop)).filter(Boolean));
+      const inScope = (r) => String(r?.tier || '').toLowerCase() === 'sitewide' || keep.has(traditionalSeoToComparableUrl(r?.url, prop));
+      const kept = rows.filter(inScope);
+      TRADITIONAL_SEO_STATE.outOfScopeUrls = new Set(rows.filter((r) => !inScope(r)).map((r) => r?.url)).size;
+      if (kept.length !== rows.length) {
+        TRADITIONAL_SEO_STATE.evaluationRows = kept;
+        traditionalSeoRefreshRulesSummaryFromEvaluationRows();
+        renderTraditionalSeoResultsTable();
+      }
+      void traditionalSeoRefreshLastRunDisplay();
     }
 
     function traditionalSeoWriteEvaluationLocalStorage() {
@@ -95643,8 +95667,20 @@ Confidence: ${c}`;
       if (!el) return;
       const iso = await traditionalSeoResolveLastRunIso();
       if (iso) {
-        el.textContent = traditionalSeoFormatLastRunDisplay(iso);
+        el.textContent = traditionalSeoFormatLastRunDisplay(iso) + traditionalSeoEvaluationRunNote(iso);
       }
+    }
+
+    /** The pass / warn counts and the score come from the last rules run: say when it ran and on which URLs. */
+    function traditionalSeoEvaluationRunNote(latestIso) {
+      const evalAt = TRADITIONAL_SEO_STATE.lastEvaluationAt;
+      const rows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
+      const out = TRADITIONAL_SEO_STATE.outOfScopeUrls || 0;
+      const total = new Set(rows.map((r) => r?.url)).size + out;
+      if (!evalAt || (evalAt === latestIso && !out)) return '';
+      const urls = total ? ` on ${total} URLs` : '';
+      const left = out ? `; ${out} no longer in 06 are not counted` : '';
+      return ` · rules last run ${traditionalSeoFormatLastRunDisplay(evalAt)}${urls}${left}`;
     }
 
     window.traditionalSeoRefreshLastRunDisplay = traditionalSeoRefreshLastRunDisplay;
@@ -97551,7 +97587,7 @@ Confidence: ${c}`;
       }
 
       try {
-        const rawManual = localStorage.getItem('manual_url_list');
+        const rawManual = window.__manualUrlListThisRun || null;
         const manual = rawManual ? JSON.parse(rawManual) : [];
         (Array.isArray(manual) ? manual : []).forEach((url) => {
           addCanonicalUrl(url);

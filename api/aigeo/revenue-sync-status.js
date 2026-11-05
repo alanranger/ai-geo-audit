@@ -13,6 +13,7 @@
 // and `last_period_end` to help show coverage if useful later.
 
 import { createClient } from '@supabase/supabase-js';
+import { latestSchemaAudit, schemaAuditStatusFrom } from '../../lib/schema-audit-status.js';
 import { ga4AttributedView } from './ga4-data.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -110,19 +111,13 @@ async function fetchSchemaAuditStatus(supabase, propertyUrl) {
   const urls = propertyUrlCandidates(propertyUrl);
   const { data, error } = await supabase
     .from('audit_results')
-    .select('created_at, schema_total_pages, property_url')
+    .select('created_at, updated_at, schema_total_pages, schema_foundation, property_url')
     .in('property_url', urls)
     .gt('schema_total_pages', 0)
-    .order('created_at', { ascending: false })
-    .limit(1);
+    .order('updated_at', { ascending: false, nullsFirst: false })
+    .limit(5);
   if (error) throw error;
-  const latest = data?.[0] || null;
-  return {
-    source: 'schema_audit',
-    last_synced_at: latest ? latest.created_at : null,
-    schema_total_pages: latest ? Number(latest.schema_total_pages) : null,
-    row_count: latest ? 1 : 0
-  };
+  return schemaAuditStatusFrom(latestSchemaAudit(data));
 }
 
 async function fetchAcquisitionChannelsStatus(supabase) {
