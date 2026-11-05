@@ -7,6 +7,9 @@
  */
 
 import { getGSCAccessToken, normalizePropertyUrl, parseDateRange, getGscDateRange } from './utils.js';
+import { withoutExcludedUrls } from '../../lib/shared-url-exclusions.js';
+
+const pageKeyOf = (row) => row?.keys?.[0] || '';
 
 // Normalise GSC page rows to our compact shape (position null when not a valid rank).
 function mapGscPageRows(pageData) {
@@ -35,7 +38,7 @@ async function fetchGscPageWindow(searchConsoleUrl, accessToken, startDate, endD
     if (!pageResponse.ok) {
       return { startDate, endDate, rows: [], totalRows: 0, ok: false };
     }
-    const rows = mapGscPageRows(await pageResponse.json());
+    const rows = await withoutExcludedUrls(mapGscPageRows(await pageResponse.json()), pageKeyOf);
     return { startDate, endDate, rows, totalRows: rows.length, ok: true };
   } catch (e) {
     console.error(`[gsc-page-level] window ${startDate}..${endDate} failed:`, e?.message || e);
@@ -184,18 +187,7 @@ export default async function handler(req, res) {
     // Note: Position is the average position across all queries for this page
     // GSC API may return position as null/undefined for pages with no position data
     // Positions start at 1, so 0 is not a valid position - use null instead
-    const rows = (pageData.rows || []).map(row => {
-      const position = (row.position != null && row.position !== undefined && !isNaN(parseFloat(row.position)) && parseFloat(row.position) > 0)
-        ? parseFloat(row.position)
-        : null;
-      return {
-        keys: row.keys || [],
-        clicks: row.clicks || 0,
-        impressions: row.impressions || 0,
-        ctr: row.ctr || 0, // GSC returns CTR as ratio (0-1)
-        position: position
-      };
-    });
+    const rows = await withoutExcludedUrls(mapGscPageRows(pageData), pageKeyOf);
     
     console.log(`[gsc-page-level] Fetched ${rows.length} pages from GSC for ${siteUrl} (${startDate} to ${endDate})`);
     

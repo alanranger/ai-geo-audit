@@ -1,4 +1,5 @@
 import { fetchPagesMasterEntries } from '../../lib/pagesMaster.js';
+import { withoutExcludedUrls } from '../../lib/shared-url-exclusions.js';
 
 const KNOWN_TIERS = new Set(['all', 'landing', 'product', 'event', 'blog', 'academy', 'unmapped']);
 const DEFAULT_SITE_ORIGIN = 'https://www.alanranger.com';
@@ -329,7 +330,7 @@ export async function fetchTierSegmentationEntries(options = {}) {
   }
 
   const robotsFilteredEntries = await filterEntriesByRobotsDisallow(Array.from(byPath.values()), options, now);
-  const entries = filterEntriesByRuntimeExclusions(robotsFilteredEntries);
+  const entries = await withoutExcludedUrls(filterEntriesByRuntimeExclusions(robotsFilteredEntries), (e) => e?.url);
   return saveTierEntriesToCache(entries, now, snapshotKey);
 }
 

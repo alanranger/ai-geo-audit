@@ -3,6 +3,8 @@
  * Used by schema-audit and content-extractability so crawl lists match the agreed site URL set.
  */
 
+import { withoutExcludedUrls } from '../../lib/shared-url-exclusions.js';
+
 const CANONICAL_SITE_URLS_SOURCES = [
   'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/06-site-urls.csv',
   'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/06-site-urls.csv'
@@ -66,7 +68,7 @@ export async function fetchCanonicalSiteUrlList(options = {}) {
       const res = await fetch(reqUrl, { cache: forceRefresh ? 'no-store' : 'default' });
       if (!res.ok) continue;
       const urls = parseFirstColumnUrlsFrom06StyleCsv(await res.text());
-      if (urls.length > 0) return urls;
+      if (urls.length > 0) return withoutExcludedUrls(urls);
     } catch {
       // try next source
     }
