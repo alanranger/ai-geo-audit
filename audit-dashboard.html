@@ -12730,13 +12730,17 @@
         </div>
         <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
           <input type="file" id="urlListFile" accept=".csv" style="flex: 1; padding: 0.5rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem;">
-              <button class="btn btn-small" onclick="loadUrlListFromFile()" style="padding: 0.5rem 1rem;" title="Load a CSV file containing site URLs. The CSV must have a 'url' column in the header row. URLs will be used for schema audit instead of the default CSV source.">Load CSV</button>
-              <button class="btn btn-small" onclick="clearManualUrlList()" style="padding: 0.5rem 1rem; background: #ef4444; color: white; border-color: #ef4444;" title="Clear the manually loaded URL list and revert to using the default CSV source for schema audit">Clear</button>
+              <button class="btn btn-small" onclick="loadUrlListFromFile()" style="padding: 0.5rem 1rem;" title="Save a CSV in this browser. Audits still use 06 until you tick Use this list for the next audit.">Load CSV</button>
+              <button class="btn btn-small" onclick="clearManualUrlList()" style="padding: 0.5rem 1rem; background: #ef4444; color: white; border-color: #ef4444;" title="Remove the saved URL list from this browser.">Clear</button>
         </div>
         <textarea id="manualUrlList" placeholder="Or paste CSV content here (must include 'url' column in header row)..." style="width: 100%; min-height: 100px; padding: 0.75rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem; font-family: monospace; resize: vertical;"></textarea>
         <div class="help-text">
-          <strong>Required column:</strong> <code>url</code> (case-insensitive). CSV must have a header row. URLs will be extracted from the 'url' column.
+          <strong>Required column:</strong> <code>url</code> (case-insensitive). CSV must have a header row. Loading a file only saves it in this browser. Audits use 06 unless the box below is ticked for that one run.
         </div>
+        <label style="display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem; font-size: 0.9rem;">
+          <input type="checkbox" id="useManualUrlListOnce">
+          Use this list for the next audit (not 06)
+        </label>
         <div id="urlListStatus" style="margin-top: 0.5rem; font-size: 0.85rem;"></div>
           </div>
         </div>
@@ -40407,9 +40411,9 @@
           const urls = JSON.parse(savedUrlList);
           const statusDiv = document.getElementById('urlListStatus');
           if (statusDiv) {
-            statusDiv.innerHTML = `<span style="color: #10b981;">✓ ${urls.length} URLs loaded from saved list</span>`;
+            statusDiv.innerHTML = `<span style="color: #92400e;">A saved list of ${urls.length} URLs is in this browser. Audits use 06 unless you tick Use this list for the next audit.</span>`;
           }
-          debugLog(`✓ Manual URL list loaded: ${urls.length} URLs`, 'success');
+          debugLog(`Saved manual URL list present (${urls.length} URLs); audits use 06 unless the next-audit box is ticked`, 'info');
         } catch (e) {
           debugLog('⚠ Failed to load saved URL list', 'warn');
         }
@@ -40700,9 +40704,9 @@
         try {
           const result = parseUrlListCsv(csvText);
           localStorage.setItem('manual_url_list', JSON.stringify(result.urls));
-          statusDiv.innerHTML = `<span style="color: #10b981;">✓ Loaded ${result.validUrls} URLs from ${result.totalRows} rows</span>`;
+          statusDiv.innerHTML = `<span style="color: #92400e;">Saved ${result.validUrls} URLs. Tick Use this list for the next audit, or the run uses 06.</span>`;
           debugLog(`✓ Manual URL list loaded: ${result.validUrls} URLs from CSV`, 'success');
-          showStatus(`URL list loaded! Found ${result.validUrls} URLs.`, 'success');
+          showStatus(`Saved ${result.validUrls} URLs. Audits still use 06 until you tick the box.`, 'info');
         } catch (error) {
           statusDiv.innerHTML = `<span style="color: #ef4444;">✗ ${error.message}</span>`;
           debugLog(`✗ URL list parse error: ${error.message}`, 'error');
@@ -40724,10 +40728,10 @@
         // Also populate textarea with the CSV content
         textarea.value = fileText;
         
-        statusDiv.innerHTML = `<span style="color: #10b981;">✓ Loaded ${result.validUrls} URLs from ${result.totalRows} rows. Columns: ${result.headers.join(', ')}</span>`;
+        statusDiv.innerHTML = `<span style="color: #92400e;">Saved ${result.validUrls} URLs from ${file.name}. Tick Use this list for the next audit, or the run uses 06.</span>`;
         debugLog(`✓ URL list loaded from file: ${result.validUrls} URLs`, 'success');
         debugLog(`  File: ${file.name}, Columns: ${result.headers.join(', ')}`, 'info');
-        showStatus(`URL list loaded! Found ${result.validUrls} URLs from ${file.name}.`, 'success');
+        showStatus(`Saved ${result.validUrls} URLs from ${file.name}. Audits still use 06 until you tick the box.`, 'info');
         
         // Clear file input
         fileInput.value = '';
@@ -40736,6 +40740,17 @@
         debugLog(`✗ URL list file error: ${error.message}`, 'error');
         showStatus(`URL list error: ${error.message}`, 'error');
       }
+    }
+
+    /** The saved list applies to one run only, and only when its box is ticked; the box clears once used. */
+    function takeChosenManualUrlList() {
+      const box = document.getElementById('useManualUrlListOnce');
+      const raw = localStorage.getItem('manual_url_list');
+      window.__manualUrlListThisRun = null;
+      if (!box?.checked || !raw) return null;
+      box.checked = false;
+      window.__manualUrlListThisRun = raw;
+      return raw;
     }
 
     // Clear manual URL list
@@ -40747,7 +40762,9 @@
       textarea.value = '';
       fileInput.value = '';
       localStorage.removeItem('manual_url_list');
-      statusDiv.innerHTML = '<span style="color: #666;">Manual URL list cleared</span>';
+      const armBox = document.getElementById('useManualUrlListOnce');
+      if (armBox) armBox.checked = false;
+      statusDiv.innerHTML = '<span style="color: #666;">Manual URL list cleared. Audits use 06.</span>';
       debugLog('Manual URL list cleared', 'info');
       showStatus('Manual URL list cleared', 'success');
     }
@@ -41347,7 +41364,7 @@
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ urls: failedUrls })
+          body: JSON.stringify({ urls: failedUrls, useManualList: true })
         });
         
         if (!schemaResponse.ok) {
@@ -43784,9 +43801,10 @@
         const d = String(p?.date || '').slice(0, 10);
         if (/^\d{4}-\d{2}-\d{2}$/.test(d)) byDate.set(d, p);
       });
-      const end = new Date();
-      end.setHours(0, 0, 0, 0);
-      end.setDate(end.getDate() - 3);
+      const keys = [...byDate.keys()].sort();
+      if (!keys.length) return [];
+      const endParts = keys[keys.length - 1].split('-').map((n) => Number(n));
+      const end = new Date(endParts[0], endParts[1] - 1, endParts[2]);
       const start = new Date(end);
       start.setDate(start.getDate() - Math.max(1, Number(days) || 90) + 1);
       const out = [];
@@ -47975,7 +47993,7 @@
         let csvUrls = [];
         try {
           // Check for manually loaded URL list first
-          const manualUrlList = localStorage.getItem('manual_url_list');
+          const manualUrlList = window.__manualUrlListThisRun || null;
           if (manualUrlList) {
             try {
               csvUrls = JSON.parse(manualUrlList);
@@ -48758,7 +48776,7 @@
         // Fetch schema audit data
         try {
           // Check if manual URL list is available
-          const manualUrlList = localStorage.getItem('manual_url_list');
+          const manualUrlList = takeChosenManualUrlList();
           let schemaRequest;
           
           if (manualUrlList) {
@@ -48771,7 +48789,7 @@
                 headers: {
                   'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ urls })
+                body: JSON.stringify({ urls, useManualList: true })
               });
             } catch (e) {
               debugLog('⚠ Failed to parse manual URL list, using default CSV', 'warn');
@@ -48794,6 +48812,11 @@
                 debugLog('  Source: Manual URL list', 'info');
               } else {
                 debugLog('  Source: CSV (GitHub/hosted)', 'info');
+              }
+              const listNote = schemaAudit.data?.urlList?.notice;
+              if (listNote) {
+                debugLog(`  ${listNote}`, 'info');
+                if (schemaAudit.data.urlList.source !== '06') showStatus(listNote, 'info');
               }
               try {
                 if (typeof IMPL_AUDIT_CACHE_KEYS === 'object' && IMPL_AUDIT_CACHE_KEYS?.qa
@@ -87389,7 +87412,7 @@ Separate four-input composite — not the Site AI Health overall (Surface 40% ·
         // Preferred source for page counts: full site URL list (manual/synced CSV).
         // This guarantees "Other" means every non-money page, not just pages present in query-level GSC rows.
         try {
-          const rawList = localStorage.getItem('manual_url_list');
+          const rawList = window.__manualUrlListThisRun || null;
           const urlList = rawList ? JSON.parse(rawList) : [];
           if (Array.isArray(urlList) && urlList.length > 0 && typeof classifyPageSegment === 'function' && typeof PageSegment !== 'undefined') {
             let unmappedCount = 0;

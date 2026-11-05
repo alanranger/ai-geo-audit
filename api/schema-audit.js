@@ -9,6 +9,7 @@
 
 import { safeJsonParse } from './aigeo/utils.js';
 import { fetchCanonicalSiteUrlList } from './aigeo/canonical-site-urls.js';
+import { manualUrlsIfChosen, urlListRecord } from '../lib/audit/crawl-url-choice.mjs';
 import {
   fetchTierSegmentationEntries,
   normalizeTierInput as normalizeSharedTierInput,
@@ -1295,14 +1296,14 @@ export default async function handler(req, res) {
       bodyTierSnapshotKey = String(body.tierSnapshotKey || '').trim();
       bodyTierCacheTtlMs = parsePositiveInt(body.tierCacheTtlMs);
       
-      if (body.urls && Array.isArray(body.urls)) {
-        // Use manual URL list from request
-        urls = body.urls.filter(url => url && typeof url === 'string' && url.startsWith('http'));
+      const chosenManual = manualUrlsIfChosen(body.urls, parseBoolean(body.useManualList));
+      if (chosenManual) {
+        urls = chosenManual;
         urlSource = 'manual';
         crawlListKind = 'manual';
         console.log(`📄 Using manual URL list: ${urls.length} URLs provided`);
       } else {
-        // POST but no URLs provided, fall back to CSV
+        // POST but no chosen list, fall back to CSV
         const parsed = await parseCsvUrls({
           forceRefresh: queryRefreshTierSource || bodyRefreshTierSource,
           snapshotKey: queryTierSnapshotKey || bodyTierSnapshotKey,
@@ -1867,6 +1868,7 @@ export default async function handler(req, res) {
       });
     }
     const serviceSchemaCoverage = buildServiceSchemaCoverage(pages);
+    const urlList = urlListRecord(crawlListKind, urls.length);
     const qaGate = {
       ...buildSchemaQaGate(results, urlSource, runMode, runTier, qaTierLookup),
       tierLookupLoaded: qaTierLookupLoaded
@@ -1887,6 +1889,7 @@ export default async function handler(req, res) {
         missingSchemaPages: missingSchemaPages.length > 0 ? missingSchemaPages : undefined,
         serviceSchemaCoverage,
         qaGate,
+        urlList,
         richEligible,
         errors: errors.length > 0 ? errors : undefined,
         pages // Array of all pages with metadata (title, metaDescription)

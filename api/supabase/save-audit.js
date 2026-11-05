@@ -18,6 +18,7 @@ import { createClient } from '@supabase/supabase-js';
 import { computeSurfaceOutcomesRollup } from '../../lib/audit/surfaceOutcomes.js';
 import { computeSurfaceVisibilityRollup } from '../../lib/audit/surfaceScores.js';
 import { computeTopOfPageRollup } from '../../lib/audit/topOfPage.js';
+import { attachUrlList } from '../../lib/audit/crawl-url-choice.mjs';
 import {
   readDfsBacklinkScalars,
   appendDomainRankHistoryFromCache,
@@ -594,6 +595,7 @@ export default async function handler(req, res) {
     foundationTypes.forEach(type => {
       foundationSchemas[type] = !schemaData.missingTypes?.includes(type);
     });
+    attachUrlList(foundationSchemas, schemaData.urlList);
 
     // Validate and prepare data for Supabase
     // Ensure numeric fields are numbers, not strings
