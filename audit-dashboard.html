@@ -92520,6 +92520,17 @@ Confidence: ${c}`;
       if (btn) btn.onclick = () => window.location.reload();
     }
 
+    /**
+     * The saved results were last fully scored from another render run. Site-wide rows carry the run id of the full
+     * score; a single-page or single-rule re-audit keeps them, so it can't hide a newer render.
+     */
+    function traditionalSeoNeedsRescoreForRender(run) {
+      if (!run?.run_id || run.status === 'running') return false;
+      const site = (TRADITIONAL_SEO_STATE.evaluationRows || [])
+        .find((r) => String(r?.tier || '').toLowerCase() === 'sitewide' && r.render_run_id);
+      return !site || site.render_run_id !== run.run_id;
+    }
+
     function traditionalSeoBrokenPending() {
       const bp = TRADITIONAL_SEO_STATE.brokenProgress;
       return !!bp && bp.total > 0 && bp.checked < bp.total;
@@ -93076,9 +93087,7 @@ Confidence: ${c}`;
         const gscServerN = await traditionalSeoHydrateGscCacheFromServer();
         if (!gscServerN) traditionalSeoHydrateGscIndexFromStorage();
         if (!gscServerN && traditionalSeoGscIndexLoaded()) traditionalSeoMarkSource('gscInspect', true);
-        const renderDoneAt = Date.parse(renderSnap?.run?.finished_at || 0);
-        const lastEvalAt = Date.parse(TRADITIONAL_SEO_STATE.lastEvaluationAt || 0);
-        if (renderSnap?.run && renderSnap.run.status !== 'running' && Number.isFinite(renderDoneAt) && renderDoneAt > (lastEvalAt || 0)) {
+        if (traditionalSeoNeedsRescoreForRender(renderSnap?.run)) {
           traditionalSeoTabLoadSet('table', 'running', 'Scoring from rendered snapshots…');
           await runTraditionalSeoEvaluation({ refreshAudit: false, refreshExtractability: false, skipBrokenLive: true, autoAfterRender: true });
         }
@@ -102613,7 +102622,8 @@ Confidence: ${c}`;
               rule_weight: Math.max(0, traditionalSeoToNum(rule.weight, 1)),
               clicks: 0,
               impressions: 0,
-              target_keyword: ''
+              target_keyword: '',
+              render_run_id: TRADITIONAL_SEO_STATE.renderRun?.run_id || null
             });
           });
         }
