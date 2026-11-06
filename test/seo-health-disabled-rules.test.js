@@ -49,6 +49,17 @@ test('a disabled rule never changes the Monday brief score, warn count or open f
   assert.equal(off.open_fail, 'none');
 });
 
+test('a site-wide rule is scored from its site-wide row', async () => {
+  const out = await sectionSeoHealth(fakeSupabase({
+    traditional_seo_rules: [{ rule_key: 'robots_fetchable', rule_name: 'robots.txt fetchable', enabled: true, weight: 1 }],
+    traditional_seo_evaluation_cache: [{ evaluation_rows: [{ url: 'https://www.alanranger.com/', tier: 'sitewide', rule_key: 'robots_fetchable', status: 'fail' }] }],
+    traditional_seo_score_snapshots: [],
+    domain_strength_snapshots: []
+  }), null);
+  assert.deepEqual(out.hygiene, { enabled: 1, pass: 0, warn: 0, fail: 1 });
+  assert.equal(out.open_fail, 'robots.txt fetchable');
+});
+
 test('re-enabling the rules brings their saved results back with no re-crawl', async () => {
   const on = await brief({ thin: true, gsc: true });
   assert.deepEqual(on.hygiene, { enabled: 3, pass: 1, warn: 1, fail: 1 });
