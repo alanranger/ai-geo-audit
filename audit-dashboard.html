@@ -92426,8 +92426,18 @@ Confidence: ${c}`;
     };
 
     window.getGaioTraditionalSeoEvaluationRows = function getGaioTraditionalSeoEvaluationRows() {
-      return Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
+      return traditionalSeoActiveEvaluationRows();
     };
+
+    /**
+     * Saved rule rows for rules switched on in Rule Manager. A disabled rule's rows stay stored (re-enabling brings them
+     * back without a re-crawl) but count nowhere: URL tiles, page scores, the modal, exports and coverage.
+     */
+    function traditionalSeoActiveEvaluationRows() {
+      const rows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
+      const off = new Set((TRADITIONAL_SEO_STATE.rules || []).filter((r) => r?.enabled === false).map((r) => String(r.rule_key)));
+      return off.size ? rows.filter((r) => !off.has(String(r?.rule_key))) : rows;
+    }
 
     /** SPA rewrite sends most paths to audit-dashboard.html; load disavow via API so we get real text. */
     const TRADITIONAL_SEO_DISAVOW_URL = '/api/aigeo/disavow-list';
@@ -99938,7 +99948,7 @@ Confidence: ${c}`;
       TRADITIONAL_SEO_STATE.modalPageUrl = target;
       traditionalSeoSyncModalGscInspectHref(target);
       await traditionalSeoEnsureTargetKeywordOverridesLoaded();
-      const all = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
+      const all = traditionalSeoActiveEvaluationRows();
       const propModal = traditionalSeoEffectivePropertyUrl();
       const rkTarget = traditionalSeoLandingRollupGroupKey(target, propModal);
       const hitsRaw = all.filter((row) => {
@@ -100947,7 +100957,7 @@ Confidence: ${c}`;
 
     /** Same filter + sort as the visible Traditional SEO results table (all matching rows, not paginated). */
     function traditionalSeoGetFilteredSortedResultRows() {
-      const allRows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
+      const allRows = traditionalSeoActiveEvaluationRows();
       if (allRows.length && !String(TRADITIONAL_SEO_STATE.lastPropertyUrl || '').trim()) {
         const bootProp = traditionalSeoPropertyUrl();
         if (bootProp) TRADITIONAL_SEO_STATE.lastPropertyUrl = bootProp;
