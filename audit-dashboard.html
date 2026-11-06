@@ -95582,6 +95582,7 @@ Confidence: ${c}`;
       let passCount = 0;
       let warnCount = 0;
       let failCount = 0;
+      let notCheckedCount = 0;
 
       safeRules.forEach((rule) => {
         const enabled = rule?.enabled !== false;
@@ -95589,7 +95590,10 @@ Confidence: ${c}`;
         enabledCount += 1;
         const weight = Math.max(0, traditionalSeoToNum(rule?.weight, 1));
         const status = String(rule?.current_status || 'fail').toLowerCase();
-        if (status === 'na' || status === 'not_checked') return;
+        if (status === 'na' || status === 'not_checked') {
+          notCheckedCount += 1;
+          return;
+        }
         weightedTotal += weight;
         weightedAchieved += weight * traditionalSeoScorePoints(status);
         if (status === 'pass') passCount += 1;
@@ -95604,6 +95608,7 @@ Confidence: ${c}`;
         passCount,
         warnCount,
         failCount,
+        notCheckedCount,
         weightedTotal
       };
     }
@@ -96711,13 +96716,15 @@ Confidence: ${c}`;
       const passCount = Math.max(0, traditionalSeoToNum(summary?.passCount, 0));
       const warnCount = Math.max(0, traditionalSeoToNum(summary?.warnCount, 0));
       const failCount = Math.max(0, traditionalSeoToNum(summary?.failCount, 0));
+      const notCheckedCount = Math.max(0, traditionalSeoToNum(summary?.notCheckedCount, 0));
       const rulesPills = [
         `<button type="button" class="traditional-seo-status-pill" data-status="pass" data-filter-status="pass" title="Filter table: rows with pass">Pass ${passCount}</button>`,
         `<button type="button" class="traditional-seo-status-pill" data-status="warn" data-filter-status="warn" title="Filter table: rows with warn">Warn ${warnCount}</button>`,
-        `<button type="button" class="traditional-seo-status-pill" data-status="fail" data-filter-status="fail" title="Filter table: rows with fail">Fail ${failCount}</button>`
+        `<button type="button" class="traditional-seo-status-pill" data-status="fail" data-filter-status="fail" title="Filter table: rows with fail">Fail ${failCount}</button>`,
+        `<button type="button" class="traditional-seo-status-pill" data-status="not_checked" data-filter-status="not_checked" title="Rules with no checked result on any URL (not checked or n/a)">Not checked ${notCheckedCount}</button>`
       ].join('');
       return [
-        `<div class="traditional-seo-strip-sub" style="margin:0 0 0.12rem 0;font-size:0.78rem;color:var(--dark-text-muted);"><strong>Rules</strong> (${enabled} on) — one pill per rule; numbers sum to ~${enabled}, not URL count.</div>`,
+        `<div class="traditional-seo-strip-sub" style="margin:0 0 0.12rem 0;font-size:0.78rem;color:var(--dark-text-muted);"><strong>Rules</strong> (${enabled} on) — one pill per rule; numbers sum to ${enabled}, not URL count.</div>`,
         `<div class="traditional-seo-pwf-row">${rulesPills}</div>`
       ].join('');
     }
@@ -97754,17 +97761,6 @@ Confidence: ${c}`;
       return Array.isArray(rows) ? rows.length : 0;
     }
 
-    function traditionalSeoQaPayloadNeedsSupabaseFallback(qaPayload, evaluatedUrlCount) {
-      const n = traditionalSeoQaGateRowCount(qaPayload);
-      const target = Math.max(0, traditionalSeoToNum(evaluatedUrlCount, 0));
-      if (!qaPayload || String(qaPayload.status || '').toLowerCase() !== 'ok') return true;
-      if (n === 0) return true;
-      if (target <= 0) return false;
-      if (n < target) return true;
-      if (target >= 30 && n < Math.floor(target * 0.98)) return true;
-      return false;
-    }
-
     function traditionalSeoNormalizePropertyUrlForSnapshots(raw) {
       const value = String(raw || '').trim();
       if (!value) return 'https://www.alanranger.com';
@@ -97886,12 +97882,11 @@ Confidence: ${c}`;
       return [...keys];
     }
 
-    async function traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl, evaluatedUrlCount, options = {}) {
+    async function traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl) {
       const payloads = traditionalSeoLoadImplementationPayloads();
       let qa = payloads.qa;
-      const forceRemote = options?.forceRemote === true;
-      const needRemote = forceRemote || traditionalSeoQaPayloadNeedsSupabaseFallback(qa, evaluatedUrlCount);
-      const remote = needRemote ? await traditionalSeoFetchQaPayloadFromSupabase(propertyUrl) : null;
+      // A full-size local copy can still predate pages added since, and a page with no QA row scores warn.
+      const remote = await traditionalSeoFetchQaPayloadFromSupabase(propertyUrl).catch(() => null);
       if (remote && String(remote.status || '').toLowerCase() === 'ok'
           && traditionalSeoQaGateRowCount(remote) > 0) {
         qa = traditionalSeoMergeSchemaQaBodies(qa, remote, propertyUrl);
@@ -101843,7 +101838,7 @@ Confidence: ${c}`;
 
         traditionalSeoEvalProgressTrack(0, 0);
         traditionalSeoEvalProgressStage('Building signals and loading overrides…', 78);
-        const implPayloads = await traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl, urls.length);
+        const implPayloads = await traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl);
         const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
         TRADITIONAL_SEO_STATE.lastSignalMaps = signalMaps;
         if (propertyUrl) TRADITIONAL_SEO_STATE.lastPropertyUrl = propertyUrl;
@@ -102313,11 +102308,7 @@ Confidence: ${c}`;
         // the save-audit merge appended a stale: true entry). The normal
         // threshold (n < target) won't trigger because the cached count still
         // matches the URL list, so the healed entry stays invisible.
-        const implPayloads = await traditionalSeoEnsureQaPayloadWithRemoteFallback(
-          propertyUrl,
-          urls.length,
-          { forceRemote: isPartialPageRescore }
-        );
+        const implPayloads = await traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl);
         const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
         TRADITIONAL_SEO_STATE.lastSignalMaps = signalMaps;
         if (propertyUrl) TRADITIONAL_SEO_STATE.lastPropertyUrl = propertyUrl;
