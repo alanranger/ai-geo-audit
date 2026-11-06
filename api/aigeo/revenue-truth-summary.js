@@ -273,6 +273,7 @@ function buildConfig(includeJlr, gpBundle) {
   return {
     tierBands,
     annualGpTargets: gpBundle?.annualTargets || null,
+    position: gpBundle?.master ? positionTargets(gpBundle.master) : null,
     survivalThresholdLabel: gpBundle?.survival_threshold_label || null,
     derivedSales: gpBundle?.derived || null,
     ...panelRevenueTargets(gpBundle),
@@ -360,9 +361,10 @@ function ytdContext(monthly, cfg) {
   const inYear = monthly.filter(m => m.year === year);
   const ytdRevenue = round2(inYear.reduce((s, m) => s + m.headlineRevenue, 0));
   const dayOfYear = dayOfYearUtc(new Date(cfg.now.iso));
-  const yearTarget = (cfg.annualGpTargets?.comfortable) || (ACTIVE_TIER_BANDS.comfortable * 12);
-  const proRata = round2((yearTarget * dayOfYear) / 365);
-  return { year, ytdRevenue, proRataTarget: proRata, yearTarget };
+  const rev = cfg.position?.rev;
+  const yearTarget = rev?.year?.survival || (ACTIVE_TIER_BANDS.survival * 12);
+  const proRata = rev?.ytd?.survival != null ? round2(rev.ytd.survival) : round2((yearTarget * dayOfYear) / 365);
+  return { year, ytdRevenue, proRataTarget: proRata, yearTarget, targetBasis: 'Targets panel: revenue the seasonal survival GP needs (year to date / full year)' };
 }
 
 function classifyBand(amount) {
@@ -494,7 +496,8 @@ function buildForecast(monthly, cfg) {
   const trailing3 = closedThisYear.slice(-3);
   const { avg, min, max } = trailingStats(trailing3);
   const monthsRemaining = Math.max(0, 12 - closedThisYear.length);
-  const annualTarget = (cfg.annualGpTargets?.comfortable) || (ACTIVE_TIER_BANDS.comfortable * 12);
+  const annualTarget = cfg.position?.rev?.year?.survival || (ACTIVE_TIER_BANDS.survival * 12);
+  const monthlyTarget = cfg.position?.rev?.month?.survival || ACTIVE_TIER_BANDS.survival;
   const forecastCentral = round2(ytdActual + avg * monthsRemaining);
   const forecastLow = round2(ytdActual + min * monthsRemaining);
   const forecastHigh = round2(ytdActual + max * monthsRemaining);
@@ -522,9 +525,10 @@ function buildForecast(monthly, cfg) {
     forecastInclCurrentDelta: round2(forecastInclCurrent - forecastCentral),
     partialMonthProjected: projectedPartial,
     annualTarget,
-    monthlyTarget: ACTIVE_TIER_BANDS.comfortable,
+    monthlyTarget,
+    targetBasis: 'Targets panel: revenue the survival GP needs (full year / this month, seasonal)',
     varianceToAnnualTarget: round2(forecastCentral - annualTarget),
-    varianceToMonthlyTarget: round2(avg - ACTIVE_TIER_BANDS.comfortable),
+    varianceToMonthlyTarget: round2(avg - monthlyTarget),
     formula: 'forecast = YTD actual + (trailing-3-closed-month average × months remaining)',
     caveat: 'Simple run-rate projection — does not model seasonality; revenue is seasonal (see the tier band chart).'
   };

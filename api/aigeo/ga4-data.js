@@ -114,8 +114,20 @@ function sumEnquiryEvents(counts) {
   return total;
 }
 
-export async function fetchGa4FromGoogle() {
-  const { startDate, endDate } = getGscDateRange({ daysBack: 28, endOffsetDays: 2 });
+/** 28 days ending on the latest Search Console page-metrics date, so Pipeline & Funnel's GSC and GA4 windows match. */
+export async function ga4RangeForGsc(supabase, propertyUrl) {
+  const fallback = getGscDateRange({ daysBack: 28, endOffsetDays: 2 });
+  const { data, error } = await supabase.from('gsc_page_metrics_28d').select('date_end')
+    .eq('site_url', propertyUrl).order('date_end', { ascending: false }).limit(1);
+  const end = !error && data?.[0]?.date_end ? String(data[0].date_end).slice(0, 10) : null;
+  if (!end || end > fallback.endDate) return fallback;
+  const start = new Date(`${end}T12:00:00Z`);
+  start.setUTCDate(start.getUTCDate() - 27);
+  return { startDate: start.toISOString().slice(0, 10), endDate: end };
+}
+
+export async function fetchGa4FromGoogle(rangeOverride = null) {
+  const { startDate, endDate } = rangeOverride || getGscDateRange({ daysBack: 28, endOffsetDays: 2 });
   const accessToken = await getGSCAccessToken();
   const range = { startDate, endDate };
   const enquiryFilter = {
@@ -259,7 +271,7 @@ export async function getGa4MetricsForProperty(supabase, propertyUrl, { forceRef
   if (!forceRefresh && isCacheFresh(cached)) {
     return { row: cached, refreshed: false };
   }
-  const snap = await fetchGa4FromGoogle();
+  const snap = await fetchGa4FromGoogle(await ga4RangeForGsc(supabase, url).catch(() => null));
   const row = await upsertGa4Snapshot(supabase, url, snap);
   return { row, refreshed: true };
 }

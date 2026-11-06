@@ -32,6 +32,7 @@ export function targetsPatch(body) {
     patch[`${k}_gp_annual`] = n * 12;
   }
   if (body?.funnel_targets && typeof body.funnel_targets === 'object') patch.funnel_targets = body.funnel_targets;
+  if (body?.kpi_targets && typeof body.kpi_targets === 'object') patch.kpi_targets = body.kpi_targets;
   if (Array.isArray(body?.roadmap_targets)) patch.roadmap_targets = body.roadmap_targets;
   if (body?.campaign_targets && typeof body.campaign_targets === 'object') patch.campaign_targets = body.campaign_targets;
   return patch;

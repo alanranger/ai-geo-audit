@@ -208,13 +208,13 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script src="/keyword-tracking-class-LOCKED.js"></script>
   <script src="/lib/competitor-analysis-tab.js?v=ca-prog-20260719a"></script>
-  <script src="/lib/strategy-tab.js?v=st-20261106-camp1"></script>
-  <script src="/lib/strategy-actions.js?v=sa-20261106d"></script>
+  <script src="/lib/strategy-tab.js?v=st-20261106-audit1"></script>
+  <script src="/lib/strategy-actions.js?v=sa-20261106-audit1"></script>
   <script src="/lib/strategy-board.js?v=sb-20261106-rework1"></script>
   <script src="/lib/strategy-campaigns.js?v=sc-20261106-camp2"></script>
-  <script src="/lib/monthly-chart.js?v=mc-20261106a"></script>
+  <script src="/lib/monthly-chart.js?v=mc-20261106-audit1"></script>
   <script src="/lib/pages-by-traffic.js?v=pt-20261106a"></script>
-  <script src="/lib/targets-panel.js?v=tp-20261106d"></script>
+  <script src="/lib/targets-panel.js?v=tp-20261106-audit1"></script>
   <script src="/lib/silent-faults-tab.js?v=sf-20261027a"></script>
   <script src="/lib/trad-seo-render-client.js?v=tsr-20261030b"></script>
   <script src="/lib/acquisition/channels-audit-outcome.js?v=cao-20261106a"></script>
@@ -9263,7 +9263,7 @@
         <!-- Per-tier cards, Profit Pyramid, Academy -->
         <section class="rf-section">
           <h3>Money-page tiers: this month &amp; YTD</h3>
-          <div class="rf-sub">One card per money-page tier, against its share of the Targets panel survival target (Strategy &amp; Actions). The month-by-month chart, the Survival Cockpit and the Profit Goal Tracker are on the Revenue tab.</div>
+          <div class="rf-sub">One card per money-page tier, against its share of the Targets panel survival target (Strategy &amp; Actions). The month-by-month chart, the Survival Cockpit and "Where we are now" are on the Revenue tab.</div>
           <!-- Per-tier mini sparklines (7 tiles: 6 commercial tiers + an
                "Unidentified" safety-net bucket so we can spot new product
                types that don't match any classifier rule yet). -->
@@ -9274,8 +9274,9 @@
             <div class="rf-tier-spark-card" data-tier-id="services"><div class="rf-tier-spark-empty">Loading…</div></div>
             <div class="rf-tier-spark-card" data-tier-id="hire"><div class="rf-tier-spark-empty">Loading…</div></div>
             <div class="rf-tier-spark-card" data-tier-id="academy"><div class="rf-tier-spark-empty">Loading…</div></div>
-            <div class="rf-tier-spark-card rf-tier-spark-card-warn" data-tier-id="unidentified" title="Transactions the classifier couldn't tier. Click through to see which rows landed here and ask the agent to add a classifier rule."><div class="rf-tier-spark-empty">Loading…</div></div>
+            <div class="rf-tier-spark-card rf-tier-spark-card-warn" data-tier-id="unidentified" hidden title="Transactions the classifier couldn't tier."><div class="rf-tier-spark-empty">Loading…</div></div>
           </div>
+          <p class="rf-sub" id="rf-tier-unmapped-warn" hidden></p>
 
           <!-- Profit Pyramid: re-rank tiers by annualised gross profit
                (revenue × GP%) instead of revenue. Surfaces the gap between
@@ -10706,7 +10707,7 @@
           <div class="rt-table-scroll"><table class="rt-table rt-striped" id="rt-funding-table"></table></div>
         </details>
 
-        <script type="module" src="/lib/revenue-truth-controller.mjs?v=rt-20261106-stage4"></script>
+        <script type="module" src="/lib/revenue-truth-controller.mjs?v=rt-20261106-audit1"></script>
       </section>
 
       <!-- Scenario Planning retired (6 Nov 2026, Stage 5): not in the nav, never shown, its scripts do not start.
@@ -105476,15 +105477,25 @@ Confidence: ${c}`;
         </div>
         <svg class="rf-tier-spark-svg" viewBox="0 0 ${RF_TIER_SPARK_DIMS.W} ${RF_TIER_SPARK_DIMS.H}" preserveAspectRatio="none">${svgBody}</svg>`;
     }
+    /** "Unidentified" is a warning line, shown only when some bookings couldn't be given a tier. */
+    function rfTierUnmappedWarning(series) {
+      const el = document.getElementById('rf-tier-unmapped-warn');
+      if (!el) return;
+      const ytd = Number(series?.ytd?.revenue_gbp) || 0;
+      el.hidden = ytd <= 0;
+      el.innerHTML = ytd > 0 ? `<span style="color:#fbbf24;">⚠ £${Math.round(ytd).toLocaleString('en-GB')} of ${series.ytd.year} bookings couldn't be given a tier (unmapped products): they need a classifier rule.</span>` : '';
+    }
     function rfRenderTierSparklines(tierHistory) {
       const grid = document.getElementById('rf-tier-spark-grid');
       if (!grid) return;
       const byId = new Map();
       (tierHistory || []).forEach(series => byId.set(series.tier_id, series));
       const cards = grid.querySelectorAll('.rf-tier-spark-card');
+      rfTierUnmappedWarning(byId.get('unidentified'));
       cards.forEach(card => {
         const id = card.getAttribute('data-tier-id');
         const series = byId.get(id);
+        if (id === 'unidentified') return;
         if (!series) {
           card.innerHTML = '<div class="rf-tier-spark-empty">No data</div>';
           return;
