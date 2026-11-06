@@ -92465,7 +92465,8 @@ Confidence: ${c}`;
     function traditionalSeoRuleStatusOrNotLoaded(rule, url, tier, metric, context) {
       const missing = traditionalSeoFailedSourceLabelForRule(rule?.rule_key);
       if (missing) return { status: 'not_checked', reason: missing };
-      return { status: traditionalSeoRuleStatusForUrl(rule, url, tier, metric, context), reason: '' };
+      const carried = String(rule?.rule_key) === 'broken_links_no_404' ? traditionalSeoBrokenCarriedFrom(url) : '';
+      return { status: traditionalSeoRuleStatusForUrl(rule, url, tier, metric, context), reason: '', carried };
     }
 
     function traditionalSeoMarkEvaluationSources(payloads) {
@@ -92493,15 +92494,90 @@ Confidence: ${c}`;
         el.style.cssText = 'margin:0.5rem 0;padding:0.55rem 0.75rem;border:1px solid rgba(245,158,11,0.6);border-radius:8px;background:rgba(245,158,11,0.12);font-size:0.85rem;';
         anchor.parentNode.insertBefore(el, anchor);
       }
-      const failed = Object.entries(TRADITIONAL_SEO_SOURCES)
-        .filter(([src]) => traditionalSeoSourceState(src) === 'failed')
-        .map(([, d]) => d.label);
-      el.style.display = failed.length ? 'block' : 'none';
-      el.innerHTML = failed.length
-        ? `<strong>${escapeHtml(failed.join(', '))} didn't load</strong> — figures incomplete. Rules that need it show as not checked, and a re-score won't be saved. <button type="button" class="btn" id="traditional-seo-source-retry" style="margin-left:0.5rem;padding:0.2rem 0.6rem;font-size:0.78rem;">Retry</button>`
-        : '';
+      const failed = traditionalSeoFailedSourceLabels();
+      const parts = [];
+      if (failed.length) {
+        parts.push(`<strong>${escapeHtml(failed.join(', '))} didn't load</strong> — figures incomplete. Rules that need it show as not checked, and nothing is saved. <button type="button" class="btn" id="traditional-seo-source-retry" style="margin-left:0.5rem;padding:0.2rem 0.6rem;font-size:0.78rem;">Retry</button>`);
+      }
+      const bp = TRADITIONAL_SEO_STATE.brokenProgress;
+      if (traditionalSeoBrokenPending()) {
+        parts.push(`<div>Broken-link check in progress (${bp.checked}/${bp.total}) — results update when it finishes. Pages not reached yet show their previous result${TRADITIONAL_SEO_STATE.brokenPrevAt ? ` from ${escapeHtml(formatTraditionalSeoTimestamp(TRADITIONAL_SEO_STATE.brokenPrevAt))}` : ''}.</div>`);
+      }
+      el.style.display = parts.length ? 'block' : 'none';
+      el.innerHTML = parts.join('');
       const btn = document.getElementById('traditional-seo-source-retry');
       if (btn) btn.onclick = () => window.location.reload();
+    }
+
+    function traditionalSeoBrokenPending() {
+      const bp = TRADITIONAL_SEO_STATE.brokenProgress;
+      return !!bp && bp.total > 0 && bp.checked < bp.total;
+    }
+
+    function traditionalSeoBrokenCarriedFrom(url) {
+      const st = TRADITIONAL_SEO_STATE;
+      if (traditionalSeoRenderMapGet(st.brokenByUrl, url)) return '';
+      const prev = traditionalSeoRenderMapGet(st.brokenPrevByUrl, url);
+      return prev && String(prev.outcome) === 'checked' ? String(st.brokenPrevAt || prev.checked_at || '') : '';
+    }
+
+    function traditionalSeoBrokenResultForUrl(url) {
+      const st = TRADITIONAL_SEO_STATE;
+      const now = traditionalSeoRenderMapGet(st.brokenByUrl, url);
+      if (now) return now;
+      return traditionalSeoBrokenCarriedFrom(url) ? traditionalSeoRenderMapGet(st.brokenPrevByUrl, url) : null;
+    }
+
+    /** Data requests the tab's figures come from; a write to one of them is not a load. */
+    const TRADITIONAL_SEO_FETCH_SOURCES = [
+      [/\/api\/aigeo\/impl-snapshots/, 'Implementation snapshots', true],
+      [/\/api\/aigeo\/gsc-page-level/, 'GSC page metrics', true],
+      [/\/api\/aigeo\/keyword-target-metrics/, 'Keyword metrics', true],
+      [/\/api\/aigeo\/dataforseo-backlink/, 'DataForSEO backlinks', true],
+      [/\/api\/fetch-search-console/, 'Search Console', true],
+      [/\/api\/aigeo\/traditional-seo-render(\?|$)/, 'Rendered audit snapshot', false],
+      [/\/api\/aigeo\/gsc-url-inspection-cache/, 'GSC URL Inspection cache', false],
+      [/\/api\/aigeo\/traditional-seo-rules(\?|$)/, 'Rule settings', false],
+      [/\/api\/aigeo\/traditional-seo-evaluation-cache/, 'Saved evaluation', false]
+    ];
+
+    function traditionalSeoFetchSourceLabel(input, init) {
+      const url = String(typeof input === 'string' ? input : input?.url || '');
+      const method = String(init?.method || input?.method || 'GET').toUpperCase();
+      const hit = TRADITIONAL_SEO_FETCH_SOURCES.find(([re]) => re.test(url));
+      if (!hit) return '';
+      return method === 'GET' || hit[2] ? hit[1] : '';
+    }
+
+    function traditionalSeoMarkFetch(label, ok) {
+      TRADITIONAL_SEO_STATE.fetchFailures = { ...(TRADITIONAL_SEO_STATE.fetchFailures || {}), [label]: !ok };
+      traditionalSeoRenderSourceBanner();
+    }
+
+    function traditionalSeoWatchFetch() {
+      if (window.__tradSeoFetchWatched || typeof window.fetch !== 'function') return;
+      window.__tradSeoFetchWatched = true;
+      const orig = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        const label = traditionalSeoFetchSourceLabel(input, init);
+        try {
+          const res = await orig(input, init);
+          if (label) traditionalSeoMarkFetch(label, res.status < 500);
+          return res;
+        } catch (e) {
+          if (label) traditionalSeoMarkFetch(label, false);
+          throw e;
+        }
+      };
+    }
+    traditionalSeoWatchFetch();
+
+    function traditionalSeoFailedSourceLabels() {
+      const fromSources = Object.entries(TRADITIONAL_SEO_SOURCES)
+        .filter(([src]) => traditionalSeoSourceState(src) === 'failed')
+        .map(([, d]) => d.label);
+      const fromFetch = Object.entries(TRADITIONAL_SEO_STATE.fetchFailures || {}).filter(([, bad]) => bad).map(([l]) => l);
+      return [...new Set([...fromSources, ...fromFetch])];
     }
 
     function traditionalSeoActiveEvaluationRows() {
@@ -92993,7 +93069,7 @@ Confidence: ${c}`;
         const lastEvalAt = Date.parse(TRADITIONAL_SEO_STATE.lastEvaluationAt || 0);
         if (renderSnap?.run && renderSnap.run.status !== 'running' && Number.isFinite(renderDoneAt) && renderDoneAt > (lastEvalAt || 0)) {
           traditionalSeoTabLoadSet('table', 'running', 'Scoring from rendered snapshots…');
-          await runTraditionalSeoEvaluation({ refreshAudit: false, refreshExtractability: false, skipBrokenLive: true });
+          await runTraditionalSeoEvaluation({ refreshAudit: false, refreshExtractability: false, skipBrokenLive: true, autoAfterRender: true });
         }
         const hasRows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) && TRADITIONAL_SEO_STATE.evaluationRows.length;
         if (hasRows) {
@@ -94343,9 +94419,13 @@ Confidence: ${c}`;
     }
 
     function traditionalSeoPersistEvaluationSnapshot(opts = {}) {
-      const notLoaded = traditionalSeoNotLoadedLabels(TRADITIONAL_SEO_STATE.evaluationRows);
-      if (notLoaded.length) {
-        traditionalSeoDbg(`Not saved: ${notLoaded.join(', ')} didn't load, so these results are incomplete.`, 'warn');
+      const blocked = [...new Set([...traditionalSeoNotLoadedLabels(TRADITIONAL_SEO_STATE.evaluationRows), ...traditionalSeoFailedSourceLabels()])];
+      if (blocked.length) {
+        traditionalSeoDbg(`Not saved: ${blocked.join(', ')} didn't load, so these results are incomplete.`, 'warn');
+        return false;
+      }
+      if (TRADITIONAL_SEO_STATE.holdSaveUntilBroken && traditionalSeoBrokenPending()) {
+        traditionalSeoDbg('Not saved: automatic re-score held until the broken-link check finishes.', 'warn');
         return false;
       }
       traditionalSeoWriteEvaluationLocalStorage();
@@ -98378,6 +98458,13 @@ Confidence: ${c}`;
       (body?.broken || []).forEach((b) => {
         if (b?.page_url) st.brokenByUrl.set(b.page_url, b);
       });
+      st.brokenProgress = body?.broken_progress || null;
+      st.brokenPrevAt = body?.broken_previous?.checked_at || null;
+      st.brokenPrevByUrl = new Map();
+      (body?.broken_previous?.pages || []).forEach((b) => {
+        if (b?.page_url) st.brokenPrevByUrl.set(b.page_url, b);
+      });
+      traditionalSeoRenderSourceBanner();
       if (extractRows.length) {
         traditionalSeoMergeExtractabilityRowsIntoCache(traditionalSeoEffectivePropertyUrl(), extractRows);
       }
@@ -98727,7 +98814,7 @@ Confidence: ${c}`;
       if (key === 'broken_links_no_404') {
         if (traditionalSeoShouldExcludeUrlFromTraditionalAudit(url)) return 'pass';
         if (extractSignal?.excludedFromAudit === true) return 'pass';
-        const storedBroken = traditionalSeoRenderMapGet(TRADITIONAL_SEO_STATE.brokenByUrl, url);
+        const storedBroken = traditionalSeoBrokenResultForUrl(url);
         if (storedBroken) {
           const st = String(storedBroken.status || storedBroken.outcome || '').toLowerCase();
           if (st === 'not_checked') return 'not_checked';
@@ -99657,6 +99744,7 @@ Confidence: ${c}`;
 
     function traditionalSeoModalNoteForRule(row, rule, pageUrl) {
       if (row?.not_checked_reason) return `Not checked — data didn't load: ${row.not_checked_reason}.`;
+      if (row?.carried_from) return `From the ${formatTraditionalSeoTimestamp(row.carried_from)} check; new check pending.`;
       const rk = String(row?.rule_key || '');
       const renderPack = traditionalSeoRenderMapGet(TRADITIONAL_SEO_STATE.renderFindings, pageUrl);
       if (renderPack?.[rk]?.note) return String(renderPack[rk].note);
@@ -101993,6 +102081,7 @@ Confidence: ${c}`;
             const status = bypass ? 'pass' : rawStatus;
             newRows.push({
               ...(outcome.reason ? { not_checked_reason: outcome.reason } : {}),
+              ...(outcome.carried ? { carried_from: outcome.carried } : {}),
               rule_key: rule.rule_key,
               rule_name: rule.rule_name,
               rule_category: String(rule.category || 'general').toLowerCase(),
@@ -102459,6 +102548,7 @@ Confidence: ${c}`;
             const status = bypass ? 'pass' : rawStatus;
             pageRows.push({
               ...(outcome.reason ? { not_checked_reason: outcome.reason } : {}),
+              ...(outcome.carried ? { carried_from: outcome.carried } : {}),
               rule_key: rule.rule_key,
               rule_name: rule.rule_name,
               rule_category: String(rule.category || 'general').toLowerCase(),
@@ -102601,6 +102691,15 @@ Confidence: ${c}`;
         ) {
           linesRun.push('WARNING: GSC full refresh queued 0 URL Inspection API calls (check property URL / utility skips).');
         }
+        const holdForBroken = options.autoAfterRender === true && traditionalSeoBrokenPending();
+        TRADITIONAL_SEO_STATE.holdSaveUntilBroken = holdForBroken;
+        const carriedN = rows.filter((r) => r.carried_from).length;
+        if (carriedN) {
+          linesRun.push(`Broken links: ${carriedN} page(s) use the previous check (from ${formatTraditionalSeoTimestamp(TRADITIONAL_SEO_STATE.brokenPrevAt)}); the new check has reached ${TRADITIONAL_SEO_STATE.brokenProgress?.checked ?? '?'}/${TRADITIONAL_SEO_STATE.brokenProgress?.total ?? '?'}.`);
+        }
+        if (holdForBroken) {
+          linesRun.push('NOT SAVED — automatic re-score while the broken-link check is still running; it saves once the check finishes.');
+        }
         const notLoadedRun = traditionalSeoNotLoadedLabels(rows);
         if (notLoadedRun.length) {
           linesRun.push(`NOT SAVED — ${notLoadedRun.join(', ')} didn't load. Rules that need it show as not checked; the saved results are kept.`);
@@ -102614,9 +102713,11 @@ Confidence: ${c}`;
           lines: linesRun
         });
         void traditionalSeoKeywordMetricsLookupIfNeededForRun();
-        traditionalSeoPersistEvaluationSnapshot(
-          isPartialPageRescore ? { merge: TRADITIONAL_SEO_STATE.pendingPartialMerge } : {}
-        );
+        if (!holdForBroken) {
+          traditionalSeoPersistEvaluationSnapshot(
+            isPartialPageRescore ? { merge: TRADITIONAL_SEO_STATE.pendingPartialMerge } : {}
+          );
+        }
         TRADITIONAL_SEO_STATE.pendingPartialMerge = null;
         traditionalSeoDbg('run complete OK', 'success');
       } catch (err) {
