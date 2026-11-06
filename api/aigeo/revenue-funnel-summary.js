@@ -419,14 +419,25 @@ function computeKpis(pageRows, auditLatest, auditPrior, revenueSnap, ga4View, tx
   return appendIndexableKpis(base, pageRows, auditLatest, auditPrior, revenueSnap, ga4View, txns28d);
 }
 
-function computeFunnel(kpis, revenueSnap, ga4View) {
+/** Revenue snapshot for the 28-day KPIs: the same 28 days as the search figures when the window is known. */
+function windowRevenueSnap(revenueSnap, money28) {
+  return money28 ? { ...(revenueSnap || {}), revenue_amount: money28.revenue } : revenueSnap;
+}
+
+function funnelRevenue(revenueSnap, money28) {
+  if (money28) return money28.revenue;
+  return revenueSnap ? Number(revenueSnap.revenue_amount) || 0 : 0;
+}
+
+function computeFunnel(kpis, revenueSnap, ga4View, money28 = null) {
   // Six-stage funnel. Industry benchmark targets are conservative defaults;
   // tweak in dashboard if needed.
   const clicks = kpis.total_clicks_28d;
   const impr = kpis.total_impressions_28d;
   const moneyClicks = kpis.total_money_clicks_28d;
   const txns = Number(kpis.transactions_28d) || 0;
-  const revenue = revenueSnap ? Number(revenueSnap.revenue_amount) || 0 : 0;
+  // Revenue booked in the same 28 days as the search and GA4 steps (not the last closed month).
+  const revenue = funnelRevenue(revenueSnap, money28);
   const moneyEnquiry = ga4View != null ? Number(ga4View.money_page_enquiry_events) : null;
   const enquiry = moneyEnquiry != null && moneyEnquiry > 0
     ? moneyEnquiry
@@ -1493,8 +1504,8 @@ export default async function handler(req, res) {
     const ga4View = ga4AttributedView(ga4Snap);
     const txn28 = await fetchTxnCountForWindow(supabase, propertyUrl, pageMetrics.dateEnd, includeJlr);
     const money28 = await fetchWindowMoney(supabase, propertyUrl, txn28.window, includeJlr);
-    const kpis = computeKpis(enrichedPageRows, auditLatest, auditPrior, revenueSnap, ga4View, txn28.count);
-    const funnel = computeFunnel(kpis, revenueSnap, ga4View);
+    const kpis = computeKpis(enrichedPageRows, auditLatest, auditPrior, windowRevenueSnap(revenueSnap, money28), ga4View, txn28.count);
+    const funnel = computeFunnel(kpis, revenueSnap, ga4View, money28);
     const leakPages = pickLeakPages(pageRows);
     const earningPages = pickEarningPages(pageRows);
     const revenueHistoryDecorated = decorateHistoryWithTargets(revenueHistory);
