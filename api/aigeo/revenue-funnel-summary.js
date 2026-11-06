@@ -845,18 +845,9 @@ function buildProfitPyramid(tierHistory) {
     r.share_gap_pp = Number((r.share_of_gp_pct - r.share_of_revenue_pct).toFixed(1));
   }
   rows.sort((a, b) => b.annualised_gp_gbp - a.annualised_gp_gbp);
-  // GP band = survival → top stretch from the Targets panel; revenue band = the
-  // turnover that delivers it at the Booking Sheet target category mix.
-  const band = FT?.pyramid || {};
-  const MONTHLY_GP_MIN = band.gp_low_monthly || 0;
-  const MONTHLY_GP_MAX = band.gp_high_monthly || 0;
-  const ANNUAL_GP_MIN = MONTHLY_GP_MIN * 12;
-  const ANNUAL_GP_MAX = MONTHLY_GP_MAX * 12;
-  const MONTHLY_REV_MIN = band.revenue_low_monthly || 0;
-  const MONTHLY_REV_MAX = band.revenue_high_monthly || 0;
-  const ANNUAL_REV_MIN = MONTHLY_REV_MIN * 12;
-  const ANNUAL_REV_MAX = MONTHLY_REV_MAX * 12;
+  const t = pyramidTargets();
   return {
+    ...t,
     rows,
     annualised_gp_total_gbp: Number(totalAnnualGp.toFixed(2)),
     annualised_revenue_total_gbp: Number(totalAnnualRev.toFixed(2)),
@@ -864,17 +855,30 @@ function buildProfitPyramid(tierHistory) {
     ytd_revenue_total_gbp: Number(totalYtdRev.toFixed(2)),
     projected_remainder_gp_gbp: Number(Math.max(0, totalAnnualGp - totalYtdGp).toFixed(2)),
     projected_remainder_revenue_gbp: Number(Math.max(0, totalAnnualRev - totalYtdRev).toFixed(2)),
-    monthly_gp_target_low_gbp: MONTHLY_GP_MIN,
-    monthly_gp_target_high_gbp: MONTHLY_GP_MAX,
-    annual_gp_target_low_gbp: ANNUAL_GP_MIN,
-    annual_gp_target_high_gbp: ANNUAL_GP_MAX,
-    monthly_revenue_target_low_gbp: MONTHLY_REV_MIN,
-    monthly_revenue_target_high_gbp: MONTHLY_REV_MAX,
-    annual_revenue_target_low_gbp: ANNUAL_REV_MIN,
-    annual_revenue_target_high_gbp: ANNUAL_REV_MAX,
-    gp_gap_to_min_annual_gbp: Number(Math.max(0, ANNUAL_GP_MIN - totalAnnualGp).toFixed(2)),
-    revenue_gap_to_min_annual_gbp: Number(Math.max(0, ANNUAL_REV_MIN - totalAnnualRev).toFixed(2)),
-    profit_goal_progress_pct: Number(((totalAnnualGp / ANNUAL_GP_MIN) * 100).toFixed(1))
+    gp_gap_to_min_annual_gbp: Number(Math.max(0, t.annual_gp_target_low_gbp - totalAnnualGp).toFixed(2)),
+    revenue_gap_to_min_annual_gbp: Number(Math.max(0, t.annual_revenue_target_low_gbp - totalAnnualRev).toFixed(2)),
+    profit_goal_progress_pct: Number(((totalAnnualGp / t.annual_gp_target_low_gbp) * 100).toFixed(1))
+  };
+}
+
+/**
+ * Monthly band = this month's seasonal survival → stretch 2 (Targets panel); yearly band = full-year targets;
+ * revenue = the turnover that delivers it at the Booking Sheet target category mix; flat panel value = bills line.
+ */
+function pyramidTargets() {
+  const b = FT?.pyramid || {};
+  const n = (v) => v || 0;
+  return {
+    bills_line_gp_monthly_gbp: n(b.bills_line_gp_monthly),
+    bills_line_revenue_monthly_gbp: n(b.bills_line_revenue_monthly),
+    monthly_gp_target_low_gbp: n(b.gp_low_monthly),
+    monthly_gp_target_high_gbp: n(b.gp_high_monthly),
+    annual_gp_target_low_gbp: n(b.gp_low_annual),
+    annual_gp_target_high_gbp: n(b.gp_high_annual),
+    monthly_revenue_target_low_gbp: n(b.revenue_low_monthly),
+    monthly_revenue_target_high_gbp: n(b.revenue_high_monthly),
+    annual_revenue_target_low_gbp: n(b.revenue_low_annual),
+    annual_revenue_target_high_gbp: n(b.revenue_high_annual)
   };
 }
 
