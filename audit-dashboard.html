@@ -92434,6 +92434,76 @@ Confidence: ${c}`;
      * Saved rule rows for rules switched on in Rule Manager. A disabled rule's rows stay stored (re-enabling brings them
      * back without a re-crawl) but count nowhere: URL tiles, page scores, the modal, exports and coverage.
      */
+    /** Inputs a rule's outcome depends on. A source that failed to load makes its rules "not checked", never warn. */
+    const TRADITIONAL_SEO_SOURCES = {
+      gscInspect: { label: 'GSC URL Inspection cache', rules: ['gsc_url_indexed'] },
+      qa: { label: 'Schema QA snapshot', rules: ['schema_qa_gate_page', 'schema_present_core'] },
+      extractability: {
+        label: 'Extractability snapshot',
+        rules: ['thin_content_guardrail', 'content_freshness_last_updated', 'canonical_self_or_valid', 'title_tag_present',
+          'meta_description_present', 'single_h1', 'h1_length_best_practice', 'keyword_in_title', 'keyword_in_meta',
+          'keyword_in_h1', 'keyword_in_intro', 'image_alt_coverage', 'external_links_new_tab']
+      }
+    };
+
+    function traditionalSeoMarkSource(source, ok) {
+      TRADITIONAL_SEO_STATE.sourceLoad = { ...(TRADITIONAL_SEO_STATE.sourceLoad || {}), [source]: ok ? 'ok' : 'failed' };
+      traditionalSeoRenderSourceBanner();
+    }
+
+    function traditionalSeoSourceState(source) {
+      return String(TRADITIONAL_SEO_STATE.sourceLoad?.[source] || 'pending');
+    }
+
+    function traditionalSeoFailedSourceLabelForRule(ruleKey) {
+      const k = String(ruleKey || '');
+      const hit = Object.entries(TRADITIONAL_SEO_SOURCES)
+        .find(([src, def]) => def.rules.includes(k) && traditionalSeoSourceState(src) === 'failed');
+      return hit ? hit[1].label : '';
+    }
+
+    function traditionalSeoRuleStatusOrNotLoaded(rule, url, tier, metric, context) {
+      const missing = traditionalSeoFailedSourceLabelForRule(rule?.rule_key);
+      if (missing) return { status: 'not_checked', reason: missing };
+      return { status: traditionalSeoRuleStatusForUrl(rule, url, tier, metric, context), reason: '' };
+    }
+
+    function traditionalSeoMarkEvaluationSources(payloads) {
+      const extractRows = payloads?.extractability?.data?.rows;
+      traditionalSeoMarkSource('qa', traditionalSeoQaGateRowCount(payloads?.qa) > 0);
+      traditionalSeoMarkSource('extractability', Array.isArray(extractRows) && extractRows.length > 0);
+    }
+
+    function traditionalSeoGscIndexLoaded() {
+      return TRADITIONAL_SEO_STATE.gscIndexByUrlKey instanceof Map && TRADITIONAL_SEO_STATE.gscIndexByUrlKey.size > 0;
+    }
+
+    function traditionalSeoNotLoadedLabels(rows) {
+      return [...new Set((Array.isArray(rows) ? rows : []).map((r) => r?.not_checked_reason).filter(Boolean))];
+    }
+
+    function traditionalSeoRenderSourceBanner() {
+      const anchor = document.getElementById('traditional-seo-drilldown-tiles');
+      if (!anchor?.parentNode) return;
+      let el = document.getElementById('traditional-seo-source-banner');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'traditional-seo-source-banner';
+        el.setAttribute('role', 'alert');
+        el.style.cssText = 'margin:0.5rem 0;padding:0.55rem 0.75rem;border:1px solid rgba(245,158,11,0.6);border-radius:8px;background:rgba(245,158,11,0.12);font-size:0.85rem;';
+        anchor.parentNode.insertBefore(el, anchor);
+      }
+      const failed = Object.entries(TRADITIONAL_SEO_SOURCES)
+        .filter(([src]) => traditionalSeoSourceState(src) === 'failed')
+        .map(([, d]) => d.label);
+      el.style.display = failed.length ? 'block' : 'none';
+      el.innerHTML = failed.length
+        ? `<strong>${escapeHtml(failed.join(', '))} didn't load</strong> — figures incomplete. Rules that need it show as not checked, and a re-score won't be saved. <button type="button" class="btn" id="traditional-seo-source-retry" style="margin-left:0.5rem;padding:0.2rem 0.6rem;font-size:0.78rem;">Retry</button>`
+        : '';
+      const btn = document.getElementById('traditional-seo-source-retry');
+      if (btn) btn.onclick = () => window.location.reload();
+    }
+
     function traditionalSeoActiveEvaluationRows() {
       return traditionalSeoWithoutDisabledRules(TRADITIONAL_SEO_STATE.evaluationRows);
     }
@@ -92918,6 +92988,7 @@ Confidence: ${c}`;
         }
         const gscServerN = await traditionalSeoHydrateGscCacheFromServer();
         if (!gscServerN) traditionalSeoHydrateGscIndexFromStorage();
+        if (!gscServerN && traditionalSeoGscIndexLoaded()) traditionalSeoMarkSource('gscInspect', true);
         const renderDoneAt = Date.parse(renderSnap?.run?.finished_at || 0);
         const lastEvalAt = Date.parse(TRADITIONAL_SEO_STATE.lastEvaluationAt || 0);
         if (renderSnap?.run && renderSnap.run.status !== 'running' && Number.isFinite(renderDoneAt) && renderDoneAt > (lastEvalAt || 0)) {
@@ -94272,8 +94343,14 @@ Confidence: ${c}`;
     }
 
     function traditionalSeoPersistEvaluationSnapshot(opts = {}) {
+      const notLoaded = traditionalSeoNotLoadedLabels(TRADITIONAL_SEO_STATE.evaluationRows);
+      if (notLoaded.length) {
+        traditionalSeoDbg(`Not saved: ${notLoaded.join(', ')} didn't load, so these results are incomplete.`, 'warn');
+        return false;
+      }
       traditionalSeoWriteEvaluationLocalStorage();
       void traditionalSeoPersistEvaluationToServer(opts);
+      return true;
     }
 
     async function traditionalSeoHydrateEvaluationFromServer() {
@@ -94795,7 +94872,7 @@ Confidence: ${c}`;
     function traditionalSeoBackfillGscEvaluationRows() {
       const rules = TRADITIONAL_SEO_STATE.rules || [];
       const gscRule = rules.find((r) => String(r.rule_key) === 'gsc_url_indexed' && r.enabled !== false);
-      if (!gscRule) return false;
+      if (!gscRule || traditionalSeoSourceState('gscInspect') !== 'ok') return false;
       const prop = String(traditionalSeoEffectivePropertyUrl() || traditionalSeoPropertyUrl() || '').trim();
       const rows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
       if (!rows.length || !prop) return false;
@@ -94856,9 +94933,14 @@ Confidence: ${c}`;
           cache: 'no-store',
         });
         const json = await res.json().catch(() => ({}));
-        if (!res.ok || String(json?.status || '').toLowerCase() !== 'ok') return 0;
+        if (!res.ok || String(json?.status || '').toLowerCase() !== 'ok') {
+          traditionalSeoMarkSource('gscInspect', traditionalSeoGscIndexLoaded());
+          return 0;
+        }
+        traditionalSeoMarkSource('gscInspect', true);
         return traditionalSeoApplyServerGscCacheRows(Array.isArray(json.rows) ? json.rows : []);
       } catch (e) {
+        traditionalSeoMarkSource('gscInspect', traditionalSeoGscIndexLoaded());
         return 0;
       }
     }
@@ -99574,6 +99656,7 @@ Confidence: ${c}`;
     }
 
     function traditionalSeoModalNoteForRule(row, rule, pageUrl) {
+      if (row?.not_checked_reason) return `Not checked — data didn't load: ${row.not_checked_reason}.`;
       const rk = String(row?.rule_key || '');
       const renderPack = traditionalSeoRenderMapGet(TRADITIONAL_SEO_STATE.renderFindings, pageUrl);
       if (renderPack?.[rk]?.note) return String(renderPack[rk].note);
@@ -99939,7 +100022,8 @@ Confidence: ${c}`;
       } catch (errHydrate) { /* non-fatal */ }
       const canonRk = 'canonical_self_or_valid';
       const canonRow = byRuleKey.get(canonRk);
-      if (canonRow) {
+      const canonEvidence = traditionalSeoSignalMapGet(TRADITIONAL_SEO_STATE.lastSignalMaps?.extractability, target, propModal);
+      if (canonRow && canonEvidence) {
         const canonRule = (meta.get(canonRk) || { rule_key: canonRk });
         const liveCanon = traditionalSeoRuleStatusForUrl(
           canonRule,
@@ -100302,7 +100386,7 @@ Confidence: ${c}`;
 
     function traditionalSeoSummaryRuleStatus(row, prop) {
       const rkey = String(row.rule_key || '').trim();
-      if (rkey !== 'gsc_url_indexed') return String(row.status || 'fail').toLowerCase();
+      if (rkey !== 'gsc_url_indexed' || traditionalSeoSourceState('gscInspect') !== 'ok') return String(row.status || 'fail').toLowerCase();
       const u = String(row.url || '').trim();
       if (traditionalSeoHasRuleBypass(u, rkey)) return 'pass';
       return traditionalSeoGscInspectDeriveStatus(u, traditionalSeoGscInspectGet(prop, u));
@@ -101839,6 +101923,7 @@ Confidence: ${c}`;
         traditionalSeoEvalProgressTrack(0, 0);
         traditionalSeoEvalProgressStage('Building signals and loading overrides…', 78);
         const implPayloads = await traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl);
+        traditionalSeoMarkEvaluationSources(implPayloads);
         const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
         TRADITIONAL_SEO_STATE.lastSignalMaps = signalMaps;
         if (propertyUrl) TRADITIONAL_SEO_STATE.lastPropertyUrl = propertyUrl;
@@ -101902,10 +101987,12 @@ Confidence: ${c}`;
             const targetKeywordSingle = keywordLookupSingle instanceof Map
               ? String(keywordLookupSingle.get(kwKeySingle) || '').trim()
               : '';
-            const rawStatus = traditionalSeoRuleStatusForUrl(rule, url, tier, metric, context);
+            const outcome = traditionalSeoRuleStatusOrNotLoaded(rule, url, tier, metric, context);
+            const rawStatus = outcome.status;
             const bypass = traditionalSeoHasRuleBypass(url, rule.rule_key);
             const status = bypass ? 'pass' : rawStatus;
             newRows.push({
+              ...(outcome.reason ? { not_checked_reason: outcome.reason } : {}),
               rule_key: rule.rule_key,
               rule_name: rule.rule_name,
               rule_category: String(rule.category || 'general').toLowerCase(),
@@ -101959,6 +102046,10 @@ Confidence: ${c}`;
           linesRe.push(
             `GSC: hydrated ${gscQueued} row(s) from server cache (no live URL Inspection API — use Refresh GSC URL Inspection for that).`
           );
+        }
+        const notLoadedRe = traditionalSeoNotLoadedLabels(merged);
+        if (notLoadedRe.length) {
+          linesRe.push(`NOT SAVED — ${notLoadedRe.join(', ')} didn't load. Rules that need it show as not checked; the saved results are kept.`);
         }
         linesRe.push(`Property URL: ${propertyUrl || '(not set)'}`);
         linesRe.push(`Page URL: ${String(typeof location !== 'undefined' ? location.href : '')}`);
@@ -102309,6 +102400,7 @@ Confidence: ${c}`;
         // threshold (n < target) won't trigger because the cached count still
         // matches the URL list, so the healed entry stays invisible.
         const implPayloads = await traditionalSeoEnsureQaPayloadWithRemoteFallback(propertyUrl);
+        traditionalSeoMarkEvaluationSources(implPayloads);
         const signalMaps = traditionalSeoBuildSignalMaps(audit, implPayloads, propertyUrl);
         TRADITIONAL_SEO_STATE.lastSignalMaps = signalMaps;
         if (propertyUrl) TRADITIONAL_SEO_STATE.lastPropertyUrl = propertyUrl;
@@ -102361,10 +102453,12 @@ Confidence: ${c}`;
           const kwKey = traditionalSeoSignalMapKey(url, propertyUrl);
           const targetKeyword = keywordLookup instanceof Map ? String(keywordLookup.get(kwKey) || '').trim() : '';
           pageRules.forEach((rule) => {
-            const rawStatus = traditionalSeoRuleStatusForUrl(rule, url, tier, metric, context);
+            const outcome = traditionalSeoRuleStatusOrNotLoaded(rule, url, tier, metric, context);
+            const rawStatus = outcome.status;
             const bypass = traditionalSeoHasRuleBypass(url, rule.rule_key);
             const status = bypass ? 'pass' : rawStatus;
             pageRows.push({
+              ...(outcome.reason ? { not_checked_reason: outcome.reason } : {}),
               rule_key: rule.rule_key,
               rule_name: rule.rule_name,
               rule_category: String(rule.category || 'general').toLowerCase(),
@@ -102506,6 +102600,10 @@ Confidence: ${c}`;
           && urls.some((u) => /^https:\/\//i.test(String(u || '').trim()))
         ) {
           linesRun.push('WARNING: GSC full refresh queued 0 URL Inspection API calls (check property URL / utility skips).');
+        }
+        const notLoadedRun = traditionalSeoNotLoadedLabels(rows);
+        if (notLoadedRun.length) {
+          linesRun.push(`NOT SAVED — ${notLoadedRun.join(', ')} didn't load. Rules that need it show as not checked; the saved results are kept.`);
         }
         linesRun.push(`Property URL: ${propertyUrl || '(not set)'}`);
         linesRun.push(`Page URL: ${String(typeof location !== 'undefined' ? location.href : '')}`);
