@@ -9822,7 +9822,7 @@
         <!-- Block 0: 12-month revenue history -->
         <section class="rf-section">
           <h3>Revenue history (rolling 12 months)</h3>
-          <div class="rf-sub">One row per calendar month from Squarespace. <strong>Target</strong> = seasonal monthly target from Booking Sheet 2026. Light grey points/rows are partially-complete months. The 5 cards below split revenue by money-page tier and now show <strong>This month vs target</strong> (top row, target pro-rated by days elapsed) and <strong>YTD vs target</strong> (sum since Jan, pro-rated through today). Hover any number for the breakdown.</div>
+          <div class="rf-sub">One row per calendar month from Squarespace. <strong>Target</strong> = seasonal monthly target from the Targets panel (Strategy &amp; Actions). Light grey points/rows are partially-complete months. The 5 cards below split revenue by money-page tier and now show <strong>This month vs target</strong> (top row, target pro-rated by days elapsed) and <strong>YTD vs target</strong> (sum since Jan, pro-rated through today). Hover any number for the breakdown.</div>
 
           <!-- HERO sparkline: full width, tall -->
           <div class="rf-hero-spark">
@@ -9856,13 +9856,12 @@
           </div>
 
           <!-- Profit-goal hero strip: thermometer showing monthly gross-profit
-               run-rate vs the £4-5k/mo target Alan wants the business to hit
-               sustainably without churning through residential workshops. -->
+               run-rate vs the survival → top stretch GP band from the Targets panel. -->
           <div class="rf-profit-goal" id="rf-profit-goal" style="display:none;">
             <div class="rf-profit-goal-head">
               <div>
                 <div class="rf-profit-goal-title">Profit Goal Tracker — revenue mix vs gross-profit reality</div>
-                <div class="rf-profit-goal-sub">YTD actual (solid) + projected remainder of year (striped). Two bars because the £4-5k/mo revenue target only matters if it delivers the £2.5-4k/mo cash-profit floor.</div>
+                <div class="rf-profit-goal-sub">YTD actual (solid) + projected remainder of year (striped). Two bars because the revenue target only matters if it delivers the survival gross profit set in the Targets panel.</div>
               </div>
               <div class="rf-profit-goal-numbers" id="rf-profit-goal-numbers"></div>
             </div>
@@ -11799,8 +11798,9 @@
           // Scenario cockpit: Jan-Dec calendar charts + annual goal bars
           (function () {
             const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-            // Booking-sheet seasonal revenue targets (must match revenue-funnel-summary.js).
-            const SP_SEASONAL_MONTHLY_REV = [4555, 3674, 2422, 4985, 5833, 6277, 4725, 3592, 5633, 7352, 6050, 5457];
+            // Seasonal revenue targets + target-mix margin from the Targets panel (via revenue-funnel-summary `targets`).
+            let SP_SEASONAL_MONTHLY_REV = [];
+            let SP_TARGET_MIX = null;
             const LINES = [
               { key: 'do_nothing', color: '#9ca3af', label: 'Do nothing', shape: 'dot', path: true },
               { key: 'active', color: '#f59e0b', label: 'Active scenario', shape: 'dot', path: false },
@@ -11848,7 +11848,7 @@
                   rev *= now.getDate() / dim;
                 }
               }
-              return kind === 'rev' ? rev : rev * gpRateVal;
+              return kind === 'rev' ? rev : rev * (SP_TARGET_MIX || gpRateVal);
             }
             function actualsForYear(history, year, rate) {
               const out = Array(12).fill(null);
@@ -12070,6 +12070,8 @@
                 const priData = priRes.ok ? await priRes.json() : { candidates: [] };
                 const lift = aggregateLift(priData.candidates || []);
                 const scenarioName = await fetchActiveScenarioName();
+                SP_SEASONAL_MONTHLY_REV = summary.targets?.seasonal_revenue || [];
+                SP_TARGET_MIX = summary.targets?.target_mix_margin || null;
                 const year = summary.ytd_summary?.year || new Date().getFullYear();
                 const rate = gpRate(summary.profit_pyramid);
                 const actuals = actualsForYear(summary.revenue_history || [], year, rate);
@@ -104731,7 +104733,7 @@ Confidence: ${c}`;
             <div class="rf-kpi-value">${rfFmtMoney(targets.rolling_28d_actual, kpis.revenue_currency || 'GBP')}
               <span style="font-size:0.9rem; color:#9ca3af; font-weight:600; margin-left:0.5rem;">/ ${rfFmtMoney(targets.rolling_28d_target, kpis.revenue_currency || 'GBP')}</span>
             </div>
-            <div class="rf-kpi-delta">Annual target £${rfFmtNum(targets.annual_target)} from Booking Sheet 2026 (Workshops £30k + Courses £8k + 1-2-1/Services £10.4k + Hire £4.2k + Academy £8k)</div>
+            <div class="rf-kpi-delta">Annual target £${rfFmtNum(targets.annual_target)}: revenue the Targets panel's survival GP needs at the Booking Sheet category mix</div>
           </div>`);
       }
       host.innerHTML = cards.join('');
@@ -106875,7 +106877,7 @@ Confidence: ${c}`;
       const projLabel = projPct >= 8 ? `+£${rfFmtNum(Math.round(projected))} proj` : '';
       const unitLabel = kind === 'rev' ? 'revenue' : 'cash profit';
       const targetPill = useSeasonal
-        ? `<span class="rf-profit-goal-target-pill">booking sheet £${rfFmtNum(Math.round(seasonal.annualTarget))}/yr</span>`
+        ? `<span class="rf-profit-goal-target-pill">Targets panel £${rfFmtNum(Math.round(seasonal.annualTarget))}/yr</span>`
         : `<span class="rf-profit-goal-target-pill">target £${rfFmtNum(monthlyMin)}\u2013£${rfFmtNum(monthlyMax)}/mo</span>`;
 
       // Scenario impact band - only rendered if the active scenario has
@@ -106920,7 +106922,7 @@ Confidence: ${c}`;
             <span>${gapLabel}</span>
             ${scenarioSummaryHtml}`;
       const seasonMarker = useSeasonal
-        ? `<div class="rf-profit-goal-bar-marker rf-profit-goal-bar-marker-seasonal" style="left:${seasonPct.toFixed(1)}%;" title="Booking-sheet seasonal year target £${rfFmtNum(Math.round(seasonal.annualTarget))}/yr"><span class="rf-profit-goal-bar-marker-label">seasonal £${rfFmtNum(Math.round(seasonal.annualTarget / 12))}/mo</span></div>`
+        ? `<div class="rf-profit-goal-bar-marker rf-profit-goal-bar-marker-seasonal" style="left:${seasonPct.toFixed(1)}%;" title="Targets panel seasonal year target £${rfFmtNum(Math.round(seasonal.annualTarget))}/yr"><span class="rf-profit-goal-bar-marker-label">seasonal £${rfFmtNum(Math.round(seasonal.annualTarget / 12))}/mo</span></div>`
         : `<div class="rf-profit-goal-bar-marker rf-profit-goal-bar-marker-high" style="left:100%;" title="£${rfFmtNum(monthlyMax)}/mo (£${rfFmtNum(maxScale)}/yr) \u2014 stretch target"><span class="rf-profit-goal-bar-marker-label">£${rfFmtNum(monthlyMax)}/mo stretch</span></div>`;
       const floorMarker = useSeasonal
         ? `<div class="rf-profit-goal-bar-marker" style="left:${minPct.toFixed(1)}%;" title="£${rfFmtNum(monthlyMin)}/mo (£${rfFmtNum(minTarget)}/yr) \u2014 survival floor (not seasonal target)"><span class="rf-profit-goal-bar-marker-label">£${rfFmtNum(monthlyMin)}/mo floor</span></div>`

@@ -248,6 +248,12 @@ async function fetchMarketMap(supabase, _propertyUrl) {
 // Annotation + shaping helpers (each one small)
 // ----------------------------------------------------------------------
 
+/** Revenue the Targets panel's survival GP needs, by month and for the year. */
+function panelRevenueTargets(gpBundle) {
+  const re = gpBundle?.master?.revenue_equivalent || {};
+  return { monthTargets: re.survival_monthly || null, annualSurvivalSales: re.survival_annual || null };
+}
+
 function buildConfig(includeJlr, gpBundle) {
   const now = new Date();
   const tierBands = gpBundle?.tierBands || DEFAULT_TIER_BANDS;
@@ -256,7 +262,7 @@ function buildConfig(includeJlr, gpBundle) {
     annualGpTargets: gpBundle?.annualTargets || null,
     survivalThresholdLabel: gpBundle?.survival_threshold_label || null,
     derivedSales: gpBundle?.derived || null,
-    monthTargets: gpBundle?.master?.revenue_equivalent?.survival_monthly || null,
+    ...panelRevenueTargets(gpBundle),
     feeRules: FEE_RULES,
     includeJlr: includeJlr !== false,
     now: {

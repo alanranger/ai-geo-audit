@@ -131,7 +131,11 @@ const tierTarget = (t) => FT?.tiers?.[t.id]?.monthly_target ?? 0;
 const tierGpPct = (t) => FT?.tiers?.[t.id]?.gross_profit_pct ?? null;
 const seasonalRevenue = (monthIdx) => FT?.seasonal_revenue?.[monthIdx] || 0;
 const annualRevenueTarget = () => FT?.annual_revenue || 0;
-const targetsSource = () => FT?.source || null;
+const targetsBlock = () => ({
+  seasonal_revenue: FT?.seasonal_revenue || [],
+  target_mix_margin: FT?.target_mix_margin ?? null,
+  source: FT?.source || null
+});
 const gpTargets = () => ({ ytd: FT?.gp_ytd || 0, annual: FT?.gp_annual || 0 });
 
 // Industry baselines used for the funnel KPI RAG indicators.
@@ -1461,7 +1465,7 @@ export default async function handler(req, res) {
         gross_profit_pct: tierGpPct(t),
         gross_profit_rag: gpRagBucket(tierGpPct(t))
       })),
-      targets_source: targetsSource()
+      targets: targetsBlock()
     });
   } catch (err) {
     return send(res, 500, { error: 'summary_failed', message: err?.message || String(err) });
