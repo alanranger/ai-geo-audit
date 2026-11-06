@@ -53,7 +53,6 @@ import {
 import {
   TIER_ORDER,
   TIER_DEFINITIONS,
-  BOOKING_SHEET_NON_JLR_TARGETS,
   tierFromProductCategory,
   tierFromBookingCategory,
   shouldKeepByPageTier,
@@ -63,6 +62,7 @@ import {
 import { loadRevenueStreamGscRoles } from '../../lib/revenue-stream-gsc-roles.js';
 import { applyPageVisibilityLossPolicyGuard } from '../../lib/page-indexability-policy.js';
 import { parseIncludeJlr } from '../../lib/parse-include-jlr.mjs';
+import { selectAllPaged } from '../../lib/supabase-paged.js';
 
 const SITE_ORIGIN = 'https://www.alanranger.com';
 const GSC_FIRST_DAY = '2025-01-13';
@@ -1094,24 +1094,32 @@ function pickTopTier(countsByTier) {
 }
 
 async function fetchBookingRevenueByTier(supabase, propertyUrl) {
-  const empty = { byTier: new Map(), unmapped: [] };
+  const empty = { byTier: new Map(), unmapped: [], allNonJlr: new Map() };
   try {
-    const { data, error } = await supabase
-      .from('booking_sheet_transactions')
-      .select('category_label, year, amount, is_jlr')
-      .eq('property_url', propertyUrl);
-    if (error) throw error;
-    return aggregateBookingRevenue(data || []);
+    // Paged: the table has more rows than one PostgREST page (1,000); unpaged reads silently dropped 2024 rows.
+    const data = await selectAllPaged(
+      () => supabase.from('booking_sheet_transactions').select('category_label, year, amount, is_jlr').eq('property_url', propertyUrl),
+      ['year', 'source_workbook', 'source_row']
+    );
+    return aggregateBookingRevenue(data);
   } catch (err) {
     console.warn('[diagnosis] booking revenue rollup failed (continuing):', err.message);
     return empty;
   }
 }
 
+function addAllNonJlr(all, r) {
+  if (r.is_jlr) return;
+  const y = Number(r.year);
+  if (Number.isFinite(y)) all.set(y, (all.get(y) || 0) + (Number(r.amount) || 0));
+}
+
 function aggregateBookingRevenue(rows) {
   const byTier = new Map();
   const unmapped = new Map();
+  const allNonJlr = new Map();
   for (const r of rows) {
+    addAllNonJlr(allNonJlr, r);
     const tier = tierFromBookingCategory(r.category_label);
     if (!tier) {
       const k = String(r.category_label || '').trim();
@@ -1122,6 +1130,7 @@ function aggregateBookingRevenue(rows) {
   }
   return {
     byTier,
+    allNonJlr,
     unmapped: [...unmapped.entries()].map(([category_label, txn_count]) => ({ category_label, txn_count }))
   };
 }
@@ -1226,29 +1235,19 @@ function buildTierReconciliation(tierRollup, bookingRevenue) {
       y2026_ytd: pickYear(yearMap, 2026).non_jlr
     };
   }
+  // Live comparator: every non-JLR Booking Sheet transaction of the year (tiered or not).
+  const all = bookingRevenue?.allNonJlr || new Map();
+  const live = { y2024: round2(all.get(2024) || 0), y2025: round2(all.get(2025) || 0), y2026_ytd: round2(all.get(2026) || 0) };
   const delta = {
-    y2024: round2(sums.y2024 - BOOKING_SHEET_NON_JLR_TARGETS.y2024),
-    y2025: round2(sums.y2025 - BOOKING_SHEET_NON_JLR_TARGETS.y2025),
-    y2026_ytd: round2(sums.y2026_ytd - BOOKING_SHEET_NON_JLR_TARGETS.y2026_ytd)
-  };
-  const stated = { y2024: 42791, y2025: 27027, y2026_ytd: 19233 };
-  const deltaStated = {
-    y2024: round2(sums.y2024 - stated.y2024),
-    y2025: round2(sums.y2025 - stated.y2025),
-    y2026_ytd: round2(sums.y2026_ytd - stated.y2026_ytd)
+    y2024: round2(sums.y2024 - live.y2024),
+    y2025: round2(sums.y2025 - live.y2025),
+    y2026_ytd: round2(sums.y2026_ytd - live.y2026_ytd)
   };
   return {
-    targets_non_jlr: BOOKING_SHEET_NON_JLR_TARGETS,
-    stated_targets_rounded_gbp: stated,
+    targets_non_jlr: live,
     tier_sum_non_jlr: sums,
     delta_vs_targets: delta,
-    delta_vs_stated_rounded: deltaStated,
-    passes: pennyMatch(sums.y2024, BOOKING_SHEET_NON_JLR_TARGETS.y2024)
-      && pennyMatch(sums.y2025, BOOKING_SHEET_NON_JLR_TARGETS.y2025)
-      && pennyMatch(sums.y2026_ytd, BOOKING_SHEET_NON_JLR_TARGETS.y2026_ytd),
-    passes_stated_rounded: Math.round(sums.y2024) === stated.y2024
-      && Math.round(sums.y2025) === stated.y2025
-      && Math.round(sums.y2026_ytd) === stated.y2026_ytd,
+    passes: pennyMatch(sums.y2024, live.y2024) && pennyMatch(sums.y2025, live.y2025) && pennyMatch(sums.y2026_ytd, live.y2026_ytd),
     per_tier: perTier,
     unmapped_booking_categories: bookingRevenue?.unmapped || [],
     note: 'Tier revenue is net of paired voucher Out lines (Pick n Mix, Gift Vouchers). '

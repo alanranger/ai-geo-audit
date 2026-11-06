@@ -14,7 +14,6 @@ import { createClient } from '@supabase/supabase-js';
 import { readLatestGa4Metrics, ga4AttributedView } from './ga4-data.js';
 import { buildTxnCountMap, applyTxnCount, txnWindowFor } from '../../lib/revenue-funnel-txn-counts.js';
 import { isRowIndexable, resolvePolicy } from '../../lib/page-indexability-policy.js';
-import { synthesiseLegacyTierRevenue } from '../../lib/booking-sheet-parser.mjs';
 import { parseIncludeJlr } from '../../lib/parse-include-jlr.mjs';
 import {
   applyJlrToFunnelWideRow,
@@ -124,7 +123,7 @@ const MONEY_PAGE_TIERS = [
 // set once at the start of each request: per-tier monthly targets, the revenue each month needs for
 // survival GP, the funnel KPI targets and the Profit Pyramid band. Tier GP % = Booking Sheet category rates.
 import { loadTargetsMaster } from '../../lib/targets-master.mjs';
-import { funnelTargetsFrom } from '../../lib/funnel-targets.mjs';
+import { funnelTargetsFrom, windowSurvival } from '../../lib/funnel-targets.mjs';
 
 let FT = null;
 const tierTarget = (t) => FT?.tiers?.[t.id]?.monthly_target ?? 0;
@@ -289,6 +288,20 @@ async function fetchPageMetrics(supabase, propertyUrl) {
   return { rows: data || [], dateEnd: latestEnd };
 }
 
+/** Funnel GSC and GA4 windows end on the same date: use the GSC snapshot ending on GA4's end date when one exists. */
+async function alignPageMetricsToGa4(supabase, propertyUrl, pageMetrics, ga4Snap) {
+  const end = ga4Snap?.date_end;
+  if (!end || end === pageMetrics.dateEnd) return pageMetrics;
+  const { data, error } = await supabase
+    .from('gsc_page_metrics_28d')
+    .select('page_url, clicks_28d, impressions_28d, ctr_28d, position_28d, date_end')
+    .eq('site_url', propertyUrl)
+    .eq('date_end', end)
+    .limit(2000);
+  if (error || !data?.length) return pageMetrics;
+  return { rows: data, dateEnd: end };
+}
+
 /** Small rules table — avoid scanning revenue_gsc_joined_with_policy (LATERAL join timeout). */
 async function fetchIndexabilityPolicies(supabase) {
   const { data, error } = await supabase
@@ -426,6 +439,32 @@ function computeFunnel(kpis, revenueSnap, ga4View) {
     { stage: 'Transactions', value: txns || null, target_pct_next: null },
     { stage: 'Revenue', value: revenue || null, target_pct_next: null }
   ];
+}
+
+/** Extra clicks in 28 days if CTR rose to max(1.5%, 1.6 × today's) — the leak table's "recoverable" basis. */
+function recoverableClicks(impr, ctr) {
+  return Math.max(0, Math.round((Math.max(0.015, ctr * 1.6) - ctr) * impr));
+}
+
+/** "Pages by search traffic" (P5): top 100 pages by clicks, money / info tagged, with recoverable clicks. */
+function pickPagesByTraffic(pageRows) {
+  return pageRows
+    .map((r) => {
+      const impr = Number(r.impressions_28d) || 0;
+      const ctr = Number(r.ctr_28d) || 0;
+      return {
+        page_url: r.page_url,
+        is_money_page: isMoneyPage(r.page_url),
+        impressions_28d: impr,
+        clicks_28d: Number(r.clicks_28d) || 0,
+        ctr_28d_pct: ctr * 100,
+        position_28d: Number(r.position_28d) || null,
+        recoverable_clicks_28d: recoverableClicks(impr, ctr)
+      };
+    })
+    .filter((r) => r.impressions_28d > 0)
+    .sort((a, b) => b.clicks_28d - a.clicks_28d)
+    .slice(0, 100);
 }
 
 function pickLeakPages(pageRows) {
@@ -613,8 +652,21 @@ function mergeRowsByMonth(rows) {
 // Phase L1 originally only mapped 4 verbatim categories and nullled hire/
 // services — that hid B2B Commissions/Prints and D2C Mentoring/1-2-1 etc.
 // Now aggregate all 12 categories via classifyCategory() in booking-sheet-parser.
+/**
+ * Tier revenue = the sum of each money-page tier's Booking Sheet categories (MONEY_PAGE_TIERS.categories), the same
+ * categories the Revenue tab and the Targets panel use. Voucher / Pick n Mix in-out lines (4, 5, 8, 9) stay out.
+ */
 function synthesiseLegacyTierRevenueFromRow(row) {
-  return synthesiseLegacyTierRevenue(row.category_revenue);
+  const out = {};
+  for (const t of MONEY_PAGE_TIERS) {
+    if (!t.categories?.length) continue;
+    out[t.id] = 0;
+  }
+  for (const [label, amount] of Object.entries(row.category_revenue || {})) {
+    const tier = MONEY_PAGE_TIERS.find((t) => t.categories?.includes(parseInt(label, 10)));
+    if (tier) out[tier.id] += Number(amount) || 0;
+  }
+  return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, Math.round(v * 100) / 100]));
 }
 
 function shapeWideViewRow(row, jlrCtx) {
@@ -681,6 +733,25 @@ async function fetchTxnCountForWindow(supabase, propertyUrl, dateEndIso, include
   const { count, error } = await query;
   if (error) throw error;
   return { count: Number(count) || 0, window };
+}
+
+/** Revenue and GP (category rates) booked in the KPI window, against survival for exactly those days. */
+async function fetchWindowMoney(supabase, propertyUrl, window, includeJlr) {
+  if (!window) return null;
+  let query = supabase.from('booking_sheet_transactions').select('amount, category_order')
+    .eq('property_url', propertyUrl).eq('is_redemption', false)
+    .gte('txn_date', window.start).lte('txn_date', window.end).limit(5000);
+  if (!includeJlr) query = query.eq('is_jlr', false);
+  const { data, error } = await query;
+  if (error) throw error;
+  const rates = FT?.gp_rates || {};
+  const revenue = (data || []).reduce((a, r) => a + (Number(r.amount) || 0), 0);
+  const gp = (data || []).reduce((a, r) => a + (Number(r.amount) || 0) * (rates[r.category_order] || 0), 0);
+  const target = windowSurvival(FT, window.start, window.end);
+  return {
+    start: window.start, end: window.end, revenue: Math.round(revenue), gp: Math.round(gp),
+    target_revenue: target.revenue, target_gp: target.gp, rag: revenueRagFor(gp, target.gp)
+  };
 }
 
 async function fetchMonthlyTxnCounts(supabase, propertyUrl) {
@@ -788,12 +859,28 @@ function tierMapOf(row) {
   return null;
 }
 
+/** This month's GP margin for a tier: its categories' revenue × each category's GP rate (the one GP method). */
+function tierMonthMargin(row, tierId) {
+  const cats = MONEY_PAGE_TIERS.find((t) => t.id === tierId)?.categories || [];
+  const rates = FT?.gp_rates || {};
+  let rev = 0;
+  let gp = 0;
+  for (const [label, amount] of Object.entries(row?.category_revenue || {})) {
+    const order = parseInt(label, 10);
+    if (!cats.includes(order)) continue;
+    rev += Number(amount) || 0;
+    gp += (Number(amount) || 0) * (rates[order] || 0);
+  }
+  return rev > 0 ? gp / rev : (tierGpPct({ id: tierId }) || 0) / 100;
+}
+
 function tierPoint(row, tierMap, series) {
   const revenue = tierMap ? Number(tierMap[series.tier_id]) : null;
   const isNum = Number.isFinite(revenue);
   return {
     month: row.period_start.slice(0, 7),
     revenue: isNum ? revenue : null,
+    gp: isNum ? revenue * tierMonthMargin(row, series.tier_id) : null,
     target: series.monthly_target,
     variance_pct: isNum ? variancePct(revenue, series.monthly_target) : null,
     is_partial: row.is_partial,
@@ -928,17 +1015,13 @@ function computeTierYtd(series) {
   const monthIdx = now.getUTCMonth();
   const dim = daysInMonth(year, monthIdx);
   const dayInMonth = now.getUTCDate();
-  let revenue = 0;
-  let monthsWithData = 0;
-  for (const p of points) {
-    if (!p.month || !p.month.startsWith(String(year))) continue;
-    const v = Number(p.revenue);
-    if (Number.isFinite(v)) { revenue += v; monthsWithData += 1; }
-  }
+  const ytdPoints = points.filter((p) => p.month && p.month.startsWith(String(year)) && Number.isFinite(Number(p.revenue)));
+  const revenue = ytdPoints.reduce((a, p) => a + Number(p.revenue), 0);
+  const monthsWithData = ytdPoints.length;
   const tt = tierTargetsFor(series.tier_id);
   const target = tt.ytd;
   const variance = target > 0 ? ((revenue - target) / target) * 100 : null;
-  const gpYtd = grossProfitAmount(revenue, series.gross_profit_pct);
+  const gpYtd = Number(ytdPoints.reduce((a, p) => a + (Number(p.gp) || 0), 0).toFixed(2));
   const monthsElapsed = monthIdx + (dayInMonth / dim);
   const annualisedRevenue = monthsElapsed > 0 ? (revenue / monthsElapsed) * 12 : null;
   return {
@@ -950,7 +1033,7 @@ function computeTierYtd(series) {
     variance_pct: variance,
     gross_profit_ytd_gbp: gpYtd,
     run_rate_annual_revenue_gbp: annualisedRevenue == null ? null : Number(annualisedRevenue.toFixed(2)),
-    run_rate_annual_gp_gbp: grossProfitAmount(annualisedRevenue || 0, series.gross_profit_pct)
+    run_rate_annual_gp_gbp: revenue > 0 ? Number(((annualisedRevenue || 0) * (gpYtd / revenue)).toFixed(2)) : 0
   };
 }
 
@@ -994,7 +1077,8 @@ function sumYtdRevenue(history, year) {
   for (const row of history || []) {
     if (!row?.period_start) continue;
     if (row.period_start.slice(0, 4) !== String(year)) continue;
-    total += Number(row.revenue_amount) || 0;
+    // D2C + B2B: the voucher / Pick n Mix timing line (adjustment_net) is not revenue for the year (as Revenue tab).
+    total += (Number(row.revenue_amount) || 0) - (Number(row.adjustment_net) || 0);
   }
   return total;
 }
@@ -1386,7 +1470,7 @@ export default async function handler(req, res) {
   try {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
     FT = funnelTargetsFrom(await loadTargetsMaster(supabase, propertyUrl), MONEY_PAGE_TIERS);
-    const [audits, pageMetrics, bookingBundle, aiMap, priorities, ga4Snap, policies] = await Promise.all([
+    const [audits, rawPageMetrics, bookingBundle, aiMap, priorities, ga4Snap, policies] = await Promise.all([
       fetchLatestAudit(supabase, propertyUrl),
       fetchPageMetrics(supabase, propertyUrl),
       fetchBookingSheetBundle(supabase, propertyUrl, includeJlr),
@@ -1399,6 +1483,7 @@ export default async function handler(req, res) {
     const revenueHistory = bookingBundle.revenueHistory;
     const revenueSnap = revenueSnaps.kpiSnap;
     const tierRevenueSnap = revenueSnaps.tierSnap;
+    const pageMetrics = await alignPageMetricsToGa4(supabase, propertyUrl, rawPageMetrics, ga4Snap);
     const pageRows = pageMetrics.rows;
     const periodStart = pageMetrics.dateEnd ? `${String(pageMetrics.dateEnd).slice(0, 7)}-01` : null;
     const policyBySlug = buildPolicyBySlug(pageRows, policies);
@@ -1407,6 +1492,7 @@ export default async function handler(req, res) {
     const auditPrior = audits[1] || null;
     const ga4View = ga4AttributedView(ga4Snap);
     const txn28 = await fetchTxnCountForWindow(supabase, propertyUrl, pageMetrics.dateEnd, includeJlr);
+    const money28 = await fetchWindowMoney(supabase, propertyUrl, txn28.window, includeJlr);
     const kpis = computeKpis(enrichedPageRows, auditLatest, auditPrior, revenueSnap, ga4View, txn28.count);
     const funnel = computeFunnel(kpis, revenueSnap, ga4View);
     const leakPages = pickLeakPages(pageRows);
@@ -1456,6 +1542,8 @@ export default async function handler(req, res) {
       ai_overview_map: aiMap,
       priorities,
       earning_pages: earningPages,
+      pages_by_traffic: pickPagesByTraffic(pageRows),
+      money_28d: money28,
       money_page_performance: moneyPagePerformance,
       latest_revenue: tierRevenueSnap,
       kpi_revenue_snap: revenueSnap,

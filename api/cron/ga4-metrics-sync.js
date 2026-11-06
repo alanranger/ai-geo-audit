@@ -1,4 +1,4 @@
-// Weekly GA4 cache refresh for Revenue Funnel (Vercel cron).
+// Daily GA4 cache refresh for Pipeline & Funnel (Vercel cron): same 28-day range as the GSC page metrics.
 export const config = { runtime: 'nodejs', maxDuration: 120 };
 
 import { createClient } from '@supabase/supabase-js';

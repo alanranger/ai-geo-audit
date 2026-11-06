@@ -197,8 +197,15 @@ function summariseNow(trials, annuals, events) {
 // Gap analysis: convert a "£X/yr profit shortfall" into the number of
 // extra Academy members needed, then back into trials/month required
 // at the observed trial-to-paid conversion rate.
-function computeGapAnalysis(summary, annualGpGapGbp) {
-  const gpPerMember = ACADEMY_ANNUAL_FEE_GBP * (ACADEMY_GP_PCT / 100);
+/** GP per member = Academy GP (Booking Sheet, last 12 months) ÷ active paying members; list fee × GP% if unknown. */
+function gpPerMemberFor(summary, academyGpGbp) {
+  const active = summary.annual.active_now || 0;
+  if (academyGpGbp > 0 && active > 0) return academyGpGbp / active;
+  return ACADEMY_ANNUAL_FEE_GBP * (ACADEMY_GP_PCT / 100);
+}
+
+function computeGapAnalysis(summary, annualGpGapGbp, academyGpGbp = 0) {
+  const gpPerMember = gpPerMemberFor(summary, academyGpGbp);
   const membersNeeded = annualGpGapGbp > 0
     ? Math.ceil(annualGpGapGbp / gpPerMember)
     : 0;
@@ -217,6 +224,7 @@ function computeGapAnalysis(summary, annualGpGapGbp) {
   return {
     annual_gp_gap_gbp: annualGpGapGbp,
     gp_per_member_gbp: Number(gpPerMember.toFixed(2)),
+    gp_per_member_basis: academyGpGbp > 0 && (summary.annual.active_now || 0) > 0 ? 'academy_gp' : 'fee',
     members_needed: membersNeeded,
     trial_conversion_pct_90d: trialConversionPct,
     current_trials_per_month: currentTrialsPerMonth,
@@ -273,6 +281,7 @@ export default async function handler(req, res) {
   }
 
   const gapGbp = Number(req.query?.annual_gp_gap_gbp || 0);
+  const academyGpGbp = Number(req.query?.academy_gp_gbp || 0);
 
   try {
     const data = await fetchData(supabase);
@@ -286,7 +295,7 @@ export default async function handler(req, res) {
         for (let i = 0; i < monthly.length; i += 1) {
           monthly[i].new_paid = monthlyPaid[i]?.new_paid || 0;
         }
-    const gap = computeGapAnalysis(summary, gapGbp);
+    const gap = computeGapAnalysis(summary, gapGbp, academyGpGbp);
     return send(res, 200, {
       configured: true,
       generated_at: new Date().toISOString(),

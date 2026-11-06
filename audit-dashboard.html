@@ -208,8 +208,9 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script src="/keyword-tracking-class-LOCKED.js"></script>
   <script src="/lib/competitor-analysis-tab.js?v=ca-prog-20260719a"></script>
-  <script src="/lib/strategy-tab.js?v=st-20261106-stage2b"></script>
+  <script src="/lib/strategy-tab.js?v=st-20261106-stage3"></script>
   <script src="/lib/monthly-chart.js?v=mc-20261106a"></script>
+  <script src="/lib/pages-by-traffic.js?v=pt-20261106a"></script>
   <script src="/lib/targets-panel.js?v=tp-20261106c"></script>
   <script src="/lib/silent-faults-tab.js?v=sf-20261027a"></script>
   <script src="/lib/trad-seo-render-client.js?v=tsr-20261030b"></script>
@@ -7810,7 +7811,7 @@
       </button>
       <button class="aigeo-nav-item" data-panel="revenue-funnel" title="Revenue Funnel — exec view that follows impressions → clicks → revenue. Shows 12-month sparkline, YTD vs target, money-page performance and the Squarespace / Stripe / Booking-Sheet feed status banner. Reads the ACTIVE scenario from the Scenario Planning tab for its Top 3 Actions.">
         <span class="aigeo-nav-icon">💸</span>
-        <span>Revenue Funnel</span>
+        <span>Pipeline &amp; Funnel</span>
       </button>
       <button class="aigeo-nav-item" data-panel="scenario-planning" title="Scenario Planning &amp; Forecasting — build named scenarios, compare Auto-Optimise paths, and view the cockpit (YTD vs projected revenue/GP with active-scenario lift).">
         <span class="aigeo-nav-icon">🎯</span>
@@ -8607,6 +8608,10 @@
           .rf-funnel-stage .rf-stage-name { font-size: 0.75rem; color: var(--dark-text-muted); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.4rem; font-weight: 600; }
           .rf-funnel-stage .rf-stage-value { font-size: 1.15rem; font-weight: 800; color: var(--dark-text); }
           .rf-funnel-stage .rf-stage-dropoff { font-size: 0.72rem; color: #f87171; margin-top: 0.35rem; font-weight: 600; }
+          .rf-funnel-stage .rf-stage-dropoff.is-ok { color: #94a3b8; }
+          .rf-pt-tag { display:inline-block; font-size:0.7rem; font-weight:700; border-radius:4px; padding:0.05rem 0.4rem; border:1px solid; }
+          .rf-pt-tag.is-money { color:#5fd38d; border-color:#1f5a37; } .rf-pt-tag.is-info { color:#94a3b8; border-color:#334155; }
+          .rf-pt-chip[aria-pressed="true"] { background:#2a2108; color:#f0a500; border-color:#6b5212; }
           .rf-funnel-stage.is-empty .rf-stage-value { color: var(--dark-text-muted); font-weight: 600; font-size: 0.95rem; }
 
           /* Tables — dark, with TH AND TD aligning the same on .num */
@@ -9224,13 +9229,12 @@
 
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
           <div>
-            <h2>Revenue Funnel</h2>
-            <div style="font-size:0.9rem; margin-top:0.2rem; color:#9ca3af;">Impressions &rarr; Clicks &rarr; Money-page clicks &rarr; Revenue. One page, one read.</div>
+            <h2>Pipeline &amp; Funnel</h2>
+            <div style="font-size:0.9rem; margin-top:0.2rem; color:#9ca3af;">What's booked, and how people find you and become customers.</div>
           </div>
           <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
             <button id="rf-sync-ga4-btn" class="rf-btn" type="button" title="Pull last 28 days from GA4 (form_start, view_item, etc.) into the funnel">↻ Sync GA4</button>
             <button id="rf-sync-all-btn" class="rf-btn" type="button" title="Step 1: pick your Booking Sheet .xlsm if you want Bank/PayPal/Voucher rows included (cancel to skip). Step 2: sync Squarespace + Stripe for the last 13 months. Step 3: reload every table, chart and tile on this page.">▶ Sync everything &amp; refresh page</button>
-            <button id="rf-upload-booking-btn" class="rf-btn rf-btn-secondary" type="button" title="Upload just the Booking Sheet (.xlsm) to refresh Bank/PayPal/Voucher rows without re-syncing Squarespace or Stripe. Use this after editing the spreadsheet.">📋 Upload Booking Sheet</button>
             <label class="rt-toggle rt-jlr-toggle" title="When on (default), revenue matches your Booking Sheet totals including JLR woodland walks. Turn off to exclude JLR everywhere on this tab and Revenue Truth."><input type="checkbox" id="rf-include-jlr" checked> Include JLR revenue</label>
             <button id="rf-refresh-btn" class="rf-btn rf-btn-secondary" type="button" title="Re-fetch tables/charts only — does NOT pull fresh data from any source.">Refresh tables</button>
             <input id="rf-booking-file" type="file" accept=".xlsm,.xlsx" style="display:none;" />
@@ -9249,16 +9253,209 @@
 
         <div id="rf-status-msg" class="rf-callout" style="display:none;"></div>
 
-        <!-- Active scenario pill: shows which scenario the Top 3 Actions
-             picker (below) is reading from. Clicking the link jumps to
-             the Scenario Planning tab where the scenario library lives.
-             Added v5.3 (2026-05-21). -->
-        <div id="rfActiveScenarioPill" style="margin-bottom: 1.25rem; padding: 0.75rem 1rem; background: var(--dark-panel); border: 1px solid var(--dark-border); border-radius: 10px; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
-          <span style="color: var(--dark-text-muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 700;">Active scenario</span>
-          <span id="rfActiveScenarioName" style="font-weight: 700; color: var(--dark-text);">loading&hellip;</span>
-          <span id="rfActiveScenarioMeta" style="color: var(--dark-text-muted); font-size: 0.85rem;"></span>
-          <a href="#scenario-planning" data-nav-to="scenario-planning" style="margin-left: auto; color: var(--dark-brand); font-weight: 600; font-size: 0.85rem; text-decoration: none;" title="The targets / tier-weight / lever-weight editor lives on the Scenario Planning tab. Switch tabs to edit, build a new scenario, or activate a different one.">Edit in Scenario Planning &rarr;</a>
+        <style>
+          .rf-group-head { margin: 1.6rem 0 0.6rem; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dark-brand, #f0a500); border-bottom: 1px solid var(--dark-border, #262d3a); padding-bottom: 0.3rem; }
+        </style>
+        <div class="rf-group-head">What's booked</div>
+        <section class="rf-section" id="rf-diary-section">
+          <div id="rf-diary-host"></div>
+        </section>
+
+        <!-- Per-tier cards, Profit Pyramid, Academy -->
+        <section class="rf-section">
+          <h3>Money-page tiers: this month &amp; YTD</h3>
+          <div class="rf-sub">One card per money-page tier, against its share of the Targets panel survival target (Strategy &amp; Actions). The month-by-month chart, the Survival Cockpit and the Profit Goal Tracker are on the Revenue tab.</div>
+          <!-- Per-tier mini sparklines (7 tiles: 6 commercial tiers + an
+               "Unidentified" safety-net bucket so we can spot new product
+               types that don't match any classifier rule yet). -->
+          <div class="rf-tier-spark-grid" id="rf-tier-spark-grid">
+            <div class="rf-tier-spark-card" data-tier-id="workshops_residential"><div class="rf-tier-spark-empty">Loading…</div></div>
+            <div class="rf-tier-spark-card" data-tier-id="workshops_nonres"><div class="rf-tier-spark-empty">Loading…</div></div>
+            <div class="rf-tier-spark-card" data-tier-id="courses"><div class="rf-tier-spark-empty">Loading…</div></div>
+            <div class="rf-tier-spark-card" data-tier-id="services"><div class="rf-tier-spark-empty">Loading…</div></div>
+            <div class="rf-tier-spark-card" data-tier-id="hire"><div class="rf-tier-spark-empty">Loading…</div></div>
+            <div class="rf-tier-spark-card" data-tier-id="academy"><div class="rf-tier-spark-empty">Loading…</div></div>
+            <div class="rf-tier-spark-card rf-tier-spark-card-warn" data-tier-id="unidentified" title="Transactions the classifier couldn't tier. Click through to see which rows landed here and ask the agent to add a classifier rule."><div class="rf-tier-spark-empty">Loading…</div></div>
+          </div>
+
+          <!-- Profit Pyramid: re-rank tiers by annualised gross profit
+               (revenue × GP%) instead of revenue. Surfaces the gap between
+               "where revenue comes from" vs "where profit comes from",
+               and tracks progress against the £4-5k/mo profit target. -->
+          <div class="rf-pyramid" id="rf-pyramid" style="display:none;">
+            <div class="rf-pyramid-head">
+              <div>
+                <div class="rf-pyramid-title">Profit Pyramid — where the money actually sticks</div>
+                <div class="rf-pyramid-sub">Annualised gross profit by tier (YTD revenue × GP%). Tiers are sorted by GP £, not revenue, so the "vanity vs value" gap is obvious.</div>
+              </div>
+              <div class="rf-pyramid-goal" id="rf-pyramid-goal-host"></div>
+            </div>
+            <div class="rf-pyramid-bar" id="rf-pyramid-bar"></div>
+            <table class="rf-pyramid-table">
+              <colgroup>
+                <col style="width: 24%;" />
+                <col style="width: 8%;" />
+                <col style="width: 11%;" />
+                <col style="width: 11%;" />
+                <col style="width: 13%;" />
+                <col style="width: 13%;" />
+                <col style="width: 10%;" />
+                <col style="width: 10%;" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th title="Revenue tier (Workshops Res, Workshops Non-Res, Courses, 1-2-1 & Services, Hire/Commercial, Academy). The badge after the name is the strategic role: Workhorse = scale this; Retention engine = keeps customers warm even if low margin; Workhorse but vulnerable = good margin but lumpy; Conversion bottleneck = high margin trapped behind a weak funnel; High-margin time = time-traded, premium.">Tier · strategic role</th>
+                  <th class="num" title="Gross profit percentage for the tier (Revenue − cost of goods/time / Revenue). Coloured RAG: Green ≥ 70%, Amber 50–69%, Red < 50%. TOTAL row shows the business-wide BLENDED GP% = sum(YTD GP) / sum(YTD Rev).">GP %</th>
+                  <th class="num" title="Year-to-date GROSS REVENUE for this tier (everything customers paid you so far in 2026).">YTD Rev</th>
+                  <th class="num" title="Year-to-date GROSS PROFIT for this tier — what you actually keep after costs (YTD Rev × GP%).">YTD GP</th>
+                  <th class="num" title="Projected revenue for the full year, based on YTD run-rate × (12 / months elapsed). Lets you see the revenue side of the same projection that drives the Annualised GP column next to it.">Annualised Rev</th>
+                  <th class="num" title="Projected gross profit for the full year, based on YTD run-rate × (12 / months elapsed). The number to compare against your £30k–£48k/yr profit target.">Annualised GP</th>
+                  <th class="num" title="This tier's share of your total annualised gross profit. Adds up to 100% across all tiers. Use this to see which tier carries the business — Academy 9.9% is small but high-leverage, residential workshops 20% is doing the heavy lifting on volume.">% of profit</th>
+                  <th class="num" title="GP–Rev gap (percentage points) = Share of profit − Share of revenue. POSITIVE (green) means this tier punches above its revenue weight — every £ it earns delivers more profit than the business average. NEGATIVE (red) means it eats more revenue than profit — a vanity tier (lots of money in, low margin eats it). Example: Residential workshops at −17.7pp = 37.9% of revenue but only 20% of profit, because 35% GP. Academy at −3.3pp at 99% GP = a VOLUME problem (not enough revenue), not a margin problem.">GP–Rev gap</th>
+                </tr>
+              </thead>
+              <tbody id="rf-pyramid-tbody"></tbody>
+              <tfoot id="rf-pyramid-tfoot"></tfoot>
+            </table>
+          </div>
+
+        </section>
+
+        <div class="rf-group-head">How people get to a booking</div>
+        <!-- Funnel: last 28 days (P4 + P6) -->
+        <section class="rf-section" id="rf-funnel-28d">
+          <h3>Funnel: last 28 days</h3>
+
+          <div class="rf-sub">Drop-off = the % who do not go on to the next step; red only when that step converts below its target (Targets panel).</div>
+          <div class="rf-funnel" id="rf-funnel"></div>
+          <div id="rf-funnel-note" style="margin-top:0.65rem; color:#64748b; font-size:0.85rem;"></div>
+
+          <div class="rf-sub">If these six numbers are bad, everything else is noise. Aim small but in the right direction.</div>
+          <div class="ar-policy-banner ar-policy-banner--summary"
+               role="status"
+               aria-live="polite"
+               data-policy-banner
+               style="display: none;">
+            <div class="ar-policy-banner__icon" aria-hidden="true">ⓘ</div>
+            <div class="ar-policy-banner__body">
+              <div class="ar-policy-banner__title" data-policy-banner-title></div>
+              <div class="ar-policy-banner__detail" data-policy-banner-detail></div>
+            </div>
+          </div>
+          <div class="rf-kpi-grid" id="rf-kpi-grid">
+            <div class="rf-kpi"><div class="rf-kpi-label">Loading…</div></div>
+          </div>
+        </section>
+
+        <!-- Money pages by tier: search → sales (P8) -->
+        <section class="rf-section" id="rf-money-by-tier">
+        <div class="rt-section rt-diag-section" id="rt-diag-section">
+          <div class="rt-diag-header">
+            <div style="flex: 1 1 30rem;">
+              <h3>Money pages by tier: search &rarr; sales</h3>
+              <p class="rt-sub">Expand a tier to see hub diagnostic cards with embedded product tables (all canonical products mapped to that hub). GSC overlay Jan 2025+; revenue from Booking Sheet only.</p>
+            </div>
+            <div class="rt-diag-toggles">
+              <span class="rt-diag-window-bar"><strong>Window:</strong>
+                <label class="rt-toggle"><input type="radio" name="rt-diag-window" value="3"> 3mo</label>
+                <label class="rt-toggle"><input type="radio" name="rt-diag-window" value="6"> 6mo</label>
+                <label class="rt-toggle"><input type="radio" name="rt-diag-window" value="12" checked> 12mo</label>
+                <label class="rt-toggle"><input type="radio" name="rt-diag-window" value="18"> 18mo</label>
+              </span>
+              <label class="rt-toggle"><input type="checkbox" id="rt-diag-include-event"> Include Tier C event pages</label>
+              <label class="rt-toggle" title="Show new / low-traffic pages that are normally hidden as 'insufficient data' (under 1,000 impressions or fewer than 6 months of GSC history)."><input type="checkbox" id="rt-diag-show-new"> Show new / low-data pages</label>
+            </div>
+          </div>
+          <div class="ar-policy-banner ar-policy-banner--diagnosis"
+               role="status"
+               aria-live="polite"
+               data-policy-banner
+               style="display: none;">
+            <div class="ar-policy-banner__icon" aria-hidden="true">ⓘ</div>
+            <div class="ar-policy-banner__body">
+              <div class="ar-policy-banner__title" data-policy-banner-title></div>
+              <div class="ar-policy-banner__detail" data-policy-banner-detail></div>
+            </div>
+          </div>
+          <style>
+            #rf-money-tier-table td, #rf-money-tier-table th { padding: 0.5rem 0.55rem; vertical-align: top; }
+            #rf-money-tier-table td.n, #rf-money-tier-table th.n { text-align: right; white-space: nowrap; }
+            #rf-money-tier-table .mpt-row { cursor: pointer; } #rf-money-tier-table .mpt-row:hover td { background: #121826; }
+            #rf-money-tier-table .mpt-arrow { color: #f0a500; margin-right: 6px; }
+            .mpt-gp { display:inline-block; font-size:10.5px; font-weight:800; border-radius:999px; padding:1px 7px; margin-left:6px; border:1px solid; }
+            .mpt-gp.g1 { color:#5fd38d; border-color:#1f5a37; } .mpt-gp.g2 { color:#f0b429; border-color:#6b5212; } .mpt-gp.g3 { color:#ffb3b3; border-color:#6e2226; }
+            .mpt-small { display:block; color:#8b93a3; font-size:11.5px; margin-top:4px; }
+            .mpt-neg { color:#ff6b6b; } .mpt-pos { color:#5fd38d; }
+            .mpt-warn { color:#f0b429; font-size:12.5px; margin-top:6px; }
+          </style>
+          <div id="rf-money-tier-summary"><div class="rt-loading">Loading money pages&hellip;</div></div>
+          <h4 style="margin:1rem 0 0.4rem;">Tier detail: hubs and product pages</h4>
+          <div id="rt-diag-status" class="rt-diag-status"></div>
+          <div id="rt-diag-tier-list" class="rt-diag-tier-list"><div class="rt-loading">Loading diagnosis&hellip;</div></div>
         </div>
+
+
+        </section>
+
+        <!-- Pages by search traffic (P5) -->
+        <section class="rf-section" id="rf-pages-by-traffic">
+          <h3>Pages by search traffic</h3>
+          <div id="rf-pages-traffic-host"><div class="rt-loading">Loading&hellip;</div></div>
+        </section>
+        <section class="rf-section" id="rf-academy-section">
+          <h3>Academy Funnel</h3>
+          <!-- Academy Funnel — the deep-dive on Alan's highest-leverage,
+               lowest-effort tier. The hard work (190 articles, dashboards)
+               is done; the bottleneck is the trial-to-paid conversion.
+               Live data from the Academy Supabase (dqrtcsvqsfgbqmnonkpt). -->
+          <div class="rf-academy" id="rf-academy" style="display:none;">
+            <div class="rf-academy-head">
+              <div>
+                <div class="rf-academy-title">Academy Funnel — the highest-leverage lever</div>
+                <div class="rf-academy-sub">99% gross-profit, hard work already done (190 articles). Trial → paid conversion is the bottleneck, not content.</div>
+              </div>
+              <div class="rf-academy-status" id="rf-academy-status"></div>
+            </div>
+            <div class="rf-academy-kpis" id="rf-academy-kpis"></div>
+            <div class="rf-academy-funnel-row">
+              <div class="rf-academy-chart" id="rf-academy-chart-host">
+                <div class="rf-academy-chart-title">Top-of-funnel: free trials started per month vs new PAID members (since Jan 2026 model switch). Big bar = trial signups; pill below = how many became paying customers.</div>
+                <div class="rf-academy-bars" id="rf-academy-bars"></div>
+                <div class="rf-academy-chart-foot" id="rf-academy-chart-foot"></div>
+              </div>
+              <div class="rf-academy-gap" id="rf-academy-gap-host">
+                <div class="rf-academy-chart-title">Gap analysis: members needed to close profit gap</div>
+                <div id="rf-academy-gap"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tier classification review -->
+          <details style="margin-bottom:1rem;">
+            <summary style="cursor:pointer; color:var(--dark-brand); font-weight:600; font-size:0.85rem; padding:0.4rem 0;">Review tier classifications (140 products) — open me to check the per-tier mini sparklines are using the right product mix</summary>
+            <div id="rf-tier-review-host" style="margin-top:0.6rem; background:#0b1118; border:1px solid var(--dark-border); border-radius:8px; padding:0.9rem 1.1rem;">
+              <div style="font-size:0.78rem; color:#9ca3af; margin-bottom:0.6rem;">These come from <code>v_products_unified_open</code> in the chat AI bot Supabase project. The commercial-tier classifier groups each product into one of <strong>workshops / courses / services / hire / academy / other</strong>. Spot anything wrong and tell me — I'll tighten the rules.</div>
+              <div id="rf-tier-review-summary" style="display:flex; gap:0.6rem; flex-wrap:wrap; margin-bottom:0.6rem;"></div>
+              <div id="rf-tier-review-body"></div>
+              <div style="margin-top:0.6rem;">
+                <button id="rf-tier-review-refresh" class="rf-btn" type="button">Refresh tier classifications</button>
+              </div>
+            </div>
+          </details>
+
+        </section>
+
+        <div class="rf-group-head">Watching</div>
+        <section class="rf-section" id="rf-watching">
+          <h3>Recently edited &amp; pages in monitoring</h3>
+          <div class="rf-sub"><span class="rf-season-banner-monitoring" id="rf-season-banner-monitoring"></span></div>
+        <div class="rf-recent-edits" id="rf-recent-edits" style="display:none;">
+          <h4>Recently edited — well done</h4>
+          <ul id="rf-recent-edits-list"></ul>
+        </div>
+
+        </section>
+
         <script>
           // Tiny pill controller: lists scenarios for the property,
           // shows the active one's name + meta, wires the link to the
@@ -9786,341 +9983,6 @@
           })();
         </script>
 
-        <!-- Seasonality + monitoring banner: tells the user what kind of
-             month this is (peak/shoulder/gap for each tier) and how
-             many URLs already have active monitoring cycles so the
-             projected-lift numbers further down are read in context.
-             Populated by rfSeasonalityBannerInit() from
-             /api/aigeo/revenue-funnel-seasonality. -->
-        <div class="rf-seasonality-banner" id="rf-seasonality-banner" style="display:none;">
-          <div class="rf-season-banner-head">
-            <span class="rf-season-banner-badge" id="rf-season-banner-month">--</span>
-            <span class="rf-season-banner-title">Seasonality + monitoring outlook</span>
-            <span class="rf-season-banner-monitoring" id="rf-season-banner-monitoring"></span>
-          </div>
-          <div class="rf-season-banner-grid" id="rf-season-banner-grid"></div>
-          <div class="rf-season-banner-sub" id="rf-season-banner-sub"></div>
-        </div>
-
-        <div class="rf-recent-edits" id="rf-recent-edits" style="display:none;">
-          <h4>Recently edited — well done</h4>
-          <ul id="rf-recent-edits-list"></ul>
-        </div>
-
-        <!-- Hero "do these 3 things this week" card: the very top of the
-             page so opening the dashboard immediately answers "what should
-             I work on?". Reads from the GP-weighted smart-priorities
-             endpoint and shows the three highest-profit-lift candidates,
-             not the three highest-revenue-lift. -->
-        <div class="rf-top-actions" id="rf-top-actions" style="display:none;">
-          <div class="rf-top-actions-head">
-            <div>
-              <div class="rf-top-actions-title">Do these 3 things this week</div>
-              <div class="rf-top-actions-sub">Ranked by projected <strong>profit</strong> lift (revenue × tier GP%), not raw search volume. <strong>One keyword owner per page</strong> — online vs Coventry/local are kept separate; same-URL CTR+rank tasks are merged. Click a card for the safe action plan.</div>
-            </div>
-            <div class="rf-top-actions-foot" id="rf-top-actions-meta"></div>
-          </div>
-          <div class="rf-top-actions-grid" id="rf-top-actions-grid"></div>
-        </div>
-
-        <!-- Per-tier cards, Profit Pyramid, Academy -->
-        <section class="rf-section">
-          <h3>Money-page tiers: this month &amp; YTD</h3>
-          <div class="rf-sub">One card per money-page tier, against its share of the Targets panel survival target (Strategy &amp; Actions). The month-by-month chart, the Survival Cockpit and the Profit Goal Tracker are on the Revenue tab.</div>
-          <!-- Per-tier mini sparklines (7 tiles: 6 commercial tiers + an
-               "Unidentified" safety-net bucket so we can spot new product
-               types that don't match any classifier rule yet). -->
-          <div class="rf-tier-spark-grid" id="rf-tier-spark-grid">
-            <div class="rf-tier-spark-card" data-tier-id="workshops_residential"><div class="rf-tier-spark-empty">Loading…</div></div>
-            <div class="rf-tier-spark-card" data-tier-id="workshops_nonres"><div class="rf-tier-spark-empty">Loading…</div></div>
-            <div class="rf-tier-spark-card" data-tier-id="courses"><div class="rf-tier-spark-empty">Loading…</div></div>
-            <div class="rf-tier-spark-card" data-tier-id="services"><div class="rf-tier-spark-empty">Loading…</div></div>
-            <div class="rf-tier-spark-card" data-tier-id="hire"><div class="rf-tier-spark-empty">Loading…</div></div>
-            <div class="rf-tier-spark-card" data-tier-id="academy"><div class="rf-tier-spark-empty">Loading…</div></div>
-            <div class="rf-tier-spark-card rf-tier-spark-card-warn" data-tier-id="unidentified" title="Transactions the classifier couldn't tier. Click through to see which rows landed here and ask the agent to add a classifier rule."><div class="rf-tier-spark-empty">Loading…</div></div>
-          </div>
-
-          <!-- Profit Pyramid: re-rank tiers by annualised gross profit
-               (revenue × GP%) instead of revenue. Surfaces the gap between
-               "where revenue comes from" vs "where profit comes from",
-               and tracks progress against the £4-5k/mo profit target. -->
-          <div class="rf-pyramid" id="rf-pyramid" style="display:none;">
-            <div class="rf-pyramid-head">
-              <div>
-                <div class="rf-pyramid-title">Profit Pyramid — where the money actually sticks</div>
-                <div class="rf-pyramid-sub">Annualised gross profit by tier (YTD revenue × GP%). Tiers are sorted by GP £, not revenue, so the "vanity vs value" gap is obvious.</div>
-              </div>
-              <div class="rf-pyramid-goal" id="rf-pyramid-goal-host"></div>
-            </div>
-            <div class="rf-pyramid-bar" id="rf-pyramid-bar"></div>
-            <table class="rf-pyramid-table">
-              <colgroup>
-                <col style="width: 24%;" />
-                <col style="width: 8%;" />
-                <col style="width: 11%;" />
-                <col style="width: 11%;" />
-                <col style="width: 13%;" />
-                <col style="width: 13%;" />
-                <col style="width: 10%;" />
-                <col style="width: 10%;" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th title="Revenue tier (Workshops Res, Workshops Non-Res, Courses, 1-2-1 & Services, Hire/Commercial, Academy). The badge after the name is the strategic role: Workhorse = scale this; Retention engine = keeps customers warm even if low margin; Workhorse but vulnerable = good margin but lumpy; Conversion bottleneck = high margin trapped behind a weak funnel; High-margin time = time-traded, premium.">Tier · strategic role</th>
-                  <th class="num" title="Gross profit percentage for the tier (Revenue − cost of goods/time / Revenue). Coloured RAG: Green ≥ 70%, Amber 50–69%, Red < 50%. TOTAL row shows the business-wide BLENDED GP% = sum(YTD GP) / sum(YTD Rev).">GP %</th>
-                  <th class="num" title="Year-to-date GROSS REVENUE for this tier (everything customers paid you so far in 2026).">YTD Rev</th>
-                  <th class="num" title="Year-to-date GROSS PROFIT for this tier — what you actually keep after costs (YTD Rev × GP%).">YTD GP</th>
-                  <th class="num" title="Projected revenue for the full year, based on YTD run-rate × (12 / months elapsed). Lets you see the revenue side of the same projection that drives the Annualised GP column next to it.">Annualised Rev</th>
-                  <th class="num" title="Projected gross profit for the full year, based on YTD run-rate × (12 / months elapsed). The number to compare against your £30k–£48k/yr profit target.">Annualised GP</th>
-                  <th class="num" title="This tier's share of your total annualised gross profit. Adds up to 100% across all tiers. Use this to see which tier carries the business — Academy 9.9% is small but high-leverage, residential workshops 20% is doing the heavy lifting on volume.">% of profit</th>
-                  <th class="num" title="GP–Rev gap (percentage points) = Share of profit − Share of revenue. POSITIVE (green) means this tier punches above its revenue weight — every £ it earns delivers more profit than the business average. NEGATIVE (red) means it eats more revenue than profit — a vanity tier (lots of money in, low margin eats it). Example: Residential workshops at −17.7pp = 37.9% of revenue but only 20% of profit, because 35% GP. Academy at −3.3pp at 99% GP = a VOLUME problem (not enough revenue), not a margin problem.">GP–Rev gap</th>
-                </tr>
-              </thead>
-              <tbody id="rf-pyramid-tbody"></tbody>
-              <tfoot id="rf-pyramid-tfoot"></tfoot>
-            </table>
-          </div>
-
-          <!-- Academy Funnel — the deep-dive on Alan's highest-leverage,
-               lowest-effort tier. The hard work (190 articles, dashboards)
-               is done; the bottleneck is the trial-to-paid conversion.
-               Live data from the Academy Supabase (dqrtcsvqsfgbqmnonkpt). -->
-          <div class="rf-academy" id="rf-academy" style="display:none;">
-            <div class="rf-academy-head">
-              <div>
-                <div class="rf-academy-title">Academy Funnel — the highest-leverage lever</div>
-                <div class="rf-academy-sub">99% gross-profit, hard work already done (190 articles). Trial → paid conversion is the bottleneck, not content.</div>
-              </div>
-              <div class="rf-academy-status" id="rf-academy-status"></div>
-            </div>
-            <div class="rf-academy-kpis" id="rf-academy-kpis"></div>
-            <div class="rf-academy-funnel-row">
-              <div class="rf-academy-chart" id="rf-academy-chart-host">
-                <div class="rf-academy-chart-title">Top-of-funnel: free trials started per month vs new PAID members (since Jan 2026 model switch). Big bar = trial signups; pill below = how many became paying customers.</div>
-                <div class="rf-academy-bars" id="rf-academy-bars"></div>
-                <div class="rf-academy-chart-foot" id="rf-academy-chart-foot"></div>
-              </div>
-              <div class="rf-academy-gap" id="rf-academy-gap-host">
-                <div class="rf-academy-chart-title">Gap analysis: members needed to close profit gap</div>
-                <div id="rf-academy-gap"></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Tier classification review -->
-          <details style="margin-bottom:1rem;">
-            <summary style="cursor:pointer; color:var(--dark-brand); font-weight:600; font-size:0.85rem; padding:0.4rem 0;">Review tier classifications (140 products) — open me to check the per-tier mini sparklines are using the right product mix</summary>
-            <div id="rf-tier-review-host" style="margin-top:0.6rem; background:#0b1118; border:1px solid var(--dark-border); border-radius:8px; padding:0.9rem 1.1rem;">
-              <div style="font-size:0.78rem; color:#9ca3af; margin-bottom:0.6rem;">These come from <code>v_products_unified_open</code> in the chat AI bot Supabase project. The commercial-tier classifier groups each product into one of <strong>workshops / courses / services / hire / academy / other</strong>. Spot anything wrong and tell me — I'll tighten the rules.</div>
-              <div id="rf-tier-review-summary" style="display:flex; gap:0.6rem; flex-wrap:wrap; margin-bottom:0.6rem;"></div>
-              <div id="rf-tier-review-body"></div>
-              <div style="margin-top:0.6rem;">
-                <button id="rf-tier-review-refresh" class="rf-btn" type="button">Refresh tier classifications</button>
-              </div>
-            </div>
-          </details>
-
-        </section>
-
-        <!-- Block 1: KPI strip -->
-        <section class="rf-section">
-          <h3>Funnel KPIs (last 28 days)</h3>
-          <div class="rf-sub">If these four numbers are bad, everything else is noise. Aim small but in the right direction.</div>
-          <div class="ar-policy-banner ar-policy-banner--summary"
-               role="status"
-               aria-live="polite"
-               data-policy-banner
-               style="display: none;">
-            <div class="ar-policy-banner__icon" aria-hidden="true">ⓘ</div>
-            <div class="ar-policy-banner__body">
-              <div class="ar-policy-banner__title" data-policy-banner-title></div>
-              <div class="ar-policy-banner__detail" data-policy-banner-detail></div>
-            </div>
-          </div>
-          <div class="rf-kpi-grid" id="rf-kpi-grid">
-            <div class="rf-kpi"><div class="rf-kpi-label">Loading…</div></div>
-          </div>
-        </section>
-
-        <!-- Block 2: Funnel -->
-        <section class="rf-section">
-          <h3>The funnel (where the leak is)</h3>
-          <div class="rf-sub">Red drop-off is the % of people who do NOT progress to the next stage.</div>
-          <div class="rf-funnel" id="rf-funnel"></div>
-          <div id="rf-funnel-note" style="margin-top:0.65rem; color:#64748b; font-size:0.85rem;"></div>
-        </section>
-
-        <div class="rt-section rt-diag-section" id="rt-diag-section">
-          <div class="rt-diag-header">
-            <div style="flex: 1 1 30rem;">
-              <h3>9. Revenue Funnel Diagnosis <span class="rt-diag-pill">TIER &rarr; HUB &rarr; PRODUCT</span></h3>
-              <p class="rt-sub">Expand a tier to see hub diagnostic cards with embedded product tables (all canonical products mapped to that hub). GSC overlay Jan 2025+; revenue from Booking Sheet only.</p>
-            </div>
-            <div class="rt-diag-toggles">
-              <span class="rt-diag-window-bar"><strong>Window:</strong>
-                <label class="rt-toggle"><input type="radio" name="rt-diag-window" value="3"> 3mo</label>
-                <label class="rt-toggle"><input type="radio" name="rt-diag-window" value="6"> 6mo</label>
-                <label class="rt-toggle"><input type="radio" name="rt-diag-window" value="12" checked> 12mo</label>
-                <label class="rt-toggle"><input type="radio" name="rt-diag-window" value="18"> 18mo</label>
-              </span>
-              <label class="rt-toggle"><input type="checkbox" id="rt-diag-include-event"> Include Tier C event pages</label>
-              <label class="rt-toggle" title="Show new / low-traffic pages that are normally hidden as 'insufficient data' (under 1,000 impressions or fewer than 6 months of GSC history)."><input type="checkbox" id="rt-diag-show-new"> Show new / low-data pages</label>
-            </div>
-          </div>
-          <div class="ar-policy-banner ar-policy-banner--diagnosis"
-               role="status"
-               aria-live="polite"
-               data-policy-banner
-               style="display: none;">
-            <div class="ar-policy-banner__icon" aria-hidden="true">ⓘ</div>
-            <div class="ar-policy-banner__body">
-              <div class="ar-policy-banner__title" data-policy-banner-title></div>
-              <div class="ar-policy-banner__detail" data-policy-banner-detail></div>
-            </div>
-          </div>
-          <div id="rt-diag-status" class="rt-diag-status"></div>
-          <div id="rt-diag-tier-list" class="rt-diag-tier-list"><div class="rt-loading">Loading diagnosis&hellip;</div></div>
-        </div>
-
-        <!-- Block 2b: Money pages performance — what SHOULD be earning -->
-        <section class="rf-section">
-          <h3>Money pages performance — what's earning vs what should be</h3>
-          <div class="rf-sub">Your commercial tiers. Actual revenue = latest Booking Sheet month (includes the current month while you are still booking). 12-month total sums closed months. GSC columns are rolling 28 days. Toggle JLR above to match spreadsheet headline vs non-JLR net.</div>
-          <div class="rf-tier-grid" id="rf-tier-grid"></div>
-          <div style="overflow-x:auto;">
-            <table class="rf-table" id="rf-money-table">
-              <thead><tr>
-                <th class="sortable" data-sort="tier_label">Tier<span class="rf-sort-ind">↕</span></th>
-                <th class="sortable" data-sort="page_count">Pages<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="monthly_target">Monthly target<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="revenue_actual_28d" title="Latest closed Booking Sheet month for this tier (not GSC rolling 28d)">£ earned (mo)<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="revenue_actual_12m">£ earned 12m<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="actual_vs_target_28d_pct">% of target<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="best_rank_non_brand" title="Best Google rank across the tier's tracked non-brand keywords (excludes 'alan ranger' variants which always hit #1 and hide real commercial-intent gaps). Hover any cell to see the winning keyword and tier median.">Best rank<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="total_search_volume">Search vol<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="impressions_28d">Impr 28d<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="clicks_28d">Clicks 28d<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="ctr_28d_pct">CTR<span class="rf-sort-ind">↕</span></th>
-                <th class="sortable" data-sort="ai_keywords_uncited">AIO miss<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="revenue_potential_28d">£ pot. 28d<span class="rf-sort-ind">↕</span></th>
-              </tr></thead>
-              <tbody><tr><td colspan="13" style="text-align:center; color:#6b7280;">Loading…</td></tr></tbody>
-              <tfoot></tfoot>
-            </table>
-          </div>
-          <div id="rf-tier-detail" style="margin-top:0.9rem;"></div>
-        </section>
-
-        <!-- Block 3: Top leak pages -->
-        <section class="rf-section">
-          <h3>Top 5 leaking pages (high impressions, low CTR)</h3>
-          <div class="rf-sub">If you lift each of these to ~1.5% CTR (industry baseline for informational queries) the "Recoverable" column shows how many extra clicks you would earn in 28 days.</div>
-          <div style="overflow-x:auto;">
-            <table class="rf-table" id="rf-leak-table">
-              <thead><tr>
-                <th>#</th>
-                <th class="sortable" data-sort="page_url">Page<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="impressions_28d">Impressions 28d<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="clicks_28d">Clicks 28d<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="ctr_28d_pct">CTR<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="position_28d">Avg pos<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="recoverable_clicks_28d">Recoverable clicks<span class="rf-sort-ind">↕</span></th>
-              </tr></thead>
-              <tbody><tr><td colspan="7" style="text-align:center; color:#6b7280;">Loading…</td></tr></tbody>
-            </table>
-          </div>
-        </section>
-
-        <!-- Block 4: AI Overview map -->
-        <section class="rf-section">
-          <h3>Google AI Overviews citation map (your tracked keywords)</h3>
-          <div class="rf-sub">Green = Google AI Overview cites Alan Ranger. Red = Google AI Overview present, no citation (steals your click). Blue = no Google AI Overview yet. <strong>Tier</strong> tells you whether the ranking URL is a money page or just an article — your real priorities are uncited money pages.</div>
-          <div id="rf-ai-summary" style="display:flex; gap:0.85rem; flex-wrap:wrap; margin-bottom:0.85rem;"></div>
-          <div class="rf-toolbar">
-            <input type="text" id="rf-ai-filter" class="rf-input" placeholder="Filter by keyword or URL…" style="min-width:240px;" />
-            <select id="rf-ai-bucket-filter" class="rf-select">
-              <option value="">All buckets</option>
-              <option value="overview_cited">Cited in Google AI Overview</option>
-              <option value="overview_uncited">Google AI Overview steals click</option>
-              <option value="no_overview">No Google AI Overview</option>
-            </select>
-            <select id="rf-ai-tier-filter" class="rf-select">
-              <option value="">All tiers</option>
-              <option value="money">Money</option>
-              <option value="education">Education</option>
-              <option value="brand">Brand</option>
-              <option value="other">Other</option>
-            </select>
-            <label style="display:inline-flex; align-items:center; gap:0.4rem; color:#9ca3af; font-size:0.85rem;">
-              <input type="checkbox" id="rf-ai-money-only" /> Money pages only
-            </label>
-            <span id="rf-ai-count" style="margin-left:auto; color:#9ca3af; font-size:0.8rem;"></span>
-          </div>
-          <div style="overflow-x:auto;">
-            <table class="rf-table" id="rf-ai-table">
-              <thead><tr>
-                <th class="sortable" data-sort="keyword">Keyword<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="rank">Rank<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="search_volume">Search vol<span class="rf-sort-ind">↕</span></th>
-                <th class="sortable" data-sort="segment">Tier<span class="rf-sort-ind">↕</span></th>
-                <th class="sortable" data-sort="page_type">Page type<span class="rf-sort-ind">↕</span></th>
-                <th class="sortable" data-sort="best_url">Ranking URL<span class="rf-sort-ind">↕</span></th>
-                <th class="sortable" data-sort="has_ai_overview">AIO<span class="rf-sort-ind">↕</span></th>
-                <th class="sortable" data-sort="bucket">Status<span class="rf-sort-ind">↕</span></th>
-              </tr></thead>
-              <tbody><tr><td colspan="8" style="text-align:center; color:#6b7280;">Loading…</td></tr></tbody>
-            </table>
-          </div>
-        </section>
-
-        <!-- Block 5: Priority Action Table -->
-        <section class="rf-section">
-          <h3>Priority Action Plan (the only to-do list you need)</h3>
-          <div class="rf-sub">Tick "Start task" to spawn an entry in your existing Optimisation Tracking tab. Status auto-syncs from that tracker.</div>
-          <div class="rf-toolbar">
-            <button id="rf-add-priority-btn" class="rf-btn rf-btn-secondary" type="button">+ Add custom priority</button>
-            <button id="rf-smart-priorities-btn" class="rf-btn" type="button" title="Replace the not-started priorities with up to 5 per tier, generated from live audit data (schema gaps, low-CTR pages, AIO uncited keywords, orphan products)">Regenerate smart priorities</button>
-            <button id="rf-toggle-done-btn" class="rf-btn rf-btn-secondary" type="button" data-show="hide">Show done items</button>
-          </div>
-          <div id="rf-smart-priorities-msg" style="margin: 0.4rem 0 0.6rem 0; font-size:0.8rem; color:#9ca3af;"></div>
-          <div style="overflow-x:auto;">
-            <table class="rf-table" id="rf-priority-table">
-              <thead><tr>
-                <th style="width:36px;">#</th>
-                <th>Action</th>
-                <th>KPI / Target</th>
-                <th>Estimated lift</th>
-                <th>Status</th>
-                <th style="width:160px;">Action</th>
-              </tr></thead>
-              <tbody><tr><td colspan="6" style="text-align:center; color:#94a3b8;">Loading…</td></tr></tbody>
-            </table>
-          </div>
-        </section>
-
-        <!-- Block 6: Earning vs Traffic -->
-        <section class="rf-section">
-          <h3>What's earning vs what's just getting traffic (top 10 pages by clicks)</h3>
-          <div class="rf-sub">Pages flagged ORANGE are commercial / money pages. Pages flagged BLUE are free or informational. If most clicks land on BLUE pages, you are educating Google for free.</div>
-          <div class="rf-toolbar">
-            <label style="display:inline-flex; align-items:center; gap:0.4rem; color:#9ca3af; font-size:0.85rem;">
-              <input type="checkbox" id="rf-earn-money-only" /> Money pages only
-            </label>
-          </div>
-          <div style="overflow-x:auto;">
-            <table class="rf-table" id="rf-earning-table">
-              <thead><tr>
-                <th>#</th>
-                <th class="sortable" data-sort="page_url">Page<span class="rf-sort-ind">↕</span></th>
-                <th class="sortable" data-sort="is_money_page">Type<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="clicks_28d">Clicks 28d<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="impressions_28d">Impressions 28d<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="ctr_28d_pct">CTR<span class="rf-sort-ind">↕</span></th>
-              </tr></thead>
-              <tbody><tr><td colspan="6" style="text-align:center; color:#6b7280;">Loading…</td></tr></tbody>
-            </table>
-          </div>
-        </section>
 
       </section>
 
@@ -10845,7 +10707,7 @@
           <div class="rt-table-scroll"><table class="rt-table rt-striped" id="rt-funding-table"></table></div>
         </details>
 
-        <script type="module" src="/lib/revenue-truth-controller.mjs?v=rt-20261106-stage2"></script>
+        <script type="module" src="/lib/revenue-truth-controller.mjs?v=rt-20261106-stage3"></script>
       </section>
 
       <section class="aigeo-panel" data-panel="scenario-planning">
@@ -15145,6 +15007,51 @@
 
       <!-- Money Pages Panel -->
       <section class="aigeo-panel" data-panel="money">
+        <div class="rf-moved-aio" id="rf-aio-section">
+        <!-- Block 4: AI Overview map -->
+        <section class="rf-section">
+          <h3>Google AI Overviews citation map (your tracked keywords)</h3>
+          <div class="rf-sub">Green = Google AI Overview cites Alan Ranger. Red = Google AI Overview present, no citation (steals your click). Blue = no Google AI Overview yet. <strong>Tier</strong> tells you whether the ranking URL is a money page or just an article — your real priorities are uncited money pages.</div>
+          <div id="rf-ai-summary" style="display:flex; gap:0.85rem; flex-wrap:wrap; margin-bottom:0.85rem;"></div>
+          <div class="rf-toolbar">
+            <input type="text" id="rf-ai-filter" class="rf-input" placeholder="Filter by keyword or URL…" style="min-width:240px;" />
+            <select id="rf-ai-bucket-filter" class="rf-select">
+              <option value="">All buckets</option>
+              <option value="overview_cited">Cited in Google AI Overview</option>
+              <option value="overview_uncited">Google AI Overview steals click</option>
+              <option value="no_overview">No Google AI Overview</option>
+            </select>
+            <select id="rf-ai-tier-filter" class="rf-select">
+              <option value="">All tiers</option>
+              <option value="money">Money</option>
+              <option value="education">Education</option>
+              <option value="brand">Brand</option>
+              <option value="other">Other</option>
+            </select>
+            <label style="display:inline-flex; align-items:center; gap:0.4rem; color:#9ca3af; font-size:0.85rem;">
+              <input type="checkbox" id="rf-ai-money-only" /> Money pages only
+            </label>
+            <span id="rf-ai-count" style="margin-left:auto; color:#9ca3af; font-size:0.8rem;"></span>
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="rf-table" id="rf-ai-table">
+              <thead><tr>
+                <th class="sortable" data-sort="keyword">Keyword<span class="rf-sort-ind">↕</span></th>
+                <th class="num sortable" data-sort="rank">Rank<span class="rf-sort-ind">↕</span></th>
+                <th class="num sortable" data-sort="search_volume">Search vol<span class="rf-sort-ind">↕</span></th>
+                <th class="sortable" data-sort="segment">Tier<span class="rf-sort-ind">↕</span></th>
+                <th class="sortable" data-sort="page_type">Page type<span class="rf-sort-ind">↕</span></th>
+                <th class="sortable" data-sort="best_url">Ranking URL<span class="rf-sort-ind">↕</span></th>
+                <th class="sortable" data-sort="has_ai_overview">AIO<span class="rf-sort-ind">↕</span></th>
+                <th class="sortable" data-sort="bucket">Status<span class="rf-sort-ind">↕</span></th>
+              </tr></thead>
+              <tbody><tr><td colspan="8" style="text-align:center; color:#6b7280;">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+
+        </div>
+
         <div class="ar-policy-banner ar-policy-banner--money"
              role="status"
              aria-live="polite"
@@ -17737,6 +17644,68 @@
         </style>
         <div id="strategy-root" class="strategy-panel" aria-live="polite">
           <div class="rt-loading">Loading Strategy &amp; KPIs…</div>
+        </div>
+        <div class="rt-section" id="st-seasonality">
+        <!-- Seasonality + monitoring banner: tells the user what kind of
+             month this is (peak/shoulder/gap for each tier) and how
+             many URLs already have active monitoring cycles so the
+             projected-lift numbers further down are read in context.
+             Populated by rfSeasonalityBannerInit() from
+             /api/aigeo/revenue-funnel-seasonality. -->
+        <div class="rf-seasonality-banner" id="rf-seasonality-banner" style="display:none;">
+          <div class="rf-season-banner-head">
+            <span class="rf-season-banner-badge" id="rf-season-banner-month">--</span>
+            <span class="rf-season-banner-title">Seasonality + monitoring outlook</span>
+            
+          </div>
+          <div class="rf-season-banner-grid" id="rf-season-banner-grid"></div>
+          <div class="rf-season-banner-sub" id="rf-season-banner-sub"></div>
+        </div>
+
+        </div>
+        <div class="rt-section" id="st-moved-funnel-actions">
+          <h3>From Pipeline &amp; Funnel: what to do next</h3>
+        <!-- Hero "do these 3 things this week" card: the very top of the
+             page so opening the dashboard immediately answers "what should
+             I work on?". Reads from the GP-weighted smart-priorities
+             endpoint and shows the three highest-profit-lift candidates,
+             not the three highest-revenue-lift. -->
+        <div class="rf-top-actions" id="rf-top-actions" style="display:none;">
+          <div class="rf-top-actions-head">
+            <div>
+              <div class="rf-top-actions-title">Do these 3 things this week</div>
+              <div class="rf-top-actions-sub">Ranked by projected <strong>profit</strong> lift (revenue × tier GP%), not raw search volume. <strong>One keyword owner per page</strong> — online vs Coventry/local are kept separate; same-URL CTR+rank tasks are merged. Click a card for the safe action plan.</div>
+            </div>
+            <div class="rf-top-actions-foot" id="rf-top-actions-meta"></div>
+          </div>
+          <div class="rf-top-actions-grid" id="rf-top-actions-grid"></div>
+        </div>
+
+        <!-- Block 5: Priority Action Table -->
+        <section class="rf-section">
+          <h3>Priority Action Plan (the only to-do list you need)</h3>
+          <div class="rf-sub">Tick "Start task" to spawn an entry in your existing Optimisation Tracking tab. Status auto-syncs from that tracker.</div>
+          <div class="rf-toolbar">
+            <button id="rf-add-priority-btn" class="rf-btn rf-btn-secondary" type="button">+ Add custom priority</button>
+            <button id="rf-smart-priorities-btn" class="rf-btn" type="button" title="Replace the not-started priorities with up to 5 per tier, generated from live audit data (schema gaps, low-CTR pages, AIO uncited keywords, orphan products)">Regenerate smart priorities</button>
+            <button id="rf-toggle-done-btn" class="rf-btn rf-btn-secondary" type="button" data-show="hide">Show done items</button>
+          </div>
+          <div id="rf-smart-priorities-msg" style="margin: 0.4rem 0 0.6rem 0; font-size:0.8rem; color:#9ca3af;"></div>
+          <div style="overflow-x:auto;">
+            <table class="rf-table" id="rf-priority-table">
+              <thead><tr>
+                <th style="width:36px;">#</th>
+                <th>Action</th>
+                <th>KPI / Target</th>
+                <th>Estimated lift</th>
+                <th>Status</th>
+                <th style="width:160px;">Action</th>
+              </tr></thead>
+              <tbody><tr><td colspan="6" style="text-align:center; color:#94a3b8;">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+
         </div>
         <div class="rt-section" id="st-moved-actions">
           <h3>From Revenue: what to do next</h3>
@@ -104682,39 +104651,48 @@ Confidence: ${c}`;
         rfBuildKpiCard('Click → Sale (GSC)', kpis.click_to_sale_pct == null ? 'Add revenue' : rfFmtPct(kpis.click_to_sale_pct, 2), { label: kpis.click_to_sale_pct == null ? 'No revenue entry yet' : 'All clicks baseline', cls: '' }, csB),
         rfBuildKpiCard('Revenue / 1k impressions', kpis.revenue_per_1k_impressions == null ? '—' : rfFmtMoney(kpis.revenue_per_1k_impressions, kpis.revenue_currency), { label: kpis.revenue_per_1k_impressions == null ? 'Add revenue below' : (kpis.revenue_currency || 'GBP'), cls: '' }, rpB)
       ];
-      // Bonus: 28d revenue vs annual-target slice
-      if (targets.rolling_28d_target) {
-        const ragRev = targets.rolling_28d_rag || 'amber';
+      // 28 days: revenue and GP booked vs survival for exactly those days (Targets panel, seasonal; same basis as Revenue)
+      const m28 = rfState.summary && rfState.summary.money_28d;
+      if (m28) {
+        const ragRev = m28.rag || 'amber';
         const ragChip = `<span class="rf-rag rf-rag-${ragRev}">${ragRev.toUpperCase()}</span>`;
         cards.unshift(`
           <div class="rf-kpi rf-kpi-rag-${ragRev}" style="grid-column: span 4;">
-            <div class="rf-kpi-label">Revenue (last 28d, vs annual target ÷ 365 × 28) ${ragChip}</div>
-            <div class="rf-kpi-value">${rfFmtMoney(targets.rolling_28d_actual, kpis.revenue_currency || 'GBP')}
-              <span style="font-size:0.9rem; color:#9ca3af; font-weight:600; margin-left:0.5rem;">/ ${rfFmtMoney(targets.rolling_28d_target, kpis.revenue_currency || 'GBP')}</span>
-            </div>
-            <div class="rf-kpi-delta">Annual target £${rfFmtNum(targets.annual_target)}: revenue the Targets panel's survival GP needs at the Booking Sheet category mix</div>
+            <div class="rf-kpi-label">Revenue &amp; GP (${m28.start} → ${m28.end}) vs survival for those days ${ragChip}</div>
+            <div class="rf-kpi-value">${rfFmtMoney(m28.revenue, 'GBP')}
+              <span style="font-size:0.9rem; color:#9ca3af; font-weight:600; margin-left:0.5rem;">/ ${rfFmtMoney(m28.target_revenue, 'GBP')} revenue</span></div>
+            <div class="rf-kpi-value" style="font-size:1.1rem;">GP ${rfFmtMoney(m28.gp, 'GBP')}
+              <span style="font-size:0.9rem; color:#9ca3af; font-weight:600; margin-left:0.5rem;">/ ${rfFmtMoney(m28.target_gp, 'GBP')} GP</span></div>
+            <div class="rf-kpi-delta">Booking Sheet transactions in the same 28 days as the search figures; GP = each category's GP rate; target = each day's share of the seasonal survival target.</div>
           </div>`);
       }
       host.innerHTML = cards.join('');
     }
 
+    // Drop-off is a warning (red) only when the step converts below its target; otherwise neutral.
+    function rfStageDropoff(value, prev, targetPct) {
+      const pct = (1 - (value / prev)) * 100;
+      if (pct < 1) return '';
+      const conv = (value / prev) * 100;
+      const below = targetPct != null && conv < Number(targetPct);
+      const tip = targetPct != null ? ` title="${conv.toFixed(2)}% go on (target ${targetPct}%)"` : '';
+      return `<div class="rf-stage-dropoff${below ? '' : ' is-ok'}"${tip}>−${pct.toFixed(1)}%</div>`;
+    }
     function rfRenderFunnel(funnel) {
       const host = document.getElementById('rf-funnel');
       if (!host) return;
       let prev = null;
+      let prevTarget = null;
       const cells = funnel.map(stage => {
         const value = stage.value;
         const empty = value == null;
-        let dropoff = '';
-        if (!empty && prev && prev > 0) {
-          const pct = (1 - (value / prev)) * 100;
-          if (pct >= 1) dropoff = `<div class="rf-stage-dropoff">−${pct.toFixed(1)}%</div>`;
-        }
-        if (!empty) prev = value;
+        const dropoff = (!empty && prev > 0) ? rfStageDropoff(value, prev, prevTarget) : '';
+        if (!empty) { prev = value; prevTarget = stage.target_pct_next; }
+        const shown = /revenue/i.test(stage.stage) ? rfFmtMoney(value, 'GBP') : rfFmtNum(value);
         return `
           <div class="rf-funnel-stage ${empty ? 'is-empty' : ''}">
             <div class="rf-stage-name">${stage.stage}</div>
-            <div class="rf-stage-value">${empty ? 'Awaiting data' : rfFmtNum(value)}</div>
+            <div class="rf-stage-value">${empty ? 'Awaiting data' : shown}</div>
             ${dropoff}
           </div>`;
       });
@@ -106654,11 +106632,14 @@ Confidence: ${c}`;
           <div class="rf-academy-bar-value">${v}</div>
           <div class="rf-academy-bar-rect ${cls}" style="height:${heightPct.toFixed(1)}%;" title="${tooltip}"></div>
           ${paidBadge}
-          <div class="rf-academy-bar-label">${shortMonth(m.month)}</div>
+          <div class="rf-academy-bar-label">${shortMonth(m.month)}${String(m.month || '').slice(0, 7) === new Date().toISOString().slice(0, 7) ? ' (so far)' : ''}</div>
         </div>`;
       }).join('');
     }
-    function rfAcademyTrendNarrative(months) {
+    function rfAcademyTrendNarrative(allMonths) {
+      // Full months only: the current month is still in progress.
+      const curKey = new Date().toISOString().slice(0, 7);
+      const months = allMonths.filter(m => String(m.month || '').slice(0, 7) < curKey);
       const nonZero = months.filter(m => m.trials_started > 0);
       if (nonZero.length < 2) return '';
       // Split the post-cutover window in half so we can describe momentum
@@ -106677,18 +106658,19 @@ Confidence: ${c}`;
       const verb = deltaPct < 0 ? 'down' : 'up';
       const cls = dir === 'down' ? 'down' : (dir === 'up' ? 'up' : '');
       const peakLabel = peak.month ? peak.month.slice(0, 7) : '';
-      return `<strong>Two problems stacked:</strong> top-of-funnel collapsed from <strong>${peak.trials_started}</strong> trials in <strong>${peakLabel}</strong> to <strong>${latest.trials_started}</strong> last month (second-half avg <strong>${secondHalf.toFixed(0)}/mo</strong> vs first-half <strong>${firstHalf.toFixed(0)}/mo</strong>, <span class="${cls}">${verb} ${Math.abs(deltaPct)}%</span>) AND across the whole window only <strong>${totalPaid}</strong> of <strong>${totalTrials}</strong> trials converted — that is <strong>${overallConv}%</strong> trial→paid (industry healthy is 10–25%). Volume AND conversion both need fixing.`;
+      return `<strong>Two problems stacked:</strong> top-of-funnel collapsed from <strong>${peak.trials_started}</strong> trials in <strong>${peakLabel}</strong> to <strong>${latest.trials_started}</strong> last month (second-half avg <strong>${secondHalf.toFixed(0)}/mo</strong> vs first-half <strong>${firstHalf.toFixed(0)}/mo</strong>, <span class="${cls}">${verb} ${Math.abs(deltaPct)}%</span>) AND across the full months since ${String(months[0]?.month || '').slice(0, 7)} only <strong>${totalPaid}</strong> of <strong>${totalTrials}</strong> trials converted — that is <strong>${overallConv}%</strong> trial→paid over those months (the tile above is the last 90 days; industry healthy is 10–25%). Volume AND conversion both need fixing.`;
     }
     function rfAcademyGapMarkup(gap, data) {
       if (!gap || !gap.annual_gp_gap_gbp) {
-        return `<p style="color:#9ca3af; font-style:italic;">No profit gap detected — annualised profit is hitting the £48k+ target. Focus shifts to retention + ARR consolidation.</p>`;
+        return `<p style="color:#9ca3af; font-style:italic;">No profit gap: annualised GP is at or above the full-year survival target (Targets panel, Strategy &amp; Actions). Focus shifts to retention + ARR consolidation.</p>`;
       }
       const convRag = gap.trial_conversion_pct_90d != null && gap.trial_conversion_pct_90d >= 10 ? 'good' : (gap.trial_conversion_pct_90d != null && gap.trial_conversion_pct_90d >= 5 ? 'warn' : 'bad');
       const multRag = gap.trial_volume_multiplier_needed != null && gap.trial_volume_multiplier_needed <= 2 ? 'good' : (gap.trial_volume_multiplier_needed != null && gap.trial_volume_multiplier_needed <= 4 ? 'warn' : 'bad');
       const annual = data.academy_annual_fee_gbp;
       return `
         <p>Profit shortfall: <span class="num">£${rfFmtNum(gap.annual_gp_gap_gbp)}/yr</span>.</p>
-        <p>Academy GP per member: <span class="num">£${gap.gp_per_member_gbp}/yr</span> (£${annual} fee × ${data.academy_gp_pct}% GP).</p>
+        <p>Academy GP per member: <span class="num">£${gap.gp_per_member_gbp}/yr</span> (${gap.gp_per_member_basis === 'academy_gp' ? `Academy GP, last 12 months ÷ ${(data.current || {}).paying_members || 0} active members` : `£${annual} fee × ${data.academy_gp_pct}% GP`}).</p>
+        <p>Profit shortfall = full-year survival GP (Targets panel) − annualised GP.</p>
         <p>Members needed to close the gap: <span class="num num-rag-bad">+${gap.members_needed}</span></p>
         <p style="margin-top:0.5rem; border-top: 1px dashed #374151; padding-top:0.5rem;">At your current trial→paid rate of <span class="num num-rag-${convRag}">${gap.trial_conversion_pct_90d == null ? 'n/a' : gap.trial_conversion_pct_90d + '%'}</span>, you'd need <span class="num num-rag-${multRag}">${gap.trials_per_month_needed || 'n/a'} trials/mo</span> for 12 months.</p>
         <p>You're currently averaging <span class="num">${gap.current_trials_per_month}/mo</span> — a <span class="num num-rag-${multRag}">${gap.trial_volume_multiplier_needed || 'n/a'}×</span> increase in trial volume.</p>
@@ -106723,7 +106705,8 @@ Confidence: ${c}`;
         ? Math.max(0, (profitPyramid.annual_gp_target_low_gbp || 0) - (profitPyramid.annualised_gp_total_gbp || 0))
         : 0;
       try {
-        const res = await fetch(rfApi(`/api/aigeo/academy-funnel?annual_gp_gap_gbp=${Math.round(minGap)}`));
+        const acadGp = ((rfState.summary && rfState.summary.money_page_performance) || []).find((m) => m.tier_id === 'academy')?.gross_profit_12m || 0;
+        const res = await fetch(rfApi(`/api/aigeo/academy-funnel?annual_gp_gap_gbp=${Math.round(minGap)}&academy_gp_gbp=${Math.round(acadGp)}`));
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         if (!data.configured) {
@@ -107389,6 +107372,8 @@ Confidence: ${c}`;
         const data = await res.json();
         if (reqId !== rfState.fetchSeq) return;
         rfState.summary = data;
+        window.rfLatestSummary = data;
+        try { window.dispatchEvent(new CustomEvent('rf:summary', { detail: data })); } catch (_) { /* old browsers */ }
         rfSafeRender('history', () => rfRenderHistory(data.revenue_history || []));
         rfSafeRender('profit-goal', () => rfRenderProfitGoal(data.profit_pyramid || null));
         rfSafeRender('survival-cockpit', () => rfRenderSurvivalCockpit(data.tier_history || []));
