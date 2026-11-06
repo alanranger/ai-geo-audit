@@ -2955,6 +2955,7 @@
     section[data-panel="traditional-seo"] .traditional-seo-drill-tile[data-status="fail"] { border-color: rgba(239, 68, 68, 0.45); }
     section[data-panel="traditional-seo"] .traditional-seo-drill-tile[data-status="warn"] { border-color: rgba(245, 158, 11, 0.55); }
     section[data-panel="traditional-seo"] .traditional-seo-drill-tile[data-status="pass"] { border-color: rgba(16, 185, 129, 0.45); }
+    section[data-panel="traditional-seo"] .traditional-seo-drill-tile[data-status="not_checked"] { border-color: rgba(148, 163, 184, 0.55); }
     section[data-panel="traditional-seo"] .traditional-seo-drill-count {
       font-size: 1.12rem;
       font-weight: 900;
@@ -92434,9 +92435,13 @@ Confidence: ${c}`;
      * back without a re-crawl) but count nowhere: URL tiles, page scores, the modal, exports and coverage.
      */
     function traditionalSeoActiveEvaluationRows() {
-      const rows = Array.isArray(TRADITIONAL_SEO_STATE.evaluationRows) ? TRADITIONAL_SEO_STATE.evaluationRows : [];
+      return traditionalSeoWithoutDisabledRules(TRADITIONAL_SEO_STATE.evaluationRows);
+    }
+
+    function traditionalSeoWithoutDisabledRules(rows) {
+      const list = Array.isArray(rows) ? rows : [];
       const off = new Set((TRADITIONAL_SEO_STATE.rules || []).filter((r) => r?.enabled === false).map((r) => String(r.rule_key)));
-      return off.size ? rows.filter((r) => !off.has(String(r?.rule_key))) : rows;
+      return off.size ? list.filter((r) => !off.has(String(r?.rule_key))) : list;
     }
 
     /** SPA rewrite sends most paths to audit-dashboard.html; load disavow via API so we get real text. */
@@ -95269,7 +95274,7 @@ Confidence: ${c}`;
     function traditionalSeoBuildPageScoreByUrlFromRows(rows) {
       const prop = traditionalSeoEffectivePropertyUrl();
       const hitsByUrl = new Map();
-      (Array.isArray(rows) ? rows : []).forEach((row) => {
+      traditionalSeoWithoutDisabledRules(rows).forEach((row) => {
         if (String(row?.tier || '').toLowerCase() === 'sitewide') return;
         const u = String(row?.url || '');
         if (!u) return;
@@ -96822,7 +96827,7 @@ Confidence: ${c}`;
           return traditionalSeoToComparableUrl(new URL('/', u.origin).toString(), propertyUrl)
             || `${u.protocol}//${u.hostname}/`;
         }
-        return `${u.protocol}//${u.host}${pathTrim}`;
+        return traditionalSeoCanonicalStorageUrl(rk, propertyUrl) || `${u.protocol}//${u.host}${pathTrim}`;
       } catch (err) {
         return rk;
       }
@@ -98747,45 +98752,16 @@ Confidence: ${c}`;
     function traditionalSeoRenderUrlHealthStrip(rows) {
       const target = document.getElementById('traditional-seo-url-health');
       if (!target) return;
-      const prop = traditionalSeoEffectivePropertyUrl();
-      const pageRows = (Array.isArray(rows) ? rows : []).filter((r) => String(r?.tier || '').toLowerCase() !== 'sitewide');
-      const rankByUrl = new Map();
-      pageRows.forEach((row) => {
-        const u = String(row?.url || '').trim();
-        if (!u) return;
-        const life = traditionalSeoExtractLifecycleForUrl(u, {
-          propertyUrl: prop,
-          signalMaps: TRADITIONAL_SEO_STATE.lastSignalMaps
-        }).lifecycle;
-        if (life === 'redirected' || life === 'gone' || life === 'hidden') return;
-        if (!traditionalSeoUrlHasCurrentRunRender(u)) {
-          rankByUrl.set(u, 3);
-          return;
-        }
-        const st = String(row?.status || 'fail').toLowerCase();
-        const rank = traditionalSeoStatusRank(st);
-        const prev = rankByUrl.get(u);
-        if (prev === undefined || rank < prev) rankByUrl.set(u, rank);
-      });
-      let failU = 0;
-      let warnU = 0;
-      let passU = 0;
-      let notCheckedU = 0;
-      rankByUrl.forEach((rank) => {
-        if (rank === 0) failU += 1;
-        else if (rank === 1) warnU += 1;
-        else if (rank === 2) passU += 1;
-        else notCheckedU += 1;
-      });
-      const totalU = rankByUrl.size;
-      const sw = (Array.isArray(rows) ? rows : []).filter((r) => String(r?.tier || '').toLowerCase() === 'sitewide').length;
+      const list = Array.isArray(rows) ? rows : [];
+      const c = traditionalSeoUrlStatusCounts(traditionalSeoPageSummaryRowsFromScopedRules(list));
+      const sw = list.filter((r) => String(r?.tier || '').toLowerCase() === 'sitewide').length;
       target.innerHTML = [
-        `<span class="traditional-seo-health-chip">Page URLs: <strong>${totalU}</strong></span>`,
-        `<span class="traditional-seo-health-chip">URLs w/ any <strong>fail</strong>: <strong>${failU}</strong></span>`,
-        `<span class="traditional-seo-health-chip">URLs worst <strong>warn</strong> (no fail): <strong>${warnU}</strong></span>`,
-        `<span class="traditional-seo-health-chip">URLs all <strong>pass</strong>: <strong>${passU}</strong></span>`,
-        `<span class="traditional-seo-health-chip">URLs <strong>Not checked</strong>: <strong>${notCheckedU}</strong></span>`,
-        `<span class="traditional-seo-health-chip">Site-wide rows: <strong>${sw}</strong></span>`
+        `<span class="traditional-seo-health-chip">Page URLs: <strong>${c.all}</strong></span>`,
+        `<span class="traditional-seo-health-chip">URLs w/ any <strong>fail</strong>: <strong>${c.fail}</strong></span>`,
+        `<span class="traditional-seo-health-chip">URLs worst <strong>warn</strong> (no fail): <strong>${c.warn}</strong></span>`,
+        `<span class="traditional-seo-health-chip">URLs all <strong>pass</strong>: <strong>${c.pass}</strong></span>`,
+        `<span class="traditional-seo-health-chip">URLs <strong>Not checked</strong>: <strong>${c.not_checked}</strong></span>`,
+        `<span class="traditional-seo-health-chip">Site-wide rows (not URLs): <strong>${sw}</strong></span>`
       ].join('');
     }
 
@@ -98912,27 +98888,11 @@ Confidence: ${c}`;
           all: liveRows.length,
           fail: liveRows.filter((row) => String(row?.status) === 'fail').length,
           warn: liveRows.filter((row) => String(row?.status) === 'warn').length,
-          pass: liveRows.filter((row) => String(row?.status) === 'pass').length
+          pass: liveRows.filter((row) => String(row?.status) === 'pass').length,
+          not_checked: liveRows.filter((row) => String(row?.status) === 'not_checked').length
         };
       }
-      const rankByUrl = new Map();
-      liveRows.forEach((row) => {
-        const u = String(row?.url || '').trim();
-        if (!u) return;
-        const st = String(row?.status || 'fail').toLowerCase();
-        const rank = traditionalSeoStatusRank(st);
-        const prev = rankByUrl.get(u);
-        if (prev === undefined || rank < prev) rankByUrl.set(u, rank);
-      });
-      let fail = 0;
-      let warn = 0;
-      let pass = 0;
-      rankByUrl.forEach((rank) => {
-        if (rank === 0) fail += 1;
-        else if (rank === 1) warn += 1;
-        else if (rank === 2) pass += 1;
-      });
-      return { all: rankByUrl.size, fail, warn, pass };
+      return traditionalSeoUrlStatusCounts(traditionalSeoPageSummaryRowsFromScopedRules(safeRows));
     }
 
     function renderTraditionalSeoDrilldownTiles(rows, ctx) {
@@ -98946,7 +98906,8 @@ Confidence: ${c}`;
         `<button type="button" class="traditional-seo-drill-tile" data-status="all" data-filter-status="all" data-active="${activeStatus === 'all'}"><div class="traditional-seo-drill-count">${counts.all}</div><div class="traditional-seo-drill-label">${escapeHtml(allLabel)}</div></button>`,
         `<button type="button" class="traditional-seo-drill-tile" data-status="fail" data-filter-status="fail" data-active="${activeStatus === 'fail'}"><div class="traditional-seo-drill-count">${counts.fail}</div><div class="traditional-seo-drill-label">Fail</div></button>`,
         `<button type="button" class="traditional-seo-drill-tile" data-status="warn" data-filter-status="warn" data-active="${activeStatus === 'warn'}"><div class="traditional-seo-drill-count">${counts.warn}</div><div class="traditional-seo-drill-label">Warn</div></button>`,
-        `<button type="button" class="traditional-seo-drill-tile" data-status="pass" data-filter-status="pass" data-active="${activeStatus === 'pass'}"><div class="traditional-seo-drill-count">${counts.pass}</div><div class="traditional-seo-drill-label">Pass</div></button>`
+        `<button type="button" class="traditional-seo-drill-tile" data-status="pass" data-filter-status="pass" data-active="${activeStatus === 'pass'}"><div class="traditional-seo-drill-count">${counts.pass}</div><div class="traditional-seo-drill-label">Pass</div></button>`,
+        `<button type="button" class="traditional-seo-drill-tile" data-status="not_checked" data-filter-status="not_checked" data-active="${activeStatus === 'not_checked'}"><div class="traditional-seo-drill-count">${counts.not_checked}</div><div class="traditional-seo-drill-label">Not checked</div></button>`
       ].join('');
       if (breakdownTarget) {
         breakdownTarget.innerHTML = traditionalSeoWarnFailRuleBreakdownMarkup();
@@ -100318,110 +100279,134 @@ Confidence: ${c}`;
       ].join('');
     }
 
+    /**
+     * One status per page URL for the whole tab: table rows, URL tiles, health chips, sort and CSV all read these rows.
+     * Status = worst enabled-rule outcome (fail > warn > not checked > pass); n/a never counts.
+     */
     function traditionalSeoPageSummaryRowsFromScopedRules(scopedRows) {
       const prop = traditionalSeoEffectivePropertyUrl();
-      const byCmp = new Map();
-      (Array.isArray(scopedRows) ? scopedRows : []).forEach((row) => {
-        const u = String(row?.url || '').trim();
-        if (!u) return;
-        const cmp = traditionalSeoToComparableUrl(u, prop) || u;
-        if (!byCmp.has(cmp)) {
-          byCmp.set(cmp, {
-            clicks: traditionalSeoToNum(row.clicks, 0),
-            impressions: traditionalSeoToNum(row.impressions, 0),
-            tier: row.tier,
-            target_keyword: String(row.target_keyword || '').trim()
-          });
-          return;
-        }
-        const g = byCmp.get(cmp);
-        const rc = traditionalSeoToNum(row.clicks, 0);
-        const ri = traditionalSeoToNum(row.impressions, 0);
-        if (rc > g.clicks) g.clicks = rc;
-        if (ri > g.impressions) g.impressions = ri;
-        if (!g.target_keyword && String(row.target_keyword || '').trim()) g.target_keyword = String(row.target_keyword || '').trim();
-        if (!g.tier && row.tier) g.tier = row.tier;
-      });
-      const gscRollup = new Map();
-      byCmp.forEach((g, cmp) => {
-        const rk = traditionalSeoLandingRollupGroupKey(cmp, prop);
-        if (!gscRollup.has(rk)) {
-          gscRollup.set(rk, { clicks: 0, impressions: 0, tier: g.tier, target_keyword: g.target_keyword });
-        }
-        const h = gscRollup.get(rk);
-        h.clicks += g.clicks;
-        h.impressions += g.impressions;
-        if (!h.target_keyword && g.target_keyword) h.target_keyword = g.target_keyword;
-        if (!h.tier && g.tier) h.tier = g.tier;
-      });
-      const ruleByRollup = new Map();
-      (Array.isArray(scopedRows) ? scopedRows : []).forEach((row) => {
-        const u = String(row?.url || '').trim();
-        if (!u) return;
-        const rk = traditionalSeoLandingRollupGroupKey(u, prop);
-        const rkey = String(row.rule_key || '').trim();
-        if (!rkey) return;
-        let st = String(row.status || 'fail').toLowerCase();
-        if (rkey === 'gsc_url_indexed') {
-          const g = traditionalSeoGscInspectGet(prop, u);
-          const raw = traditionalSeoGscInspectDeriveStatus(u, g);
-          const bypass = traditionalSeoHasRuleBypass(u, rkey);
-          st = bypass ? 'pass' : raw;
-        }
-        if (!ruleByRollup.has(rk)) ruleByRollup.set(rk, new Map());
-        const m = ruleByRollup.get(rk);
-        if (!m.has(rkey)) m.set(rkey, st);
-        else m.set(rkey, traditionalSeoPickWorseStatusString(m.get(rkey), st));
-      });
-      const rkUnion = new Set([...ruleByRollup.keys(), ...gscRollup.keys()]);
       const out = [];
-      rkUnion.forEach((rk) => {
-        const ruleMap = ruleByRollup.get(rk) || new Map();
-        let pass = 0;
-        let warn = 0;
-        let fail = 0;
-        let na = 0;
-        let notChecked = 0;
-        ruleMap.forEach((st) => {
-          if (st === 'pass') pass += 1;
-          else if (st === 'warn') warn += 1;
-          else if (st === 'na') na += 1;
-          else if (st === 'not_checked') notChecked += 1;
-          else fail += 1;
-        });
-        const gsc = gscRollup.get(rk) || { clicks: 0, impressions: 0, tier: '', target_keyword: '' };
-        const dispUrl = traditionalSeoLandingRollupDisplayUrl(rk, prop);
-        const lifeInfo = traditionalSeoExtractLifecycleForUrl(dispUrl, { propertyUrl: prop, signalMaps: TRADITIONAL_SEO_STATE.lastSignalMaps });
-        let worst = fail > 0 ? 'fail' : warn > 0 ? 'warn' : (pass > 0 ? 'pass' : (notChecked > 0 ? 'not_checked' : (na > 0 ? 'na' : 'pass')));
-        if (!traditionalSeoUrlHasCurrentRunRender(dispUrl)) worst = 'not_checked';
-        if (lifeInfo.lifecycle === 'redirected') worst = 'redirected';
-        if (lifeInfo.lifecycle === 'gone') worst = 'gone';
-        if (lifeInfo.lifecycle === 'hidden') worst = 'hidden';
-        const total = pass + warn + fail + na;
-        out.push({
-          rule_key: '__page_summary__',
-          rule_name: 'All checks (summary)',
-          rule_category: 'summary',
-          url: dispUrl,
-          tier: gsc.tier,
-          target_keyword: gsc.target_keyword || '',
-          clicks: gsc.clicks,
-          impressions: gsc.impressions,
-          status: worst,
-          raw_status: worst,
-          page_lifecycle: lifeInfo.lifecycle,
-          final_url: lifeInfo.finalUrl || '',
-          bypassed: false,
-          rule_weight: 0,
-          summary_pass: pass,
-          summary_warn: warn,
-          summary_fail: fail,
-          summary_na: na,
-          summary_total: total
-        });
-      });
+      traditionalSeoPageSummaryGroups(scopedRows, prop).forEach((g, rk) => out.push(traditionalSeoPageSummaryRow(rk, g, prop)));
       out.sort((a, b) => String(a.url || '').localeCompare(String(b.url || '')));
       return out;
+    }
+
+    function traditionalSeoPageSummaryGroups(scopedRows, prop) {
+      const groups = new Map();
+      (Array.isArray(scopedRows) ? scopedRows : []).forEach((row) => {
+        const u = String(row?.url || '').trim();
+        if (!u || String(row?.tier || '').toLowerCase() === 'sitewide') return;
+        const rk = traditionalSeoLandingRollupGroupKey(u, prop);
+        if (!groups.has(rk)) groups.set(rk, { hits: [], gscByCmp: new Map(), tier: '', target_keyword: '' });
+        const g = groups.get(rk);
+        if (String(row.rule_key || '').trim()) g.hits.push({ ...row, status: traditionalSeoSummaryRuleStatus(row, prop) });
+        traditionalSeoPageSummaryAddGsc(g, row, prop);
+      });
+      return groups;
+    }
+
+    function traditionalSeoSummaryRuleStatus(row, prop) {
+      const rkey = String(row.rule_key || '').trim();
+      if (rkey !== 'gsc_url_indexed') return String(row.status || 'fail').toLowerCase();
+      const u = String(row.url || '').trim();
+      if (traditionalSeoHasRuleBypass(u, rkey)) return 'pass';
+      return traditionalSeoGscInspectDeriveStatus(u, traditionalSeoGscInspectGet(prop, u));
+    }
+
+    function traditionalSeoPageSummaryAddGsc(g, row, prop) {
+      const u = String(row.url || '').trim();
+      const cmp = traditionalSeoToComparableUrl(u, prop) || u;
+      const prev = g.gscByCmp.get(cmp) || { clicks: 0, impressions: 0 };
+      g.gscByCmp.set(cmp, {
+        clicks: Math.max(prev.clicks, traditionalSeoToNum(row.clicks, 0)),
+        impressions: Math.max(prev.impressions, traditionalSeoToNum(row.impressions, 0))
+      });
+      if (!g.tier && row.tier) g.tier = row.tier;
+      const kw = String(row.target_keyword || '').trim();
+      if (!g.target_keyword && kw) g.target_keyword = kw;
+    }
+
+    function traditionalSeoSummaryCounts(hits) {
+      const c = { pass: 0, warn: 0, fail: 0, na: 0, not_checked: 0 };
+      hits.forEach((h) => {
+        const st = String(h.status || 'fail').toLowerCase();
+        if (Object.hasOwn(c, st)) c[st] += 1;
+        else c.fail += 1;
+      });
+      return c;
+    }
+
+    function traditionalSeoWorstUrlStatus(c) {
+      if (c.fail > 0) return 'fail';
+      if (c.warn > 0) return 'warn';
+      if (c.not_checked > 0) return 'not_checked';
+      return 'pass';
+    }
+
+    function traditionalSeoPageSummaryRow(rk, g, prop) {
+      const hits = traditionalSeoDedupeHitsByRuleWorst(g.hits);
+      const c = traditionalSeoSummaryCounts(hits);
+      const url = traditionalSeoLandingRollupDisplayUrl(rk, prop);
+      const lifeInfo = traditionalSeoExtractLifecycleForUrl(url, { propertyUrl: prop, signalMaps: TRADITIONAL_SEO_STATE.lastSignalMaps });
+      const life = lifeInfo.lifecycle;
+      const status = ['redirected', 'gone', 'hidden'].includes(life) ? life : traditionalSeoWorstUrlStatus(c);
+      let clicks = 0;
+      let impressions = 0;
+      g.gscByCmp.forEach((v) => {
+        clicks += v.clicks;
+        impressions += v.impressions;
+      });
+      return {
+        rule_key: '__page_summary__',
+        rule_name: 'All checks (summary)',
+        rule_category: 'summary',
+        url,
+        tier: g.tier,
+        target_keyword: g.target_keyword,
+        clicks,
+        impressions,
+        status,
+        raw_status: status,
+        page_lifecycle: life,
+        final_url: lifeInfo.finalUrl || '',
+        bypassed: false,
+        rule_weight: 0,
+        summary_pass: c.pass,
+        summary_warn: c.warn,
+        summary_fail: c.fail,
+        summary_na: c.na,
+        summary_not_checked: c.not_checked,
+        summary_total: c.pass + c.warn + c.fail + c.na + c.not_checked,
+        page_score: traditionalSeoPageScoreDetailFromHits(hits).score
+      };
+    }
+
+    /** Live page URLs by status; redirected / gone / hidden and site-wide rows are never URL counts. */
+    function traditionalSeoUrlStatusCounts(summaryRows) {
+      const c = { all: 0, fail: 0, warn: 0, pass: 0, not_checked: 0 };
+      (summaryRows || []).forEach((r) => {
+        if (r.status === 'all' || !Object.hasOwn(c, r.status)) return;
+        c[r.status] += 1;
+        c.all += 1;
+      });
+      return c;
+    }
+
+    function traditionalSeoSummaryCountsLabel(row, sep) {
+      const n = (k) => Math.max(0, traditionalSeoToNum(row?.[k], 0));
+      const parts = [`${n('summary_pass')} pass`, `${n('summary_warn')} warn`, `${n('summary_fail')} fail`];
+      if (n('summary_not_checked') > 0) parts.push(`${n('summary_not_checked')} not checked`);
+      if (n('summary_na') > 0) parts.push(`${n('summary_na')} n/a`);
+      return parts.join(sep);
+    }
+
+    function traditionalSeoRowScoreText(row, displayUrl, urlRaw) {
+      if (String(row?.tier || '').toLowerCase() === 'sitewide') return '';
+      if (String(row?.rule_key || '') === '__page_summary__') return String(traditionalSeoToNum(row.page_score, 0));
+      const map = TRADITIONAL_SEO_STATE.pageScoreByUrl instanceof Map ? TRADITIONAL_SEO_STATE.pageScoreByUrl : null;
+      if (map?.has(displayUrl)) return String(traditionalSeoToNum(map.get(displayUrl), 0));
+      if (map?.has(urlRaw)) return String(traditionalSeoToNum(map.get(urlRaw), 0));
+      return '';
     }
 
     function traditionalSeoCollectCtrTopUrlEntries(allRows, filt, propEff) {
@@ -101000,19 +100985,20 @@ Confidence: ${c}`;
         return true;
       });
 
-      const statusOrder = { fail: 0, warn: 1, pass: 2, na: 3, not_checked: 3, redirected: 4, gone: 5, hidden: 6 };
+      const statusOrder = { fail: 0, warn: 1, not_checked: 2, pass: 3, na: 4, redirected: 5, gone: 6, hidden: 7 };
       const sortKey = String(TRADITIONAL_SEO_STATE.sort?.key || 'status');
       const sortDirection = String(TRADITIONAL_SEO_STATE.sort?.direction || 'asc');
       filtered.sort((a, b) => {
         let diff = 0;
         if (sortKey === 'status') {
-          const sa = statusOrder[String(a.status || 'fail')] ?? 6;
-          const sb = statusOrder[String(b.status || 'fail')] ?? 6;
+          const sa = statusOrder[String(a.status || 'fail')] ?? 8;
+          const sb = statusOrder[String(b.status || 'fail')] ?? 8;
           diff = sa - sb;
         } else if (sortKey === 'page_score') {
           const map = TRADITIONAL_SEO_STATE.pageScoreByUrl instanceof Map ? TRADITIONAL_SEO_STATE.pageScoreByUrl : null;
           const scoreFor = (row) => {
             if (String(row?.tier || '').toLowerCase() === 'sitewide') return -999;
+            if (String(row?.rule_key || '') === '__page_summary__') return traditionalSeoToNum(row.page_score, 0);
             const u = String(row?.url || '');
             const disp = traditionalSeoLandingRollupDisplayUrl(traditionalSeoLandingRollupGroupKey(u, propEff), propEff);
             if (map && map.has(disp)) return traditionalSeoToNum(map.get(disp), 0);
@@ -101171,28 +101157,10 @@ Confidence: ${c}`;
       const displayUrl = !isSitewide
         ? traditionalSeoLandingRollupDisplayUrl(traditionalSeoLandingRollupGroupKey(urlRaw, propEff), propEff)
         : urlRaw;
-      const scoreMap = TRADITIONAL_SEO_STATE.pageScoreByUrl instanceof Map ? TRADITIONAL_SEO_STATE.pageScoreByUrl : null;
-      let scoreText = '';
-      if (!isSitewide && scoreMap) {
-        if (scoreMap.has(displayUrl)) scoreText = String(traditionalSeoToNum(scoreMap.get(displayUrl), 0));
-        else if (scoreMap.has(urlRaw)) scoreText = String(traditionalSeoToNum(scoreMap.get(urlRaw), 0));
-      }
-      if (isSummaryRow) {
-        const sp = Math.max(0, traditionalSeoToNum(row.summary_pass, 0));
-        const sw = Math.max(0, traditionalSeoToNum(row.summary_warn, 0));
-        const sf = Math.max(0, traditionalSeoToNum(row.summary_fail, 0));
-        const sn = Math.max(0, traditionalSeoToNum(row.summary_na, 0));
-        const st = sp + sw + sf;
-        scoreText = String(st > 0 ? Math.round(((sp + sw * 0.5) / st) * 100) : (sn > 0 && sp > 0 ? 100 : 0));
-      }
-      let statusText = String(row.status || '');
-      if (isSummaryRow) {
-        const sp = traditionalSeoToNum(row.summary_pass, 0);
-        const sw = traditionalSeoToNum(row.summary_warn, 0);
-        const sf = traditionalSeoToNum(row.summary_fail, 0);
-        const sn = traditionalSeoToNum(row.summary_na, 0);
-        statusText = `${row.status || ''} (${sp} pass / ${sw} warn / ${sf} fail${sn > 0 ? ` / ${sn} n/a` : ''})`;
-      }
+      const scoreText = traditionalSeoRowScoreText(row, displayUrl, urlRaw);
+      const statusText = isSummaryRow
+        ? `${row.status || ''} (${traditionalSeoSummaryCountsLabel(row, ' / ')})`
+        : String(row.status || '');
       const ruleText = isSummaryRow
         ? `${traditionalSeoToNum(row.summary_total, 0)} checks`
         : traditionalSeoDisplayRuleName(row);
@@ -101332,7 +101300,7 @@ Confidence: ${c}`;
         pageIndex: pageIdx
       });
 
-      traditionalSeoRenderUrlHealthStrip(allRows);
+      traditionalSeoRenderUrlHealthStrip(drillBaseRows);
       const summaryRules = (TRADITIONAL_SEO_STATE.rules || []).filter((r) => r.enabled !== false);
       traditionalSeoRenderRuleSummaryTable(allRows, summaryRules.length ? summaryRules : (TRADITIONAL_SEO_STATE.rules || []));
 
@@ -101343,7 +101311,6 @@ Confidence: ${c}`;
             : 'No rows match current filters.';
           body.innerHTML = `<tr><td colspan="22" style="color: var(--dark-text-muted);">${emptyHint}</td></tr>`;
         } else {
-          const scoreMap = TRADITIONAL_SEO_STATE.pageScoreByUrl instanceof Map ? TRADITIONAL_SEO_STATE.pageScoreByUrl : null;
           const isSummaryRow = (r) => String(r?.rule_key || '') === '__page_summary__';
           body.innerHTML = pageRows.map((row) => {
             const tierLabel = escapeHtml(traditionalSeoTierCellLabel(row.tier, countMap));
@@ -101358,20 +101325,7 @@ Confidence: ${c}`;
               ? `<a class="traditional-seo-url-link" href="${traditionalSeoEscapeAttr(href)}" target="_blank" rel="noopener noreferrer">${urlInner}</a>`
               : urlInner;
             const viewAttr = traditionalSeoEscapeAttr(displayUrl);
-            let scoreText = '—';
-            if (!isSitewide && scoreMap) {
-              if (scoreMap.has(displayUrl)) scoreText = `${traditionalSeoToNum(scoreMap.get(displayUrl), 0)}`;
-              else if (scoreMap.has(urlRaw)) scoreText = `${traditionalSeoToNum(scoreMap.get(urlRaw), 0)}`;
-            }
-            if (isSummaryRow(row)) {
-              const sp = Math.max(0, traditionalSeoToNum(row.summary_pass, 0));
-              const sw = Math.max(0, traditionalSeoToNum(row.summary_warn, 0));
-              const sf = Math.max(0, traditionalSeoToNum(row.summary_fail, 0));
-              const sn = Math.max(0, traditionalSeoToNum(row.summary_na, 0));
-              const st = sp + sw + sf;
-              const liveScore = st > 0 ? Math.round(((sp + sw * 0.5) / st) * 100) : (sn > 0 && sp > 0 ? 100 : 0);
-              scoreText = `${liveScore}`;
-            }
+            const scoreText = traditionalSeoRowScoreText(row, displayUrl, urlRaw) || '—';
             const kwRaw = String(row.target_keyword || '').trim();
             const kwCell = kwRaw ? escapeHtml(kwRaw) : '—';
             const internalBacklinksN = !isSitewide ? traditionalSeoInternalBacklinksNumberForUrl(displayUrl) : null;
@@ -101439,12 +101393,7 @@ Confidence: ${c}`;
                 : '';
               statusCell = traditionalSeoStatusPill(stNorm, arrow);
             } else if (isSummaryRow(row)) {
-              const sp = traditionalSeoToNum(row.summary_pass, 0);
-              const sw = traditionalSeoToNum(row.summary_warn, 0);
-              const sf = traditionalSeoToNum(row.summary_fail, 0);
-              const sn = traditionalSeoToNum(row.summary_na, 0);
-              const naPart = sn > 0 ? ` · ${sn} n/a` : '';
-              statusCell = `${traditionalSeoStatusPill(row.status)} <span style="color:var(--dark-text-muted);font-size:0.72rem;white-space:nowrap;">(${sp} pass · ${sw} warn · ${sf} fail${naPart})</span>`;
+              statusCell = `${traditionalSeoStatusPill(row.status)} <span style="color:var(--dark-text-muted);font-size:0.72rem;white-space:nowrap;">(${traditionalSeoSummaryCountsLabel(row, ' · ')})</span>`;
             }
             return `
           <tr>
@@ -101494,7 +101443,11 @@ Confidence: ${c}`;
         const kmBusy = TRADITIONAL_SEO_STATE.keywordMetricsLookupInFlight || TRADITIONAL_SEO_STATE.keywordMetricsRefreshInFlight
           ? ' · Loading kw cache…'
           : '';
-        meta.textContent = `${totalFiltered} ${modeLbl} match filters${pageHint}${tail} · Last run: ${formatTraditionalSeoTimestamp(TRADITIONAL_SEO_STATE.lastEvaluationAt)} · Kw demand TTL: ${ttl}d${kmBusy}${kmNote}`;
+        const swShown = filtered.filter((r) => String(r?.tier || '').toLowerCase() === 'sitewide').length;
+        const countLbl = mode === 'pages' && ruleIsAll
+          ? `${totalFiltered - swShown} URLs${swShown ? ` + ${swShown} site-wide rows` : ''}`
+          : `${totalFiltered} ${modeLbl}`;
+        meta.textContent = `${countLbl} match filters${pageHint}${tail} · Last run: ${formatTraditionalSeoTimestamp(TRADITIONAL_SEO_STATE.lastEvaluationAt)} · Kw demand TTL: ${ttl}d${kmBusy}${kmNote}`;
       }
       {
         const s = computeTraditionalSeoSummary(TRADITIONAL_SEO_STATE.rules || []);
@@ -102773,6 +102726,7 @@ Confidence: ${c}`;
       }
 
       const delta = traditionalSeoComputeScoreDelta(TRADITIONAL_SEO_STATE.latestSummary);
+      TRADITIONAL_SEO_STATE.pageScoreByUrl = traditionalSeoBuildPageScoreByUrlFromRows(TRADITIONAL_SEO_STATE.evaluationRows);
 
       renderTraditionalSeoRules(TRADITIONAL_SEO_STATE.rules);
       renderTraditionalSeoScore(TRADITIONAL_SEO_STATE.latestSummary, delta);
