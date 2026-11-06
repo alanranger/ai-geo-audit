@@ -31,7 +31,7 @@ async function writeTicks(supabase, propertyUrl, keys, isTicked) {
 
 function validKeys(body) {
   const keys = Array.isArray(body?.keys) ? body.keys.map(String) : [];
-  return keys.length && keys.length <= 50 && keys.every((k) => KEY_RE.test(k) && k.length <= 200) ? keys : null;
+  return keys.length && keys.length <= 100 && keys.every((k) => KEY_RE.test(k) && k.length <= 200) ? keys : null;
 }
 
 export default async function handler(req, res) {
@@ -44,7 +44,7 @@ export default async function handler(req, res) {
     }
     if (req.method !== 'PATCH') return send(res, 405, { ok: false, error: 'Method not allowed' });
     const keys = validKeys(req.body);
-    if (!keys) return send(res, 400, { ok: false, error: 'keys must be 1-50 moment|… / catchup|… / step|… keys' });
+    if (!keys) return send(res, 400, { ok: false, error: 'keys must be 1-100 moment|… / catchup|… / step|… keys' });
     const written = await writeTicks(supabase, String(req.body.propertyUrl || DEFAULT_PROPERTY), keys, !!req.body.is_ticked);
     return send(res, 200, { ok: true, written, table: 'strategy_campaign_ticks' });
   } catch (err) {
