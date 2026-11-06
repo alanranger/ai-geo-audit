@@ -955,19 +955,51 @@ function buildProfitPyramid(tierHistory) {
   }
   rows.sort((a, b) => b.annualised_gp_gbp - a.annualised_gp_gbp);
   const t = pyramidTargets();
+  const fc = yearForecast(tierHistory, new Date());
+  const fcGp = fc.gp ?? totalAnnualGp;
+  const fcRev = fc.revenue ?? totalAnnualRev;
   return {
     ...t,
     rows,
-    annualised_gp_total_gbp: Number(totalAnnualGp.toFixed(2)),
-    annualised_revenue_total_gbp: Number(totalAnnualRev.toFixed(2)),
+    annualised_gp_total_gbp: Number(fcGp.toFixed(2)),
+    annualised_revenue_total_gbp: Number(fcRev.toFixed(2)),
+    forecast_basis: fc.basis,
     ytd_gp_total_gbp: Number(totalYtdGp.toFixed(2)),
     ytd_revenue_total_gbp: Number(totalYtdRev.toFixed(2)),
-    projected_remainder_gp_gbp: Number(Math.max(0, totalAnnualGp - totalYtdGp).toFixed(2)),
-    projected_remainder_revenue_gbp: Number(Math.max(0, totalAnnualRev - totalYtdRev).toFixed(2)),
-    gp_gap_to_min_annual_gbp: Number(Math.max(0, t.annual_gp_target_low_gbp - totalAnnualGp).toFixed(2)),
-    revenue_gap_to_min_annual_gbp: Number(Math.max(0, t.annual_revenue_target_low_gbp - totalAnnualRev).toFixed(2)),
-    profit_goal_progress_pct: Number(((totalAnnualGp / t.annual_gp_target_low_gbp) * 100).toFixed(1))
+    projected_remainder_gp_gbp: Number(Math.max(0, fcGp - totalYtdGp).toFixed(2)),
+    projected_remainder_revenue_gbp: Number(Math.max(0, fcRev - totalYtdRev).toFixed(2)),
+    gp_gap_to_min_annual_gbp: Number(Math.max(0, t.annual_gp_target_low_gbp - fcGp).toFixed(2)),
+    revenue_gap_to_min_annual_gbp: Number(Math.max(0, t.annual_revenue_target_low_gbp - fcRev).toFixed(2)),
+    profit_goal_progress_pct: Number(((fcGp / t.annual_gp_target_low_gbp) * 100).toFixed(1))
   };
+}
+
+/**
+ * The Revenue tab's one forecast method: closed months this year + this month at its daily pace + the trailing
+ * 3-closed-month average for each month left. Summed over the money-page tiers (Unidentified excluded).
+ */
+function yearForecast(tierHistory, now) {
+  const year = now.getUTCFullYear();
+  const cur = `${year}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  const byMonth = new Map();
+  for (const s of tierHistory || []) {
+    if (s.tier_id === 'unidentified') continue;
+    for (const p of s.points || []) {
+      const m = byMonth.get(p.month) || { gp: 0, revenue: 0 };
+      m.gp += Number(p.gp) || 0;
+      m.revenue += Number(p.revenue) || 0;
+      byMonth.set(p.month, m);
+    }
+  }
+  const closed = [...byMonth.keys()].filter((k) => k < cur).sort();
+  if (closed.length < 3 || !byMonth.has(cur)) return { gp: null, revenue: null, basis: 'tier run-rate (not enough months for the forecast)' };
+  const dim = new Date(Date.UTC(year, now.getUTCMonth() + 1, 0)).getUTCDate();
+  const pace = (dim / Math.max(1, now.getUTCDate()));
+  const left = 11 - now.getUTCMonth();
+  const sum = (key, list) => list.reduce((a, k) => a + byMonth.get(k)[key], 0);
+  const t3 = closed.slice(-3);
+  const one = (key) => sum(key, closed.filter((k) => k.startsWith(String(year)))) + byMonth.get(cur)[key] * pace + (sum(key, t3) / 3) * left;
+  return { gp: one('gp'), revenue: one('revenue'), basis: 'closed months + this month at its daily pace + trailing 3-closed-month average for each month left (same as Revenue)' };
 }
 
 /**
@@ -1124,6 +1156,15 @@ function ytdTargets(year, today) {
   full += currentMonthTarget;
   prorata += currentMonthTarget * (dayInMonth / dim);
   return { full, prorata, currentMonthIdx };
+}
+
+/** The year projection on the Profit Goal bars = the one forecast method (same as Revenue), not a straight line. */
+function alignYtdPace(ytd, pyramid) {
+  const fc = Number(pyramid?.annualised_revenue_total_gbp);
+  if (!ytd || !Number.isFinite(fc) || !pyramid.forecast_basis?.startsWith('closed months')) return;
+  ytd.run_rate_annual_gbp = Math.round(fc * 100) / 100;
+  ytd.pace_variance_pct = ytd.annual_target_gbp ? Math.round(((fc - ytd.annual_target_gbp) / ytd.annual_target_gbp) * 1000) / 10 : null;
+  ytd.run_rate_basis = pyramid.forecast_basis;
 }
 
 function buildYtdSummary(history) {
@@ -1524,6 +1565,7 @@ export default async function handler(req, res) {
     const tierHistory = buildTierHistory(revenueHistoryDecorated);
     const ytdSummary = buildYtdSummary(revenueHistoryDecorated);
     const profitPyramid = buildProfitPyramid(tierHistory);
+    alignYtdPace(ytdSummary, profitPyramid);
     return send(res, 200, {
       property_url: propertyUrl,
       include_jlr: includeJlr,
