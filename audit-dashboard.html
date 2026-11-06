@@ -208,7 +208,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script src="/keyword-tracking-class-LOCKED.js"></script>
   <script src="/lib/competitor-analysis-tab.js?v=ca-prog-20260719a"></script>
-  <script src="/lib/strategy-tab.js?v=st-20261008-th-wrap"></script>
+  <script src="/lib/strategy-tab.js?v=st-20261106-targets"></script>
+  <script src="/lib/targets-panel.js?v=tp-20261106a"></script>
   <script src="/lib/silent-faults-tab.js?v=sf-20261027a"></script>
   <script src="/lib/trad-seo-render-client.js?v=tsr-20261030b"></script>
   <script src="/lib/acquisition/channels-audit-outcome.js?v=cao-20261106a"></script>
@@ -12017,10 +12018,10 @@
               const pp = summary?.profit_pyramid || {};
               const b = window._spStretchBands || {};
               return {
-                survival_monthly_revenue_gbp: b.survival_monthly_revenue_gbp || pp.monthly_revenue_target_low_gbp || 4000,
-                survival_monthly_gp_gbp: b.survival_monthly_gp_gbp || pp.monthly_gp_target_low_gbp || 2500,
-                thrive_monthly_revenue_gbp: b.thrive_monthly_revenue_gbp || pp.monthly_revenue_target_high_gbp || 5000,
-                thrive_monthly_gp_gbp: b.thrive_monthly_gp_gbp || pp.monthly_gp_target_high_gbp || 4000
+                survival_monthly_revenue_gbp: b.survival_monthly_revenue_gbp || pp.monthly_revenue_target_low_gbp || 0,
+                survival_monthly_gp_gbp: b.survival_monthly_gp_gbp || pp.monthly_gp_target_low_gbp || 0,
+                thrive_monthly_revenue_gbp: b.thrive_monthly_revenue_gbp || pp.monthly_revenue_target_high_gbp || 0,
+                thrive_monthly_gp_gbp: b.thrive_monthly_gp_gbp || pp.monthly_gp_target_high_gbp || 0
               };
             }
             function renderLegend(presets) {
@@ -105764,9 +105765,9 @@ Confidence: ${c}`;
       return '#6b7280';
     }
     function rfPyramidGoalMarkup(p) {
-      const lowMo = p.monthly_gp_target_low_gbp || 4000;
-      const annLow = p.annual_gp_target_low_gbp || 48000;
-      const annHi = p.annual_gp_target_high_gbp || 60000;
+      const lowMo = p.monthly_gp_target_low_gbp || 0;
+      const annLow = p.annual_gp_target_low_gbp || 0;
+      const annHi = p.annual_gp_target_high_gbp || 0;
       const totalGp = p.annualised_gp_total_gbp || 0;
       const moRun = totalGp / 12;
       const progress = annLow > 0 ? Math.round((totalGp / annLow) * 100) : 0;
@@ -106756,8 +106757,8 @@ Confidence: ${c}`;
     }
     async function rfFetchAcademyFunnel(profitPyramid) {
       const minGap = profitPyramid
-        ? Math.max(0, (profitPyramid.annual_gp_target_low_gbp || 48000) - (profitPyramid.annualised_gp_total_gbp || 0))
-        : 18000;
+        ? Math.max(0, (profitPyramid.annual_gp_target_low_gbp || 0) - (profitPyramid.annualised_gp_total_gbp || 0))
+        : 0;
       try {
         const res = await fetch(rfApi(`/api/aigeo/academy-funnel?annual_gp_gap_gbp=${Math.round(minGap)}`));
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -106808,11 +106809,9 @@ Confidence: ${c}`;
           paceVariancePct: ytd.pace_variance_pct
         };
       }
-      const ytdRev = Number(pyramid?.ytd_revenue_total_gbp) || Number(ytd.ytd_revenue_gbp) || 0;
       const ytdGp = Number(pyramid?.ytd_gp_total_gbp) || 0;
-      const margin = ytdRev > 0 ? ytdGp / ytdRev : 0;
-      const ytdGpTgt = ytdTgt * margin;
-      const annGpTgt = annTgt * margin;
+      const ytdGpTgt = Number(ytd.gp_ytd_target_gbp) || 0;
+      const annGpTgt = Number(ytd.gp_annual_target_gbp) || 0;
       const ytdGpVar = ytdGpTgt > 0 ? ((ytdGp - ytdGpTgt) / ytdGpTgt) * 100 : null;
       const runGp = Number(pyramid?.annualised_gp_total_gbp) || 0;
       const paceGpVar = annGpTgt > 0 ? ((runGp - annGpTgt) / annGpTgt) * 100 : null;
@@ -107001,14 +107000,14 @@ Confidence: ${c}`;
       const ytdRev = pyramid.ytd_revenue_total_gbp || 0;
       const projGp = pyramid.projected_remainder_gp_gbp || Math.max(0, annGp - ytdGp);
       const projRev = pyramid.projected_remainder_revenue_gbp || Math.max(0, annRev - ytdRev);
-      const gpMin = pyramid.annual_gp_target_low_gbp || 30000;
-      const gpMax = pyramid.annual_gp_target_high_gbp || 48000;
-      const revMin = pyramid.annual_revenue_target_low_gbp || 48000;
-      const revMax = pyramid.annual_revenue_target_high_gbp || 60000;
-      const gpMoMin = pyramid.monthly_gp_target_low_gbp || 2500;
-      const gpMoMax = pyramid.monthly_gp_target_high_gbp || 4000;
-      const revMoMin = pyramid.monthly_revenue_target_low_gbp || 4000;
-      const revMoMax = pyramid.monthly_revenue_target_high_gbp || 5000;
+      const gpMin = pyramid.annual_gp_target_low_gbp || 0;
+      const gpMax = pyramid.annual_gp_target_high_gbp || 0;
+      const revMin = pyramid.annual_revenue_target_low_gbp || 0;
+      const revMax = pyramid.annual_revenue_target_high_gbp || 0;
+      const gpMoMin = pyramid.monthly_gp_target_low_gbp || 0;
+      const gpMoMax = pyramid.monthly_gp_target_high_gbp || 0;
+      const revMoMin = pyramid.monthly_revenue_target_low_gbp || 0;
+      const revMoMax = pyramid.monthly_revenue_target_high_gbp || 0;
       const scenarioAgg = rfScenarioLiftAggregate();
       const scenarioName = rfActiveScenarioName();
       const ytdSummary = (rfState.summary && rfState.summary.ytd_summary) || null;
@@ -108118,10 +108117,10 @@ Confidence: ${c}`;
           ytd: ytdRev,
           projected: Math.max(0, revBarAnnual - ytdRev),
           annualised: annRev,
-          minTarget: pyramid.annual_revenue_target_low_gbp || 48000,
+          minTarget: pyramid.annual_revenue_target_low_gbp || 0,
           maxScale: rfProfitBarMaxScale(revSeasonal, revBarAnnual, ytdRev),
-          monthlyMin: pyramid.monthly_revenue_target_low_gbp || 4000,
-          monthlyMax: pyramid.monthly_revenue_target_high_gbp || 5000,
+          monthlyMin: pyramid.monthly_revenue_target_low_gbp || 0,
+          monthlyMax: pyramid.monthly_revenue_target_high_gbp || 0,
           scenarioLiftAnnual: agg.annualRevLift || 0,
           scenarioName: scenarioName || '',
           seasonal: revSeasonal
@@ -108131,10 +108130,10 @@ Confidence: ${c}`;
           ytd: ytdGp,
           projected: Math.max(0, gpBarAnnual - ytdGp),
           annualised: annGp,
-          minTarget: pyramid.annual_gp_target_low_gbp || 30000,
+          minTarget: pyramid.annual_gp_target_low_gbp || 0,
           maxScale: rfProfitBarMaxScale(gpSeasonal, gpBarAnnual, ytdGp),
-          monthlyMin: pyramid.monthly_gp_target_low_gbp || 2500,
-          monthlyMax: pyramid.monthly_gp_target_high_gbp || 4000,
+          monthlyMin: pyramid.monthly_gp_target_low_gbp || 0,
+          monthlyMax: pyramid.monthly_gp_target_high_gbp || 0,
           scenarioLiftAnnual: agg.annualGpLift || 0,
           scenarioName: scenarioName || '',
           seasonal: gpSeasonal

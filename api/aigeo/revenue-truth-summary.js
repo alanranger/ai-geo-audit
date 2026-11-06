@@ -48,8 +48,8 @@ import {
 import { buildHeadlineReconciliation } from '../../lib/revenue-truth-headline-reconciliation.mjs';
 import { parseIncludeJlr } from '../../lib/parse-include-jlr.mjs';
 import { DEFAULT_TIER_BANDS } from '../../lib/revenue-truth-ui-core.mjs';
-import { bookingSheetMonthTarget, classifyVsMonthTarget } from '../../lib/booking-sheet-monthly-targets.mjs';
-import { resolveGpTargetsBundle } from '../../lib/business-targets.mjs';
+import { classifyVsMonthTarget } from '../../lib/booking-sheet-monthly-targets.mjs';
+import { resolveGpTargetsBundle } from '../../lib/targets-master.mjs';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
@@ -131,10 +131,12 @@ async function buildPayload(supabase, propertyUrl, includeJlr) {
     config: cfg,
     businessTargets: {
       gp_tiers: {
-        survival: Number(gpBundle.targets.survival_gp_monthly),
-        stretch1: Number(gpBundle.targets.stretch1_gp_monthly),
-        stretch2: Number(gpBundle.targets.stretch2_gp_monthly)
+        survival: gpBundle.this_month.survival,
+        stretch1: gpBundle.this_month.stretch1,
+        stretch2: gpBundle.this_month.stretch2
       },
+      gp_tiers_basis: 'this month (seasonal), Targets panel',
+      bills_line: gpBundle.bills_line,
       annual_gp: gpBundle.annualTargets,
       derived_sales: gpBundle.derived,
       margin: gpBundle.margin,
@@ -254,6 +256,7 @@ function buildConfig(includeJlr, gpBundle) {
     annualGpTargets: gpBundle?.annualTargets || null,
     survivalThresholdLabel: gpBundle?.survival_threshold_label || null,
     derivedSales: gpBundle?.derived || null,
+    monthTargets: gpBundle?.master?.revenue_equivalent?.survival_monthly || null,
     feeRules: FEE_RULES,
     includeJlr: includeJlr !== false,
     now: {
@@ -264,6 +267,11 @@ function buildConfig(includeJlr, gpBundle) {
   };
 }
 
+/** Revenue this calendar month needs for the Targets panel's seasonal survival GP (target-mix margin). */
+function monthTargetFor(cfg, month) {
+  return Math.round(Number(cfg.monthTargets?.[month - 1]) || 0);
+}
+
 function annotateMonthly(wideRows, cfg) {
   const out = [];
   for (const r of wideRows) {
@@ -271,7 +279,7 @@ function annotateMonthly(wideRows, cfg) {
     const mm = r.month ?? Number(String(r.period_start).slice(5, 7));
     const headline = Number(r.revenue_amount) || 0;
     const partial = yy === cfg.now.year && mm === cfg.now.month;
-    const monthTarget = bookingSheetMonthTarget(mm);
+    const monthTarget = monthTargetFor(cfg, mm);
     out.push({
       year: yy,
       month: mm,

@@ -44,7 +44,7 @@ const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 //                 "Best rank" / "Search vol" / "AIO miss" columns score
 //                 against. Keep them commercial-intent only (no brand-prefix
 //                 variants — those always rank #1 and drown out real gaps).
-//   - monthlyTarget  £ per month target from Booking Sheet 2026 ("flat")
+//   - categories     Booking Sheet category orders the tier's targets come from (Targets panel, lib/targets-master.mjs)
 //
 // Order matters: more-specific tiers come first so a URL like
 //   /photography-courses-coventry-online
@@ -57,8 +57,7 @@ const MONEY_PAGE_TIERS = [
     hubUrl: '/photography-courses-coventry',
     prefixes: ['/photography-courses', '/beginners-photography-class', '/beginners-photography-course', '/photography-classes', '/photography-lessons'],
     keywords: ['photography courses', 'beginner photography courses'],
-    monthlyTarget: 667,
-    grossProfitPct: 90
+    categories: [1]
   },
   {
     // Non-Residential = "2. Workshops Non Residential" in the Booking Sheet
@@ -68,8 +67,7 @@ const MONEY_PAGE_TIERS = [
     hubUrl: '/photography-workshops',
     prefixes: ['/photography-workshops', '/landscape-photography-workshops', '/2-5hr-workshops', '/2.5hr-4hr-workshops', '/one-day-workshops', '/workshops-calendar'],
     keywords: ['landscape photography workshops', 'one-day photography workshops'],
-    monthlyTarget: 1667,
-    grossProfitPct: 75
+    categories: [2]
   },
   {
     // Residential = "3. Workshops Residential" in the Booking Sheet
@@ -80,8 +78,7 @@ const MONEY_PAGE_TIERS = [
     hubUrl: '/photography-workshops-near-me',
     prefixes: ['/photography-workshops-near-me', '/residential-workshops'],
     keywords: ['photography workshops', 'photography workshops near me'],
-    monthlyTarget: 833,
-    grossProfitPct: 35
+    categories: [3]
   },
   {
     id: 'services',
@@ -89,12 +86,8 @@ const MONEY_PAGE_TIERS = [
     hubUrl: '/photography-tuition-services',
     prefixes: ['/photography-tuition-services', '/photography-services', '/1-2-1-photography-tuition', '/1-2-1-private-photography-tuition', '/photography-lessons-online-1-2-1', '/private-photography-lessons', '/mentoring', '/rps-mentoring', '/gift-vouchers', '/pick-n-mix'],
     keywords: ['private photography lessons', 'private photography lessons online', 'photography gift vouchers'],
-    monthlyTarget: 863,
-    // Weighted blend of: 1-2-1 95% + Mentoring 95% + PicknMix Inc 50% +
-    // Gift Vouchers Inc 60% (ignoring the negative debit/credit "Out"
-    // entries which are reallocation, not real margin). Per 2026 YTD
-    // proportions this lands at ~78% effective GP.
-    grossProfitPct: 78
+    // Mentoring + 1-2-1; Pick n Mix and Gift Voucher in/out lines are adjustments, not GP.
+    categories: [6, 7]
   },
   {
     id: 'hire',
@@ -102,10 +95,8 @@ const MONEY_PAGE_TIERS = [
     hubUrl: '/hire-a-professional-photographer-in-coventry',
     prefixes: ['/hire-a-professional-photographer', '/products-services-property-photography', '/portrait-photography', '/staff-training-on-photography', '/commercial-photography', '/headshots'],
     keywords: ['photographer in coventry', 'commercial photography coventry', 'professional photographer near me', 'corporate photography training'],
-    monthlyTarget: 350,
-    // Weighted blend of Prints & Royalties 99% + Commissions 90%.
-    // Commissions dominate revenue so the effective blend lands at ~92%.
-    grossProfitPct: 92
+    // Prints & Royalties + Commissions.
+    categories: [10, 11]
   },
   {
     id: 'academy',
@@ -113,12 +104,11 @@ const MONEY_PAGE_TIERS = [
     hubUrl: '/free-photography-course',
     prefixes: ['/free-photography-course', '/academy', '/free-online-photography-course', '/online-photography-course'],
     keywords: ['online photography course', 'free online photography course'],
-    monthlyTarget: 667,
-    grossProfitPct: 99
+    categories: [12]
   },
   {
     // Safety-net bucket. Anything the classifier can't confidently tier
-    // lands here. Target 0 so any value > 0 shows as an over-target red
+    // lands here. No categories, so target 0: any value > 0 shows as an over-target red
     // signal on the dashboard - prompts a review and a name-token update
     // in api/aigeo/commercial-tier.js.
     id: 'unidentified',
@@ -126,18 +116,23 @@ const MONEY_PAGE_TIERS = [
     hubUrl: '',
     prefixes: [],
     keywords: [],
-    monthlyTarget: 0,
-    grossProfitPct: null
+    categories: []
   }
 ];
 
-// Seasonal monthly TOTAL targets (sum across all tiers) from Booking Sheet 2026.
-// Index 0 = January … 11 = December. Annual total = £58,556.
-import {
-  SEASONAL_MONTHLY_TARGETS_2026 as SEASONAL_MONTHLY_TARGETS,
-  ANNUAL_REVENUE_TARGET_2026 as ANNUAL_REVENUE_TARGET
-} from '../../lib/booking-sheet-monthly-targets.mjs';
-const FLAT_MONTHLY_TIER_TOTAL = MONEY_PAGE_TIERS.reduce((s, t) => s + t.monthlyTarget, 0);
+// Every target here comes from the Targets panel (Strategy & Actions) via lib/targets-master.mjs,
+// set once at the start of each request: per-tier monthly targets, the revenue each month needs for
+// survival GP, the funnel KPI targets and the Profit Pyramid band. Tier GP % = Booking Sheet category rates.
+import { loadTargetsMaster } from '../../lib/targets-master.mjs';
+import { funnelTargetsFrom } from '../../lib/funnel-targets.mjs';
+
+let FT = null;
+const tierTarget = (t) => FT?.tiers?.[t.id]?.monthly_target ?? 0;
+const tierGpPct = (t) => FT?.tiers?.[t.id]?.gross_profit_pct ?? null;
+const seasonalRevenue = (monthIdx) => FT?.seasonal_revenue?.[monthIdx] || 0;
+const annualRevenueTarget = () => FT?.annual_revenue || 0;
+const targetsSource = () => FT?.source || null;
+const gpTargets = () => ({ ytd: FT?.gp_ytd || 0, annual: FT?.gp_annual || 0 });
 
 // Industry baselines used for the funnel KPI RAG indicators.
 // These were chosen to align with the existing top-leak-page benchmark
@@ -737,7 +732,7 @@ async function fetchBookingSheetBundle(supabase, propertyUrl, includeJlr) {
 
 function targetForMonth(periodStart) {
   const monthIdx = Number(periodStart.slice(5, 7)) - 1;
-  return SEASONAL_MONTHLY_TARGETS[monthIdx] || null;
+  return seasonalRevenue(monthIdx) || null;
 }
 
 function variancePct(revenue, target) {
@@ -775,9 +770,9 @@ function emptyTierSeries() {
   return MONEY_PAGE_TIERS.map(t => ({
     tier_id: t.id,
     tier_label: t.label,
-    monthly_target: t.monthlyTarget,
-    gross_profit_pct: t.grossProfitPct ?? null,
-    gross_profit_rag: gpRagBucket(t.grossProfitPct ?? null),
+    monthly_target: tierTarget(t),
+    gross_profit_pct: tierGpPct(t),
+    gross_profit_rag: gpRagBucket(tierGpPct(t)),
     points: []
   }));
 }
@@ -846,16 +841,15 @@ function buildProfitPyramid(tierHistory) {
     r.share_gap_pp = Number((r.share_of_gp_pct - r.share_of_revenue_pct).toFixed(1));
   }
   rows.sort((a, b) => b.annualised_gp_gbp - a.annualised_gp_gbp);
-  // GP target = £2.5k–£4k/month (£30k–£48k/yr) — the actual cash-profit
-  // floor and ceiling Alan needs to live off, after costs.
-  // Revenue target = £4k–£5k/month (£48k–£60k/yr) — the gross turnover
-  // that should deliver the GP target at the current product mix.
-  const MONTHLY_GP_MIN = 2500;
-  const MONTHLY_GP_MAX = 4000;
+  // GP band = survival → top stretch from the Targets panel; revenue band = the
+  // turnover that delivers it at the Booking Sheet target category mix.
+  const band = FT?.pyramid || {};
+  const MONTHLY_GP_MIN = band.gp_low_monthly || 0;
+  const MONTHLY_GP_MAX = band.gp_high_monthly || 0;
   const ANNUAL_GP_MIN = MONTHLY_GP_MIN * 12;
   const ANNUAL_GP_MAX = MONTHLY_GP_MAX * 12;
-  const MONTHLY_REV_MIN = 4000;
-  const MONTHLY_REV_MAX = 5000;
+  const MONTHLY_REV_MIN = band.revenue_low_monthly || 0;
+  const MONTHLY_REV_MAX = band.revenue_high_monthly || 0;
   const ANNUAL_REV_MIN = MONTHLY_REV_MIN * 12;
   const ANNUAL_REV_MAX = MONTHLY_REV_MAX * 12;
   return {
@@ -1004,12 +998,12 @@ function ytdTargets(year, today) {
   const currentMonthIdx = today.getUTCMonth();
   const dim = daysInMonth(year, currentMonthIdx);
   const dayInMonth = today.getUTCDate();
-  const currentMonthTarget = SEASONAL_MONTHLY_TARGETS[currentMonthIdx] || 0;
+  const currentMonthTarget = seasonalRevenue(currentMonthIdx);
 
   let full = 0;
   let prorata = 0;
   for (let i = 0; i < currentMonthIdx; i++) {
-    const t = SEASONAL_MONTHLY_TARGETS[i] || 0;
+    const t = seasonalRevenue(i);
     full += t;
     prorata += t;
   }
@@ -1027,8 +1021,9 @@ function buildYtdSummary(history) {
   const { full, prorata, currentMonthIdx } = ytdTargets(year, now);
   const variancePctVal = prorata > 0 ? ((revenue - prorata) / prorata) * 100 : null;
   const runRateAnnual = daysThrough > 0 ? revenue * (diy / daysThrough) : 0;
-  const paceVariancePct = ANNUAL_REVENUE_TARGET > 0
-    ? ((runRateAnnual - ANNUAL_REVENUE_TARGET) / ANNUAL_REVENUE_TARGET) * 100
+  const annualTarget = annualRevenueTarget();
+  const paceVariancePct = annualTarget > 0
+    ? ((runRateAnnual - annualTarget) / annualTarget) * 100
     : null;
   return {
     year,
@@ -1040,7 +1035,9 @@ function buildYtdSummary(history) {
     ytd_target_full_gbp: Math.round(full * 100) / 100,
     ytd_target_prorata_gbp: Math.round(prorata * 100) / 100,
     variance_pct: variancePctVal == null ? null : Math.round(variancePctVal * 10) / 10,
-    annual_target_gbp: ANNUAL_REVENUE_TARGET,
+    annual_target_gbp: annualTarget,
+    gp_ytd_target_gbp: gpTargets().ytd,
+    gp_annual_target_gbp: gpTargets().annual,
     run_rate_annual_gbp: Math.round(runRateAnnual * 100) / 100,
     pace_variance_pct: paceVariancePct == null ? null : Math.round(paceVariancePct * 10) / 10
   };
@@ -1058,9 +1055,9 @@ function initTierBucket(tier) {
     tier_id: tier.id,
     tier_label: tier.label,
     hub_url: tier.hubUrl,
-    monthly_target: tier.monthlyTarget,
-    gross_profit_pct: tier.grossProfitPct ?? null,
-    gross_profit_rag: gpRagBucket(tier.grossProfitPct ?? null),
+    monthly_target: tierTarget(tier),
+    gross_profit_pct: tierGpPct(tier),
+    gross_profit_rag: gpRagBucket(tierGpPct(tier)),
     pages: [],
     clicks_28d: 0,
     impressions_28d: 0,
@@ -1256,24 +1253,34 @@ function revenueRagFor(actual, target) {
   return 'red';
 }
 
+/** A funnel KPI's target from the Targets panel; amber starts at the same fraction of target as before. */
+function kpiBaseline(key) {
+  const base = KPI_BASELINES[key];
+  const target = Number(FT?.kpi?.[key] ?? base.target);
+  return { target, warn: target * (base.warn / base.target) };
+}
+
+function kpiTile(kpis, key) {
+  const b = kpiBaseline(key);
+  return { value: kpis[key], target: b.target, rag: ragFor(kpis[key], b) };
+}
+
 function computeKpiTargets(kpis, revenueSnap) {
-  // The 28-day revenue target: slice ANNUAL_REVENUE_TARGET to 28 days.
-  // (≈ £4,646 — a reasonable benchmark to compare against the rolling 28d
-  // actual.) The seasonal monthly figures are surfaced separately in the
-  // revenue history table.
-  const annual28d = ANNUAL_REVENUE_TARGET * (28 / 365);
+  // The 28-day revenue target: the revenue survival GP needs for the year (Targets panel), sliced to 28 days.
+  const annual = annualRevenueTarget();
+  const annual28d = annual * (28 / 365);
   const revenueActual = (revenueSnap && Number(revenueSnap.revenue_amount)) || 0;
   const revenueRag = revenueRagFor(revenueActual, annual28d);
   return {
-    annual_target: ANNUAL_REVENUE_TARGET,
+    annual_target: annual,
     rolling_28d_target: Math.round(annual28d),
     rolling_28d_actual: Math.round(revenueActual),
     rolling_28d_rag: revenueRag,
-    ctr_28d_pct: { value: kpis.ctr_28d_pct, target: KPI_BASELINES.ctr_28d_pct.target, rag: ragFor(kpis.ctr_28d_pct, KPI_BASELINES.ctr_28d_pct) },
-    money_page_click_share_pct: { value: kpis.money_page_click_share_pct, target: KPI_BASELINES.money_page_click_share_pct.target, rag: ragFor(kpis.money_page_click_share_pct, KPI_BASELINES.money_page_click_share_pct) },
-    click_to_sale_pct: { value: kpis.click_to_sale_pct, target: KPI_BASELINES.click_to_sale_pct.target, rag: ragFor(kpis.click_to_sale_pct, KPI_BASELINES.click_to_sale_pct) },
-    enquiry_to_sale_pct: { value: kpis.enquiry_to_sale_pct, target: KPI_BASELINES.enquiry_to_sale_pct.target, rag: ragFor(kpis.enquiry_to_sale_pct, KPI_BASELINES.enquiry_to_sale_pct) },
-    revenue_per_1k_impressions: { value: kpis.revenue_per_1k_impressions, target: KPI_BASELINES.revenue_per_1k_impressions.target, rag: ragFor(kpis.revenue_per_1k_impressions, KPI_BASELINES.revenue_per_1k_impressions) }
+    ctr_28d_pct: kpiTile(kpis, 'ctr_28d_pct'),
+    money_page_click_share_pct: kpiTile(kpis, 'money_page_click_share_pct'),
+    click_to_sale_pct: kpiTile(kpis, 'click_to_sale_pct'),
+    enquiry_to_sale_pct: kpiTile(kpis, 'enquiry_to_sale_pct'),
+    revenue_per_1k_impressions: kpiTile(kpis, 'revenue_per_1k_impressions')
   };
 }
 
@@ -1368,6 +1375,7 @@ export default async function handler(req, res) {
   const includeJlr = parseIncludeJlr(req.query?.includeJlr);
   try {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
+    FT = funnelTargetsFrom(await loadTargetsMaster(supabase, propertyUrl), MONEY_PAGE_TIERS);
     const [audits, pageMetrics, bookingBundle, aiMap, priorities, ga4Snap, policies] = await Promise.all([
       fetchLatestAudit(supabase, propertyUrl),
       fetchPageMetrics(supabase, propertyUrl),
@@ -1449,10 +1457,11 @@ export default async function handler(req, res) {
         id: t.id,
         label: t.label,
         hub_url: t.hubUrl,
-        monthly_target: t.monthlyTarget,
-        gross_profit_pct: t.grossProfitPct ?? null,
-        gross_profit_rag: gpRagBucket(t.grossProfitPct ?? null)
-      }))
+        monthly_target: tierTarget(t),
+        gross_profit_pct: tierGpPct(t),
+        gross_profit_rag: gpRagBucket(tierGpPct(t))
+      })),
+      targets_source: targetsSource()
     });
   } catch (err) {
     return send(res, 500, { error: 'summary_failed', message: err?.message || String(err) });

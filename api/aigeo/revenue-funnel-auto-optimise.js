@@ -397,32 +397,31 @@ function gapTierFromSummary(summary) {
   return worstId;
 }
 
+const numOr0 = (v) => Number(v) || 0;
+const numOrNull = (v) => Number(v) || null;
+
 function extractBaseline(summary, scenarioSurvivalRev) {
   const pp = summary?.profit_pyramid;
   if (!pp) return null;
-  const yrRev = Number(pp.annualised_revenue_total_gbp) || 0;
-  const yrGp  = Number(pp.annualised_gp_total_gbp) || 0;
-  const survGp = Number(pp.monthly_gp_target_low_gbp) || 2500;
-  const survRev = Number.isFinite(scenarioSurvivalRev) && scenarioSurvivalRev > 0
-    ? scenarioSurvivalRev
-    : (Number(pp.monthly_revenue_target_low_gbp) || 4000);
-  const thriveGp = Number(pp.monthly_gp_target_high_gbp) || 4000;
-  const thriveRev = Number(pp.monthly_revenue_target_high_gbp) || 5000;
+  const yrRev = numOr0(pp.annualised_revenue_total_gbp);
+  const yrGp  = numOr0(pp.annualised_gp_total_gbp);
+  // Survival / thrive come from the Targets panel via the summary's pyramid band.
+  const survRev = numOr0(pp.monthly_revenue_target_low_gbp) || numOr0(scenarioSurvivalRev);
   return {
     annualised_revenue_gbp: Math.round(yrRev),
     annualised_gp_gbp:      Math.round(yrGp),
     monthly_revenue_gbp:    Math.round(yrRev / 12),
     monthly_gp_gbp:         Math.round(yrGp  / 12),
-    ytd_revenue_gbp:        Math.round(Number(pp.ytd_revenue_total_gbp) || 0),
-    ytd_gp_gbp:             Math.round(Number(pp.ytd_gp_total_gbp) || 0),
-    monthly_gp_target_low_gbp:  Number(pp.monthly_gp_target_low_gbp) || null,
-    monthly_gp_target_high_gbp: Number(pp.monthly_gp_target_high_gbp) || null,
-    annual_gp_target_low_gbp:   Number(pp.annual_gp_target_low_gbp)   || null,
-    annual_gp_target_high_gbp:  Number(pp.annual_gp_target_high_gbp)  || null,
+    ytd_revenue_gbp:        Math.round(numOr0(pp.ytd_revenue_total_gbp)),
+    ytd_gp_gbp:             Math.round(numOr0(pp.ytd_gp_total_gbp)),
+    monthly_gp_target_low_gbp:  numOrNull(pp.monthly_gp_target_low_gbp),
+    monthly_gp_target_high_gbp: numOrNull(pp.monthly_gp_target_high_gbp),
+    annual_gp_target_low_gbp:   numOrNull(pp.annual_gp_target_low_gbp),
+    annual_gp_target_high_gbp:  numOrNull(pp.annual_gp_target_high_gbp),
     survival_monthly_revenue_gbp: Math.round(survRev),
-    survival_monthly_gp_gbp: Math.round(survGp),
-    thrive_monthly_revenue_gbp: Math.round(thriveRev),
-    thrive_monthly_gp_gbp: Math.round(thriveGp)
+    survival_monthly_gp_gbp: Math.round(numOr0(pp.monthly_gp_target_low_gbp)),
+    thrive_monthly_revenue_gbp: Math.round(numOr0(pp.monthly_revenue_target_high_gbp)),
+    thrive_monthly_gp_gbp: Math.round(numOr0(pp.monthly_gp_target_high_gbp))
   };
 }
 
