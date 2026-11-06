@@ -15,7 +15,7 @@
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 import { collectGa4Channels } from '../../lib/acquisition/ga4-channels.js';
-import { detectTriggerSource, isRequestAuthorized, startRun, finishRun } from '../../lib/acquisition/sync-runs.js';
+import { detectTriggerSource, isRequestAuthorized, startRun, finishRun, syncErrorBody } from '../../lib/acquisition/sync-runs.js';
 
 const JOB = 'ga4_channels';
 const DEFAULT_DAYS = 90;
@@ -75,6 +75,6 @@ export default async function handler(req, res) {
   } catch (err) {
     const message = err?.message || String(err);
     await finishRun(runId, { status: 'error', error_message: message });
-    return send(res, 500, { ok: false, job: JOB, error: message });
+    return send(res, 500, syncErrorBody(JOB, err));
   }
 }

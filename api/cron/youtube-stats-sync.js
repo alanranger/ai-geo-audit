@@ -13,7 +13,7 @@ export const config = { runtime: 'nodejs', maxDuration: 120 };
 
 import { collectYoutubeStats, oauthDiagnostics } from '../../lib/acquisition/youtube-stats.js';
 import { collectYoutubeReach } from '../../lib/acquisition/youtube-reach.js';
-import { detectTriggerSource, isRequestAuthorized, startRun, finishRun } from '../../lib/acquisition/sync-runs.js';
+import { detectTriggerSource, isRequestAuthorized, startRun, finishRun, syncErrorBody } from '../../lib/acquisition/sync-runs.js';
 
 const JOB = 'youtube_stats';
 
@@ -51,6 +51,6 @@ export default async function handler(req, res) {
     await finishRun(runId, { status: 'error', error_message: message });
     // A rejected credential is unfixable without knowing which value was sent.
     const diagnostics = message.startsWith('youtube_oauth') ? oauthDiagnostics() : undefined;
-    return send(res, 500, { ok: false, job: JOB, error: message, diagnostics });
+    return send(res, 500, syncErrorBody(JOB, err, { diagnostics }));
   }
 }

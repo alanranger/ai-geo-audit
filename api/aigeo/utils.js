@@ -2,6 +2,7 @@
  * Shared utilities for AI GEO Audit API routes
  * Data-layer only - no UI dependencies
  */
+import { refreshGoogleAccessToken } from '../../lib/google-token.js';
 
 /**
  * Get GSC date range for last 28 days (matching GSC UI behavior)
@@ -141,26 +142,11 @@ export async function getGSCAccessToken() {
     throw new Error('OAuth2 credentials not configured. Please set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Vercel environment variables.');
   }
   
-  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: 'refresh_token',
-    }),
-  });
-  
-  if (!tokenResponse.ok) {
-    const errorText = await tokenResponse.text();
-    throw new Error(`Failed to get access token: ${errorText}`);
+  try {
+    return (await refreshGoogleAccessToken({ clientId, clientSecret, refreshToken, label: 'gsc' })).accessToken;
+  } catch (e) {
+    throw new Error(`Failed to get access token: ${e.plain || e.message}`);
   }
-  
-  const tokenData = await tokenResponse.json();
-  return tokenData.access_token;
 }
 
 /**

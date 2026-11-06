@@ -211,6 +211,7 @@
   <script src="/lib/strategy-tab.js?v=st-20261008-th-wrap"></script>
   <script src="/lib/silent-faults-tab.js?v=sf-20261027a"></script>
   <script src="/lib/trad-seo-render-client.js?v=tsr-20261030b"></script>
+  <script src="/lib/acquisition/channels-audit-outcome.js?v=cao-20261106a"></script>
   <script>
     // CRITICAL: Set up error capture IMMEDIATELY, before any other code runs
     // This must be the very first script to execute
@@ -8163,7 +8164,7 @@
         </div>
 
         <div id="dashboardRunSummary" style="display: none; border-top: 2px solid #10b981; padding-top: 1rem; margin-top: 1rem;">
-          <div style="font-weight: 800; color: #10b981; margin-bottom: 0.5rem;">✓ Global run complete</div>
+          <div id="dashboardRunSummaryTitle" style="font-weight: 800; color: #10b981; margin-bottom: 0.5rem;">✓ Global run complete</div>
           <div id="dashboardRunSummaryContent" style="color: var(--dark-text); font-size: 0.95rem;"></div>
           <div style="margin-top: 1rem; text-align: right;">
             <button id="dashboardRunCloseBottom" class="btn" style="background: var(--brand-orange); color: white; border-color: var(--brand-orange); padding: 0.5rem 1.5rem; font-size: 0.9rem; font-weight: 600; cursor: pointer;" title="Close the global audit modal">Close</button>
@@ -8249,7 +8250,7 @@
           <div id="acqChannelsStepsList" style="display:flex;flex-direction:column;gap:0.45rem;"></div>
         </div>
         <div id="acqChannelsSummary" style="display:none;border-top:2px solid #10b981;padding-top:1rem;margin-top:1rem;">
-          <div style="font-weight:800;color:#10b981;margin-bottom:0.5rem;">✓ Channels audit complete</div>
+          <div id="acqChannelsSummaryTitle" style="font-weight:800;color:#10b981;margin-bottom:0.5rem;">✓ Channels audit complete</div>
           <div id="acqChannelsSummaryContent" style="color:var(--dark-text);font-size:0.92rem;line-height:1.55;"></div>
           <div style="margin-top:1rem;text-align:right;">
             <button id="acqChannelsSummaryClose" class="btn" style="background:var(--brand-orange);color:white;border-color:var(--brand-orange);padding:0.45rem 1.2rem;font-size:0.88rem;font-weight:600;cursor:pointer;">Close</button>
@@ -91126,16 +91127,19 @@ Confidence: ${c}`;
 
       // Calls the cron endpoints directly rather than the tab's button, so a
       // global run still refreshes channels when the tab has never been opened.
+      const ACQ_GLOBAL_PULLS = [
+        { label: 'DataForSEO AI mentions', url: '/api/cron/llm-mentions-sync' },
+        { label: 'YouTube channel stats', url: '/api/cron/youtube-stats-sync' },
+        { label: 'GA4 channel sessions', url: '/api/cron/ga4-channels-sync' }
+      ];
+
       async function runGlobalStepAcquisitionChannels() {
         debugLog('[Global Run] [Acquisition channels] Starting...', 'info');
-        const results = await Promise.all([
-          fetch('/api/cron/llm-mentions-sync', { method: 'POST' }).then(r => r.json()),
-          fetch('/api/cron/youtube-stats-sync', { method: 'POST' }).then(r => r.json()),
-          fetch('/api/cron/ga4-channels-sync', { method: 'POST' }).then(r => r.json())
-        ]);
-        const rows = results.reduce((total, r) => total + (r.rows_written || 0), 0);
-        const failed = results.find(r => r && r.ok === false);
-        if (failed) throw new Error(failed.error || 'acquisition channel sync failed');
+        const settled = await Promise.allSettled(ACQ_GLOBAL_PULLS.map((p) => fetch(p.url, { method: 'POST' }).then(r => r.json())));
+        const results = settled.map((s) => (s.status === 'fulfilled' ? s.value : { ok: false, error: `request failed: ${s.reason?.message || s.reason}` }));
+        const rows = results.reduce((total, r) => total + (r?.rows_written || 0), 0);
+        const outcome = window.acqAuditOutcome(ACQ_GLOBAL_PULLS.map((p) => p.label), results);
+        if (!outcome.ok) throw new Error(outcome.line);
         debugLog(`[Global Run] [Acquisition channels] Completed. ${rows} rows refreshed.`, 'success');
         if (typeof updateRevenueSyncBanner === 'function') {
           try { await updateRevenueSyncBanner(globalRunPropertyUrl()); } catch (_e) { /* swallow */ }
@@ -91785,7 +91789,14 @@ Confidence: ${c}`;
         const failedCount = steps.filter(s => s.status === 'Failed').length;
         const skippedCount = steps.filter(s => s.status === 'Skipped').length;
         const finalMessage = `${doneCount}/${steps.length} done · ${failedCount} failed · ${skippedCount} skipped · ${formatGlobalRunElapsed(totalElapsed)}`;
-        dashboardRunModalSetStep(`${tierLabel} complete`, finalMessage);
+        const problems = failedCount + skippedCount;
+        const resultTitle = problems ? `${tierLabel} — done with ${problems} problem${problems === 1 ? '' : 's'}` : `${tierLabel} complete`;
+        dashboardRunModalSetStep(resultTitle, finalMessage);
+        const summaryTitleEl = document.getElementById('dashboardRunSummaryTitle');
+        if (summaryTitleEl) {
+          summaryTitleEl.textContent = `${problems ? '⚠' : '✓'} ${resultTitle}`;
+          summaryTitleEl.style.color = problems ? '#f59e0b' : '#10b981';
+        }
         const elapsedEl = document.getElementById('dashboardRunElapsedTime');
         if (elapsedEl) elapsedEl.textContent = formatGlobalRunElapsed(totalElapsed);
         const stepTimeEl = document.getElementById('dashboardRunStepTime');
@@ -108849,38 +108860,55 @@ Confidence: ${c}`;
         list.innerHTML = this.steps.map(function (s) {
           var colour = s.status === 'Done' ? '#10b981'
             : s.status === 'Running' ? '#f59e0b'
-              : s.status === 'Failed' ? '#ef4444' : 'var(--dark-text-muted)';
+              : s.status === 'Failed' ? '#ef4444' : s.status === 'Skipped' ? '#94a3b8' : 'var(--dark-text-muted)';
           var detail = s.detail ? '<div style="font-size:0.74rem;color:#94a3b8;margin-top:0.15rem;">' + s.detail + '</div>' : '';
           return '<div style="display:flex;justify-content:space-between;gap:0.75rem;padding:0.45rem 0.65rem;border:1px solid var(--dark-border);border-radius:8px;background:rgba(15,20,25,0.35);">'
             + '<div><div style="font-weight:700;">' + s.label + '</div>' + detail + '</div>'
             + '<div style="font-weight:800;color:' + colour + ';">' + s.status + '</div></div>';
         }).join('');
       },
-      finish: function (results, err) {
+      finish: function (results) {
         var summary = $('acqChannelsSummary');
         var content = $('acqChannelsSummaryContent');
         var close = $('acqChannelsProgressClose');
         var written = (results || []).reduce(function (t, r) { return t + (Number(r && r.rows_written) || 0); }, 0);
-        var failed = (results || []).find(function (r) { return r && r.ok === false; });
-        if (err || failed) {
-          this.setProgress(100, 'Channels audit failed', (err && err.message) || (failed && failed.error) || 'One or more pulls failed.');
-        } else {
-          this.setProgress(100, 'Channels audit complete', written + ' rows refreshed across 3 pulls.');
+        this.steps.forEach(function (s) {
+          if (s.status === 'Pending' || s.status === 'Running') { s.status = 'Skipped'; s.detail = s.detail || 'Not run: the audit stopped before this pull.'; }
+        });
+        this.renderSteps();
+        var outcome = window.acqAuditOutcome(ACQ_AUDIT_STEPS.map(function (s) { return s.label; }), results || []);
+        this.setProgress(100, outcome.title, outcome.ok ? written + ' rows refreshed across 3 pulls.' : outcome.line);
+        var titleEl = $('acqChannelsSummaryTitle');
+        if (titleEl) {
+          titleEl.textContent = (outcome.ok ? '✓ ' : '⚠ ') + outcome.title;
+          titleEl.style.color = outcome.ok ? '#10b981' : '#f59e0b';
         }
+        if (summary) summary.style.borderTopColor = outcome.ok ? '#10b981' : '#f59e0b';
         if (content) {
           content.innerHTML = (results || []).map(function (r, i) {
             var step = ACQ_AUDIT_STEPS[i];
             var ok = r && r.ok !== false;
             var rows = r && r.rows_written != null ? r.rows_written + ' rows' : '—';
-            var note = ok ? rows : (r && (r.error || r.error_message)) || 'failed';
+            var note = ok ? rows : (r && (r.plain || r.error || r.error_message)) || 'failed';
             return '<div><strong>' + (step ? step.label : 'Step') + ':</strong> '
               + (ok ? '✓ ' + note : '✗ ' + note) + '</div>';
           }).join('');
         }
         if (summary) summary.style.display = 'block';
         if (close) { close.disabled = false; close.style.opacity = '1'; }
+        return outcome;
       }
     };
+
+    /** One pull; a failed or unreachable pull is a result too, so the next pull still runs. */
+    async function runAcqAuditStep(step) {
+      try {
+        var r = await fetch(step.url, { method: 'POST' });
+        return await r.json().catch(function () { return { ok: false, error: 'HTTP ' + r.status }; });
+      } catch (e) {
+        return { ok: false, error: 'request failed: ' + ((e && e.message) || e) };
+      }
+    }
 
     function wireAcqAuditModalClose() {
       if (window.acqAuditModalWired) return;
@@ -108908,26 +108936,22 @@ Confidence: ${c}`;
             step.label,
             'Pull ' + (i + 1) + ' of ' + ACQ_AUDIT_STEPS.length + '…'
           );
-          var res = await fetch(step.url, { method: 'POST' }).then(function (r) { return r.json(); });
+          var res = await runAcqAuditStep(step);
           results.push(res);
           var ok = res && res.ok !== false;
           AcqChannelsAuditModal.steps[i].status = ok ? 'Done' : 'Failed';
           AcqChannelsAuditModal.steps[i].detail = ok
             ? (res.rows_written != null ? res.rows_written + ' rows' : 'ok')
-            : (res.error || res.error_message || 'failed');
+            : (res.plain || res.error || res.error_message || 'failed');
           AcqChannelsAuditModal.renderSteps();
-          if (!ok) throw new Error(res.error || res.error_message || step.label + ' failed');
         }
-        await load();
-        if (typeof updateRevenueSyncBanner === 'function') {
-          try { await updateRevenueSyncBanner(); } catch (_e) { /* swallow */ }
-        }
-        AcqChannelsAuditModal.finish(results);
-        setStatus('Done — channel pulls complete.');
-      } catch (err) {
-        AcqChannelsAuditModal.finish(results, err);
-        setStatus('Failed: ' + (err.message || err));
+        try {
+          await load();
+          if (typeof updateRevenueSyncBanner === 'function') await updateRevenueSyncBanner();
+        } catch (_e) { /* the pulls' own results stand */ }
       } finally {
+        var outcome = AcqChannelsAuditModal.finish(results);
+        setStatus(outcome.ok ? 'Done — channel pulls complete.' : outcome.line);
         btn.disabled = false;
       }
     }

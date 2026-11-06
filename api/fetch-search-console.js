@@ -13,6 +13,8 @@
 //      -H "Content-Type: application/json" \
 //      -d '{"propertyUrl":"https://www.alanranger.com","startDate":"2026-01-18","endDate":"2026-02-14","dimensions":["page"],"rowLimit":25000}'
 
+import { refreshGoogleAccessToken } from '../lib/google-token.js';
+
 // Exchange the refresh token for a short-lived access token (once per request).
 async function getGscAccessToken() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -21,21 +23,12 @@ async function getGscAccessToken() {
   if (!clientId || !clientSecret || !refreshToken) {
     return { status: 500, error: 'OAuth2 credentials not configured. Please set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Vercel environment variables.' };
   }
-  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: 'refresh_token'
-    })
-  });
-  if (!tokenResponse.ok) {
-    return { status: 401, error: 'Failed to get access token', details: await tokenResponse.text() };
+  try {
+    const r = await refreshGoogleAccessToken({ clientId, clientSecret, refreshToken, label: 'gsc' });
+    return { accessToken: r.accessToken };
+  } catch (e) {
+    return { status: 401, error: 'Failed to get access token', details: e.plain || e.message };
   }
-  const tokenData = await tokenResponse.json();
-  return { accessToken: tokenData.access_token };
 }
 
 // Search Console requires the exact registered site URL (https:// + no trailing slash).
@@ -134,29 +127,12 @@ export default async function handler(req, res) {
     }
 
     // Get access token using refresh token
-    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refreshToken,
-        grant_type: 'refresh_token',
-      }),
-    });
-
-    if (!tokenResponse.ok) {
-      const errorText = await tokenResponse.text();
-      return res.status(401).json({ 
-        error: 'Failed to get access token',
-        details: errorText 
-      });
+    let accessToken;
+    try {
+      accessToken = (await refreshGoogleAccessToken({ clientId, clientSecret, refreshToken, label: 'gsc' })).accessToken;
+    } catch (e) {
+      return res.status(401).json({ error: 'Failed to get access token', details: e.plain });
     }
-
-    const tokenData = await tokenResponse.json();
-    const accessToken = tokenData.access_token;
 
     // Extract site URL - Search Console API requires exact format as registered
     // Try different formats: with https://, with http://, or domain only

@@ -4,6 +4,7 @@ export const config = { runtime: 'nodejs', maxDuration: 60 };
 import { createClient } from '@supabase/supabase-js';
 import { normalizePropertyKey, signalMapKey } from './lib/gscInspectKeys.js';
 import { deriveGscUrlIndexedStatus } from './lib/gscInspectAuditStatus.js';
+import { refreshGoogleAccessToken } from '../../lib/google-token.js';
 import {
   isGscInspectPermissionDenied,
   normalizeSiteUrlForInspect,
@@ -37,23 +38,13 @@ async function getAccessToken() {
   const clientId = need('GOOGLE_CLIENT_ID');
   const clientSecret = need('GOOGLE_CLIENT_SECRET');
   const refreshToken = need('GOOGLE_REFRESH_TOKEN');
-  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: 'refresh_token',
-    }),
-  });
-  const tokenData = await tokenResponse.json().catch(() => ({}));
-  if (!tokenResponse.ok || !tokenData.access_token) {
-    const err = new Error(`token_refresh_failed:${tokenResponse.status}`);
-    err.detail = tokenData;
+  try {
+    return (await refreshGoogleAccessToken({ clientId, clientSecret, refreshToken, label: 'gsc' })).accessToken;
+  } catch (e) {
+    const err = new Error(`token_refresh_failed:${e.code || 'unknown'}`);
+    err.detail = { error: e.code, plain: e.plain };
     throw err;
   }
-  return tokenData.access_token;
 }
 
 async function inspectOne(accessToken, siteUrl, inspectionUrl) {

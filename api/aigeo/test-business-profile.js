@@ -2,6 +2,7 @@
  * Test endpoint to verify Google Business Profile API access
  * This will test if the existing OAuth credentials work with Business Profile API
  */
+import { refreshGoogleAccessToken } from '../../lib/google-token.js';
 
 export default async function handler(req, res) {
   // Set CORS headers
@@ -35,30 +36,12 @@ export default async function handler(req, res) {
     }
     
     // Get access token
-    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refreshToken,
-        grant_type: 'refresh_token',
-      }),
-    });
-    
-    if (!tokenResponse.ok) {
-      const errorText = await tokenResponse.text();
-      return res.status(500).json({
-        status: 'error',
-        message: 'Failed to get access token',
-        error: errorText
-      });
+    let accessToken;
+    try {
+      accessToken = (await refreshGoogleAccessToken({ clientId, clientSecret, refreshToken, label: 'gbp' })).accessToken;
+    } catch (e) {
+      return res.status(500).json({ status: 'error', message: 'Failed to get access token', error: e.plain || e.message });
     }
-    
-    const tokenData = await tokenResponse.json();
-    const accessToken = tokenData.access_token;
     
     // Test Business Profile API - List accounts
     // This is a simple endpoint that requires business.manage scope
