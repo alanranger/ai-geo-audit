@@ -101,6 +101,7 @@ async function fetchAllOverrides() {
       .from('traditional_seo_target_keyword_overrides')
       .select('id, page_url, target_keyword, target_class, notes')
       .eq('property_url', PROPERTY)
+      .order('id')
       .range(from, from + page - 1);
     if (error) throw error;
     out.push(...(data || []));

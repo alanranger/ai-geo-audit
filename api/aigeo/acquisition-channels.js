@@ -228,6 +228,7 @@ async function fetchGa4(sb, days) {
       .select('date, channel_group, source, medium, sessions, engaged_sessions, avg_session_seconds, is_unattributed')
       .gte('date', isoDaysAgo(days))
       .order('date', { ascending: false })
+      .order('id', { ascending: true })
       .range(from, from + PAGE - 1);
     if (error) throw new Error(`ga4_channel_sessions_daily: ${error.message}`);
     all.push(...(data || []));

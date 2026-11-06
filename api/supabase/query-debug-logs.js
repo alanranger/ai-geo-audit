@@ -54,7 +54,8 @@ export default async function handler(req, res) {
     let query = supabase
       .from('debug_logs')
       .select('*', { count: 'exact' })
-      .order('timestamp', { ascending: false });
+      .order('timestamp', { ascending: false })
+      .order('id', { ascending: false });
 
     // Apply filters
     if (propertyUrl) {

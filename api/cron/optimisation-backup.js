@@ -3,6 +3,7 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 import { createClient } from '@supabase/supabase-js';
 import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
 import { logCronEvent } from '../../lib/cron/logCron.js';
+import { selectAllPaged } from '../../lib/supabase-paged.js';
 
 const JOB_KEY = 'optimisation_backup';
 const DEFAULT_SCHEDULE = { frequency: 'daily', timeOfDay: '19:00' };
@@ -48,20 +49,11 @@ const resolveBaseUrl = (req) => {
 const getSupabase = () => createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
 
 async function fetchAllRows(supabase, table) {
-  const rows = [];
-  let from = 0;
-  while (true) {
-    const { data, error } = await supabase
-      .from(table)
-      .select('*')
-      .range(from, from + PAGE_SIZE - 1);
-    if (error) throw new Error(`fetch_${table}_failed:${error.message}`);
-    if (!data || data.length === 0) break;
-    rows.push(...data);
-    if (data.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
+  try {
+    return await selectAllPaged(() => supabase.from(table).select('*'), ['id'], { pageSize: PAGE_SIZE });
+  } catch (e) {
+    throw new Error(`fetch_${table}_failed:${e.message}`);
   }
-  return rows;
 }
 
 async function uploadBackup(supabase, path, ndjsonBuffer) {

@@ -52,6 +52,7 @@ async function fetchRows(from, to, slugs) {
       .lte('date', to)
       .in('page_url', slugs)
       .order('date', { ascending: true })
+      .order('id', { ascending: true })
       .range(fromRow, fromRow + pageSize - 1);
     if (error) throw error;
     if (!data?.length) break;
@@ -137,6 +138,7 @@ async function fetchAllDaily(from, to, pageSlugs) {
         .lte('date', to)
         .in('page_url', part)
         .order('date', { ascending: true })
+        .order('id', { ascending: true })
         .range(fromRow, fromRow + pageSize - 1);
       if (error) throw error;
       if (!data?.length) break;

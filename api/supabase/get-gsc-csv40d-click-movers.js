@@ -31,6 +31,7 @@ async function loadRunRows(supabase, siteUrl, runId) {
       .select('page_url,clicks_28d,impressions_28d')
       .eq('site_url', siteUrl)
       .eq('run_id', runId)
+      .order('page_url')
       .range(from, to);
     if (error) throw new Error(error.message);
     const rows = Array.isArray(data) ? data : [];

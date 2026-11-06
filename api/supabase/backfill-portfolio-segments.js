@@ -94,7 +94,8 @@ export default async function handler(req, res) {
           .select('run_id, date_end')
           .gte('date_end', de)
           .order('run_id', { ascending: true })
-          .order('date_end', { ascending: true });
+          .order('date_end', { ascending: true })
+          .order('id', { ascending: true });
         if (deLte) q = q.lte('date_end', deLte);
         return q.range(from, from + ps - 1);
       });
@@ -122,6 +123,7 @@ export default async function handler(req, res) {
           .from('gsc_page_metrics_28d')
           .select('run_id')
           .order('run_id', { ascending: false })
+          .order('id', { ascending: true })
           .range(from, from + ps - 1)
       );
       runIds = [...new Set(runs?.map(r => r.run_id) || [])];

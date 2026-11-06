@@ -178,6 +178,7 @@ async function fetchGscBySlug(supabase, propertyUrl, slugs) {
         .eq('property_url', propertyUrl)
         .gte('date', GSC_FIRST_DAY)
         .in('page_url', chunk)
+        .order('id')
         .range(from, from + pageSize - 1);
       if (error) throw error;
       const batch = data || [];

@@ -342,6 +342,7 @@ async function fetchTxnsForProducts(supabase, productTitles) {
       .from('booking_sheet_transactions')
       .select('canonical_product, amount, txn_date, is_jlr')
       .in('canonical_product', productTitles)
+      .order('property_url').order('year').order('source_workbook').order('source_row')
       .range(from, from + pageSize - 1);
     if (error) throw error;
     const batch = data || [];
@@ -1494,6 +1495,7 @@ async function fetchGscTotalsBySlug(supabase, propertyUrl, slugs) {
         .eq('property_url', propertyUrl)
         .gte('date', GSC_FIRST_DAY)
         .in('page_url', chunk)
+        .order('id')
         .range(from, from + pageSize - 1);
       if (error) throw error;
       const batch = data || [];

@@ -60,6 +60,7 @@ async function fetchAllTxns(supabase) {
     const { data, error } = await supabase.from('booking_sheet_transactions')
       .select('year,month,amount,category_label,is_jlr')
       .eq('property_url', PROPERTY)
+      .order('year').order('source_workbook').order('source_row')
       .range(from, from + pageSize - 1);
     if (error) throw error;
     out.push(...data);

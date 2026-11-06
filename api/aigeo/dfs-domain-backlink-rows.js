@@ -112,6 +112,7 @@ async function loadRowHashSet(supabase, table, domainHost) {
       .from(table)
       .select('row_hash')
       .eq('domain_host', domainHost)
+      .order('row_hash', { ascending: true })
       .range(dbFrom, dbFrom + DB_PAGE - 1);
     if (error) throw new Error(String(error.message || error));
     const batch = Array.isArray(data) ? data : [];
@@ -209,6 +210,7 @@ async function collectBaselineFilteredRows(
       let query = supabase.from('dfs_domain_backlink_rows').select(ROW_SELECT).eq('domain_host', domainHost);
       query = applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search, target });
       query = query.order('domain_from_rank', { ascending: false, nullsFirst: false });
+      query = query.order('row_hash', { ascending: true });
       query = query.range(dbFrom, dbFrom + DB_PAGE - 1);
       const { data, error } = await query;
       if (error) throw new Error(String(error.message || error));
@@ -245,6 +247,7 @@ async function collectBaselineFilteredRows(
       if (rankMin != null) query = query.gte('domain_from_rank', rankMin);
       if (rankMax != null) query = query.lte('domain_from_rank', rankMax);
       query = query.order('domain_from_rank', { ascending: false, nullsFirst: false });
+      query = query.order('row_hash', { ascending: true });
       query = query.range(dbFrom, dbFrom + DB_PAGE - 1);
       const { data, error } = await query;
       if (error) throw new Error(String(error.message || error));
@@ -362,6 +365,7 @@ async function collectRowsForPageTierSort(
     let query = supabase.from('dfs_domain_backlink_rows').select(ROW_SELECT).eq('domain_host', domainHost);
     query = applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search, target });
     query = query.order('domain_from_rank', { ascending: false, nullsFirst: false });
+    query = query.order('row_hash', { ascending: true });
     query = query.range(dbFrom, dbFrom + DB_PAGE - 1);
 
     const { data, error } = await query;
@@ -460,6 +464,7 @@ async function fetchRowsWithPageTierFilter(supabase, opts) {
     let query = supabase.from('dfs_domain_backlink_rows').select(ROW_SELECT).eq('domain_host', domainHost);
     query = applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search, target });
     query = query.order(sort, { ascending, nullsFirst: false });
+    query = query.order('row_hash', { ascending: true });
     query = query.range(dbFrom, dbFrom + DB_PAGE - 1);
 
     const { data, error } = await query;
@@ -672,6 +677,7 @@ export default async function handler(req, res) {
     query = applyBacklinkRowFilters(query, { follow, rankMin, rankMax, search, target });
 
     query = query.order(sortCol, { ascending, nullsFirst: false });
+    query = query.order('row_hash', { ascending: true });
     query = query.range(offset, offset + limit - 1);
 
     const { data, error, count } = await query;

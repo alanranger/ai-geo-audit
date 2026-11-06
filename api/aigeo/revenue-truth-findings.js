@@ -80,6 +80,7 @@ async function fetchAllTransactions(supabase, propertyUrl) {
       .select('year, month, txn_date, client_name, category_label, funding, amount, booking_source, channel, client_type, canonical_product, landing_page_url, is_jlr, is_redemption')
       .eq('property_url', propertyUrl)
       .order('txn_date', { ascending: true })
+      .order('year').order('source_workbook').order('source_row')
       .range(from, from + TXN_PAGE_SIZE - 1);
     if (error) throw error;
     out.push(...(data || []));

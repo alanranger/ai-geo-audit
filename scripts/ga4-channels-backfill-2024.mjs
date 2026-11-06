@@ -58,6 +58,7 @@ async function countByMonth(client) {
       .eq('property_url', PROPERTY)
       .gte('date', '2024-01-01')
       .lte('date', '2026-09-30')
+      .order('id')
       .range(from, from + page - 1);
     if (err) throw new Error(err.message);
     const chunk = rows || [];
@@ -82,6 +83,7 @@ async function monthlyChannelSummary(client) {
       .eq('property_url', PROPERTY)
       .gte('date', '2024-01-01')
       .lte('date', '2026-09-30')
+      .order('id')
       .range(from, from + page - 1);
     if (error) throw new Error(error.message);
     const chunk = rows || [];
