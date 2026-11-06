@@ -102627,6 +102627,8 @@ Confidence: ${c}`;
               <option value="pass" ${status === 'pass' ? 'selected' : ''}>Pass</option>
               <option value="warn" ${status === 'warn' ? 'selected' : ''}>Warn</option>
               <option value="fail" ${status === 'fail' ? 'selected' : ''}>Fail</option>
+              <option value="not_checked" ${status === 'not_checked' ? 'selected' : ''}>Not checked</option>
+              <option value="na" ${status === 'na' ? 'selected' : ''}>n/a</option>
             </select>
           </td>
           <td><input data-field="weight" type="number" min="0" step="0.1" value="${weight}"></td>
@@ -102707,8 +102709,15 @@ Confidence: ${c}`;
       return response.json();
     }
 
+    /** Rule status comes from the saved per-URL results when there are any, so pills and Rule Manager match the table after Save. */
+    function traditionalSeoRulesWithRowStatus(rules) {
+      const rows = TRADITIONAL_SEO_STATE.evaluationRows;
+      if (!Array.isArray(rows) || !rows.length) return rules;
+      return rules.map((rule) => ({ ...rule, current_status: traditionalSeoAggregateRuleStatus(rows, rule.rule_key) }));
+    }
+
     function applyTraditionalSeoPayload(payload) {
-      TRADITIONAL_SEO_STATE.rules = traditionalSeoMergeRulesWithBaseline(Array.isArray(payload?.rules) ? payload.rules : []);
+      TRADITIONAL_SEO_STATE.rules = traditionalSeoRulesWithRowStatus(traditionalSeoMergeRulesWithBaseline(Array.isArray(payload?.rules) ? payload.rules : []));
       TRADITIONAL_SEO_STATE.latestSummary = computeTraditionalSeoSummary(TRADITIONAL_SEO_STATE.rules);
       TRADITIONAL_SEO_STATE.latestSnapshot = payload?.latestSnapshot || null;
       TRADITIONAL_SEO_STATE.previousSnapshot = payload?.previousSnapshot || null;

@@ -55,6 +55,7 @@ const computeSummary = (rules) => {
     enabledCount += 1;
     const weight = Math.max(0, toNum(rule?.weight, 1));
     const status = String(rule?.current_status || 'fail').toLowerCase();
+    if (status === 'na' || status === 'not_checked') return;
     weightedTotal += weight;
     weightedAchieved += weight * toPoints(status);
     if (status === 'pass') passCount += 1;
