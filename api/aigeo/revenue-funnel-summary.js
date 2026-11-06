@@ -302,6 +302,15 @@ async function alignPageMetricsToGa4(supabase, propertyUrl, pageMetrics, ga4Snap
   return { rows: data, dateEnd: end };
 }
 
+/** The GA4 28-day snapshot ending on the GSC end date (daily GA4 sync keeps one per day); else the latest. */
+async function ga4SnapForEnd(supabase, propertyUrl, ga4Snap, endDate) {
+  if (!endDate || ga4Snap?.date_end === endDate) return ga4Snap;
+  const { data, error } = await supabase.from('ga4_site_metrics_28d').select('*')
+    .eq('property_url', propertyUrl).eq('date_end', endDate).limit(1);
+  if (error || !data?.length) return ga4Snap;
+  return data[0];
+}
+
 /** Small rules table — avoid scanning revenue_gsc_joined_with_policy (LATERAL join timeout). */
 async function fetchIndexabilityPolicies(supabase) {
   const { data, error } = await supabase
@@ -1481,7 +1490,7 @@ export default async function handler(req, res) {
   try {
     const supabase = createClient(need('SUPABASE_URL'), need('SUPABASE_SERVICE_ROLE_KEY'));
     FT = funnelTargetsFrom(await loadTargetsMaster(supabase, propertyUrl), MONEY_PAGE_TIERS);
-    const [audits, rawPageMetrics, bookingBundle, aiMap, priorities, ga4Snap, policies] = await Promise.all([
+    const [audits, rawPageMetrics, bookingBundle, aiMap, priorities, rawGa4Snap, policies] = await Promise.all([
       fetchLatestAudit(supabase, propertyUrl),
       fetchPageMetrics(supabase, propertyUrl),
       fetchBookingSheetBundle(supabase, propertyUrl, includeJlr),
@@ -1494,7 +1503,8 @@ export default async function handler(req, res) {
     const revenueHistory = bookingBundle.revenueHistory;
     const revenueSnap = revenueSnaps.kpiSnap;
     const tierRevenueSnap = revenueSnaps.tierSnap;
-    const pageMetrics = await alignPageMetricsToGa4(supabase, propertyUrl, rawPageMetrics, ga4Snap);
+    const pageMetrics = await alignPageMetricsToGa4(supabase, propertyUrl, rawPageMetrics, rawGa4Snap);
+    const ga4Snap = await ga4SnapForEnd(supabase, propertyUrl, rawGa4Snap, pageMetrics.dateEnd);
     const pageRows = pageMetrics.rows;
     const periodStart = pageMetrics.dateEnd ? `${String(pageMetrics.dateEnd).slice(0, 7)}-01` : null;
     const policyBySlug = buildPolicyBySlug(pageRows, policies);
