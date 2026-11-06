@@ -9,7 +9,7 @@ import { loadFaultSummary } from '../../lib/fault-monitor/brief.js';
 import { runSiteChecks } from '../../lib/fault-monitor/site-checks.js';
 import { groupHealthRows } from '../../lib/fault-monitor/health-panel.js';
 import { loadRunPages, loadLatestPage } from '../../lib/trad-seo-render/pages-store.js';
-import { brokenTickReply, loadBrokenPages, tickBrokenLinks } from '../../lib/trad-seo-render/broken-job.js';
+import { brokenTickReply, loadBrokenPages, loadPreviousBroken, tickBrokenLinks } from '../../lib/trad-seo-render/broken-job.js';
 
 function need(key) {
   const v = process.env[key];
@@ -29,12 +29,17 @@ function healthRows(findings) {
   return groupHealthRows(findings);
 }
 
+function brokenRow(b) {
+  return { page_url: b.page_url, checked_at: b.checked_at, outcome: b.outcome, status: b.status, note: b.note };
+}
+
 async function handleGet(sb, req, res) {
   const runId = String(req.query?.runId || '').trim();
   let run = runId ? await loadRun(sb, runId) : await latestTradSeoRun(sb);
   if (!run && !runId) run = await latestAnyTradSeoRun(sb);
   const pages = run ? await loadRunPages(sb, run.id) : [];
   const broken = run ? await loadBrokenPages(sb, run.id) : [];
+  const previous = run && broken.length < pages.length ? await loadPreviousBroken(sb, run.id) : null;
   const summary = await loadFaultSummary(sb).catch(() => null);
   let health = [];
   if (String(req.query?.health || '') === '1') {
@@ -54,13 +59,9 @@ async function handleGet(sb, req, res) {
       findings: p.findings,
       html_len: p.html_len
     })),
-    broken: broken.map((b) => ({
-      page_url: b.page_url,
-      checked_at: b.checked_at,
-      outcome: b.outcome,
-      status: b.status,
-      note: b.note
-    })),
+    broken: broken.map(brokenRow),
+    broken_progress: { checked: broken.length, total: pages.length },
+    broken_previous: previous ? { run_id: previous.run_id, checked_at: previous.checked_at, pages: previous.pages.map(brokenRow) } : null,
     health,
     fault_summary: summary
   });
