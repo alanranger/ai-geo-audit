@@ -208,7 +208,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script src="/keyword-tracking-class-LOCKED.js"></script>
   <script src="/lib/competitor-analysis-tab.js?v=ca-prog-20260719a"></script>
-  <script src="/lib/strategy-tab.js?v=st-20261106-seasonal-t3"></script>
+  <script src="/lib/strategy-tab.js?v=st-20261106-stage2"></script>
+  <script src="/lib/monthly-chart.js?v=mc-20261106a"></script>
   <script src="/lib/targets-panel.js?v=tp-20261106c"></script>
   <script src="/lib/silent-faults-tab.js?v=sf-20261027a"></script>
   <script src="/lib/trad-seo-render-client.js?v=tsr-20261030b"></script>
@@ -7805,7 +7806,7 @@
       <div class="aigeo-nav-section">Planning &amp; Optimisation</div>
       <button class="aigeo-nav-item" data-panel="revenue-truth" title="Revenue Truth — measured revenue history from the Booking Sheet (single source of truth). Headline = the YTD Actual cell you see on the spreadsheet (£46,572.46 for 2025). Tier band chart, market split (D2C / B2B / ADJUSTMENT), category breakdown with GP, channel mix, new vs existing clients, and funding/fees. No projections, no forecasts.">
         <span class="aigeo-nav-icon">📒</span>
-        <span>Revenue Truth</span>
+        <span>Revenue</span>
       </button>
       <button class="aigeo-nav-item" data-panel="revenue-funnel" title="Revenue Funnel — exec view that follows impressions → clicks → revenue. Shows 12-month sparkline, YTD vs target, money-page performance and the Squarespace / Stripe / Booking-Sheet feed status banner. Reads the ACTIVE scenario from the Scenario Planning tab for its Top 3 Actions.">
         <span class="aigeo-nav-icon">💸</span>
@@ -9822,94 +9823,10 @@
           <div class="rf-top-actions-grid" id="rf-top-actions-grid"></div>
         </div>
 
-        <!-- Block 0: 12-month revenue history -->
+        <!-- Per-tier cards, Profit Pyramid, Academy -->
         <section class="rf-section">
-          <h3>Revenue history (rolling 12 months)</h3>
-          <div class="rf-sub">One row per calendar month from Squarespace. <strong>Target</strong> = seasonal monthly target from the Targets panel (Strategy &amp; Actions). Light grey points/rows are partially-complete months. The 5 cards below split revenue by money-page tier and now show <strong>This month vs target</strong> (top row, target pro-rated by days elapsed) and <strong>YTD vs target</strong> (sum since Jan, pro-rated through today). Hover any number for the breakdown.</div>
-
-          <!-- HERO sparkline: full width, tall -->
-          <div class="rf-hero-spark">
-            <div class="rf-hero-spark-header">
-              <div>
-                <div class="rf-hero-spark-title">All revenue — last 12 months</div>
-                <div class="rf-hero-spark-sub" id="rf-hist-total-12m-sub">Awaiting data</div>
-              </div>
-              <div class="rf-hero-spark-totals">
-                <div class="rf-hero-spark-total">
-                  <div class="rf-history-label">Total (closed months)</div>
-                  <div class="rf-history-value" id="rf-hist-total-12m">—</div>
-                  <div class="rf-hero-spark-target-sub" id="rf-hist-vs-target">—</div>
-                </div>
-                <div class="rf-hero-spark-total rf-hero-spark-ytd">
-                  <div class="rf-history-label" id="rf-hist-ytd-label">Year-to-date</div>
-                  <div class="rf-history-value" id="rf-hist-ytd-revenue">—</div>
-                  <div class="rf-hero-spark-target-sub" id="rf-hist-ytd-vs-target">—</div>
-                </div>
-                <div class="rf-hero-spark-total">
-                  <div class="rf-history-label">Annual run-rate</div>
-                  <div class="rf-history-value" id="rf-hist-runrate">—</div>
-                  <div class="rf-hero-spark-target-sub" id="rf-hist-runrate-vs">—</div>
-                </div>
-              </div>
-            </div>
-            <div class="rf-history-chart-wrap rf-hero-chart" id="rf-spark-host">
-              <svg class="rf-spark rf-spark-hero" id="rf-spark-svg" viewBox="0 0 1200 280" preserveAspectRatio="xMidYMid meet"></svg>
-              <div id="rf-spark-tooltip" style="position:absolute; display:none; pointer-events:none; background:#0b1118; border:1px solid var(--dark-brand); color:var(--dark-text); padding:0.4rem 0.55rem; border-radius:4px; font-size:0.78rem; z-index:5; white-space:nowrap;"></div>
-            </div>
-          </div>
-
-          <!-- Profit-goal hero strip: thermometer showing monthly gross-profit
-               run-rate vs the survival → top stretch GP band from the Targets panel. -->
-          <div class="rf-profit-goal" id="rf-profit-goal" style="display:none;">
-            <div class="rf-profit-goal-head">
-              <div>
-                <div class="rf-profit-goal-title">Profit Goal Tracker — revenue mix vs gross-profit reality</div>
-                <div class="rf-profit-goal-sub">YTD actual (solid) + projected remainder of year (striped). Two bars because the revenue target only matters if it delivers the survival gross profit set in the Targets panel.</div>
-              </div>
-              <div class="rf-profit-goal-numbers" id="rf-profit-goal-numbers"></div>
-            </div>
-            <div class="rf-profit-goal-bars" id="rf-profit-goal-bars"></div>
-            <div class="rf-profit-goal-foot" id="rf-profit-goal-foot"></div>
-          </div>
-
-          <!-- Survival Cockpit (Phase B) - one compact glanceable row per
-               tier so the whole revenue book fits on one screen above
-               the fold. Driven by the same tier_history payload that
-               feeds the per-tier sparkline cards below: we just pivot
-               the numbers into a sortable, RAG-coloured table so the
-               business owner sees "is this tier on track this month"
-               and "is this tier on track YTD" without scanning seven
-               separate cards. -->
-          <div class="rf-survival-cockpit" id="rf-survival-cockpit" style="display:none;">
-            <div class="rf-survival-head">
-              <div>
-                <div class="rf-survival-title">Survival Cockpit &mdash; per-tier this month + YTD</div>
-                <div class="rf-survival-sub">MTD = month-to-date revenue &middot; Projected = month-end at current pace &middot; RAG vs monthly target &middot; Trend = this month vs last full month. Click a row to scroll to its tier card below.</div>
-              </div>
-              <div class="rf-survival-foot" id="rf-survival-foot"></div>
-            </div>
-            <div class="rf-survival-table-wrap">
-              <table class="rf-survival-table" id="rf-survival-table">
-                <thead>
-                  <tr>
-                    <th>Tier</th>
-                    <th class="num">MTD</th>
-                    <th class="num">Projected</th>
-                    <th class="num">Target/mo</th>
-                    <th class="rag-col">RAG</th>
-                    <th class="trend-col">Trend</th>
-                    <th class="num">YTD</th>
-                    <th class="num">YTD target</th>
-                    <th class="num">YTD vs</th>
-                    <th class="num">GP &times; margin</th>
-                  </tr>
-                </thead>
-                <tbody id="rf-survival-tbody"></tbody>
-                <tfoot id="rf-survival-tfoot"></tfoot>
-              </table>
-            </div>
-          </div>
-
+          <h3>Money-page tiers: this month &amp; YTD</h3>
+          <div class="rf-sub">One card per money-page tier, against its share of the Targets panel survival target (Strategy &amp; Actions). The month-by-month chart, the Survival Cockpit and the Profit Goal Tracker are on the Revenue tab.</div>
           <!-- Per-tier mini sparklines (7 tiles: 6 commercial tiers + an
                "Unidentified" safety-net bucket so we can spot new product
                types that don't match any classifier rule yet). -->
@@ -10003,45 +9920,6 @@
             </div>
           </details>
 
-          <!-- Revenue by source (3-source breakdown per month) -->
-          <details style="margin-bottom:1rem;" id="rf-source-mix-details">
-            <summary style="cursor:pointer; color:var(--dark-brand); font-weight:600; font-size:0.85rem; padding:0.4rem 0;">Revenue by source per month — verify your 3 data sources reconcile</summary>
-            <div style="margin-top:0.6rem; background:#0b1118; border:1px solid var(--dark-border); border-radius:8px; padding:0.9rem 1.1rem;">
-              <div style="font-size:0.78rem; color:#9ca3af; margin-bottom:0.6rem;">
-                <strong>Squarespace API</strong> (workshops / courses / vouchers via Squarespace Commerce) +
-                <strong>Stripe supplemental</strong> (Acuity 1-2-1 / Academy memberships) +
-                <strong>Booking Sheet</strong> (direct Bank + Cash, e.g. JLR, Artfully Walls). Cells with values appear in the merged total above.
-              </div>
-              <div style="overflow-x:auto;">
-                <table class="rf-table" id="rf-source-mix-table" style="font-size:0.82rem;">
-                  <thead><tr>
-                    <th>Month</th>
-                    <th class="num">Squarespace</th>
-                    <th class="num">Stripe (Acuity + Subs)</th>
-                    <th class="num">Booking Sheet (Bank + Cash)</th>
-                    <th class="num">Combined</th>
-                    <th class="num">Sources</th>
-                  </tr></thead>
-                  <tbody><tr><td colspan="6" style="text-align:center; color:#6b7280;">Loading…</td></tr></tbody>
-                </table>
-              </div>
-            </div>
-          </details>
-          <div style="overflow-x:auto;">
-            <table class="rf-table" id="rf-history-table">
-              <thead><tr>
-                <th class="sortable" data-sort="month">Month<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="revenue">Revenue<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="target">Target<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="variance_pct">Variance<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="transactions">Transactions<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="aov">AOV<span class="rf-sort-ind">↕</span></th>
-                <th class="num sortable" data-sort="mom">MoM %<span class="rf-sort-ind">↕</span></th>
-              </tr></thead>
-              <tbody><tr><td colspan="7" style="text-align:center; color:#6b7280;">Loading…</td></tr></tbody>
-              <tfoot></tfoot>
-            </table>
-          </div>
         </section>
 
         <!-- Block 1: KPI strip -->
@@ -10071,6 +9949,38 @@
           <div class="rf-funnel" id="rf-funnel"></div>
           <div id="rf-funnel-note" style="margin-top:0.65rem; color:#64748b; font-size:0.85rem;"></div>
         </section>
+
+        <div class="rt-section rt-diag-section" id="rt-diag-section">
+          <div class="rt-diag-header">
+            <div style="flex: 1 1 30rem;">
+              <h3>9. Revenue Funnel Diagnosis <span class="rt-diag-pill">TIER &rarr; HUB &rarr; PRODUCT</span></h3>
+              <p class="rt-sub">Expand a tier to see hub diagnostic cards with embedded product tables (all canonical products mapped to that hub). GSC overlay Jan 2025+; revenue from Booking Sheet only.</p>
+            </div>
+            <div class="rt-diag-toggles">
+              <span class="rt-diag-window-bar"><strong>Window:</strong>
+                <label class="rt-toggle"><input type="radio" name="rt-diag-window" value="3"> 3mo</label>
+                <label class="rt-toggle"><input type="radio" name="rt-diag-window" value="6"> 6mo</label>
+                <label class="rt-toggle"><input type="radio" name="rt-diag-window" value="12" checked> 12mo</label>
+                <label class="rt-toggle"><input type="radio" name="rt-diag-window" value="18"> 18mo</label>
+              </span>
+              <label class="rt-toggle"><input type="checkbox" id="rt-diag-include-event"> Include Tier C event pages</label>
+              <label class="rt-toggle" title="Show new / low-traffic pages that are normally hidden as 'insufficient data' (under 1,000 impressions or fewer than 6 months of GSC history)."><input type="checkbox" id="rt-diag-show-new"> Show new / low-data pages</label>
+            </div>
+          </div>
+          <div class="ar-policy-banner ar-policy-banner--diagnosis"
+               role="status"
+               aria-live="polite"
+               data-policy-banner
+               style="display: none;">
+            <div class="ar-policy-banner__icon" aria-hidden="true">ⓘ</div>
+            <div class="ar-policy-banner__body">
+              <div class="ar-policy-banner__title" data-policy-banner-title></div>
+              <div class="ar-policy-banner__detail" data-policy-banner-detail></div>
+            </div>
+          </div>
+          <div id="rt-diag-status" class="rt-diag-status"></div>
+          <div id="rt-diag-tier-list" class="rt-diag-tier-list"><div class="rt-loading">Loading diagnosis&hellip;</div></div>
+        </div>
 
         <!-- Block 2b: Money pages performance — what SHOULD be earning -->
         <section class="rf-section">
@@ -10212,76 +10122,6 @@
           </div>
         </section>
 
-        <!-- Block 7: Revenue snapshot -->
-        <section class="rf-section">
-          <h3>Revenue snapshot</h3>
-          <div class="rf-sub">Squarespace Orders sync (daily 07:00 UTC) plus Stripe sync (daily 07:10 UTC) together cover Squarespace Commerce, Acuity 1-2-1 bookings and Academy memberships. Manual entries are kept as a fallback.</div>
-
-          <!-- Sub-block: Squarespace sync -->
-          <div style="background:#0b1118; border:1px solid var(--dark-border); border-radius:8px; padding:0.85rem 1rem; margin-bottom:1rem;">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap;">
-              <div style="min-width:240px;">
-                <div style="font-weight:700; color:var(--dark-text);">Sync from Squarespace</div>
-                <div style="color:#9ca3af; font-size:0.85rem;">Fetches PAID, non-test orders for the selected window and upserts one rolling-window snapshot plus one row per calendar month touched.</div>
-              </div>
-              <form id="rf-sq-form" style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:end;">
-                <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">From
-                  <input type="date" id="rf-sq-start" class="rf-input" required />
-                </label>
-                <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">To
-                  <input type="date" id="rf-sq-end" class="rf-input" required />
-                </label>
-                <button type="submit" class="rf-btn" id="rf-sq-sync-btn">Sync now</button>
-              </form>
-            </div>
-            <div id="rf-sq-result" style="margin-top:0.6rem; color:#9ca3af; font-size:0.85rem;"></div>
-          </div>
-
-          <!-- Sub-block: Stripe sync (Acuity + Subscriptions, supplements Squarespace) -->
-          <div style="background:#0b1118; border:1px solid var(--dark-border); border-radius:8px; padding:0.85rem 1rem; margin-bottom:1rem;">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap;">
-              <div style="min-width:240px;">
-                <div style="font-weight:700; color:var(--dark-text);">Sync from Stripe (Acuity + Memberships)</div>
-                <div style="color:#9ca3af; font-size:0.85rem;">Captures revenue Squarespace Commerce misses: Acuity 1-2-1 bookings (Services tier) and Academy / Pick &amp; Mix subscriptions (Academy &amp; Services tiers). Squarespace Commerce charges are skipped to avoid double counting.</div>
-              </div>
-              <form id="rf-stripe-form" style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:end;">
-                <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">From
-                  <input type="date" id="rf-stripe-start" class="rf-input" required />
-                </label>
-                <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">To
-                  <input type="date" id="rf-stripe-end" class="rf-input" required />
-                </label>
-                <button type="submit" class="rf-btn" id="rf-stripe-sync-btn">Sync now</button>
-              </form>
-            </div>
-            <div id="rf-stripe-result" style="margin-top:0.6rem; color:#9ca3af; font-size:0.85rem;"></div>
-          </div>
-
-          <!-- Sub-block: Manual entry (kept as fallback) -->
-          <details style="margin-bottom:0.75rem;">
-            <summary style="cursor:pointer; font-weight:600; color:var(--dark-brand);">Manual entry (fallback)</summary>
-            <form id="rf-revenue-form" style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:end; margin-top:0.65rem;">
-              <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">Period start
-                <input type="date" id="rf-rev-start" class="rf-input" required />
-              </label>
-              <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">Period end
-                <input type="date" id="rf-rev-end" class="rf-input" required />
-              </label>
-              <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">Revenue (£)
-                <input type="number" id="rf-rev-amount" min="0" step="0.01" class="rf-input" required />
-              </label>
-              <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">Transactions
-                <input type="number" id="rf-rev-txn" min="0" step="1" class="rf-input" />
-              </label>
-              <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">Notes
-                <input type="text" id="rf-rev-notes" class="rf-input" placeholder="e.g. workshop bookings, print sales" />
-              </label>
-              <button type="submit" class="rf-btn">Save</button>
-            </form>
-          </details>
-
-          <div id="rf-rev-latest" style="margin-top:0.75rem; color:#9ca3af; font-size:0.88rem;"></div>
-        </section>
       </section>
 
       <!-- =====================================================================
@@ -10710,7 +10550,7 @@
 
         <div style="margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: flex-end; gap: 1.5rem; flex-wrap: wrap;">
           <div style="flex: 1 1 30rem;">
-            <h2>Revenue Truth</h2>
+            <h2>Revenue</h2>
             <p class="rt-sub" style="margin-top: 0.4rem;">Measured revenue history from the Booking Sheet — the single source of truth. The headline figure is the same number that appears in row 18 / J47-J48 of your Sales tab. Measured sections only; the Forecast section (clearly labelled) is the one projection on this tab. British English throughout.</p>
           </div>
           <div class="rt-tab-toolbar" style="flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 0.55rem;">
@@ -10738,56 +10578,193 @@
 
         <div id="rt-error-banner"></div>
 
-        <div class="rt-pulse-row" id="rt-pulse-row">
-          <div id="rt-current-month-pulse" class="rt-current-month-pulse">
-            <div class="rt-pulse-head-bar">
-              <h3>Current Month Pulse</h3>
-              <span class="rt-basis-badge" id="rt-pulse-basis-badge">Non-JLR / Net · PARTIAL</span>
+        <div class="rt-section" id="rt-data-in">
+          <h3>Data in &amp; checks</h3>
+          <p class="rt-sub">Upload the Booking Sheet with the button at the top right. Squarespace and Stripe syncs and manual entries below, then revenue by source per month to check the three sources reconcile.</p>
+        <div class="rf-section" id="rt-revenue-snapshot">
+          <h3>Revenue snapshot</h3>
+          <div class="rf-sub">Squarespace Orders sync (daily 07:00 UTC) plus Stripe sync (daily 07:10 UTC) together cover Squarespace Commerce, Acuity 1-2-1 bookings and Academy memberships. Manual entries are kept as a fallback.</div>
+
+          <!-- Sub-block: Squarespace sync -->
+          <div style="background:#0b1118; border:1px solid var(--dark-border); border-radius:8px; padding:0.85rem 1rem; margin-bottom:1rem;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap;">
+              <div style="min-width:240px;">
+                <div style="font-weight:700; color:var(--dark-text);">Sync from Squarespace</div>
+                <div style="color:#9ca3af; font-size:0.85rem;">Fetches PAID, non-test orders for the selected window and upserts one rolling-window snapshot plus one row per calendar month touched.</div>
+              </div>
+              <form id="rf-sq-form" style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:end;">
+                <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">From
+                  <input type="date" id="rf-sq-start" class="rf-input" required />
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">To
+                  <input type="date" id="rf-sq-end" class="rf-input" required />
+                </label>
+                <button type="submit" class="rf-btn" id="rf-sq-sync-btn">Sync now</button>
+              </form>
             </div>
-            <div id="rt-current-month-pulse-body"><div class="rt-loading">Loading live month&hellip;</div></div>
+            <div id="rf-sq-result" style="margin-top:0.6rem; color:#9ca3af; font-size:0.85rem;"></div>
           </div>
-          <div id="rt-current-year-ytd-pulse" class="rt-current-month-pulse rt-current-year-ytd-pulse">
-            <div class="rt-pulse-head-bar">
-              <h3>Current Year YTD Pulse</h3>
-              <span class="rt-basis-badge" id="rt-ytd-pulse-basis-badge">Non-JLR / Net · YTD</span>
+
+          <!-- Sub-block: Stripe sync (Acuity + Subscriptions, supplements Squarespace) -->
+          <div style="background:#0b1118; border:1px solid var(--dark-border); border-radius:8px; padding:0.85rem 1rem; margin-bottom:1rem;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap;">
+              <div style="min-width:240px;">
+                <div style="font-weight:700; color:var(--dark-text);">Sync from Stripe (Acuity + Memberships)</div>
+                <div style="color:#9ca3af; font-size:0.85rem;">Captures revenue Squarespace Commerce misses: Acuity 1-2-1 bookings (Services tier) and Academy / Pick &amp; Mix subscriptions (Academy &amp; Services tiers). Squarespace Commerce charges are skipped to avoid double counting.</div>
+              </div>
+              <form id="rf-stripe-form" style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:end;">
+                <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">From
+                  <input type="date" id="rf-stripe-start" class="rf-input" required />
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">To
+                  <input type="date" id="rf-stripe-end" class="rf-input" required />
+                </label>
+                <button type="submit" class="rf-btn" id="rf-stripe-sync-btn">Sync now</button>
+              </form>
             </div>
-            <div id="rt-current-year-ytd-pulse-body"><div class="rt-loading">Loading YTD pulse&hellip;</div></div>
+            <div id="rf-stripe-result" style="margin-top:0.6rem; color:#9ca3af; font-size:0.85rem;"></div>
           </div>
+
+          <!-- Sub-block: Manual entry (kept as fallback) -->
+          <details style="margin-bottom:0.75rem;">
+            <summary style="cursor:pointer; font-weight:600; color:var(--dark-brand);">Manual entry (fallback)</summary>
+            <form id="rf-revenue-form" style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:end; margin-top:0.65rem;">
+              <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">Period start
+                <input type="date" id="rf-rev-start" class="rf-input" required />
+              </label>
+              <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">Period end
+                <input type="date" id="rf-rev-end" class="rf-input" required />
+              </label>
+              <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">Revenue (£)
+                <input type="number" id="rf-rev-amount" min="0" step="0.01" class="rf-input" required />
+              </label>
+              <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">Transactions
+                <input type="number" id="rf-rev-txn" min="0" step="1" class="rf-input" />
+              </label>
+              <label style="display:flex; flex-direction:column; font-size:0.78rem; color:#9ca3af;">Notes
+                <input type="text" id="rf-rev-notes" class="rf-input" placeholder="e.g. workshop bookings, print sales" />
+              </label>
+              <button type="submit" class="rf-btn">Save</button>
+            </form>
+          </details>
+
+          <div id="rf-rev-latest" style="margin-top:0.75rem; color:#9ca3af; font-size:0.88rem;"></div>
+        </div>
+          <!-- Revenue by source (3-source breakdown per month) -->
+          <details style="margin-bottom:1rem;" id="rf-source-mix-details">
+            <summary style="cursor:pointer; color:var(--dark-brand); font-weight:600; font-size:0.85rem; padding:0.4rem 0;">Revenue by source per month — verify your 3 data sources reconcile</summary>
+            <div style="margin-top:0.6rem; background:#0b1118; border:1px solid var(--dark-border); border-radius:8px; padding:0.9rem 1.1rem;">
+              <div style="font-size:0.78rem; color:#9ca3af; margin-bottom:0.6rem;">
+                <strong>Squarespace API</strong> (workshops / courses / vouchers via Squarespace Commerce) +
+                <strong>Stripe supplemental</strong> (Acuity 1-2-1 / Academy memberships) +
+                <strong>Booking Sheet</strong> (direct Bank + Cash, e.g. JLR, Artfully Walls). Cells with values appear in the merged total above.
+              </div>
+              <div style="overflow-x:auto;">
+                <table class="rf-table" id="rf-source-mix-table" style="font-size:0.82rem;">
+                  <thead><tr>
+                    <th>Month</th>
+                    <th class="num">Squarespace</th>
+                    <th class="num">Stripe (Acuity + Subs)</th>
+                    <th class="num">Booking Sheet (Bank + Cash)</th>
+                    <th class="num">Combined</th>
+                    <th class="num">Sources</th>
+                  </tr></thead>
+                  <tbody><tr><td colspan="6" style="text-align:center; color:#6b7280;">Loading…</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <style>
+          #rt-position .pos-head { display:flex; justify-content:flex-end; margin:-0.4rem 0 0.4rem; }
+          #rt-position .pos-seg { display:flex; gap:4px; }
+          #rt-position .pos-seg button { background:#0b1118; color:#94a3b8; border:1px solid #1f2937; border-radius:6px; padding:5px 10px; font:inherit; font-size:12px; cursor:pointer; }
+          #rt-position .pos-seg button[aria-pressed="true"] { background:#1e293b; color:#e5e7eb; border-color:#334155; }
+          #rt-position .card { background:#151a23; border:1px solid #262d3a; border-radius:12px; padding:6px 18px; margin-bottom:12px; }
+          #rt-position .row { display:grid; grid-template-columns:170px 1fr 170px; gap:14px; align-items:center; padding:12px 0; border-top:1px solid #262d3a; }
+          #rt-position .row:first-child { border-top:0; }
+          #rt-position .lbl b { display:block; color:#fff; } #rt-position .lbl span { color:#8b93a3; font-size:12px; }
+          #rt-position .fig { font-size:12px; color:#c3c9d4; margin-bottom:5px; } #rt-position .fig b { color:#fff; }
+          #rt-position .bar { position:relative; height:22px; background:#1b2130; border:1px solid #2f3a4d; border-radius:6px; }
+          #rt-position .act { position:absolute; left:0; top:0; bottom:0; background:#3d8f5f; border-radius:5px 0 0 5px; }
+          #rt-position .proj { position:absolute; top:0; bottom:0; background:repeating-linear-gradient(45deg,#3d8f5f55 0 6px,transparent 6px 12px); border-right:2px solid #3d8f5f; }
+          #rt-position .mk { position:absolute; top:-5px; bottom:-5px; width:2px; cursor:help; }
+          #rt-position .mk.sv { background:#ff6b6b; } #rt-position .mk.s1 { background:#f0b429; } #rt-position .mk.s2 { background:#5fd38d; }
+          #rt-position .mk.bl { background:repeating-linear-gradient(to bottom,#fbbf24 0 4px,transparent 4px 7px); }
+          #rt-position .gap { text-align:right; } #rt-position .gap b { display:block; font-size:18px; } #rt-position .gap span { font-size:11.5px; color:#8b93a3; }
+          #rt-position .neg { color:#ff6b6b; } #rt-position .pos { color:#5fd38d; }
+          #rt-position .def { display:inline-block; font-size:10.5px; font-weight:800; border-radius:999px; padding:2px 8px; color:var(--dc); border:1px solid var(--dc); background:#0b0e14; }
+          #rt-position .tiles { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; padding:10px 0; }
+          #rt-position .tile { background:#121826; border:1px solid #2f3a4d; border-radius:10px; padding:14px; text-align:center; }
+          #rt-position .tile h3 { margin:0 0 8px; font-size:13.5px; color:#fff; }
+          #rt-position .ring { width:150px; height:150px; margin:0 auto 8px; position:relative; }
+          #rt-position .ring .c { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+          #rt-position .ring .c b { font-size:22px; color:#fff; } #rt-position .ring .c span { font-size:11px; color:#8b93a3; }
+          #rt-position .tile .l { font-size:12px; color:#c3c9d4; line-height:1.6; } #rt-position .tile .g { font-size:16px; font-weight:800; margin-top:4px; }
+          #rt-position .foot { display:grid; gap:4px; font-size:12px; color:#8b93a3; } #rt-position .foot .fc { cursor:help; text-decoration:underline dotted; }
+          @media (max-width:820px) { #rt-position .tiles { grid-template-columns:1fr; } #rt-position .row { grid-template-columns:1fr; } #rt-position .gap { text-align:left; } }
+        </style>
+        <div class="rt-section" id="rt-position">
+          <h3>Where we are now</h3>
+          <p class="rt-sub">This month, year to date and the full year against the Targets panel on Strategy &amp; Actions: seasonal survival (red), stretch 1 (amber) and stretch 2 (green); dashed = the flat bills line. GP = each category's revenue × its GP rate. Follows the Include JLR switch above.</p>
+          <div id="rt-position-body"><div class="rt-loading">Loading&hellip;</div></div>
+        </div>
+
+        <div class="rt-section mc-root" id="rt-monthly-chart">
+          <h3><span id="st-gp-h-metric">GP</span> by month vs survival</h3>
+          <div id="rt-monthly-chart-host"><div class="rt-loading">Loading chart&hellip;</div></div>
         </div>
 
         <div id="rt-exec-summary" class="rt-exec-summary">
           <div class="rt-exec-head">
-            <h3>Exec Summary — Revenue Truth</h3>
-            <div>
-              <span class="rt-basis-badge">Non-JLR / Net</span>
-              <button type="button" class="rt-toggle" id="rt-exec-collapse" style="margin-left:0.5rem;">Hide</button>
+            <h3>What the numbers say</h3>
+            <div><span class="rt-basis-badge">Non-JLR / Net</span></div>
+          </div>
+          <p class="rt-sub">Worry points, trends going the wrong way and what's working: facts from the Booking Sheet and search data. What to do about them is on Strategy &amp; Actions.</p>
+          <div id="rt-exec-body"><div class="rt-loading">Loading&hellip;</div></div>
+        </div>
+
+        <div class="rt-section" id="rt-tiers-cockpit">
+          <h3>Tiers this month &amp; YTD vs target</h3>
+          <!-- Survival Cockpit (Phase B) - one compact glanceable row per
+               tier so the whole revenue book fits on one screen above
+               the fold. Driven by the same tier_history payload that
+               feeds the per-tier sparkline cards below: we just pivot
+               the numbers into a sortable, RAG-coloured table so the
+               business owner sees "is this tier on track this month"
+               and "is this tier on track YTD" without scanning seven
+               separate cards. -->
+          <div class="rf-survival-cockpit" id="rf-survival-cockpit" style="display:none;">
+            <div class="rf-survival-head">
+              <div>
+                <div class="rf-survival-title">Survival Cockpit &mdash; per-tier this month + YTD</div>
+                <div class="rf-survival-sub">MTD = month-to-date revenue &middot; Projected = month-end at current pace &middot; RAG vs monthly target &middot; Trend = this month vs last full month. Click a row to scroll to its tier card below.</div>
+              </div>
+              <div class="rf-survival-foot" id="rf-survival-foot"></div>
+            </div>
+            <div class="rf-survival-table-wrap">
+              <table class="rf-survival-table" id="rf-survival-table">
+                <thead>
+                  <tr>
+                    <th>Tier</th>
+                    <th class="num">MTD</th>
+                    <th class="num">Projected</th>
+                    <th class="num">Target/mo</th>
+                    <th class="rag-col">RAG</th>
+                    <th class="trend-col">Trend</th>
+                    <th class="num">YTD</th>
+                    <th class="num">YTD target</th>
+                    <th class="num">YTD vs</th>
+                    <th class="num">GP &times; margin</th>
+                  </tr>
+                </thead>
+                <tbody id="rf-survival-tbody"></tbody>
+                <tfoot id="rf-survival-tfoot"></tfoot>
+              </table>
             </div>
           </div>
-          <div id="rt-exec-body"><div class="rt-loading">Loading summary&hellip;</div></div>
-        </div>
 
-        <div class="rt-section rt-opportunity-stack" id="rt-opportunity-stack">
-          <h3>Revenue Recovery Opportunities <span class="rt-prov-pill rt-prov-hybrid" title="Live tier revenue / at-risk / GSC numbers are computed from the diagnosis on render (expand a row); levers, £ uplift ranges, difficulty and confidence are curated. Rows flag '⟳ updated' when live drifts &gt;20% from the curated baseline.">Hybrid: live data + curated levers</span></h3>
-          <p class="rt-sub">Where £ can be recovered — ranked by realistic annual uplift, not the largest data gap. Drawn from booking history 2024–2026 + GSC.</p>
-          <div id="rt-opportunity-stack-body"><div class="rt-loading">Loading opportunities&hellip;</div></div>
-        </div>
-
-        <div class="rt-section rt-headline-forecast" id="rt-headline-forecast">
-          <div style="display:flex; gap:0.6rem; align-items:baseline; flex-wrap:wrap;">
-            <h3 style="display:inline;">2. Headline &amp; full-year forecast</h3>
-            <span class="rt-basis-badge">Headline (12-category gross)</span>
-            <span class="rt-forecast-pill">PROJECTION</span>
-          </div>
-          <p class="rt-sub" id="rt-headline-forecast-sub">Measured headline strip first; full-year projections below show closed-month-only vs live-month-aware scenarios side by side.</p>
-          <div id="rt-headline-forecast-signals" class="rt-key-signals" style="display:none;"></div>
-          <div id="rt-headline-forecast-body"></div>
-        </div>
-
-        <div class="rt-section" id="rt-tier-chart-section">
-          <h3>1. Monthly actual vs Booking Sheet target</h3>
-          <p class="rt-sub" id="rt-section-1-sub">Leftmost column = trailing 6-mo average actual vs average target. Other columns = each month. Bar colour = vs target; lines + dots = absolute survival.</p>
-          <div class="rt-tier-chart-wrap"><div id="rt-tier-chart-host"></div></div>
-          <div class="rt-tier-legend" id="rt-tier-legend"></div>
         </div>
 
         <div class="rt-section rt-movers" id="rt-movers">
@@ -10803,38 +10780,6 @@
             <div class="rt-findings-card"><h4>Top 5 growing products</h4><div id="rt-findings-products-growth"><div class="rt-loading">Loading&hellip;</div></div></div>
             <div class="rt-findings-card"><h4>Flags &amp; caveats</h4><div id="rt-findings-flags"><div class="rt-loading">Loading&hellip;</div></div></div>
           </div>
-        </div>
-
-        <div class="rt-section rt-diag-section" id="rt-diag-section">
-          <div class="rt-diag-header">
-            <div style="flex: 1 1 30rem;">
-              <h3>9. Revenue Funnel Diagnosis <span class="rt-diag-pill">TIER &rarr; HUB &rarr; PRODUCT</span></h3>
-              <p class="rt-sub">Expand a tier to see hub diagnostic cards with embedded product tables (all canonical products mapped to that hub). GSC overlay Jan 2025+; revenue from Booking Sheet only.</p>
-            </div>
-            <div class="rt-diag-toggles">
-              <span class="rt-diag-window-bar"><strong>Window:</strong>
-                <label class="rt-toggle"><input type="radio" name="rt-diag-window" value="3"> 3mo</label>
-                <label class="rt-toggle"><input type="radio" name="rt-diag-window" value="6"> 6mo</label>
-                <label class="rt-toggle"><input type="radio" name="rt-diag-window" value="12" checked> 12mo</label>
-                <label class="rt-toggle"><input type="radio" name="rt-diag-window" value="18"> 18mo</label>
-              </span>
-              <label class="rt-toggle"><input type="checkbox" id="rt-diag-include-event"> Include Tier C event pages</label>
-              <label class="rt-toggle" title="Show new / low-traffic pages that are normally hidden as 'insufficient data' (under 1,000 impressions or fewer than 6 months of GSC history)."><input type="checkbox" id="rt-diag-show-new"> Show new / low-data pages</label>
-            </div>
-          </div>
-          <div class="ar-policy-banner ar-policy-banner--diagnosis"
-               role="status"
-               aria-live="polite"
-               data-policy-banner
-               style="display: none;">
-            <div class="ar-policy-banner__icon" aria-hidden="true">ⓘ</div>
-            <div class="ar-policy-banner__body">
-              <div class="ar-policy-banner__title" data-policy-banner-title></div>
-              <div class="ar-policy-banner__detail" data-policy-banner-detail></div>
-            </div>
-          </div>
-          <div id="rt-diag-status" class="rt-diag-status"></div>
-          <div id="rt-diag-tier-list" class="rt-diag-tier-list"><div class="rt-loading">Loading diagnosis&hellip;</div></div>
         </div>
 
         <div class="rt-section" id="rt-category">
@@ -10900,7 +10845,7 @@
           <div class="rt-table-scroll"><table class="rt-table rt-striped" id="rt-funding-table"></table></div>
         </details>
 
-        <script type="module" src="/lib/revenue-truth-controller.mjs"></script>
+        <script type="module" src="/lib/revenue-truth-controller.mjs?v=rt-20261106-stage2"></script>
       </section>
 
       <section class="aigeo-panel" data-panel="scenario-planning">
@@ -17793,6 +17738,17 @@
         <div id="strategy-root" class="strategy-panel" aria-live="polite">
           <div class="rt-loading">Loading Strategy &amp; KPIs…</div>
         </div>
+        <div class="rt-section" id="st-moved-actions">
+          <h3>From Revenue: what to do next</h3>
+          <p class="rt-sub">Revenue's "What to do next", "Investigate (data signals)", "Next to investigate" and Recovery Opportunities, moved here (decision 4).</p>
+          <div id="st-moved-actions-body"><div class="rt-loading">Loading&hellip;</div></div>
+        </div>
+        <div class="rt-section rt-opportunity-stack" id="rt-opportunity-stack">
+          <h3>Revenue Recovery Opportunities <span class="rt-prov-pill rt-prov-hybrid" title="Live tier revenue / at-risk / GSC numbers are computed from the diagnosis on render (expand a row); levers, £ uplift ranges, difficulty and confidence are curated. Rows flag '⟳ updated' when live drifts &gt;20% from the curated baseline.">Hybrid: live data + curated levers</span></h3>
+          <p class="rt-sub">Where £ can be recovered — ranked by realistic annual uplift, not the largest data gap. Drawn from booking history 2024–2026 + GSC.</p>
+          <div id="rt-opportunity-stack-body"><div class="rt-loading">Loading opportunities&hellip;</div></div>
+        </div>
+
       </section>
 
       <!-- Optimisation Tracking Panel -->

@@ -49,7 +49,8 @@ import { buildHeadlineReconciliation } from '../../lib/revenue-truth-headline-re
 import { parseIncludeJlr } from '../../lib/parse-include-jlr.mjs';
 import { DEFAULT_TIER_BANDS } from '../../lib/revenue-truth-ui-core.mjs';
 import { classifyVsMonthTarget } from '../../lib/booking-sheet-monthly-targets.mjs';
-import { resolveGpTargetsBundle } from '../../lib/targets-master.mjs';
+import { resolveGpTargetsBundle, positionTargets } from '../../lib/targets-master.mjs';
+import { resolveCostRiseByYear, GP_TARGET_BASE_YEAR } from '../../lib/business-targets.mjs';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
@@ -137,6 +138,7 @@ async function buildPayload(supabase, propertyUrl, includeJlr) {
       },
       gp_tiers_basis: 'this month (seasonal), Targets panel',
       bills_line: gpBundle.bills_line,
+      ...chartTargets(gpBundle),
       annual_gp: gpBundle.annualTargets,
       derived_sales: gpBundle.derived,
       margin: gpBundle.margin,
@@ -247,6 +249,17 @@ async function fetchMarketMap(supabase, _propertyUrl) {
 // ----------------------------------------------------------------------
 // Annotation + shaping helpers (each one small)
 // ----------------------------------------------------------------------
+
+/** Targets for "Where we are now" and the month-by-month chart (flat levels step back by year with cost rises). */
+function chartTargets(gpBundle) {
+  const money = gpBundle.master.money;
+  return {
+    position: positionTargets(gpBundle.master),
+    flat_gp_monthly: { survival: money.survival_monthly, stretch1: money.stretch1_monthly, stretch2: money.stretch2_monthly },
+    cost_rise_by_year: resolveCostRiseByYear(gpBundle.targets),
+    gp_target_base_year: GP_TARGET_BASE_YEAR
+  };
+}
 
 /** Revenue the Targets panel's survival GP needs, by month and for the year. */
 function panelRevenueTargets(gpBundle) {
