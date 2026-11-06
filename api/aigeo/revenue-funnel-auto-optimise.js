@@ -425,18 +425,6 @@ function extractBaseline(summary, scenarioSurvivalRev) {
   };
 }
 
-async function fetchActiveScenarioSurvivalRev(supabase, propertyUrl) {
-  const { data, error } = await supabase
-    .from('revenue_funnel_scenarios')
-    .select('monthly_survival_baseline_gbp')
-    .eq('property_url', propertyUrl)
-    .eq('is_active', true)
-    .maybeSingle();
-  if (error || !data) return null;
-  const n = Number(data.monthly_survival_baseline_gbp);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
 function stretchTargetsForBaseline(baseline) {
   const br = baseline.annualised_revenue_gbp;
   const bg = baseline.annualised_gp_gbp;
@@ -601,8 +589,8 @@ export default async function handler(req, res) {
       academyTierHealth(supabase, propertyUrl)
     ]);
     if (SP.setBlendedSeasonality) SP.setBlendedSeasonality(blended);
-    const scenarioSurvivalRev = await fetchActiveScenarioSurvivalRev(supabase, propertyUrl);
-    const baseline = extractBaseline(summary, scenarioSurvivalRev);
+    // Scenario Planning is retired: survival comes only from the Targets panel (via the summary's pyramid band).
+    const baseline = extractBaseline(summary, null);
     const optimCycles = await SP.fetchActiveOptimisationCycles(supabase);
     const suppressionMap = SP.buildSuppressionMap(optimCycles);
     const monthIdx = SP.currentMonthIndex();
