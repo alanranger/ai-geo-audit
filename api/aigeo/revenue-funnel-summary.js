@@ -131,6 +131,8 @@ const tierTarget = (t) => FT?.tiers?.[t.id]?.monthly_target ?? 0;
 const tierGpPct = (t) => FT?.tiers?.[t.id]?.gross_profit_pct ?? null;
 const seasonalRevenue = (monthIdx) => FT?.seasonal_revenue?.[monthIdx] || 0;
 const annualRevenueTarget = () => FT?.annual_revenue || 0;
+/** A tier's seasonal YTD (closed months + this month pro rata) and full-year revenue targets. */
+const tierTargetsFor = (tierId) => ({ ytd: FT?.tiers?.[tierId]?.ytd_target || 0, year: FT?.tiers?.[tierId]?.year_target || 0 });
 const targetsBlock = () => ({
   seasonal_revenue: FT?.seasonal_revenue || [],
   target_mix_margin: FT?.target_mix_margin ?? null,
@@ -933,8 +935,8 @@ function computeTierYtd(series) {
     const v = Number(p.revenue);
     if (Number.isFinite(v)) { revenue += v; monthsWithData += 1; }
   }
-  const flat = series.monthly_target || 0;
-  const target = flat * (monthIdx + (dayInMonth / dim));
+  const tt = tierTargetsFor(series.tier_id);
+  const target = tt.ytd;
   const variance = target > 0 ? ((revenue - target) / target) * 100 : null;
   const gpYtd = grossProfitAmount(revenue, series.gross_profit_pct);
   const monthsElapsed = monthIdx + (dayInMonth / dim);
@@ -944,7 +946,7 @@ function computeTierYtd(series) {
     months_with_data: monthsWithData,
     revenue_gbp: revenue,
     target_prorata_gbp: target,
-    target_full_year_gbp: flat * 12,
+    target_full_year_gbp: tt.year,
     variance_pct: variance,
     gross_profit_ytd_gbp: gpYtd,
     run_rate_annual_revenue_gbp: annualisedRevenue == null ? null : Number(annualisedRevenue.toFixed(2)),
