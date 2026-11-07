@@ -31,6 +31,17 @@ check('send line uses billing-cycle meter', /Billing cycle|no Squarespace meter/
 check('segments listed', (await page.$$('#mk-seg-table tbody tr')).length >= 8);
 check('import block shown', /list import is blocked/i.test(await page.textContent('#mk-segments')));
 await page.screenshot({ path: `${out}/1-marketing-top.png` });
+const strip = await page.textContent('section[data-panel="marketing"] .rt-strip');
+check('subscribers tile shows the eligible count', /923/.test(strip), strip.match(/Subscribers\s*([\d,]+)/)?.[1] || '');
+check('no stale collector warning in Data health', !/collector (stale|failed)/i.test(strip), strip.match(/Data health[^·]*/)?.[0]?.slice(0, 80) || '');
+const eng = await page.textContent('#mk-engagement');
+check('backfill line reads real totals', /Backfill: 163 of 163 campaigns · complete · last run/.test(eng), eng.match(/Backfill:[^\n]{0,80}/)?.[0] || '');
+check('engagement explained as real open/click times', /real time of each person's latest recorded open/.test(eng));
+await page.waitForSelector('#mk-review-table tbody tr', { timeout: 60000 }).catch(() => {});
+const review = await page.$$eval('#mk-review-table tbody tr', (trs) => trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim().replace(/\S+@\S+/g, '<email>'))));
+check('review shows the 2 still-blocked people with evidence', review.length === 2 && review.every((r) => /\d/.test(r[2]) && r[8].includes('Clear')), review.map((r) => `${r[2]} · opens since ${r[4]} · orders since ${r[6]}`).join(' | '));
+await page.locator('#mk-review').screenshot({ path: `${out}/5-review-and-clear.png` });
+await page.locator('#mk-engagement').screenshot({ path: `${out}/6-engagement.png` });
 
 await page.selectOption('#mk-cust-seg', 'beginners-no-lightroom-local');
 await page.click('[data-mk="cust-search"]');
