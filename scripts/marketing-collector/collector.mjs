@@ -1,0 +1,143 @@
+/**
+ * Squarespace email-report collector (runs on Alan's PC, dedicated browser profile — never his everyday browser).
+ *
+ *   npm run marketing:collector-login      once: opens a window, Alan signs in to Squarespace himself (password is never
+ *                                          typed or stored by this script); close the window when the dashboard shows
+ *   npm run marketing:collector            daily (scheduled task): send meter + sent-campaign totals + recipient events
+ *                                          for recent campaigns and any not yet complete (resumes where it stopped)
+ *   npm run marketing:collector-backfill   every sent campaign's recipient events (checkpoint per campaign; re-runnable)
+ *   add --dry to read without posting (prints counts only)
+ *
+ * Posts to /api/aigeo/marketing (action=collector) with the admin key from this machine's env files. Expired login,
+ * a changed Squarespace response or an interrupted run is reported as a stale / failed run, never as zero.
+ */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { chromium } from 'playwright';
+import { listSent, PAGE_HELPERS, readEventUsers, readMeter, readSummary } from './page-reads.mjs';
+
+const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..', '..');
+const PROFILE = path.join(process.env.LOCALAPPDATA || os.homedir(), 'AlanRanger', 'sqs-collector-profile');
+const SITE = 'https://alan-ranger.squarespace.com/config/marketing/campaigns';
+const API = `${process.env.MARKETING_API_BASE || 'https://ai-geo-audit.vercel.app'}/api/aigeo/marketing`;
+const args = new Set(process.argv.slice(2));
+const DRY = args.has('--dry');
+const RECENT_DAYS = 45;
+const EVENT_TYPES = ['DELIVERED', 'OPENED', 'CLICKED', 'UNSUBSCRIBED'];
+
+function adminKey() {
+  if (process.env.ARP_ADMIN_KEY) return process.env.ARP_ADMIN_KEY;
+  for (const f of ['.env.local', '.env.vercel.prod']) {
+    const file = path.join(ROOT, f);
+    if (!fs.existsSync(file)) continue;
+    const line = fs.readFileSync(file, 'utf8').split(/\r?\n/).find((l) => l.startsWith('ARP_ADMIN_KEY='));
+    if (line) return line.slice('ARP_ADMIN_KEY='.length).replace(/^"|"$/g, '').trim();
+  }
+  throw new Error('ARP_ADMIN_KEY not found in env or .env files');
+}
+
+async function api(method, body, query = '') {
+  if (DRY && method === 'POST') return { ok: true, dry: true };
+  const r = await fetch(`${API}${query}`, { method, headers: { 'Content-Type': 'application/json', 'x-arp-admin-key': adminKey() }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.ok) throw new Error(`api ${r.status}: ${j.error || 'failed'}`);
+  return j;
+}
+const post = (kindOf, data) => api('POST', { action: 'collector', kind_of: kindOf, data });
+
+async function openSite(headless) {
+  fs.mkdirSync(PROFILE, { recursive: true });
+  const ctx = await chromium.launchPersistentContext(PROFILE, { headless, channel: 'chrome', viewport: { width: 1280, height: 900 } }).catch(() => chromium.launchPersistentContext(PROFILE, { headless }));
+  const page = ctx.pages()[0] || await ctx.newPage();
+  await page.goto(SITE, { waitUntil: 'domcontentloaded', timeout: 90000 });
+  return { ctx, page };
+}
+
+async function login() {
+  const { ctx, page } = await openSite(false);
+  console.log('Sign in to Squarespace in the window that opened (this script never sees or types your password).');
+  console.log('When the Email Campaigns page shows, close the window.');
+  await new Promise((resolve) => ctx.on('close', resolve));
+  void page;
+}
+
+async function signedIn(page) {
+  await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {});
+  if (!/alan-ranger\.squarespace\.com\/config/.test(page.url())) return false;
+  await page.evaluate(PAGE_HELPERS);
+  return page.evaluate(() => window.__arpGet('/api/newsletters/v1.0/composer/billing/billing-state').then(() => true, () => false));
+}
+
+function pickEventTargets(sent, state, backfill) {
+  const done = new Map(state.map((s) => [s.email_id, s]));
+  const recent = Date.now() - RECENT_DAYS * 86400000;
+  return sent.filter((c) => backfill ? !done.get(c.email_id)?.events_complete : (Date.parse(c.sent_on) >= recent || !done.get(c.email_id)?.events_complete))
+    .sort((a, b) => String(b.sent_on).localeCompare(String(a.sent_on)));
+}
+
+async function campaignEvents(page, c, summary) {
+  const rows = [];
+  for (const type of EVENT_TYPES) rows.push(...await page.evaluate(readEventUsers, { emailId: c.email_id, type }));
+  for (const u of summary.url_clicks) rows.push(...await page.evaluate(readEventUsers, { emailId: c.email_id, type: 'CLICKED', url: u.url }));
+  const delivered = rows.filter((r) => r.event_type === 'DELIVERED').length;
+  if (delivered !== summary.delivered) throw new Error(`INCOMPLETE delivered list for ${c.email_id}: ${delivered}/${summary.delivered}`);
+  return rows;
+}
+
+async function postEvents(emailId, rows) {
+  for (let i = 0; i < rows.length; i += 2000) await post('events', { email_id: emailId, events: rows.slice(i, i + 2000), complete: i + 2000 >= rows.length });
+  if (!rows.length) await post('events', { email_id: emailId, events: [], complete: true });
+}
+
+const eta = (t0, done, total) => (done ? Math.round(((Date.now() - t0) / done) * (total - done) / 60000) : null);
+
+async function collect(page, runId, backfill, maxMinutes) {
+  const meter = await page.evaluate(readMeter);
+  await post('meter', { ...meter, run_id: runId });
+  const sent = await page.evaluate(listSent);
+  const state = DRY ? [] : (await api('GET', null, '?action=collector-state')).campaigns;
+  const known = new Set(state.map((s) => s.email_id));
+  const summaries = new Map();
+  const refresh = sent.filter((c) => !known.has(c.email_id) || Date.parse(c.sent_on) >= Date.now() - RECENT_DAYS * 86400000);
+  for (const c of refresh) summaries.set(c.email_id, { ...c, ...(await page.evaluate(readSummary, c.email_id)) });
+  for (let i = 0; i < refresh.length; i += 25) await post('campaigns', { campaigns: refresh.slice(i, i + 25).map((c) => summaries.get(c.email_id)) });
+  const targets = pickEventTargets(sent, state, backfill);
+  const t0 = Date.now();
+  let done = 0;
+  let events = 0;
+  for (const c of targets) {
+    if ((Date.now() - t0) / 60000 > maxMinutes) break;
+    const summary = summaries.get(c.email_id) || { ...c, ...(await page.evaluate(readSummary, c.email_id)) };
+    const rows = await campaignEvents(page, c, summary);
+    await postEvents(c.email_id, rows);
+    done += 1;
+    events += rows.length;
+    await post('run', { run_id: runId, items_done: done, items_total: targets.length, checkpoint: { last_email_id: c.email_id }, session_ok: true });
+    console.log(`${done}/${targets.length} (${Math.round((done / targets.length) * 100)}%) · ${rows.length} events · ETA ${eta(t0, done, targets.length) ?? '?'} min`);
+  }
+  return { meter_used: meter.used, meter_quota: meter.quota, campaigns_listed: sent.length, summaries_refreshed: refresh.length, event_campaigns_done: done, event_campaigns_target: targets.length, events, complete: done === targets.length };
+}
+
+async function main() {
+  if (args.has('--login')) return login();
+  const backfill = args.has('--backfill');
+  const { run_id: runId } = DRY ? { run_id: null } : await post('run', { kind: backfill ? 'collector:backfill' : 'collector', host: os.hostname() });
+  const { ctx, page } = await openSite(true);
+  try {
+    if (!(await signedIn(page))) throw new Error('SESSION_EXPIRED');
+    const summary = await collect(page, runId, backfill, backfill ? 600 : 50);
+    await post('run', { run_id: runId, status: summary.complete ? 'ok' : 'partial', session_ok: true, summary });
+    console.log(JSON.stringify(summary));
+  } catch (err) {
+    const msg = String(err?.message || err);
+    const expired = /SESSION_EXPIRED/.test(msg);
+    await post('run', { run_id: runId, status: expired ? 'stale' : 'failed', session_ok: !expired, error: expired ? 'Squarespace login expired: run "npm run marketing:collector-login" once' : msg }).catch(() => {});
+    console.error(expired ? 'Squarespace login expired: run npm run marketing:collector-login once.' : msg);
+    process.exitCode = 1;
+  } finally {
+    await ctx.close();
+  }
+}
+
+main();
