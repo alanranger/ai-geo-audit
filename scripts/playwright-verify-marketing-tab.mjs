@@ -54,8 +54,8 @@ if (process.argv.includes('--sync')) {
   await page.screenshot({ path: `${out}/3-sync-progress.png` });
   await page.waitForSelector('#mk-modal', { state: 'detached', timeout: 240000 }).catch(() => {});
   await page.waitForSelector('#mk-sources', { timeout: 120000 });
-  const txt = await page.textContent('#mk-sources');
-  check('sync finished, steps show OK', (txt.match(/\bOK\b/g) || []).length >= 4, '');
+  const pills = await page.$$eval('#mk-sources .rt-pill', (els) => els.map((e) => e.textContent.trim()));
+  check('sync finished, steps show OK', pills.filter((p) => p === 'OK').length >= 4, pills.join(','));
   await page.locator('#mk-sources').screenshot({ path: `${out}/4-sources.png` });
 }
 

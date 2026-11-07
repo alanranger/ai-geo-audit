@@ -14,10 +14,11 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { listSent, PAGE_HELPERS, readEventUsers, readMeter, readSummary } from './page-reads.mjs';
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..', '..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PROFILE = path.join(process.env.LOCALAPPDATA || os.homedir(), 'AlanRanger', 'sqs-collector-profile');
 const SITE = 'https://alan-ranger.squarespace.com/config/marketing/campaigns';
 const API = `${process.env.MARKETING_API_BASE || 'https://ai-geo-audit.vercel.app'}/api/aigeo/marketing`;
