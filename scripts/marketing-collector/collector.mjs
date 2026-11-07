@@ -11,6 +11,7 @@
  * Posts to /api/aigeo/marketing (action=collector) with the admin key from this machine's env files. Expired login,
  * a changed Squarespace response or an interrupted run is reported as a stale / failed run, never as zero.
  */
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,6 +27,7 @@ const args = new Set(process.argv.slice(2));
 const DRY = args.has('--dry');
 const RECENT_DAYS = 45;
 const EVENT_TYPES = ['DELIVERED', 'OPENED', 'CLICKED', 'UNSUBSCRIBED'];
+const RELOGIN = 'Squarespace login expired: in the AI GEO Audit folder run "npm run marketing:collector-login", sign in with Google in the Chrome window, then close it';
 
 function adminKey() {
   if (process.env.ARP_ADMIN_KEY) return process.env.ARP_ADMIN_KEY;
@@ -47,20 +49,46 @@ async function api(method, body, query = '') {
 }
 const post = (kindOf, data) => api('POST', { action: 'collector', kind_of: kindOf, data });
 
+/** Same installed Chrome as the sign-in window (a profile written by one Chrome build must be read by the same build). */
 async function openSite(headless) {
   fs.mkdirSync(PROFILE, { recursive: true });
-  const ctx = await chromium.launchPersistentContext(PROFILE, { headless, channel: 'chrome', viewport: { width: 1280, height: 900 } }).catch(() => chromium.launchPersistentContext(PROFILE, { headless }));
+  const ctx = await chromium.launchPersistentContext(PROFILE, { headless, channel: 'chrome', viewport: { width: 1280, height: 900 } }).catch((err) => {
+    throw new Error(/lock|in use|already/i.test(String(err?.message)) ? 'PROFILE_IN_USE: close the Squarespace sign-in window, then run again' : `CHROME_LAUNCH: ${String(err?.message || err).split('\n')[0]}`);
+  });
   const page = ctx.pages()[0] || await ctx.newPage();
   await page.goto(SITE, { waitUntil: 'domcontentloaded', timeout: 90000 });
   return { ctx, page };
 }
 
+function installedChrome() {
+  const roots = [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA].filter(Boolean);
+  return roots.map((r) => path.join(r, 'Google', 'Chrome', 'Application', 'chrome.exe')).find((p) => fs.existsSync(p)) || null;
+}
+
+/**
+ * Google refuses sign-in in a browser started under automation (Playwright adds --enable-automation / --no-sandbox and
+ * sets navigator.webdriver). So the one-time sign-in opens Alan's normal installed Chrome on the collector's own profile
+ * folder with no automation flags and nothing attached; the scheduled runs later reuse the session saved in that folder.
+ */
+function loginLaunch() {
+  const exe = installedChrome();
+  if (!exe) throw new Error('Google Chrome is not installed in the usual place');
+  return { exe, args: [`--user-data-dir=${PROFILE}`, '--no-first-run', '--no-default-browser-check', SITE] };
+}
+
 async function login() {
-  const { ctx, page } = await openSite(false);
-  console.log('Sign in to Squarespace in the window that opened (this script never sees or types your password).');
-  console.log('When the Email Campaigns page shows, close the window.');
-  await new Promise((resolve) => ctx.on('close', resolve));
-  void page;
+  fs.mkdirSync(PROFILE, { recursive: true });
+  const { exe, args } = loginLaunch();
+  console.log('A normal Chrome window is opening on the collector\'s own profile (not your everyday Chrome).');
+  console.log('Sign in to Squarespace there (Google sign-in is fine; this script never sees or types your password).');
+  console.log('When the Email Campaigns page shows, close that Chrome window.');
+  const child = spawn(exe, args, { stdio: 'ignore' });
+  await new Promise((resolve) => child.on('exit', resolve));
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  const { ctx, page } = await openSite(true);
+  const ok = await signedIn(page).catch(() => false);
+  await ctx.close();
+  console.log(ok ? 'Signed in: the session is saved for the nightly collector.' : 'Not signed in yet: run npm run marketing:collector-login again and finish the sign-in before closing the window.');
 }
 
 async function signedIn(page) {
@@ -122,10 +150,14 @@ async function collect(page, runId, backfill, maxMinutes) {
 
 async function main() {
   if (args.has('--login')) return login();
+  if (args.has('--print-login')) return console.log(JSON.stringify(loginLaunch()));
   const backfill = args.has('--backfill');
   const { run_id: runId } = DRY ? { run_id: null } : await post('run', { kind: backfill ? 'collector:backfill' : 'collector', host: os.hostname() });
-  const { ctx, page } = await openSite(true);
+  let ctx = null;
   try {
+    const site = await openSite(true);
+    ctx = site.ctx;
+    const { page } = site;
     if (!(await signedIn(page))) throw new Error('SESSION_EXPIRED');
     const summary = await collect(page, runId, backfill, backfill ? 600 : 50);
     await post('run', { run_id: runId, status: summary.complete ? 'ok' : 'partial', session_ok: true, summary });
@@ -133,11 +165,11 @@ async function main() {
   } catch (err) {
     const msg = String(err?.message || err);
     const expired = /SESSION_EXPIRED/.test(msg);
-    await post('run', { run_id: runId, status: expired ? 'stale' : 'failed', session_ok: !expired, error: expired ? 'Squarespace login expired: run "npm run marketing:collector-login" once' : msg }).catch(() => {});
-    console.error(expired ? 'Squarespace login expired: run npm run marketing:collector-login once.' : msg);
+    await post('run', { run_id: runId, status: expired ? 'stale' : 'failed', session_ok: !expired, error: expired ? RELOGIN : msg }).catch(() => {});
+    console.error(expired ? RELOGIN : msg);
     process.exitCode = 1;
   } finally {
-    await ctx.close();
+    if (ctx) await ctx.close();
   }
 }
 
