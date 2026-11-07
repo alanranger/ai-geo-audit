@@ -132,6 +132,12 @@ const GETS = {
   'collector-state': collectorState,
   'suppression-review': (sb) => reviewList(sb),
   'list-load-next': (sb) => nextLoad(sb),
+  'plan-import-next': async (sb) => {
+    const { data } = await sb.from('marketing_collector_runs').select('run_id').eq('kind', 'plan-import').eq('status', 'queued').order('started_at').limit(1).maybeSingle();
+    if (!data) return { job: null };
+    await sb.from('marketing_collector_runs').update({ status: 'running', host: 'alan-pc', heartbeat_at: new Date().toISOString() }).eq('run_id', data.run_id);
+    return { job: { run_id: data.run_id } };
+  },
   run: async (sb, q) => {
     const { data, error } = await sb.from('marketing_collector_runs').select('run_id, kind, status, started_at, heartbeat_at, finished_at, items_done, items_total, checkpoint, summary, error').eq('run_id', q.run_id).maybeSingle();
     if (error || !data) throw new Error('run not found');
@@ -163,6 +169,7 @@ const POSTS = {
   'list-load-finish': (sb, b) => finishLoad(sb, { ...b, status: b.status === 'ok' ? 'ok' : 'failed' }),
   'presend-check': (sb, b) => presendCheck(sb, b.export_id),
   'identity-separate': (sb, b) => separateIdentity(sb, b, () => runStep(sb, 'customers')),
+  'plan-import-request': async (sb) => ({ run_id: await logRun(sb, { kind: 'plan-import', status: 'queued', host: 'dashboard', items_total: 0, items_done: 0, checkpoint: { step: 'waiting for Alan\'s PC (checks every 5 min)' } }) }),
   collector: ingest,
   ...QUERY_POSTS
 };

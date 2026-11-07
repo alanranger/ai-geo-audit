@@ -205,8 +205,20 @@ async function undoFlips(page, job, listId, ids) {
   return { ...r, all_subscribers: allSubs };
 }
 
+/** "Re-read plan files" from the dashboard: read the Pick n Mix statements on this PC, then rebuild the customer view. */
+async function planImportJob() {
+  const { job } = await api('GET', null, '?action=plan-import-next');
+  if (!job) return;
+  const code = await new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--env-file=.env.local', 'scripts/pnm-plans/import.mjs', `--run-id=${job.run_id}`], { cwd: ROOT, stdio: 'inherit' });
+    child.on('exit', resolve);
+  });
+  if (code === 0) await api('POST', { action: 'sync', step: 'customers' }).catch((e) => console.error(e.message));
+}
+
 /** Scheduled every few minutes: opens the browser only when the dashboard has queued a load. */
 async function jobs() {
+  await planImportJob().catch((e) => console.error(`plan import: ${e.message}`));
   for (let n = 0; n < 5; n += 1) {
     const { job } = await api('GET', null, '?action=list-load-next');
     if (!job) return;
