@@ -8,6 +8,7 @@ import { band, engagementView } from '../lib/marketing/engagement.mjs';
 import { latestCollectorRun } from '../lib/marketing/overview.mjs';
 import { resolveOne } from '../lib/marketing/suppression-review.mjs';
 import { safeCell, validListName } from '../lib/marketing/exports.mjs';
+import { presendState, stateOf } from '../lib/marketing/list-load.mjs';
 import { allFacts } from '../lib/marketing/facts.mjs';
 import { runAlert } from '../lib/marketing/health.mjs';
 import { buildIdentities, sqsOrderNumber } from '../lib/marketing/identity.mjs';
@@ -198,4 +199,15 @@ test('import file safety: formula-looking names are neutralised, list names foll
   assert.equal(safeCell('Ann'), 'Ann');
   assert.equal(validListName('ARP | Jan beginners | Beginners booked | 2026-11-07'), 'ARP | Jan beginners | Beginners booked | 2026-11-07');
   assert.throws(() => validListName('x'.repeat(76)));
+});
+
+test('list load: before-check drops not subscribed / suppressed / missing; pre-send PASS lasts 30 minutes', () => {
+  const c = { byEmail: new Map([['a@x.com', { accepts_marketing: true }], ['b@x.com', { accepts_marketing: false }], ['c@x.com', { accepts_marketing: true }], ['d@x.com', { accepts_marketing: true, missing_since: '2026-11-01' }]]), suppressed: new Set([emailHash('c@x.com')]) };
+  assert.deepEqual(['A@x.com', 'b@x.com', 'c@x.com', 'd@x.com', 'e@x.com'].map((e) => stateOf(e, c)), ['pass', 'not_subscribed', 'suppressed', 'missing', 'missing']);
+  const at = '2026-11-07T12:00:00Z';
+  const t = Date.parse(at);
+  assert.equal(presendState({ presend_at: at, presend_result: { result: 'PASS' } }, t + 29 * 60000).state, 'pass');
+  assert.equal(presendState({ presend_at: at, presend_result: { result: 'PASS' } }, t + 31 * 60000).state, 'not_checked');
+  assert.equal(presendState({ presend_at: at, presend_result: { result: 'FAIL' } }, t + 60000).state, 'fail');
+  assert.equal(presendState({}).state, 'not_checked');
 });

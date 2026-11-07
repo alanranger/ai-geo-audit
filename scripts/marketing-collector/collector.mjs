@@ -6,6 +6,8 @@
  *   npm run marketing:collector            daily (scheduled task): send meter + sent-campaign totals + recipient events
  *                                          for recent campaigns and any not yet complete (resumes where it stopped)
  *   npm run marketing:collector-backfill   every sent campaign's recipient events (checkpoint per campaign; re-runnable)
+ *   npm run marketing:list-jobs            every 5 min (scheduled task): runs any "Load into Squarespace list" the
+ *                                          dashboard queued — consent checked by the dashboard before and after
  *   add --dry to read without posting (prints counts only)
  *
  * Posts to /api/aigeo/marketing (action=collector) with the admin key from this machine's env files. Expired login,
@@ -18,6 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { listSent, PAGE_HELPERS, readEventUsers, readMeter, readSummary } from './page-reads.mjs';
+import { createList, readLists, subscribedTotal, uploadCsv } from './page-writes.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PROFILE = path.join(process.env.LOCALAPPDATA || os.homedir(), 'AlanRanger', 'sqs-collector-profile');
@@ -148,9 +151,75 @@ async function collect(page, runId, backfill, maxMinutes) {
   return { meter_used: meter.used, meter_quota: meter.quota, campaigns_listed: sent.length, summaries_refreshed: refresh.length, event_campaigns_done: done, event_campaigns_target: targets.length, events, complete: done === targets.length };
 }
 
+const csvCell = (v) => {
+  const s = String(v ?? '').replace(/^[=+\-@\t\r]+/, '');
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+const loadStep = (job, n, step) => api('POST', { action: 'list-load-progress', run_id: job.run_id, export_id: job.export_id, items_done: n, items_total: 4, step }).catch(() => {});
+
+async function targetList(page, name) {
+  const same = (await page.evaluate(readLists)).find((l) => l.name === name);
+  if (same && same.count > 0) throw new Error(`a Squarespace list called "${name}" already has ${same.count} contacts; rename the snapshot`);
+  return same || page.evaluate(createList, name);
+}
+
+async function waitForCount(page, listId, want) {
+  let seen = null;
+  for (let i = 0; i < 36; i += 1) {
+    seen = (await page.evaluate(readLists)).find((l) => l.id === listId)?.count ?? null;
+    if (seen != null && seen >= want) return seen;
+    await new Promise((ok) => setTimeout(ok, 5000));
+  }
+  return seen;
+}
+
+/** One "Load into Squarespace list" job: check → create list → import passed people → re-check (dashboard decides). */
+async function runLoad(page, job) {
+  await loadStep(job, 1, 'Re-reading consent from Squarespace before the import');
+  const pre = await api('POST', { action: 'list-load-precheck', export_id: job.export_id });
+  if (!pre.import.length) throw new Error(`nobody passed the consent check (${JSON.stringify(pre.dropped)}); nothing imported`);
+  const before = await page.evaluate(subscribedTotal);
+  await loadStep(job, 2, `Creating list and importing ${pre.import.length} people`);
+  const list = await targetList(page, job.list_name);
+  const csv = ['Email Address,First Name,Last Name', ...pre.import.map((m) => [m.email, csvCell(m.first_name), csvCell(m.last_name)].join(','))].join('\n');
+  await page.evaluate(uploadCsv, { listId: list.id, csv, filename: `arp-${job.export_id.slice(0, 8)}.csv` });
+  await loadStep(job, 3, 'Waiting for Squarespace to finish the import');
+  const count = await waitForCount(page, list.id, pre.import.length);
+  const after = await page.evaluate(subscribedTotal);
+  await loadStep(job, 4, 'Re-reading consent after the import');
+  const post2 = await api('POST', { action: 'list-load-postcheck', export_id: job.export_id, list_id: list.id, list_count: count, all_subscribers_before: before, all_subscribers_after: after });
+  return { list_id: list.id, imported: pre.import.length, dropped: pre.dropped, list_count: count, all_subscribers_before: before, all_subscribers_after: after, status: post2.status, flips: post2.flips };
+}
+
+/** Scheduled every few minutes: opens the browser only when the dashboard has queued a load. */
+async function jobs() {
+  for (let n = 0; n < 5; n += 1) {
+    const { job } = await api('GET', null, '?action=list-load-next');
+    if (!job) return;
+    let ctx = null;
+    try {
+      const site = await openSite(true);
+      ctx = site.ctx;
+      if (!(await signedIn(site.page))) throw new Error('SESSION_EXPIRED');
+      const summary = await runLoad(site.page, job);
+      await api('POST', { action: 'list-load-finish', run_id: job.run_id, export_id: job.export_id, status: 'ok', summary });
+      console.log(JSON.stringify(summary));
+    } catch (err) {
+      const msg = /SESSION_EXPIRED/.test(String(err?.message)) ? RELOGIN : String(err?.message || err);
+      await api('POST', { action: 'list-load-finish', run_id: job.run_id, export_id: job.export_id, status: 'failed', error: msg }).catch(() => {});
+      console.error(msg);
+      process.exitCode = 1;
+    } finally {
+      if (ctx) await ctx.close();
+    }
+  }
+}
+
+const MODES = { '--login': login, '--print-login': () => console.log(JSON.stringify(loginLaunch())), '--jobs': jobs };
+
 async function main() {
-  if (args.has('--login')) return login();
-  if (args.has('--print-login')) return console.log(JSON.stringify(loginLaunch()));
+  const mode = Object.keys(MODES).find((m) => args.has(m));
+  if (mode) return MODES[mode]();
   const backfill = args.has('--backfill');
   const { run_id: runId } = DRY ? { run_id: null } : await post('run', { kind: backfill ? 'collector:backfill' : 'collector', host: os.hostname() });
   let ctx = null;

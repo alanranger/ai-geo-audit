@@ -10,6 +10,10 @@
  * GET  ?action=collector-state                                 which sent campaigns already have complete recipient events
  * GET  ?action=suppression-review                              suppressed people subscribed again, with the evidence
  * POST { action: 'suppression-resolve', email_hash, reason }   clear one person (typed reason, logged; Squarespace untouched)
+ * POST { action: 'list-load-request', export_id }              queue "Load into Squarespace list" (run on Alan's PC)
+ * GET  ?action=list-load-next  ·  POST list-load-precheck / -postcheck / -progress / -finish   (PC job runner)
+ * POST { action: 'presend-check', export_id }                   consent + suppression for everyone loaded → PASS / FAIL
+ * GET  ?action=run&run_id=                                      progress of a queued / running job
  * POST { action: 'sync', step: profiles|orders|postcodes|customers }
  * POST { action: 'segment-preview', segment_ids, params }      count + exclusion reasons + first 25 people
  * POST { action: 'segment-save', segment_id?, name, description, definition }
@@ -23,11 +27,12 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { ingest } from '../../lib/marketing/collector-ingest.mjs';
 import { customerDetail, listCustomers } from '../../lib/marketing/customers.mjs';
-import { createExport, exportCsv, setExportStatus } from '../../lib/marketing/exports.mjs';
+import { createExport, createTestExport, exportCsv, setExportStatus } from '../../lib/marketing/exports.mjs';
 import { allSegments, evalCtx, loadPeople, overview, withParams } from '../../lib/marketing/overview.mjs';
 import { rebuildCustomers } from '../../lib/marketing/rebuild.mjs';
 import { evaluate } from '../../lib/marketing/segments.mjs';
 import { resolveOne, reviewList } from '../../lib/marketing/suppression-review.mjs';
+import { finishLoad, nextLoad, postcheck, precheck, presendCheck, requestLoad, runProgress } from '../../lib/marketing/list-load.mjs';
 import { finishRun, logRun, serviceClient } from '../../lib/marketing/store.mjs';
 import { syncOrders, syncPostcodes, syncProfiles } from '../../lib/marketing/sync.mjs';
 
@@ -108,7 +113,13 @@ const GETS = {
   customers: (sb, q) => listCustomers(sb, { q: q.q, segment_id: q.segment_id, page: q.page || 0, subscribed_only: q.subscribed_only === '1', params: params(q) }),
   customer: (sb, q) => customerDetail(sb, q.person_id, params(q)),
   'collector-state': collectorState,
-  'suppression-review': (sb) => reviewList(sb)
+  'suppression-review': (sb) => reviewList(sb),
+  'list-load-next': (sb) => nextLoad(sb),
+  run: async (sb, q) => {
+    const { data, error } = await sb.from('marketing_collector_runs').select('run_id, kind, status, started_at, heartbeat_at, finished_at, items_done, items_total, checkpoint, summary, error').eq('run_id', q.run_id).maybeSingle();
+    if (error || !data) throw new Error('run not found');
+    return { run: data };
+  }
 };
 
 async function collectorState(sb) {
@@ -123,8 +134,15 @@ const POSTS = {
   'segment-save': saveSegment,
   'export-create': (sb, b) => createExport(sb, { ...b, created_by: SET_BY }, () => runStep(sb, 'profiles').then(() => runStep(sb, 'customers'))),
   'export-status': (sb, b) => setExportStatus(sb, { ...b, by: SET_BY }),
+  'export-test-create': (sb, b) => createTestExport(sb, { ...b, created_by: SET_BY }),
   'campaign-plan': campaignPlan,
   'suppression-resolve': (sb, b) => resolveOne(sb, b, () => runStep(sb, 'customers')),
+  'list-load-request': (sb, b) => requestLoad(sb, b.export_id, SET_BY),
+  'list-load-precheck': (sb, b) => precheck(sb, b.export_id),
+  'list-load-postcheck': (sb, b) => postcheck(sb, b.export_id, b),
+  'list-load-progress': (sb, b) => runProgress(sb, b.run_id, { items_done: b.items_done, items_total: b.items_total, checkpoint: { export_id: b.export_id, step: String(b.step || '').slice(0, 120) } }),
+  'list-load-finish': (sb, b) => finishLoad(sb, { ...b, status: b.status === 'ok' ? 'ok' : 'failed' }),
+  'presend-check': (sb, b) => presendCheck(sb, b.export_id),
   collector: ingest
 };
 
