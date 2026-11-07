@@ -1,0 +1,260 @@
+function getIntegrityFilterState() {
+      return {
+        status: document.getElementById('ci-filter-status')?.value || 'all',
+        stream: document.getElementById('ci-filter-stream')?.value || 'all',
+        check: document.getElementById('ci-filter-check')?.value || 'all',
+        sort: document.getElementById('ci-sort')?.value || 'volume_desc'
+      };
+    }
+
+    function compareIntegrityRows(a, b, sortKey) {
+      const vol = (r) => (r.volume == null ? -1 : r.volume);
+      const clk = (r) => (r.clicks == null ? -1 : r.clicks);
+      if (sortKey === 'volume_asc') return vol(a) - vol(b);
+      if (sortKey === 'clicks_desc') return clk(b) - clk(a);
+      if (sortKey === 'clicks_asc') return clk(a) - clk(b);
+      if (sortKey === 'stream') {
+        return String(a.stream || '').localeCompare(String(b.stream || '')) || (vol(b) - vol(a));
+      }
+      if (sortKey === 'keyword') {
+        return String(a.subject || '').localeCompare(String(b.subject || ''));
+      }
+      if (a.volume == null && b.volume == null) return 0;
+      if (a.volume == null) return 1;
+      if (b.volume == null) return -1;
+      return b.volume - a.volume;
+    }
+
+    function filterAndSortIntegrityFindings(rows) {
+      const f = getIntegrityFilterState();
+      let list = rows.slice();
+      if (f.status !== 'all') list = list.filter((r) => r.statusKey === f.status);
+      if (f.stream !== 'all') list = list.filter((r) => r.stream === f.stream);
+      if (f.check !== 'all') list = list.filter((r) => String(r.check) === String(f.check));
+      list.sort((a, b) => {
+        if (a.statusSort !== b.statusSort) return a.statusSort - b.statusSort;
+        return compareIntegrityRows(a, b, f.sort);
+      });
+      return list;
+    }
+
+    function groupIntegrityByStatus(rows) {
+      const order = [
+        { key: 'decision', label: 'Decision needed' },
+        { key: 'awaiting', label: 'Link in place — awaiting recrawl' },
+        { key: 'weak', label: 'Link present, weak anchor' },
+        { key: 'fix', label: 'Fix needed' },
+        { key: 'unchecked', label: 'Not page-checked' },
+        { key: 'other', label: 'Other/config' }
+      ];
+      return order.map((g) => ({
+        ...g,
+        rows: rows.filter((r) => r.statusKey === g.key)
+      })).filter((g) => g.rows.length);
+    }
+
+    function exportConfigIntegrityCsv() {
+      const payload = window.__configIntegrityLatest;
+      const findings = Array.isArray(payload?.data?.findings) ? payload.data.findings : [];
+      if (!findings.length) {
+        alert('No findings to export yet. Run the check first.');
+        return;
+      }
+      const rows = filterAndSortIntegrityFindings(mergePageAuditOntoFindings(assignIntegrityFindingIds(findings.map(normalizeIntegrityFinding))));
+      const esc = (v) => {
+        const t = String(v ?? '');
+        return /["\n,]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+      };
+      const header = [
+        'id', 'status', 'stream', 'check', 'keyword', 'search_volume', 'clicks', 'impressions',
+        'ranks_now_url', 'should_be_url', 'anchor_text', 'link_to_url', 'target_ok', 'checked_at', 'action'
+      ];
+      const lines = [header.join(',')];
+      for (const r of rows) {
+        lines.push([
+          esc(r.findingId || ''),
+          esc(r.statusLabel),
+          esc(r.stream),
+          esc(r.check ?? ''),
+          esc(r.subject ?? ''),
+          esc(r.volume == null ? '' : r.volume),
+          esc(r.clicks == null ? '' : r.clicks),
+          esc(r.impressions == null ? '' : r.impressions),
+          esc(pathToSiteUrl(r.ranksNowUrl) || r.ranksNowUrl || ''),
+          esc(pathToSiteUrl(r.shouldBeUrl) || r.shouldBeUrl || ''),
+          esc(r.anchorText || r.subject || ''),
+          esc(r.linkToUrl || pathToSiteUrl(r.shouldBeUrl) || ''),
+          esc(r.targetOk == null ? '' : (r.targetOk ? 'yes' : 'no')),
+          esc(r.checkedAt || ''),
+          esc(r.suggested_action ?? '')
+        ].join(','));
+      }
+      const blob = new Blob(['\uFEFF' + lines.join('\n') + '\n'], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = URL.createObjectURL(blob);
+      a.download = 'keyword-config-findings-' + stamp + '.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }
+
+    function renderConfigIntegrityPanel(payload) {
+      const panel = document.getElementById('config-integrity-panel-body');
+      const meta = document.getElementById('config-integrity-panel-meta');
+      if (!panel) return;
+      const data = payload?.data || {};
+      const findings = Array.isArray(data.findings) ? data.findings : [];
+      const stats = data.stats || {};
+      const runAt = data.latestRun?.run_at;
+      if (meta) {
+        meta.textContent = runAt
+          ? ('Last run: ' + formatImplPriorityMatrixStamp(Date.parse(String(runAt))) + ' · ' + findings.length + ' finding(s)')
+          : 'No persisted run yet';
+      }
+      if (!findings.length) {
+        panel.innerHTML = '<p style="margin:0.5rem 0 0; color:#059669;">No findings — keyword & config GREEN.</p>';
+        return;
+      }
+
+      const normalized = mergePageAuditOntoFindings(assignIntegrityFindingIds(findings.map(normalizeIntegrityFinding)));
+      const filters = getIntegrityFilterState();
+      const filtered = filterAndSortIntegrityFindings(normalized);
+      const groups = groupIntegrityByStatus(filtered);
+      const streams = [...new Set(normalized.map((r) => r.stream).filter(Boolean))].sort();
+      const checks = [...new Set(normalized.map((r) => String(r.check)))].sort((a, b) => Number(a) - Number(b));
+      const statusCounts = { decision: 0, awaiting: 0, weak: 0, fix: 0, unchecked: 0, other: 0 };
+      for (const r of normalized) statusCounts[r.statusKey] = (statusCounts[r.statusKey] || 0) + 1;
+
+      const legendHtml =
+        '<details class="config-integrity-key">' +
+        '<summary>Key — Check / Severity / Stream / Status</summary>' +
+        '<ul>' +
+        '<li><strong>Check 1–6</strong> — integrity suite (1/4/6 structural red; 2/3/5 advisory amber). Check 3 = Google ranks a different URL than locked target.</li>' +
+        '<li><strong>Status</strong> — Decision needed from action text; link Fix / weak / awaiting from <em>live page audit</em> (Re-check pages). Until audited: Not page-checked (no shipped guess).</li>' +
+        '<li><strong>Stream</strong> — Hub / Swap / Blog / Config work grouping (not a dashboard panel).</li>' +
+        '<li><strong>ID</strong> — stable short id (CANN-xxxx check 3; CFG-xxxx other) from keyword+assigned path so the issue keeps the same code across runs.</li><li><strong>Lifecycle</strong> — rows recompute each run and clear when data changes. No mark-done.</li>' +
+        '</ul></details>';
+
+      const streamOpts = streams.map((st) => '<option value="' + escapeHtml(st) + '">' + escapeHtml(st) + '</option>').join('');
+      const checkOpts = checks.map((c) => '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>').join('');
+
+      const controlsHtml =
+        '<div class="ci-controls">' +
+        '<label>Status <select id="ci-filter-status">' +
+        '<option value="all">All (' + normalized.length + ')</option>' +
+        '<option value="decision">Decision needed (' + (statusCounts.decision || 0) + ')</option>' +
+        '<option value="awaiting">Link in place — awaiting recrawl (' + (statusCounts.awaiting || 0) + ')</option>' +
+        '<option value="weak">Link present, weak anchor (' + (statusCounts.weak || 0) + ')</option>' +
+        '<option value="fix">Fix needed (' + (statusCounts.fix || 0) + ')</option>' +
+        '<option value="unchecked">Not page-checked (' + (statusCounts.unchecked || 0) + ')</option>' +
+        '<option value="other">Other/config (' + (statusCounts.other || 0) + ')</option>' +
+        '</select></label>' +
+        '<label>Stream <select id="ci-filter-stream"><option value="all">All</option>' + streamOpts + '</select></label>' +
+        '<label>Check <select id="ci-filter-check"><option value="all">All</option>' + checkOpts + '</select></label>' +
+        '<label>Sort <select id="ci-sort">' +
+        '<option value="volume_desc">Volume ↓</option>' +
+        '<option value="volume_asc">Volume ↑</option>' +
+        '<option value="clicks_desc">Clicks ↓</option>' +
+        '<option value="clicks_asc">Clicks ↑</option>' +
+        '<option value="stream">Stream A–Z</option>' +
+        '<option value="keyword">Keyword A–Z</option>' +
+        '</select></label>' +
+        '<span class="ci-filter-count">Showing ' + filtered.length + ' of ' + normalized.length + '</span>' +
+        '</div>';
+
+      const renderRow = (r) => {
+        const meaningTitle = escapeHtml(String(r.meaning || r.detail || ''));
+        const vol = r.volume == null ? '—' : Number(r.volume).toLocaleString();
+        const clk = r.clicks == null ? '—' : Number(r.clicks).toLocaleString();
+        const streamCell = r.stream ? ('<span class="ci-ws-tag">' + escapeHtml(r.stream) + '</span>') : '—';
+        const targetCell = r.targetOk === true
+          ? '<span class="ci-target-ok">OK</span>'
+          : (r.targetOk === false
+            ? '<span class="ci-target-bad" title="HTTP ' + escapeHtml(String(r.targetHttpStatus || '')) + ' final ' + escapeHtml(String(r.targetFinalPath || '')) + '">Issue</span>'
+            : '—');
+        const checkedCell = r.checkedAt
+          ? '<span class="ci-checked-at">' + escapeHtml(String(r.checkedAt).replace('T', ' ').slice(0, 16)) + 'Z</span>'
+          : '—';
+        const anchorCell = escapeHtml(String(r.anchorText || r.subject || '—'));
+        const linkToCell = integrityLinkCell(r.linkToUrl || r.shouldBeUrl);
+        return (
+          '<tr>' +
+          '<td class="ci-finding-id">' + escapeHtml(String(r.findingId || '—')) + '</td>' +
+          '<td>' + integrityStatusPill(r.statusKey, r.statusLabel) + '</td>' +
+          '<td>' + streamCell + '</td>' +
+          '<td>' + Number(r.check || 0) + '</td>' +
+          '<td>' + escapeHtml(String(r.subject || '—')) + '</td>' +
+          '<td class="ci-num">' + vol + '</td>' +
+          '<td class="ci-num">' + clk + '</td>' +
+          '<td class="ci-url">' + integrityLinkCell(r.ranksNowUrl) + '</td>' +
+          '<td class="ci-url">' + integrityLinkCell(r.shouldBeUrl) + '</td>' +
+          '<td>' + targetCell + '</td>' +
+          '<td><code style="font-size:0.75rem;">' + anchorCell + '</code></td>' +
+          '<td class="ci-url">' + linkToCell + '</td>' +
+          '<td>' + checkedCell + '</td>' +
+          '<td class="ci-action" title="' + meaningTitle + '">' + escapeHtml(String(r.suggested_action || '—')) + '</td>' +
+          '</tr>'
+        );
+      };
+
+      const groupsHtml = groups.length
+        ? groups.map((g) => (
+          '<tbody class="ci-group ci-group-' + String(g.key || 'other') + '">' +
+          '<tr class="ci-group-head"><td colspan="14">' + escapeHtml(g.label) +
+          ' <span class="ci-group-count">(' + g.rows.length + ')</span></td></tr>' +
+          g.rows.map(renderRow).join('') +
+          '</tbody>'
+        )).join('')
+        : '<tbody><tr><td colspan="14" class="ci-muted">No rows match filters.</td></tr></tbody>';
+
+      panel.innerHTML =
+        legendHtml +
+        controlsHtml +
+        '<div class="ci-table-wrap"><table class="config-integrity-findings-table">' +
+        '<thead><tr>' +
+        '<th style="width:5.5rem;" title="Stable finding id (CANN-/CFG-)">ID</th>' +
+        '<th style="width:8rem;">Status</th>' +
+        '<th style="width:4.5rem;">Stream</th>' +
+        '<th style="width:3rem;">Check</th>' +
+        '<th>Keyword</th>' +
+        '<th style="width:4.5rem;" title="Search volume">Vol</th>' +
+        '<th style="width:4rem;" title="28d clicks on assigned page">Clicks</th>' +
+        '<th>Ranks now (from)</th>' +
+        '<th>Should be (to)</th>' +
+        '<th style="width:4.5rem;" title="Money page returns 200 and final path matches LOCKED target">Target OK?</th>' +
+        '<th title="Exact text to hyperlink on the from-page">Anchor text</th>' +
+        '<th title="Destination URL for that anchor">Link to</th>' +
+        '<th style="width:6rem;">Checked</th>' +
+        '<th>Action</th>' +
+        '</tr></thead>' +
+        groupsHtml +
+        '</table></div>' +
+        '<div style="margin-top:0.5rem; font-size:0.78rem; color:#666;">' +
+        'Structural (checks 1,4,6): ' + Number(stats.structuralCount || 0) +
+        ' · Advisory: ' + Number(stats.advisoryCount || 0) +
+        ' · full meaning is on each Action cell tooltip' +
+        '</div>';
+
+      const apply = (id, val) => {
+        const el = document.getElementById(id);
+        if (el && val != null) el.value = val;
+      };
+      apply('ci-filter-status', filters.status);
+      apply('ci-filter-stream', filters.stream);
+      apply('ci-filter-check', filters.check);
+      apply('ci-sort', filters.sort);
+
+      const rebind = () => {
+        if (window.__configIntegrityLatest) renderConfigIntegrityPanel(window.__configIntegrityLatest);
+      };
+      ['ci-filter-status', 'ci-filter-stream', 'ci-filter-check', 'ci-sort'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.onchange = rebind;
+      });
+    }
+
+
+                
+    

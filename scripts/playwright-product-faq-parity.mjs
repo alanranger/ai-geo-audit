@@ -1,6 +1,7 @@
 /**
  * Rendered live product pages: visible FAQ questions vs FAQPage questions, plus review count/rating.
- * Reads every product URL from the live products-manifest.json. Paced 16 s between pages (Squarespace 429).
+ * Reads every product URL from the live products-manifest.json. Paced 16 s between pages (GAP_MS overrides;
+ * Squarespace starts refusing after ~8 rendered pages in a row at 16 s).
  * Usage: node scripts/playwright-product-faq-parity.mjs <out.json> [url ...]
  */
 import fs from 'node:fs';
@@ -63,7 +64,7 @@ const page = await browser.newPage();
 const rows = [];
 try {
   for (let i = 0; i < pages.length; i += 1) {
-    if (i) await page.waitForTimeout(16000);
+    if (i) await page.waitForTimeout(Number(process.env.GAP_MS || 16000));
     const r = await readPage(page, pages[i]);
     rows.push({ url: pages[i], ...r });
     console.log(`${i + 1}/${pages.length} ${pages[i].replace('https://www.alanranger.com', '')} | visible?=${r.visibleCount} | FAQPage=${r.faqPages} q=${r.faqCount} notInText=${r.faqNotInPageText.length} | reviews=${r.aggregate.join(',') || '-'}`);

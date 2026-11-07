@@ -1,0 +1,1 @@
+DELETE FROM public.booking_sheet_course_attendees WHERE property_url = 'https://www.alanranger.com';
