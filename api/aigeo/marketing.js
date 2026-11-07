@@ -14,6 +14,10 @@
  * GET  ?action=list-load-next  ·  POST list-load-precheck / -postcheck / -fixed / -progress / -finish   (PC job runner)
  * POST { action: 'presend-check', export_id }                   consent + suppression for everyone loaded → PASS / FAIL
  * GET  ?action=run&run_id=                                      progress of a queued / running job
+ * GET  ?action=query-fields | groups | group-versions&segment_id=   query builder catalogue, saved groups
+ * POST { action: 'query-run', query, sort, dir, page, columns, show }   filtered customer table (server-side paging)
+ * POST { action: 'customer-why', person_id, query }             detail + timeline + why in / out of the query
+ * POST { action: 'group-save' | 'group-preview', ... }          versioned saved groups; who joined / left since last check
  * POST { action: 'sync', step: profiles|orders|postcodes|customers }
  * POST { action: 'segment-preview', segment_ids, params }      count + exclusion reasons + first 25 people
  * POST { action: 'segment-save', segment_id?, name, description, definition }
@@ -33,6 +37,7 @@ import { rebuildCustomers } from '../../lib/marketing/rebuild.mjs';
 import { evaluate } from '../../lib/marketing/segments.mjs';
 import { resolveOne, reviewList } from '../../lib/marketing/suppression-review.mjs';
 import { finishLoad, fixFlips, nextLoad, postcheck, precheck, presendCheck, requestLoad, runProgress } from '../../lib/marketing/list-load.mjs';
+import { QUERY_GETS, QUERY_POSTS } from '../../lib/marketing/query/api.mjs';
 import { finishRun, logRun, serviceClient } from '../../lib/marketing/store.mjs';
 import { syncOrders, syncPostcodes, syncProfiles } from '../../lib/marketing/sync.mjs';
 
@@ -119,7 +124,8 @@ const GETS = {
     const { data, error } = await sb.from('marketing_collector_runs').select('run_id, kind, status, started_at, heartbeat_at, finished_at, items_done, items_total, checkpoint, summary, error').eq('run_id', q.run_id).maybeSingle();
     if (error || !data) throw new Error('run not found');
     return { run: data };
-  }
+  },
+  ...QUERY_GETS
 };
 
 async function collectorState(sb) {
@@ -144,7 +150,8 @@ const POSTS = {
   'list-load-progress': (sb, b) => runProgress(sb, b.run_id, { items_done: b.items_done, items_total: b.items_total, checkpoint: { export_id: b.export_id, step: String(b.step || '').slice(0, 120) } }),
   'list-load-finish': (sb, b) => finishLoad(sb, { ...b, status: b.status === 'ok' ? 'ok' : 'failed' }),
   'presend-check': (sb, b) => presendCheck(sb, b.export_id),
-  collector: ingest
+  collector: ingest,
+  ...QUERY_POSTS
 };
 
 async function csvDownload(res, sb, exportId) {

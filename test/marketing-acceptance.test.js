@@ -9,6 +9,9 @@ import { latestCollectorRun } from '../lib/marketing/overview.mjs';
 import { resolveOne } from '../lib/marketing/suppression-review.mjs';
 import { safeCell, validListName } from '../lib/marketing/exports.mjs';
 import { presendState, stateOf } from '../lib/marketing/list-load.mjs';
+import { evalNode, rowCtx } from '../lib/marketing/query/evaluate.mjs';
+import { validateQuery } from '../lib/marketing/query/english.mjs';
+import { valueFacts } from '../lib/marketing/value.mjs';
 import { allFacts } from '../lib/marketing/facts.mjs';
 import { runAlert } from '../lib/marketing/health.mjs';
 import { buildIdentities, sqsOrderNumber } from '../lib/marketing/identity.mjs';
@@ -106,12 +109,12 @@ test('selected recipients are deduplicated; unsubscribed and suppressed people a
 test('deleted and JLR-unsubscribed contacts never reappear, even if Squarespace later shows them subscribed', () => {
   const now = '2026-11-07T00:00:00Z';
   const first = suppressionChanges([{ profile_id: 'j1', email: 'x@jaguarlandrover.com', accepts_marketing: false }], [], now);
-  assert.equal(first.suppress[0].reason, 'jlr_unsubscribed_cleanup_2026_11_07');
+  assert.equal(first.suppress[0].reason, 'JLR address, not subscribed at first sync (7 Nov 2026)');
   const later = suppressionChanges([{ profile_id: 'a', email: 'a@example.com', accepts_marketing: false }], [{ profile_id: 'a', email: 'a@example.com', accepts_marketing: true }, { profile_id: 'gone', email: 'g@example.com', accepts_marketing: true }], now);
   assert.deepEqual(later.suppress.map((s) => s.reason).sort(), ['deleted_in_squarespace', 'unsubscribed']);
   assert.deepEqual(later.gone, ['gone']);
   assert.equal(first.suppress[0].email_hash, emailHash('X@JaguarLandRover.com '));
-  assert.equal(consentReason({ email: 'x@jaguarlandrover.com', subscribed: true, profile_state: 'active', suppressed: 'jlr_unsubscribed_cleanup_2026_11_07' }), 'suppressed:jlr_unsubscribed_cleanup_2026_11_07');
+  assert.equal(consentReason({ email: 'x@jaguarlandrover.com', subscribed: true, profile_state: 'active', suppressed: 'JLR address, not subscribed at first sync (7 Nov 2026)' }), 'suppressed:JLR address, not subscribed at first sync (7 Nov 2026)');
   assert.equal(consentReason({ email: 'g@example.com', subscribed: false, profile_state: 'deleted' }), 'deleted_in_squarespace');
 });
 
@@ -166,7 +169,7 @@ test('Alan\'s business address is admin, never a customer: its orders go to the 
     lines: [{ order_id: 'oa', product_name: 'Woodland Walk', line_type: 'SERVICE' }, { order_id: 'ob', product_name: 'Woodland Walk', line_type: 'SERVICE' }, { order_id: 'oc', product_name: 'Woodland Walk', line_type: 'SERVICE' }],
     workshops: []
   });
-  assert.deepEqual(st.admin, { orders: 3, by_email: 1, by_name: 1, unassigned: 1 });
+  assert.deepEqual(st.admin, { orders: 3, by_email: 1, by_name: 1, unassigned: 1, value: 0 });
   const admin = f('sqs:a1');
   assert.equal(admin.admin, true);
   assert.equal(admin.bookings.length, 0);
@@ -199,6 +202,61 @@ test('import file safety: formula-looking names are neutralised, list names foll
   assert.equal(safeCell('Ann'), 'Ann');
   assert.equal(validListName('ARP | Jan beginners | Beginners booked | 2026-11-07'), 'ARP | Jan beginners | Beginners booked | 2026-11-07');
   assert.throws(() => validListName('x'.repeat(76)));
+});
+
+test('query: confirmed meets "at least", probable-only / gaps are unknown, NOT and ANY groups, exact domains', () => {
+  const ctx = { centre: null, today: '2026-11-07', engagementComplete: true };
+  const person = (f, anchor = 'sqs:1') => ({ person_id: anchor, anchor_key: anchor, facts: { email: 'a@yahoo.com', profile_state: 'active', subscribed: true, cats: {}, ...f } });
+  const val = (c, p, extra = {}) => ({ value: { c: { net: c, orders: c ? 1 : 0 }, cp: { net: c + p, orders: (c ? 1 : 0) + (p ? 1 : 0) } }, ...extra });
+  const cond = (field, op, value) => ({ type: 'cond', field, op, value });
+  const run = (p, root) => evalNode(validateQuery({ root }).root, rowCtx(p, ctx)).r;
+  assert.equal(run(person(val(400, 0)), cond('spend_net', 'gte', 300)), 'yes');
+  assert.equal(run(person(val(100, 250)), cond('spend_net', 'gte', 300)), 'unknown');
+  assert.equal(run(person(val(0, 0)), cond('spend_net', 'gte', 300)), 'no');
+  assert.equal(run(person(val(0, 0, { history_incomplete: true })), cond('orders', 'eq', 0)), 'unknown');
+  assert.equal(run(person(val(0, 0)), cond('orders', 'eq', 0)), 'yes');
+  assert.equal(run(person({}), cond('email_domain', 'is', 'yahoo.com')), 'yes');
+  assert.equal(run(person({ email: 'b@yahoo.co.uk' }), cond('email_domain', 'is', 'yahoo.com')), 'no');
+  assert.equal(run(person({ postcode: null }), cond('miles', 'lte', 30)), 'unknown');
+  const either = { type: 'group', match: 'any', items: [cond('spend_net', 'gte', 300), cond('orders', 'gte', 2)] };
+  assert.equal(run(person(val(50, 0)), either), 'no');
+  assert.equal(run(person(val(500, 0)), { type: 'group', match: 'none', items: [either] }), 'no');
+});
+
+test('query: same-record clicks and bookings; probable history makes "has no" unknown, never "no"', () => {
+  const ctx = { centre: null, today: '2026-11-07', engagementComplete: true };
+  const p = (f) => ({ person_id: 'x', anchor_key: 'sqs:x', facts: { email: 'a@b.com', profile_state: 'active', engagement: { delivered_campaigns: 10 }, cats: {}, ...f } });
+  const run = (person, root) => evalNode(validateQuery({ root }).root, rowCtx(person, ctx)).r;
+  const clicks = [{ url: 'alanranger.com/lightroom-courses', at: '2026-03-01T10:00:00Z' }, { url: 'alanranger.com/workshops', at: '2026-11-01T10:00:00Z' }];
+  const lightroom90 = { type: 'cond', field: 'click', op: 'exists', value: { url_contains: 'lightroom', within: { n: 90, unit: 'days' } } };
+  assert.equal(run(p({ clicks }), lightroom90), 'no');
+  assert.equal(run(p({ clicks: [{ url: 'alanranger.com/lightroom', at: '2026-10-20T10:00:00Z' }] }), lightroom90), 'yes');
+  assert.equal(run(p({ clicks: [], email: null }), lightroom90), 'unknown');
+  const noLr = { type: 'cond', field: 'booking', op: 'none', value: { cats: ['lightroom'] } };
+  assert.equal(run(p({ bookings: [{ date: '2025-01-01', cats: ['beginners'], role: 'buyer' }], booking_count: 1 }), noLr), 'yes');
+  assert.equal(run(p({ bookings: [], booking_count: 0, cats: { lightroom: { c: 0, p: 1 } } }), noLr), 'unknown');
+  assert.equal(run(p({ bookings: [{ date: '2025-01-01', cats: ['lightroom'], role: 'attendee' }], booking_count: 1 }), noLr), 'no');
+  assert.throws(() => validateQuery({ root: { type: 'cond', field: 'raw_sql', op: 'is', value: 'x' } }));
+});
+
+test('value: a Booking Sheet sale that is the same Squarespace order counts once; voucher redemptions are not spend', () => {
+  const st = buildIdentities({
+    profiles: [{ profile_id: 'p1', email: 'ann@x.com', first_name: 'Ann', last_name: 'Lee', accepts_marketing: true }],
+    orders: [{ order_id: 'o1', order_number: 3001, created_on: '2025-05-01T10:00:00Z', customer_email: 'ann@x.com', grand_total_gbp: 150, refunded_total_gbp: 0 }],
+    lines: [{ order_id: 'o1', product_name: 'Beginners course', quantity: 1 }],
+    transactions: [
+      { source_workbook: 'w', source_row: 1, txn_date: '2025-05-02', client_name: 'Ann Lee', amount: 150, funding: 'Stripe', category_label: 'Courses', is_redemption: false },
+      { source_workbook: 'w', source_row: 2, txn_date: '2025-06-10', client_name: 'Ann Lee', amount: 90, funding: 'Bank', category_label: '1-2-1', is_redemption: false },
+      { source_workbook: 'w', source_row: 3, txn_date: '2025-07-10', client_name: 'Ann Lee', amount: -50, funding: 'Gift Voucher Out', category_label: 'Vouchers', is_redemption: true }
+    ]
+  });
+  const ann = st.persons.get('sqs:p1');
+  const nameRec = st.persons.get('name:ann lee');
+  const v = valueFacts(ann, [nameRec], '2026-11-07').value;
+  assert.equal(v.c.net, 150);
+  assert.equal(v.c.orders, 1);
+  assert.equal(v.p.net, 90);
+  assert.equal(v.cp.orders, 2);
 });
 
 test('list load: before-check drops not subscribed / suppressed / missing; pre-send PASS lasts 30 minutes', () => {
