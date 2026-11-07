@@ -93,7 +93,7 @@ await mock.route('**/api/aigeo/marketing?action=overview*', async (route) => {
   const res = await route.fetch();
   const j = await res.json();
   const [a, b] = j.exports;
-  Object.assign(a, { status: 'blocked_do_not_send', is_test: false, load_result: { ...a.load_result, flips: 1, action: 'Do not send to this list. (mock)' }, load_run: null });
+  Object.assign(a, { status: 'blocked_do_not_send', is_test: false, sqs_list_id: a.sqs_list_id || 'mock-list', load_result: { ...a.load_result, flips: 1, action: 'Do not send to this list. (mock)' }, load_run: null });
   Object.assign(b, { status: 'loading', load_run: { run_id: 'mock', status: 'running', started_at: new Date(Date.now() - 90000).toISOString(), heartbeat_at: new Date().toISOString(), items_done: 2, checkpoint: { step: 'Waiting for Squarespace to finish the import' } } });
   await route.fulfill({ response: res, json: j });
 });
