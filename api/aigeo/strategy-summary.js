@@ -20,7 +20,8 @@ export default async function handler(req, res) {
       auth: { persistSession: false }
     });
     const noBackfill = String(req.query.noBackfill || '') === '1';
-    const summary = await buildStrategySummary(supabase, propertyUrl, { noBackfill });
+    const insights = String(req.query.insights || '1') !== '0';
+    const summary = await buildStrategySummary(supabase, propertyUrl, { noBackfill, insights });
     // no-store: quarter ticks must appear immediately after PATCH + reload
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json({ ok: true, ...summary });
