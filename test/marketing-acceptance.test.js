@@ -12,12 +12,16 @@ import { presendState, stateOf } from '../lib/marketing/list-load.mjs';
 import { evalNode, rowCtx } from '../lib/marketing/query/evaluate.mjs';
 import { validateQuery } from '../lib/marketing/query/english.mjs';
 import { valueFacts } from '../lib/marketing/value.mjs';
+import { recordType } from '../lib/marketing/record-type.mjs';
+import { orderCancelled } from '../lib/marketing/identity.mjs';
+import { offerOn } from '../lib/strategy-board-rows.mjs';
+import { computeRunRate } from '../lib/strategy-run-rate.mjs';
 import { allFacts } from '../lib/marketing/facts.mjs';
 import { runAlert } from '../lib/marketing/health.mjs';
 import { buildIdentities, sqsOrderNumber } from '../lib/marketing/identity.mjs';
 import { ingest, reSuppressAfterReview } from '../lib/marketing/collector-ingest.mjs';
 import { capacityCheck, cycleOf, meterView } from '../lib/marketing/meter.mjs';
-import { BUILTIN_SEGMENTS, consentReason, evaluate } from '../lib/marketing/segments.mjs';
+import { BUILTIN_SEGMENTS, consentReason, evaluate, resolveParams } from '../lib/marketing/segments.mjs';
 import { emailHash } from '../lib/marketing/store.mjs';
 import { suppressionChanges } from '../lib/marketing/sync.mjs';
 import { readMeter, readEventUsers } from '../scripts/marketing-collector/page-reads.mjs';
@@ -85,10 +89,11 @@ test('refunds create no history; booked is never "attended" and future bookings 
 });
 
 test('unknown is not none: incomplete history is reported apart; unknown engagement is never cold', () => {
-  const seg = BUILTIN_SEGMENTS.find((s) => s.segment_id === 'beginners-no-lightroom-local').definition;
-  const person = (facts) => ({ person_id: 'x', facts: { email: 'a@example.com', subscribed: true, profile_state: 'active', lat: 52.4, lng: -1.59, cats: { beginners: { c: 1, p: 0 } }, ...facts } });
+  const seg = resolveParams(BUILTIN_SEGMENTS.find((s) => s.segment_id === 'beginners-no-lightroom-local').definition);
+  const beg = [{ key: 'sqs:1', date: '2025-05-01', cats: ['beginners'], role: 'buyer' }];
+  const person = (facts) => ({ person_id: 'x', anchor_key: 'sqs:x', facts: { email: 'a@example.com', subscribed: true, profile_state: 'active', lat: 52.4, lng: -1.59, cats: { beginners: { c: 1, p: 0 } }, bookings: beg, booking_count: 1, ...facts } });
   const ctx = { centre: { lat: 52.3998, lng: -1.5942 }, today: TODAY };
-  assert.deepEqual(evaluate([person({ history_incomplete: true })], [seg], ctx).exclusions, { history_incomplete: 1 });
+  assert.deepEqual(evaluate([person({ history_incomplete: true })], [seg], ctx).exclusions, { 'undecided: has no booking (same record: in lightroom)': 1 });
   assert.equal(evaluate([person({ history_incomplete: false })], [seg], ctx).count, 1);
   assert.equal(band(null, null, true), 'unknown');
   assert.equal(band(null, { delivered_campaigns: 5 }, false), 'unknown');
@@ -99,8 +104,8 @@ test('unknown is not none: incomplete history is reported apart; unknown engagem
 });
 
 test('selected recipients are deduplicated; unsubscribed and suppressed people are excluded', () => {
-  const p = (id, email, extra = {}) => ({ person_id: id, facts: { email, subscribed: true, profile_state: 'active', cats: { residential: { c: 1, p: 0 }, day_workshop: { c: 1, p: 0 } }, ...extra } });
-  const defs = [BUILTIN_SEGMENTS[3].definition, BUILTIN_SEGMENTS[2].definition];
+  const p = (id, email, extra = {}) => ({ person_id: id, anchor_key: `sqs:${id}`, facts: { email, subscribed: true, profile_state: 'active', cats: { residential: { c: 1, p: 0 }, day_workshop: { c: 1, p: 0 } }, bookings: [{ key: `b${id}`, date: '2025-06-01', cats: ['residential', 'day_workshop'], role: 'buyer' }], booking_count: 1, ...extra } });
+  const defs = [resolveParams(BUILTIN_SEGMENTS[3].definition), resolveParams(BUILTIN_SEGMENTS[2].definition)];
   const r = evaluate([p('1', 'a@example.com'), p('2', 'a@example.com'), p('3', 'b@example.com', { subscribed: false }), p('4', 'c@example.com', { suppressed: 'unsubscribed' })], defs, { today: TODAY, centre: null });
   assert.equal(r.count, 1);
   assert.deepEqual(r.exclusions, { duplicate_email: 1, not_subscribed: 1, 'suppressed:unsubscribed': 1 });
@@ -178,7 +183,10 @@ test('Alan\'s business address is admin, never a customer: its orders go to the 
   assert.equal(f('name:pat other').cats.woodland.c, 1);
   assert.equal(st.byName.has('some client'), false);
   const seg = BUILTIN_SEGMENTS.find((s) => s.segment_id === 'residential-prospects').definition;
-  assert.equal(evaluate([{ person_id: 'a', facts: { ...admin, subscribed: true, profile_state: 'active' } }], [seg], { today: TODAY }).count, 1);
+  const r = evaluate([{ person_id: 'a', anchor_key: 'sqs:a1', facts: { ...admin, subscribed: true, profile_state: 'active' } }], [resolveParams(seg)], { today: TODAY });
+  assert.equal(r.members.length, 1);
+  assert.equal(r.count, 0);
+  assert.equal(r.admin_included, 1);
 });
 
 test('run updates keep progress counts; a later successful collector run clears an earlier stale one', () => {
@@ -257,6 +265,24 @@ test('value: a Booking Sheet sale that is the same Squarespace order counts once
   assert.equal(v.c.orders, 1);
   assert.equal(v.p.net, 90);
   assert.equal(v.cp.orders, 2);
+});
+
+test('Part 1 rules: record types, partial refunds count, offers end on their date, run rate excludes withdrawn', () => {
+  assert.equal(recordType({ name: 'Pick n Mix Subs' }), 'system');
+  assert.equal(recordType({ name: 'Mentoring Subs' }), 'system');
+  assert.equal(recordType({ email: 'no-reply@squarespace.com' }), 'system');
+  assert.equal(recordType({ name: 'HOMD Consulting Limited' }), 'organisation');
+  assert.equal(recordType({ name: 'Birkdale' }), 'organisation');
+  assert.equal(recordType({ name: 'Elaine Cash' }), 'person');
+  assert.equal(recordType({ name: 'Ross Schoolar' }), 'person');
+  assert.equal(orderCancelled({ payment_state: 'REFUNDED', grand_total_gbp: 400, refunded_total_gbp: 150 }), false);
+  assert.equal(orderCancelled({ payment_state: 'REFUNDED', grand_total_gbp: 400, refunded_total_gbp: 400 }), true);
+  assert.equal(orderCancelled({ fulfillment_status: 'CANCELED', grand_total_gbp: 400 }), true);
+  const offer = { note: '£150 off', ends: '2026-11-14' };
+  assert.equal(offerOn(offer, '2026-11-14'), offer);
+  assert.equal(offerOn(offer, '2026-11-19'), null);
+  const outcomes = [{ type: 'day', outcome: 'ran' }, { type: 'day', outcome: 'withdrawn' }, { type: 'day', outcome: 'cancelled' }];
+  assert.equal(computeRunRate(outcomes).countLine.split(' | ')[0], '1/2');
 });
 
 test('list load: before-check drops not subscribed / suppressed / missing; pre-send PASS lasts 30 minutes', () => {

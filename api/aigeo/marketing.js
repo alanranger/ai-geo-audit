@@ -39,6 +39,7 @@ import { resolveOne, reviewList } from '../../lib/marketing/suppression-review.m
 import { finishLoad, fixFlips, nextLoad, postcheck, precheck, presendCheck, requestLoad, runProgress } from '../../lib/marketing/list-load.mjs';
 import { QUERY_GETS, QUERY_POSTS } from '../../lib/marketing/query/api.mjs';
 import { cronOrAdmin } from '../../lib/api/cronAuth.js';
+import { validateQuery } from '../../lib/marketing/query/english.mjs';
 import { finishRun, logRun, serviceClient } from '../../lib/marketing/store.mjs';
 import { syncOrders, syncPostcodes, syncProfiles } from '../../lib/marketing/sync.mjs';
 
@@ -88,13 +89,27 @@ async function preview(sb, b) {
 
 async function saveSegment(sb, b) {
   const name = String(b.name || '').trim().slice(0, 120);
-  if (!name || !b.definition || typeof b.definition !== 'object') throw new Error('a segment needs a name and a definition');
+  if (!name || !b.definition?.query) throw new Error('a segment needs a name and a structured query (use Customers → Save as group)');
+  b.definition = { ...b.definition, query: validateQuery(b.definition.query) };
   const id = b.segment_id || `custom-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50)}`;
   if ((await allSegments(sb)).some((s) => s.segment_id === id && s.is_builtin)) throw new Error('built-in segments are fixed; save under a new name');
   const row = { segment_id: id, name, description: b.description ? String(b.description).slice(0, 500) : null, definition: b.definition, is_builtin: false, set_by: SET_BY, updated_at: new Date().toISOString() };
   const { error } = await sb.from('marketing_segments').upsert(row, { onConflict: 'segment_id' });
   if (error) throw new Error(error.message);
   return { segment_id: id };
+}
+
+/** "Not the same person": keep a Booking Sheet name record as its own row instead of under a contact (reversible C10). */
+async function separateIdentity(sb, b, rebuild) {
+  const reason = String(b.reason || '').trim();
+  if (reason.length < 10) throw new Error('give a reason (10+ characters)');
+  const { data: p, error } = await sb.from('customer_person').select('anchor_key').eq('person_id', b.person_id).maybeSingle();
+  if (error || !p) throw new Error('record not found');
+  if (!p.anchor_key.startsWith('name:')) throw new Error('only Booking Sheet name records can be separated');
+  const { error: e2 } = await sb.from('marketing_identity_overrides').upsert({ name_anchor: p.anchor_key, action: 'separate', reason: reason.slice(0, 300), set_by: SET_BY, set_at: new Date().toISOString() }, { onConflict: 'name_anchor' });
+  if (e2) throw new Error(e2.message);
+  await rebuild();
+  return { separated: p.anchor_key.slice(0, 5) + '…', person_id: b.person_id };
 }
 
 async function campaignPlan(sb, b) {
@@ -147,6 +162,7 @@ const POSTS = {
   'list-load-progress': (sb, b) => runProgress(sb, b.run_id, { items_done: b.items_done, items_total: b.items_total, checkpoint: { export_id: b.export_id, step: String(b.step || '').slice(0, 120) } }),
   'list-load-finish': (sb, b) => finishLoad(sb, { ...b, status: b.status === 'ok' ? 'ok' : 'failed' }),
   'presend-check': (sb, b) => presendCheck(sb, b.export_id),
+  'identity-separate': (sb, b) => separateIdentity(sb, b, () => runStep(sb, 'customers')),
   collector: ingest,
   ...QUERY_POSTS
 };
