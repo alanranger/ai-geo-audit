@@ -36,6 +36,8 @@ function categories(v) {
   return v.map(Number);
 }
 
+const setByOf = (b) => (b?.via === 'claude' ? 'Alan via Claude (admin key)' : SET_BY);
+
 export function overrideRow(b, propertyUrl, now) {
   const key = String(b?.event_key || '');
   const date = key.split('|')[0];
@@ -46,7 +48,7 @@ export function overrideRow(b, propertyUrl, now) {
     event_title: text(b.event_title, 200), event_url: text(b.event_url, 300),
     promote_mode: b.promote_mode || 'normal',
     offer_note: text(b.offer_note, 300), offer_code: text(b.offer_code, 40), offer_ends: dateOrNull(b.offer_ends, 'offer_ends'),
-    set_by: SET_BY, set_at: now, updated_at: now
+    set_by: setByOf(b), set_at: now, updated_at: now
   };
 }
 
@@ -101,7 +103,7 @@ export default async function handler(req, res) {
   if (!run) return send(res, 400, { ok: false, error: 'type must be override, stage or theme' });
   try {
     const out = await run(client(), b, String(b.propertyUrl || DEFAULT_PROPERTY), new Date().toISOString());
-    return send(res, 200, { ok: true, set_by: SET_BY, ...out });
+    return send(res, 200, { ok: true, set_by: setByOf(b), ...out });
   } catch (err) {
     return send(res, 400, { ok: false, error: err?.message || String(err) });
   }
