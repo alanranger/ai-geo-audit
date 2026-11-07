@@ -7,7 +7,12 @@
 /** Shared fetch for the page functions below (injected as a string). */
 export const PAGE_HELPERS = `
   window.__arpGet = async function (path) {
-    const r = await fetch(path, { credentials: 'include', redirect: 'manual' });
+    let r;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      r = await fetch(path, { credentials: 'include', redirect: 'manual' });
+      if (r.status < 500) break;
+      await new Promise((ok) => setTimeout(ok, 2000 * (attempt + 1)));
+    }
     if (r.type === 'opaqueredirect' || r.status === 401 || r.status === 403) throw new Error('SESSION_EXPIRED');
     if (!r.ok) throw new Error('HTTP_' + r.status + ' ' + path.split('?')[0]);
     const j = await r.json().catch(() => null);
