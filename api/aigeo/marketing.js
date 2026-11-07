@@ -11,7 +11,7 @@
  * GET  ?action=suppression-review                              suppressed people subscribed again, with the evidence
  * POST { action: 'suppression-resolve', email_hash, reason }   clear one person (typed reason, logged; Squarespace untouched)
  * POST { action: 'list-load-request', export_id }              queue "Load into Squarespace list" (run on Alan's PC)
- * GET  ?action=list-load-next  ·  POST list-load-precheck / -postcheck / -progress / -finish   (PC job runner)
+ * GET  ?action=list-load-next  ·  POST list-load-precheck / -postcheck / -fixed / -progress / -finish   (PC job runner)
  * POST { action: 'presend-check', export_id }                   consent + suppression for everyone loaded → PASS / FAIL
  * GET  ?action=run&run_id=                                      progress of a queued / running job
  * POST { action: 'sync', step: profiles|orders|postcodes|customers }
@@ -32,7 +32,7 @@ import { allSegments, evalCtx, loadPeople, overview, withParams } from '../../li
 import { rebuildCustomers } from '../../lib/marketing/rebuild.mjs';
 import { evaluate } from '../../lib/marketing/segments.mjs';
 import { resolveOne, reviewList } from '../../lib/marketing/suppression-review.mjs';
-import { finishLoad, nextLoad, postcheck, precheck, presendCheck, requestLoad, runProgress } from '../../lib/marketing/list-load.mjs';
+import { finishLoad, fixFlips, nextLoad, postcheck, precheck, presendCheck, requestLoad, runProgress } from '../../lib/marketing/list-load.mjs';
 import { finishRun, logRun, serviceClient } from '../../lib/marketing/store.mjs';
 import { syncOrders, syncPostcodes, syncProfiles } from '../../lib/marketing/sync.mjs';
 
@@ -140,6 +140,7 @@ const POSTS = {
   'list-load-request': (sb, b) => requestLoad(sb, b.export_id, SET_BY),
   'list-load-precheck': (sb, b) => precheck(sb, b.export_id),
   'list-load-postcheck': (sb, b) => postcheck(sb, b.export_id, b),
+  'list-load-fixed': (sb, b) => fixFlips(sb, b.export_id, b),
   'list-load-progress': (sb, b) => runProgress(sb, b.run_id, { items_done: b.items_done, items_total: b.items_total, checkpoint: { export_id: b.export_id, step: String(b.step || '').slice(0, 120) } }),
   'list-load-finish': (sb, b) => finishLoad(sb, { ...b, status: b.status === 'ok' ? 'ok' : 'failed' }),
   'presend-check': (sb, b) => presendCheck(sb, b.export_id),

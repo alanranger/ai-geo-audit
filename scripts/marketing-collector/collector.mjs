@@ -20,7 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { listSent, PAGE_HELPERS, readEventUsers, readMeter, readSummary } from './page-reads.mjs';
-import { createList, readLists, subscribedTotal, uploadCsv } from './page-writes.mjs';
+import { createList, csvSwitchedOn, optOut, readLists, subscribedTotal, uploadCsv } from './page-writes.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PROFILE = path.join(process.env.LOCALAPPDATA || os.homedir(), 'AlanRanger', 'sqs-collector-profile');
@@ -182,13 +182,27 @@ async function runLoad(page, job) {
   await loadStep(job, 2, `Creating list and importing ${pre.import.length} people`);
   const list = await targetList(page, job.list_name);
   const csv = ['Email Address,First Name,Last Name', ...pre.import.map((m) => [m.email, csvCell(m.first_name), csvCell(m.last_name)].join(','))].join('\n');
+  const importStart = Date.now() - 60000;
   await page.evaluate(uploadCsv, { listId: list.id, csv, filename: `arp-${job.export_id.slice(0, 8)}.csv` });
   await loadStep(job, 3, 'Waiting for Squarespace to finish the import');
   const count = await waitForCount(page, list.id, pre.import.length);
   const after = await page.evaluate(subscribedTotal);
   await loadStep(job, 4, 'Re-reading consent after the import');
-  const post2 = await api('POST', { action: 'list-load-postcheck', export_id: job.export_id, list_id: list.id, list_count: count, all_subscribers_before: before, all_subscribers_after: after });
-  return { list_id: list.id, imported: pre.import.length, dropped: pre.dropped, list_count: count, all_subscribers_before: before, all_subscribers_after: after, status: post2.status, flips: post2.flips };
+  const sw = await page.evaluate(csvSwitchedOn, { ids: pre.import.map((m) => m.profile_id).filter(Boolean), sinceMs: importStart });
+  const post2 = await api('POST', { action: 'list-load-postcheck', export_id: job.export_id, list_id: list.id, list_count: count, all_subscribers_before: before, all_subscribers_after: after, switched_ids: sw.switched, unreadable: sw.unreadable.length });
+  const fix = post2.fix_ids?.length ? await undoFlips(page, job, list.id, post2.fix_ids) : null;
+  return { list_id: list.id, imported: pre.import.length, dropped: pre.dropped, list_count: count, all_subscribers_before: before, all_subscribers_after: after, status: fix?.status || post2.status, flips: post2.flips, fixed: fix?.fixed ?? 0, all_subscribers_after_fix: fix?.all_subscribers ?? null };
+}
+
+/** The import switched these people on: opt them out again (Squarespace also drops them from the list), then confirm. */
+async function undoFlips(page, job, listId, ids) {
+  await loadStep(job, 4, `Setting ${ids.length} person(s) back to unsubscribed`);
+  await page.evaluate(optOut, ids);
+  await new Promise((ok) => setTimeout(ok, 15000));
+  const count = (await page.evaluate(readLists)).find((l) => l.id === listId)?.count ?? null;
+  const allSubs = await page.evaluate(subscribedTotal);
+  const r = await api('POST', { action: 'list-load-fixed', export_id: job.export_id, list_count: count, all_subscribers_after_fix: allSubs });
+  return { ...r, all_subscribers: allSubs };
 }
 
 /** Scheduled every few minutes: opens the browser only when the dashboard has queued a load. */
