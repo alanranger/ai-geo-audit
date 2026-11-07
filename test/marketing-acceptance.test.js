@@ -4,12 +4,14 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { band } from '../lib/marketing/engagement.mjs';
+import { band, engagementView } from '../lib/marketing/engagement.mjs';
+import { latestCollectorRun } from '../lib/marketing/overview.mjs';
+import { resolveOne } from '../lib/marketing/suppression-review.mjs';
 import { safeCell, validListName } from '../lib/marketing/exports.mjs';
 import { allFacts } from '../lib/marketing/facts.mjs';
 import { runAlert } from '../lib/marketing/health.mjs';
 import { buildIdentities, sqsOrderNumber } from '../lib/marketing/identity.mjs';
-import { ingest } from '../lib/marketing/collector-ingest.mjs';
+import { ingest, reSuppressAfterReview } from '../lib/marketing/collector-ingest.mjs';
 import { capacityCheck, cycleOf, meterView } from '../lib/marketing/meter.mjs';
 import { BUILTIN_SEGMENTS, consentReason, evaluate } from '../lib/marketing/segments.mjs';
 import { emailHash } from '../lib/marketing/store.mjs';
@@ -144,6 +146,51 @@ test('collector: expired session and changed responses fail loudly; malformed da
   assert.match(runAlert('Collector', { status: 'ok', finished_at: '2026-11-01T00:00:00Z' }), /stale, last ran/);
   assert.match(runAlert('Collector', null, 'run login'), /never run/);
   delete globalThis.window;
+});
+
+test('engagement uses the real (first) open / click time, not the send date; the send date is kept apart', () => {
+  const e = { delivered_campaigns: 10, last_open_campaign_at: '2026-01-05T09:00:00Z', last_open_at: '2026-10-30T20:00:00Z', last_click_campaign_at: '2026-01-05T09:00:00Z', last_click_at: null, last5_opened: 1, last5_delivered: 5, last5_clicked: 0 };
+  const v = engagementView(e, true, undefined, TODAY);
+  assert.equal(v.open, 'warm');
+  assert.equal(v.last_opened_at, '2026-10-30T20:00:00Z');
+  assert.equal(v.last_opened_email_sent_at, '2026-01-05T09:00:00Z');
+  assert.equal(v.click, 'cold');
+});
+
+test('Alan\'s business address is admin, never a customer: its orders go to the attendee on the order, else unassigned', () => {
+  const { st, f } = world({
+    profiles: [profile('a1', 'info@alanranger.com', 'Some', 'Client', { order_count: 3 }), profile('p2', 'jo@example.com', 'Jo', 'Sample')],
+    orders: [order('oa', 5001, 'info@alanranger.com', { attendee_email: 'jo@example.com', attendee_first_name: 'Jo', attendee_last_name: 'Sample' }),
+      order('ob', 5002, 'info@alanranger.com', { attendee_first_name: 'Pat', attendee_last_name: 'Other' }), order('oc', 5003, 'info@alanranger.com')],
+    lines: [{ order_id: 'oa', product_name: 'Woodland Walk', line_type: 'SERVICE' }, { order_id: 'ob', product_name: 'Woodland Walk', line_type: 'SERVICE' }, { order_id: 'oc', product_name: 'Woodland Walk', line_type: 'SERVICE' }],
+    workshops: []
+  });
+  assert.deepEqual(st.admin, { orders: 3, by_email: 1, by_name: 1, unassigned: 1 });
+  const admin = f('sqs:a1');
+  assert.equal(admin.admin, true);
+  assert.equal(admin.bookings.length, 0);
+  assert.equal(admin.history_incomplete, false);
+  assert.equal(f('sqs:p2').cats.woodland.c, 1);
+  assert.equal(f('name:pat other').cats.woodland.c, 1);
+  assert.equal(st.byName.has('some client'), false);
+  const seg = BUILTIN_SEGMENTS.find((s) => s.segment_id === 'residential-prospects').definition;
+  assert.equal(evaluate([{ person_id: 'a', facts: { ...admin, subscribed: true, profile_state: 'active' } }], [seg], { today: TODAY }).count, 1);
+});
+
+test('run updates keep progress counts; a later successful collector run clears an earlier stale one', () => {
+  const runs = [{ kind: 'collector', status: 'stale', started_at: '2026-11-07T15:55:00Z', finished_at: '2026-11-07T15:55:10Z' }, { kind: 'collector:backfill', status: 'ok', started_at: '2026-11-07T16:30:00Z', finished_at: '2026-11-07T17:58:00Z' }, { kind: 'sync:profiles', status: 'ok', started_at: '2026-11-07T18:00:00Z', finished_at: '2026-11-07T18:00:20Z' }];
+  assert.equal(latestCollectorRun(runs).status, 'ok');
+  assert.equal(latestCollectorRun([runs[0]]).status, 'stale');
+});
+
+test('review and clear: one person, a typed reason; a later unsubscribe puts the block back', async () => {
+  await assert.rejects(resolveOne({}, { email_hash: 'x', reason: 'long enough reason' }, async () => ({})), /one person at a time/);
+  await assert.rejects(resolveOne({}, { email_hash: 'a'.repeat(64), reason: 'short' }, async () => ({})), /type a reason/);
+  const updates = [];
+  const fake = { from: () => ({ select: () => ({ in: () => ({ not: async () => ({ data: [{ email_hash: 'h1', resolved_at: '2026-11-07T18:00:00Z' }, { email_hash: 'h2', resolved_at: '2026-11-07T18:00:00Z' }] }) }) }), update: (patch) => ({ eq: async (_c, h) => { updates.push([h, patch.reason]); return {}; } }) }) };
+  const n = await reSuppressAfterReview(fake, [{ email_hash: 'h1', at: '2026-11-08T10:00:00Z' }, { email_hash: 'h2', at: '2026-11-01T10:00:00Z' }]);
+  assert.equal(n, 1);
+  assert.deepEqual(updates, [['h1', 'unsubscribed_again_after_review']]);
 });
 
 test('import file safety: formula-looking names are neutralised, list names follow the Squarespace 75-char limit', () => {

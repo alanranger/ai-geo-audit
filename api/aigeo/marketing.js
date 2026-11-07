@@ -8,6 +8,8 @@
  * GET  ?action=customer&person_id=                             one person: bookings, links, probable records, segments
  * GET  ?action=export-csv&export_id=                           import CSV (consent re-checked at download)
  * GET  ?action=collector-state                                 which sent campaigns already have complete recipient events
+ * GET  ?action=suppression-review                              suppressed people subscribed again, with the evidence
+ * POST { action: 'suppression-resolve', email_hash, reason }   clear one person (typed reason, logged; Squarespace untouched)
  * POST { action: 'sync', step: profiles|orders|postcodes|customers }
  * POST { action: 'segment-preview', segment_ids, params }      count + exclusion reasons + first 25 people
  * POST { action: 'segment-save', segment_id?, name, description, definition }
@@ -25,6 +27,7 @@ import { createExport, exportCsv, setExportStatus } from '../../lib/marketing/ex
 import { allSegments, evalCtx, loadPeople, overview, withParams } from '../../lib/marketing/overview.mjs';
 import { rebuildCustomers } from '../../lib/marketing/rebuild.mjs';
 import { evaluate } from '../../lib/marketing/segments.mjs';
+import { resolveOne, reviewList } from '../../lib/marketing/suppression-review.mjs';
 import { finishRun, logRun, serviceClient } from '../../lib/marketing/store.mjs';
 import { syncOrders, syncPostcodes, syncProfiles } from '../../lib/marketing/sync.mjs';
 
@@ -104,7 +107,8 @@ const GETS = {
   overview: (sb, q) => overview(sb, params(q)),
   customers: (sb, q) => listCustomers(sb, { q: q.q, segment_id: q.segment_id, page: q.page || 0, subscribed_only: q.subscribed_only === '1', params: params(q) }),
   customer: (sb, q) => customerDetail(sb, q.person_id, params(q)),
-  'collector-state': collectorState
+  'collector-state': collectorState,
+  'suppression-review': (sb) => reviewList(sb)
 };
 
 async function collectorState(sb) {
@@ -120,6 +124,7 @@ const POSTS = {
   'export-create': (sb, b) => createExport(sb, { ...b, created_by: SET_BY }, () => runStep(sb, 'profiles').then(() => runStep(sb, 'customers'))),
   'export-status': (sb, b) => setExportStatus(sb, { ...b, by: SET_BY }),
   'campaign-plan': campaignPlan,
+  'suppression-resolve': (sb, b) => resolveOne(sb, b, () => runStep(sb, 'customers')),
   collector: ingest
 };
 
