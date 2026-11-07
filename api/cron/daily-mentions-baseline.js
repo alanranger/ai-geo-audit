@@ -1,5 +1,6 @@
 import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
 import { logCronEvent } from '../../lib/cron/logCron.js';
+import { CORS_AUTH_HEADERS, cronHeaders, cronOrAdmin } from '../../lib/api/cronAuth.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -7,7 +8,7 @@ const sendJson = (res, status, body) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-cron-secret');
+  res.setHeader('Access-Control-Allow-Headers', CORS_AUTH_HEADERS);
   res.status(status).send(JSON.stringify(body));
 };
 
@@ -41,10 +42,7 @@ export default async function handler(req, res) {
     return sendJson(res, 405, { status: 'error', message: 'Method not allowed. Use GET.' });
   }
 
-  const cronSecret = process.env.CRON_SECRET;
-  const requestSecret = req.headers['x-cron-secret'] || req.query.secret;
-  const isVercelCron = req.headers['x-vercel-cron'] === '1';
-  if (cronSecret && !isVercelCron && requestSecret !== cronSecret) {
+    if (!cronOrAdmin(req)) {
     return sendJson(res, 401, {
       status: 'error',
       message: 'Unauthorized cron request',
@@ -101,7 +99,7 @@ export default async function handler(req, res) {
 
     const ingestion = await fetchJson(`${baseUrl}/api/aigeo/mentions-ingestion?persist=1&maxKeywords=30&perQueryLimit=3`, {
       method: 'GET',
-      headers: cronSecret ? { 'x-cron-secret': cronSecret } : {}
+      headers: cronHeaders()
     });
 
     await updateScheduleStatus('ok');

@@ -5,7 +5,7 @@
  * today — late-arriving and reprocessed sessions get corrected, and the first
  * run backfills.
  *
- * GET  with x-vercel-cron / ?secret=  — scheduled run
+ * GET  Vercel Cron (Bearer CRON_SECRET) — scheduled run; POST with the dashboard admin key
  * POST                                — dashboard audit button / full refresh
  * ?dryRun=true                        — fetch and report without writing
  * ?days=90                            — window / backfill depth

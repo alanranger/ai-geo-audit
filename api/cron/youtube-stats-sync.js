@@ -5,7 +5,7 @@
  * credentials are not set yet, so an unauthorised channel reads as a named
  * setup gap rather than a crashed cron or an implied zero.
  *
- * GET  with x-vercel-cron / ?secret=  — scheduled run
+ * GET  Vercel Cron (Bearer CRON_SECRET) — scheduled run; POST with the dashboard admin key
  * POST                                — dashboard audit button / full refresh
  * ?dryRun=true                        — fetch and report without writing
  */

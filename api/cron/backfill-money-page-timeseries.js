@@ -47,6 +47,7 @@ import { getGSCAccessToken, normalizePropertyUrl, getGscDateRange } from '../aig
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
 import { runPageQueryNightly, PAGE_QUERY_DAYS } from '../../lib/gsc-page-query-nightly.js';
+import { CORS_AUTH_HEADERS, cronOrAdmin } from '../../lib/api/cronAuth.js';
 
 const ROW_LIMIT = 25000;
 const REQUEST_PAUSE_MS = 120;
@@ -79,14 +80,7 @@ function jsonResponse(res, status, body) {
   return res.status(status).json({ ...body, meta });
 }
 
-function checkAuth(req) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret) return { ok: true };
-  const requestSecret = req.headers['x-cron-secret'] || req.query.secret;
-  const isVercelCron = req.headers['x-vercel-cron'] === '1';
-  if (isVercelCron || requestSecret === cronSecret) return { ok: true };
-  return { ok: false };
-}
+const checkAuth = (req) => ({ ok: !!cronOrAdmin(req) });
 
 function resolveDateRange(req) {
   const { startDate, endDate, daysBack } = req.query || {};
@@ -281,7 +275,7 @@ function buildOkResponse({ siteUrl, startDate, endDate, runId, records, inserted
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Cron-Secret');
+  res.setHeader('Access-Control-Allow-Headers', CORS_AUTH_HEADERS);
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }

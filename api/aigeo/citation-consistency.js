@@ -2,6 +2,7 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 import { createClient } from '@supabase/supabase-js';
 import { collectCitationConsistencyRows } from '../../lib/citation/consistency.js';
+import { CORS_AUTH_HEADERS, cronOrAdmin } from '../../lib/api/cronAuth.js';
 
 const need = (key) => {
   const value = process.env[key];
@@ -13,7 +14,7 @@ const sendJson = (res, status, body) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-cron-secret');
+  res.setHeader('Access-Control-Allow-Headers', CORS_AUTH_HEADERS);
   res.status(status).send(JSON.stringify(body));
 };
 
@@ -168,6 +169,7 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') {
     return sendJson(res, 405, { status: 'error', message: 'Method not allowed. Use GET.' });
   }
+  if (!cronOrAdmin(req)) return sendJson(res, 401, { status: 'error', message: 'unauthorized' });
 
   try {
     const propertyUrl = normalizePropertyUrl(req.query.propertyUrl || process.env.CRON_PROPERTY_URL || 'https://www.alanranger.com');

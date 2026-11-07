@@ -5,7 +5,7 @@
 // Revenue Funnel summary endpoint reads from that table, so KPIs/funnel
 // update automatically once this runs.
 //
-// Method:  POST | GET (GET only when invoked by Vercel cron with x-vercel-cron)
+// Method:  POST | GET — Vercel Cron (Bearer CRON_SECRET) or the dashboard admin key (lib/api/cronAuth.js)
 // Body / query:
 //   propertyUrl     - default https://www.alanranger.com
 //   period_start    - YYYY-MM-DD (defaults to today - 27 days, UTC)
@@ -27,6 +27,7 @@ export const config = { runtime: 'nodejs' };
 import { createClient } from '@supabase/supabase-js';
 import { classifyCommercialTier, emptyTierAccumulator, setProductTierMap } from './commercial-tier.js';
 import { loadProductTierMap } from '../../lib/product-tier-map.js';
+import { CORS_AUTH_HEADERS, cronOrAdmin } from '../../lib/api/cronAuth.js';
 
 const SQS_BASE = 'https://api.squarespace.com/1.0/commerce/orders';
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
@@ -37,7 +38,7 @@ const send = (res, status, body) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', CORS_AUTH_HEADERS);
   res.setHeader('Cache-Control', 'no-store');
   res.status(status).send(JSON.stringify(body));
 };
@@ -356,23 +357,14 @@ function parseModes(raw) {
   return set;
 }
 
-function authoriseRequest(req) {
-  // GET is only allowed when invoked by Vercel cron (`x-vercel-cron: 1`) OR
-  // when a shared admin token is provided via ?token=. POST is unrestricted
-  // because the UI already runs inside the admin shell.
-  if (req.method === 'POST' || req.method === 'OPTIONS') return true;
-  const isCron = String(req.headers['x-vercel-cron'] || '') === '1';
-  if (isCron) return true;
-  const token = String(req.query?.token || '').trim();
-  const expected = String(process.env.SQUARESPACE_SYNC_TOKEN || '').trim();
-  return !!expected && token === expected;
-}
+/** Vercel Cron / internal jobs (Bearer CRON_SECRET) or the dashboard admin key; no URL tokens. */
+const authoriseRequest = (req) => !!cronOrAdmin(req);
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', CORS_AUTH_HEADERS);
     return res.status(204).end();
   }
   if (req.method !== 'GET' && req.method !== 'POST') {

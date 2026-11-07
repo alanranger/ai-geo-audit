@@ -12,6 +12,7 @@ import {
   withGbpToken,
 } from '../../lib/gbp/performance.js';
 import { getGSCAccessToken } from '../aigeo/utils.js';
+import { cronOrAdmin } from '../../lib/api/cronAuth.js';
 
 const PROPERTY = 'https://www.alanranger.com';
 const BRAND_TERMS = ['alan ranger', 'alanranger', 'alan ranger photography'];
@@ -27,13 +28,7 @@ const need = (key) => {
   return v;
 };
 
-function authoriseRequest(req) {
-  if (req.method === 'POST') return true;
-  if (req.method === 'GET' && String(req.headers['x-vercel-cron'] || '') === '1') return true;
-  const secret = process.env.CRON_SECRET;
-  if (secret && (req.headers['x-cron-secret'] === secret || req.query?.secret === secret)) return true;
-  return false;
-}
+const authoriseRequest = (req) => !!cronOrAdmin(req);
 
 function isBrandQuery(query) {
   if (!query || typeof query !== 'string') return false;

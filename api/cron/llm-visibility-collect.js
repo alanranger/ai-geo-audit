@@ -1,21 +1,19 @@
 /**
- * Ad-hoc LLM visibility collect (manual secret only).
+ * Ad-hoc LLM visibility collect (Bearer CRON_SECRET or the dashboard admin key).
  * Weekly vercel.json schedule REMOVED — use Full refresh / Ranking & AI /
  * POST /api/aigeo/llm-visibility-collect instead.
  */
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 import { collectLlmVisibilitySnapshot } from '../../lib/llm-visibility/collect-core.js';
+import { cronOrAdmin } from '../../lib/api/cronAuth.js';
 
 const send = (res, status, body) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.status(status).send(JSON.stringify(body));
 };
 
-function authorise(req) {
-  const secret = process.env.CRON_SECRET;
-  return secret && (req.headers['x-cron-secret'] === secret || req.query?.secret === secret);
-}
+const authorise = (req) => !!cronOrAdmin(req);
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return send(res, 204, {});

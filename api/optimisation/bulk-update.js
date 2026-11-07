@@ -3,6 +3,7 @@ export const config = { runtime: 'nodejs' };
 import { createClient } from '@supabase/supabase-js';
 import { computeAiMetricsForPageUrl } from '../../lib/optimisation/aiMetrics.js';
 import { normalizeUrlForMatching } from '../../lib/audit/moneyPages.js';
+import { CORS_AUTH_HEADERS, cronOrAdmin } from '../../lib/api/cronAuth.js';
 
 const need = (k) => {
   const v = process.env[k];
@@ -14,7 +15,7 @@ const sendJSON = (res, status, obj) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-cron-secret');
+  res.setHeader('Access-Control-Allow-Headers', CORS_AUTH_HEADERS);
   res.status(status).send(JSON.stringify(obj));
 };
 
@@ -168,7 +169,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-cron-secret');
+    res.setHeader('Access-Control-Allow-Headers', CORS_AUTH_HEADERS);
     return res.status(200).end();
   }
 
@@ -176,9 +177,7 @@ export default async function handler(req, res) {
     return sendJSON(res, 405, { status: 'error', message: 'Method not allowed. Use POST.' });
   }
 
-  const cronSecret = process.env.CRON_SECRET;
-  const requestSecret = req.headers['x-cron-secret'];
-  if (cronSecret && requestSecret !== cronSecret) {
+  if (!cronOrAdmin(req)) {
     return sendJSON(res, 401, {
       status: 'error',
       message: 'Unauthorized cron request'

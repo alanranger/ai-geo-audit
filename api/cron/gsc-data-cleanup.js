@@ -3,6 +3,7 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 import { createClient } from '@supabase/supabase-js';
 import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
 import { logCronEvent } from '../../lib/cron/logCron.js';
+import { CORS_AUTH_HEADERS, cronHeaders, cronOrAdmin } from '../../lib/api/cronAuth.js';
 
 const JOB_KEY = 'gsc_cleanup';
 const DEFAULT_SCHEDULE = { frequency: 'monthly', timeOfDay: '02:30' };
@@ -19,7 +20,7 @@ const sendJson = (res, status, body) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Cron-Secret');
+  res.setHeader('Access-Control-Allow-Headers', CORS_AUTH_HEADERS);
   res.status(status).send(JSON.stringify(body));
 };
 
@@ -116,10 +117,7 @@ export default async function handler(req, res) {
     return sendJson(res, 405, { status: 'error', message: 'Method not allowed. Use GET.' });
   }
 
-  const cronSecret = process.env.CRON_SECRET;
-  const requestSecret = req.headers['x-cron-secret'] || req.query.secret;
-  const isVercelCron = req.headers['x-vercel-cron'] === '1';
-  if (cronSecret && !isVercelCron && requestSecret !== cronSecret) {
+    if (!cronOrAdmin(req)) {
     return sendJson(res, 401, { status: 'error', message: 'Unauthorized cron request' });
   }
 

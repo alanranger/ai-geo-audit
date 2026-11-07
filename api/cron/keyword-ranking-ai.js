@@ -11,6 +11,7 @@ import {
   deleteKeywordRowsForDate
 } from '../../lib/keyword-ranking/refresh-core.js';
 import { preflightLocalCapture } from '../../lib/keyword-ranking/local-capture-preflight.js';
+import { CORS_AUTH_HEADERS, cronHeaders, cronOrAdmin } from '../../lib/api/cronAuth.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -89,10 +90,7 @@ export default async function handler(req, res) {
     return sendJson(res, 405, { status: 'error', message: 'Method not allowed. Use GET.' });
   }
 
-  const cronSecret = process.env.CRON_SECRET;
-  const requestSecret = req.headers['x-cron-secret'] || req.query.secret;
-  const isVercelCron = req.headers['x-vercel-cron'] === '1';
-  if (cronSecret && !isVercelCron && requestSecret !== cronSecret) {
+    if (!cronOrAdmin(req)) {
     return sendJson(res, 401, {
       status: 'error',
       message: 'Unauthorized cron request',

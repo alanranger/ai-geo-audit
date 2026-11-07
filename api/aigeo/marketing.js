@@ -38,6 +38,7 @@ import { evaluate } from '../../lib/marketing/segments.mjs';
 import { resolveOne, reviewList } from '../../lib/marketing/suppression-review.mjs';
 import { finishLoad, fixFlips, nextLoad, postcheck, precheck, presendCheck, requestLoad, runProgress } from '../../lib/marketing/list-load.mjs';
 import { QUERY_GETS, QUERY_POSTS } from '../../lib/marketing/query/api.mjs';
+import { cronOrAdmin } from '../../lib/api/cronAuth.js';
 import { finishRun, logRun, serviceClient } from '../../lib/marketing/store.mjs';
 import { syncOrders, syncPostcodes, syncProfiles } from '../../lib/marketing/sync.mjs';
 
@@ -50,11 +51,7 @@ function send(res, status, body) {
   res.status(status).send(JSON.stringify(body));
 }
 
-function isCron(req) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) return String(req.headers.authorization || '') === `Bearer ${secret}`;
-  return String(req.headers['x-vercel-cron'] || '') === '1';
-}
+const isCron = (req) => cronOrAdmin(req) === 'cron';
 
 async function runStep(sb, step) {
   const fn = STEPS[step];

@@ -1,5 +1,6 @@
 import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
 import { logCronEvent } from '../../lib/cron/logCron.js';
+import { CORS_AUTH_HEADERS, cronHeaders, cronOrAdmin } from '../../lib/api/cronAuth.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -32,10 +33,7 @@ export default async function handler(req, res) {
     return sendJson(res, 405, { status: 'error', message: 'Method not allowed. Use GET.' });
   }
 
-  const cronSecret = process.env.CRON_SECRET;
-  const requestSecret = req.headers['x-cron-secret'] || req.query.secret;
-  const isVercelCron = req.headers['x-vercel-cron'] === '1';
-  if (cronSecret && !isVercelCron && requestSecret !== cronSecret) {
+    if (!cronOrAdmin(req)) {
     return sendJson(res, 401, {
       status: 'error',
       message: 'Unauthorized cron request',
@@ -95,9 +93,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const headers = cronSecret
-      ? { 'x-cron-secret': cronSecret }
-      : undefined;
+    const headers = cronHeaders();
 
     const syncResult = await fetchJson(`${baseUrl}/api/sync-csv`, { method: 'GET', headers });
 
@@ -113,7 +109,7 @@ export default async function handler(req, res) {
 
     const bulkHeaders = {
       'Content-Type': 'application/json',
-      ...(cronSecret ? { 'x-cron-secret': cronSecret } : {})
+      ...cronHeaders()
     };
 
     const [

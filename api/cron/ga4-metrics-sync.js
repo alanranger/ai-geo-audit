@@ -3,6 +3,7 @@ export const config = { runtime: 'nodejs', maxDuration: 120 };
 
 import { createClient } from '@supabase/supabase-js';
 import { getGa4MetricsForProperty } from '../aigeo/ga4-data.js';
+import { cronOrAdmin } from '../../lib/api/cronAuth.js';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 
@@ -17,11 +18,7 @@ const need = (key) => {
   return v;
 };
 
-function authoriseRequest(req) {
-  if (req.method === 'POST') return true;
-  if (req.method === 'GET' && String(req.headers['x-vercel-cron'] || '') === '1') return true;
-  return false;
-}
+const authoriseRequest = (req) => !!cronOrAdmin(req);
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return send(res, 204, {});

@@ -2,7 +2,7 @@
  * Nightly DataForSEO llm_mentions pull for the Acquisition tab's AI channels.
  * Covers chat_gpt + google only — the two platforms this API supports.
  *
- * GET  with x-vercel-cron / ?secret=  — scheduled run
+ * GET  Vercel Cron (Bearer CRON_SECRET) — scheduled run; POST with the dashboard admin key
  * POST                                — dashboard audit button / full refresh
  * ?dryRun=true                        — fetch and report without writing
  */

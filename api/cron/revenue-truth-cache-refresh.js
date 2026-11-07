@@ -14,6 +14,7 @@ import {
   buildDiagnosisOpts
 } from '../aigeo/revenue-funnel-diagnosis.js';
 import { buildFindingsPayload } from '../aigeo/revenue-truth-findings.js';
+import { cronOrAdmin } from '../../lib/api/cronAuth.js';
 import {
   diagnosisCacheKey,
   findingsCacheKey,
@@ -45,11 +46,7 @@ const need = (key) => {
   return v;
 };
 
-function authoriseRequest(req) {
-  if (req.method === 'POST') return true;
-  if (req.method === 'GET' && String(req.headers['x-vercel-cron'] || '') === '1') return true;
-  return false;
-}
+const authoriseRequest = (req) => !!cronOrAdmin(req);
 
 async function warmFindings(supabase, propertyUrl, results) {
   const t0 = Date.now();

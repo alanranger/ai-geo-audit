@@ -1,5 +1,5 @@
 // Daily strategy_event_snapshots — Vercel cron + manual POST.
-// Vercel schedules call GET; must accept x-vercel-cron and Bearer CRON_SECRET.
+// Vercel schedules call GET with Bearer CRON_SECRET (lib/api/cronAuth.js); the dashboard uses the admin key.
 export const config = { runtime: 'nodejs', maxDuration: 120 };
 
 import { createClient } from '@supabase/supabase-js';

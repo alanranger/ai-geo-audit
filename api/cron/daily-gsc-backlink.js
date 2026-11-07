@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
 import { runFullAudit } from '../../lib/audit/fullAudit.js';
 import { logCronEvent } from '../../lib/cron/logCron.js';
+import { CORS_AUTH_HEADERS, cronHeaders, cronOrAdmin } from '../../lib/api/cronAuth.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -123,7 +124,7 @@ const buildMoneyPageGridRows = ({ propertyUrl, moneyPages, timeseries, days }) =
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Cron-Secret');
+  res.setHeader('Access-Control-Allow-Headers', CORS_AUTH_HEADERS);
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -135,10 +136,7 @@ export default async function handler(req, res) {
     });
   }
 
-  const cronSecret = process.env.CRON_SECRET;
-  const requestSecret = req.headers['x-cron-secret'] || req.query.secret;
-  const isVercelCron = req.headers['x-vercel-cron'] === '1';
-  if (cronSecret && !isVercelCron && requestSecret !== cronSecret) {
+    if (!cronOrAdmin(req)) {
     return res.status(401).json({
       status: 'error',
       message: 'Unauthorized cron request',
@@ -250,7 +248,7 @@ export default async function handler(req, res) {
 
     // Same Brand demand refresh as GSC & Backlink Audit button / Dashboard full refresh
     try {
-      await fetchJson(`${baseUrl}/api/cron/gbp-brand-demand-sync`, { method: 'POST' });
+      await fetchJson(`${baseUrl}/api/cron/gbp-brand-demand-sync`, { method: 'POST', headers: cronHeaders() });
       const brandPayload = await fetchJson(
         `${baseUrl}/api/aigeo/brand-demand?propertyUrl=${encodeURIComponent(propertyUrl)}`
       );

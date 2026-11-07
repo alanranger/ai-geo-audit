@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
 import { logCronEvent } from '../../lib/cron/logCron.js';
 import { selectAllPaged } from '../../lib/supabase-paged.js';
+import { cronOrAdmin } from '../../lib/api/cronAuth.js';
 
 const JOB_KEY = 'optimisation_backup';
 const DEFAULT_SCHEDULE = { frequency: 'daily', timeOfDay: '19:00' };
@@ -126,12 +127,7 @@ async function updateScheduleStatus(baseUrl, schedule, nowIso, status, errorMess
   }
 }
 
-function isAuthorized(req) {
-  const cronSecret = process.env.CRON_SECRET;
-  const requestSecret = req.headers['x-cron-secret'] || req.query.secret;
-  const isVercelCron = req.headers['x-vercel-cron'] === '1';
-  return !cronSecret || isVercelCron || requestSecret === cronSecret;
-}
+const isAuthorized = (req) => !!cronOrAdmin(req);
 
 async function loadSchedule(baseUrl) {
   try {

@@ -31,7 +31,7 @@ for (const envFile of ['.env.local', '.env']) {
   }
 }
 
-const CRON_SECRET = process.env.CRON_SECRET || '';
+const ADMIN_KEY = process.env.ARP_ADMIN_KEY || '';
 const outDir = join(__dir, 'output');
 mkdirSync(outDir, { recursive: true });
 const logPath = join(outDir, `full-refresh-job-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
@@ -42,9 +42,10 @@ const log = (msg) => {
   appendFileSync(logPath, line + '\n', 'utf8');
 };
 
+/** Scheduled routes accept the dashboard admin key (lib/api/cronAuth.js); the cron secret never leaves Vercel. */
 const cronHeaders = () => {
   const h = { Accept: 'application/json' };
-  if (CRON_SECRET) h['x-cron-secret'] = CRON_SECRET;
+  if (ADMIN_KEY) h['x-arp-admin-key'] = ADMIN_KEY;
   return h;
 };
 
@@ -89,24 +90,23 @@ const run = async (label, url, options, timeoutMs) => {
 log(`Full refresh job → ${BASE}`);
 log(`Property: ${PROPERTY}`);
 log(`Log file: ${logPath}`);
-if (!CRON_SECRET) log('WARN: CRON_SECRET not set — cron endpoints may return 401');
+if (!ADMIN_KEY) log('WARN: ARP_ADMIN_KEY not set — scheduled endpoints will return 401');
 
 const q = encodeURIComponent(PROPERTY);
-const secretQ = CRON_SECRET ? `&secret=${encodeURIComponent(CRON_SECRET)}` : '';
 const { start: revStart, end: revEnd } = revenueWindow13mo();
 
 await run('1/10 Sync CSV', `${BASE}/api/sync-csv`, { method: 'GET', headers: cronHeaders() }, 120000);
 
 await run(
   '2/10 GSC + schema full audit (daily-gsc-backlink cron)',
-  `${BASE}/api/cron/daily-gsc-backlink?force=1&propertyUrl=${q}${secretQ}`,
+  `${BASE}/api/cron/daily-gsc-backlink?force=1&propertyUrl=${q}`,
   { method: 'GET', headers: cronHeaders() },
   600000
 );
 
 await run(
   '3/10 Ranking & AI (keyword-ranking-ai cron)',
-  `${BASE}/api/cron/keyword-ranking-ai?force=1&propertyUrl=${q}${secretQ}`,
+  `${BASE}/api/cron/keyword-ranking-ai?force=1&propertyUrl=${q}`,
   { method: 'GET', headers: cronHeaders() },
   600000
 );

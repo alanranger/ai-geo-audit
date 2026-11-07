@@ -15,6 +15,7 @@ import {
 } from '../../lib/competitor-analysis/rivals.js';
 import { fetchReviewsForDomain, upsertReviewRow } from '../../lib/competitor-analysis/collect-reviews.js';
 import { collectOnpageForUrl, upsertOnpageRow } from '../../lib/competitor-analysis/collect-onpage.js';
+import { cronOrAdmin } from '../../lib/api/cronAuth.js';
 
 const MAX_REVIEWS = 5;
 const MAX_ONPAGE = 4;
@@ -25,11 +26,7 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function authorise(req) {
-  if (req.method === 'GET' && String(req.headers['x-vercel-cron'] || '') === '1') return true;
-  const secret = process.env.CRON_SECRET;
-  return secret && (req.headers['x-cron-secret'] === secret || req.query?.secret === secret);
-}
+const authorise = (req) => !!cronOrAdmin(req);
 
 function loadLockedKeywords() {
   const paths = [

@@ -1,6 +1,7 @@
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
+import { cronHeaders } from '../../lib/api/cronAuth.js';
 
 const JOB_ENDPOINTS = {
   gsc_backlinks: '/api/cron/daily-gsc-backlink',
@@ -66,10 +67,7 @@ export default async function handler(req, res) {
   if (propertyUrl) url.searchParams.set('propertyUrl', propertyUrl);
 
   try {
-    const headers = {};
-    if (process.env.CRON_SECRET) {
-      headers['x-cron-secret'] = process.env.CRON_SECRET;
-    }
+    const headers = cronHeaders();
     const response = await fetch(url.toString(), { method: 'GET', headers });
     const text = await response.text();
     let payload = null;

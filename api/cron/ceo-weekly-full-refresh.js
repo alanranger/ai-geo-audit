@@ -14,6 +14,7 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 import { createClient } from '@supabase/supabase-js';
 import { authoriseCron, sendJson, londonWeekStartYmd, DEFAULT_PROPERTY } from '../../lib/ceo-weekly/shared.js';
+import { cronHeaders as sharedCronHeaders } from '../../lib/api/cronAuth.js';
 import { runCeoWeeklyReport } from '../../lib/ceo-weekly/report.js';
 import {
   buildDashboardFullSteps,
@@ -47,11 +48,7 @@ function baseUrl(req) {
   ).replace(/\/$/, '');
 }
 
-function cronHeaders() {
-  const h = {};
-  if (process.env.CRON_SECRET) h['x-cron-secret'] = process.env.CRON_SECRET;
-  return h;
-}
+const cronHeaders = sharedCronHeaders;
 
 /** End state: sent, held by the sense-check (Alan got the short note), or failed. */
 export function finalOutcome(progress) {
