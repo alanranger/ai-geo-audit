@@ -106,13 +106,13 @@ test('placements: FB feed, IG feed, IG Story and LinkedIn each read only their o
   const ticks = { [`${STEP.key}|fb`]: { is_ticked: true, status: 'done', set_at: '2026-11-13T18:40:00Z', set_by: 'Alan via GPT', reason: 'Facebook published' } };
   const c = SS.context(S(ticks), { facts: [FACT], placements: [], quota: null });
   const p = SS.placementsOf({ row: 'fbig', step_key: STEP.key, day: '2026-11-13' }, c);
-  assert.deepEqual(JSON.parse(JSON.stringify(p.map((x) => [x.placement, x.stage]))), [['facebook_feed', 'published'], ['instagram_feed', 'factual_review'], ['instagram_story', 'factual_review']], 'Facebook done does not make Instagram done');
+  assert.deepEqual(JSON.parse(JSON.stringify(p.map((x) => [x.placement, x.stage]))), [['facebook_feed', 'published'], ['instagram_feed', 'prepare'], ['instagram_story', 'prepare']], 'Facebook done does not make Instagram done (no public caption stored yet → prepare)');
   assert.equal(p[1].in_app, true, 'planned in app');
   const withIg = SS.context(S({ ...ticks, [`${STEP.key}|ig`]: { is_ticked: true, status: 'done', set_at: 't', reason: 'IG feed https://www.instagram.com/p/abc/', history: [{ at: 't2', by: 'Alan via GPT', action: 'instagram_caption_url_and_linked_story_published', evidence: 'Your story has been published' }] } }), { facts: [FACT], placements: [] });
   const q = SS.placementsOf({ row: 'fbig', step_key: STEP.key, day: '2026-11-13' }, withIg);
   assert.deepEqual([q[1].stage, q[1].provider_url, q[2].stage, q[2].source], ['published', 'https://www.instagram.com/p/abc/', 'published', 'Story evidence on the Instagram tick']);
   const noStory = SS.context(S({ [`${STEP.key}|ig`]: { is_ticked: true, status: 'done', set_at: 't', reason: 'feed only', history: [] } }), { facts: [FACT], placements: [] });
-  assert.equal(SS.placementsOf({ row: 'fbig', step_key: STEP.key, day: '2026-11-13' }, noStory)[2].stage, 'factual_review', 'IG feed done does not make the Story done');
+  assert.equal(SS.placementsOf({ row: 'fbig', step_key: STEP.key, day: '2026-11-13' }, noStory)[2].stage, 'prepare', 'IG feed done does not make the Story done');
 });
 
 test('placements: "scheduled" needs a provider id or URL; without one it shows as a platform draft', () => {
@@ -127,14 +127,64 @@ test('placements: "scheduled" needs a provider id or URL; without one it shows a
 test('social panel: facts joined from the record, final caption, per-placement links, readiness and the link quota', () => {
   const SS = browser().SocialStandard;
   const quota = { used: 2, limit: 2, exhausted: true, month: '2026-11', basis: 'counted from our own evidence' };
-  const p = SS.panelFor({ row: 'fbig', step_key: STEP.key, day: '2026-11-13' }, SS.context(S({}), { facts: [FACT], placements: [], quota }));
+  const CAP = 'If you have been thinking about the North Norfolk coast, use NORFOLK150.\n\nhttps://www.alanranger.com/photo-workshops-uk/landscape-photography-workshop-norfolk';
+  const rows = ['facebook_feed', 'instagram_feed', 'instagram_story'].map((pl) => ({ step_key: STEP.key, placement: pl, stage: null, public_caption: pl === 'instagram_story' ? null : CAP, caption_markers: [], asset_instructions: 'Own Norfolk photo', internal_notes: 'DRAFT — Alan to review.', platform_state: 'app_draft', assets: {}, evidence: [] }));
+  const view = { facts: [FACT], placements: rows, quota, url_checks: { [FACT.booking_url]: { ok: true, status: 200 } } };
+  const p = SS.panelFor({ row: 'fbig', step_key: STEP.key, day: '2026-11-13' }, SS.context(S({}), view));
   assert.equal(p.facts[0].event_id, 'norfolk-2026-11-20');
-  assert.match(p.caption, /^If you have been thinking about the North Norfolk coast/);
+  assert.equal(p.caption, CAP, 'Final caption = the stored public caption only');
+  assert.deepEqual([p.copy.asset_instructions, p.copy.platform_state], ['Own Norfolk photo', 'app_draft']);
   assert.equal(p.proposed_at, '2026-11-13 18:30');
   assert.deepEqual(JSON.parse(JSON.stringify(p.coverage)), ['Norfolk coastal workshop']);
   assert.equal(p.links.facebook_first_comment, FACT.booking_url);
   assert.equal(p.links.instagram_written_in_caption, true);
-  assert.deepEqual(JSON.parse(JSON.stringify(p.readiness.map((r) => [r.label, r.ok]))), [['planned time stored', false], ['explicit purpose stored', false], ['event facts complete', true], ['no contradictory facts', true], ['final caption drafted', true], ['rendered preview', false], ['Facebook caption link available', false]]);
+  assert.deepEqual(JSON.parse(JSON.stringify(p.readiness.map((r) => [r.label, r.ok]))), [['planned time stored', false], ['explicit purpose stored', false], ['event facts complete', true], ['no contradictory facts', true], ['public caption stored', true], ['no internal marker phrases in the caption', true], ['booking URL resolves', true], ['rendered asset present', false], ['Facebook caption link available', false]]);
+  const editorialOnly = rows.map((r) => ({ ...r, assets: { editorial: { approval: 'GPT draft' } } }));
+  const e = SS.panelFor({ row: 'fbig', step_key: STEP.key, day: '2026-11-13' }, SS.context(S({}), { ...view, placements: editorialOnly }));
+  assert.equal(e.readiness.find((r) => r.label === 'rendered asset present').ok, false, 'notes in assets are not a rendered asset');
+  const png = rows.map((r) => ({ ...r, assets: { feed: { storage_path: 'n/feed.png', sha256: 'abc' } } }));
+  assert.equal(SS.panelFor({ row: 'fbig', step_key: STEP.key, day: '2026-11-13' }, SS.context(S({}), { ...view, placements: png })).readiness.find((r) => r.label === 'rendered asset present').ok, true);
+});
+
+test('final fix item 1: the brief is never the caption; a marker phrase or a dead link blocks readiness', () => {
+  const SS = browser().SocialStandard;
+  const x = { row: 'linkedin', step_key: LI.key, day: '2026-11-09' };
+  const ready = (rows, urls) => JSON.parse(JSON.stringify(SS.panelFor(x, SS.context(S({}), { facts: [FACT], placements: rows, url_checks: urls })).readiness.filter((r) => /caption|URL/.test(r.label)).map((r) => [r.label, r.ok, r.detail])));
+  assert.deepEqual(ready([], {}), [['public caption stored', false, ['needs caption: no public caption stored (GPT writes it)']], ['no internal marker phrases in the caption', false, ['no caption to check']], ['booking URL resolves', false, ['not checked yet']]], 'brief text present, but no public caption → needs caption');
+  const dirty = [{ step_key: LI.key, placement: 'linkedin_feed', public_caption: 'Norfolk text. Use the AR-social-v1 LinkedIn feed master. App plan only.', caption_markers: ['master', 'AR-social-v1', 'App plan'], assets: {}, evidence: [] }];
+  const r = ready(dirty, { [FACT.booking_url]: { ok: false, status: 404 } });
+  assert.deepEqual([r[1][1], r[1][2][0], r[2][1], r[2][2][0]], [false, 'remove: master, AR-social-v1, App plan', false, `${FACT.booking_url} → 404`]);
+});
+
+test('review-first: the public caption and rendered image come first; no production brief in the review block', () => {
+  const win = {};
+  vm.runInContext(fs.readFileSync(new URL('../lib/social-standard/social-panel.js', import.meta.url), 'utf8'), vm.createContext({ window: win, document: undefined, Date, Number, String, Object, Array, JSON }));
+  const p = { caption: 'Three days on the coast.', readiness: [{ label: 'public caption stored', ok: true }, { label: 'rendered asset present', ok: false }], placements: [{ assets: { feed: { url: 'https://x/feed.png', width: 1080, height: 1350, photo_check: 'unchanged' } } }] };
+  const h = win.SocialPanel.review(p);
+  assert.ok(h.indexOf('Public caption') < h.indexOf('Rendered image'), 'caption first, then the image');
+  assert.match(h, /Three days on the coast\./);
+  assert.match(h, /<img src="https:\/\/x\/feed\.png"/);
+  assert.match(h, /Not ready to approve: rendered asset present/);
+  assert.ok(!/Production brief|Internal/.test(h), 'no brief or internal fields in the review block');
+});
+
+test('final fix item 1: splitting briefs — only a clearly delimited brief gives a public caption; markers found server-side', async () => {
+  const { splitBrief, markersIn, checkUrls } = await import('../lib/social-standard/caption.mjs');
+  const clean = splitBrief('DRAFT — Alan review required. Proposed 2026-11-09 08:30 GMT. Purpose Sell / Inspire.\n\nThree days on the coast.\n\nhttps://www.alanranger.com/x\n\nAsset: Original Norfolk photo.\nStatus: app draft; no provider schedule.\nInternal notes: confirm availability.');
+  assert.deepEqual([clean.split, clean.public_caption, clean.asset_instructions, clean.platform_state], ['clean', 'Three days on the coast.\n\nhttps://www.alanranger.com/x', 'Original Norfolk photo.', 'app_draft']);
+  assert.match(clean.internal_notes, /^DRAFT — Alan review required[\s\S]*Status: app draft/);
+  assert.ok(!clean.internal_notes.includes('Three days'), 'the caption is not repeated in the internal notes');
+  const undelimited = splitBrief('DRAFT — planned Monday 9 November 2026, 08:30 GMT. Purpose Sell / Inspire. AR-social-v1.\n\nThree days on the coast.\n\nUse the AR-social-v1 LinkedIn feed master and the ORIGINAL photo. Verify availability before scheduling. App plan only, not provider scheduled. Prepared under Alan\'s instruction.');
+  assert.deepEqual([undelimited.split, undelimited.public_caption], ['needs_gpt', null], 'no "Asset:" line → needs caption, never publish-ready');
+  const leaked = splitBrief('DRAFT — x.\n\nGood text. Prepared under Alan\'s instruction.\n\nAsset: photo');
+  assert.deepEqual([leaked.split, leaked.public_caption], ['needs_gpt', null]);
+  assert.match(leaked.reason, /internal text in the caption part \(Prepared under\)/);
+  assert.deepEqual(JSON.parse(JSON.stringify(markersIn('Use the template. Verify the date. Woodland masterclass on 10 Jan.'))), ['template', 'Verify'], '"masterclass" is not the "master" marker');
+  const calls = [];
+  const fake = async (u, o) => { calls.push(o.method); return { ok: o.method === 'GET', status: o.method === 'GET' ? 200 : 405 }; };
+  const c1 = await checkUrls(['https://example.test/a', 'http://insecure.test'], fake, 1000);
+  const c2 = await checkUrls(['https://example.test/a'], fake, 2000);
+  assert.deepEqual([c1['https://example.test/a'].ok, Object.keys(c1).length, c2['https://example.test/a'].ok, calls.join(',')], [true, 1, true, 'HEAD,GET'], 'HEAD refused → GET; cached; https only');
 });
 
 test('item 5: planned time and purpose come from stored fields only; without them the delivery says "needs time / purpose"', () => {
@@ -147,7 +197,7 @@ test('item 5: planned time and purpose come from stored fields only; without the
   const rows = [{ step_key: LI.key, placement: 'linkedin_feed', stage: null, planned_at: '2026-11-09T08:30:00+00:00', planned_tz: 'Europe/London', plan_source: 'GPT brief: "planned Monday 9 November 2026, 08:30 GMT"', assets: {}, evidence: [] }];
   const full = SS.panelFor(x, SS.context({ ...S({}), quarter_plan: qp }, { facts: [FACT], placements: rows }));
   assert.deepEqual(JSON.parse(JSON.stringify([full.plan.planned_at, full.purpose])), ['2026-11-09T08:30:00+00:00', { primary: 'sell', secondary: ['inspire'], source: 'stored' }]);
-  assert.equal(full.placements[0].stage, 'factual_review', 'a row with only a planned time records no stage: the stage is still derived');
+  assert.equal(full.placements[0].stage, 'prepare', 'a row with only a planned time records no stage: the stage is still derived (no public caption yet → prepare)');
   const rule = SS.purposeOf(LI.key, { quarter_plan: { initiatives: { a: { deliveries: [{ key: LI.key, purpose: { primary: 'sell', secondary: ['educate'] }, purpose_source: 'rule' }] } } } });
   assert.equal(rule.source, 'rule', 'a channel rule is never shown as stored');
 });

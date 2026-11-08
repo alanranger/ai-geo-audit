@@ -29,6 +29,13 @@ test('tile 6: two bars (approved solid, drafts hatched), zero segments hidden bu
   assert.match(html, /<details class="mko-det"><summary>details<\/summary>/);
 });
 
+test('tile 9: the denominator line fills from the client-health summary (the slim summary, not the panel)', () => {
+  const summary = { can_email: 673, can_email_people: 669, owner_addresses: 3, organisations: 1, gap: 0, recent_not_eligible: { total: 0 } };
+  const t = tiles().tileAudience({ identity: { subscribed_unsuppressed: 673 }, runs: {} }, { state: 'ok', data: summary });
+  assert.match(t.lines[0], /= 669 people \+ 3 own addresses \+ 1 organisation</);
+  assert.ok(!/…/.test(t.lines[0]));
+});
+
 test('Needs Alan counts only Alan-owned (or unowned) actions; others are listed by owner', () => {
   const s = {
     actions: [

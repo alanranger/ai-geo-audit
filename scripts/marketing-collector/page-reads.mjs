@@ -94,6 +94,41 @@ export async function listScheduled() {
   return { complete: true, read_at: new Date().toISOString(), emails };
 }
 
+/**
+ * Squarespace's Drafts (same list route, emailState=DRAFT) + each draft's own record for its list ids (a draft often
+ * has none yet). Read-only; throws unless every page and record was read, so a partial read is never posted.
+ */
+export async function listDrafts() {
+  const readPages = async () => {
+    const out = [];
+    let cursor = '';
+    let pages = 0;
+    let max = null;
+    do {
+      const j = await window.__arpGet(`/api/newsletters/v1.0/composer/emails?emailState=DRAFT&pageCursor=${encodeURIComponent(cursor)}&pageSize=50`);
+      if (!Array.isArray(j.results) || typeof j.hasNextPage !== 'boolean') throw new Error('UNEXPECTED_SHAPE drafts list');
+      max = j.maxCount ?? max;
+      out.push(...j.results);
+      cursor = j.hasNextPage ? j.nextPageCursor : null;
+      pages += 1;
+    } while (cursor && pages < 20);
+    if (cursor || (max != null && out.length !== max)) throw new Error(`INCOMPLETE drafts list ${out.length}/${max}`);
+    return out;
+  };
+  const pick = (a, b) => (a != null ? a : (b != null ? b : null));
+  const toDraft = (e, d) => ({
+    email_id: d.id, subject: pick(d.subject || d.derivedSubject, e.subject), email_type: pick(d.emailType, e.emailType), created_on: pick(d.createdOn, e.createdOn),
+    modified_on: pick(d.modifiedOn, e.modifiedOn), mailing_list_ids: d.mailingListIds || [], mailing_list_names: Array.isArray(d.mailingLists) ? d.mailingLists : (e.mailingListNames || [])
+  });
+  const drafts = [];
+  for (const e of await readPages()) {
+    const d = await window.__arpGet(`/api/newsletters/v1.0/composer/emails/${encodeURIComponent(e.id)}`);
+    if (!e.id || d.id !== e.id) throw new Error(`UNEXPECTED_SHAPE draft ${e.id}`);
+    drafts.push(toDraft(e, d));
+  }
+  return { complete: true, read_at: new Date().toISOString(), drafts };
+}
+
 export async function readSummary(emailId) {
   const s = await window.__arpGet(`/api/newsletters/v1.0/composer/analytics/emails/${emailId}/summary`);
   if (typeof s.emailMessageCount !== 'number' || typeof s.deliveredCount !== 'number' || !Array.isArray(s.urlClickCounts)) throw new Error(`UNEXPECTED_SHAPE summary ${emailId}`);

@@ -11,6 +11,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { socialStandardView } from '../../lib/social-standard/facts.mjs';
+import { checkUrls, markersIn, urlsInCaption } from '../../lib/social-standard/caption.mjs';
 import { loadSquarespaceEventFeeds } from '../../lib/squarespace-events-feed.mjs';
 
 const PROP = 'https://www.alanranger.com';
@@ -26,9 +27,16 @@ async function withPreviewUrls(sb, placements) {
   return placements.map((p) => ({ ...p, assets: Object.fromEntries(Object.entries(p.assets || {}).map(([k, a]) => [k, { ...a, url: url.get(a?.storage_path) || null }])) }));
 }
 
+/** Internal marker phrases per public caption, and whether each booking / caption URL resolves (cached HEAD). */
+async function captionChecks(v) {
+  const placements = v.placements.map((p) => ({ ...p, caption_markers: markersIn(p.public_caption) }));
+  const urls = [...v.facts.map((f) => f.booking_url), ...placements.flatMap((p) => urlsInCaption(p.public_caption))];
+  return { placements, url_checks: await checkUrls(urls) };
+}
 async function view(sb, propertyUrl) {
   const v = await socialStandardView(sb, propertyUrl, { todayIso: todayUk(), feeds: loadSquarespaceEventFeeds });
-  return { ...v, placements: await withPreviewUrls(sb, v.placements) };
+  const c = await captionChecks(v);
+  return { ...v, url_checks: c.url_checks, placements: await withPreviewUrls(sb, c.placements) };
 }
 
 async function renderRequest(sb, b, propertyUrl) {

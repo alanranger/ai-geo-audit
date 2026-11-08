@@ -83,7 +83,7 @@ const STRATEGY = {
 function model(over = {}) {
   const win = browser();
   const meter = deliveryView(METER, { campaigns: CAMPAIGNS, exports: EXPORTS, schedules: [], sent: [], runs: [], members: MEMBERS, ...over.inputs }, {}, NOW);
-  const d = { meter: { ...meter, capacity: meter.capacity } };
+  const d = { meter: { ...meter, capacity: meter.capacity }, ...(over.drafts ? { drafts: over.drafts } : {}) };
   const s = over.s || STRATEGY;
   const items = win.mkDeliveryItems(d, s);
   const m = win.mkScheduleModel.build({ items, d, s, cap: { ...meter.capacity, unchosen: [] }, g: over.g || null, today: TODAY });
@@ -127,6 +127,15 @@ const FREQ = (extra = []) => ({
   ],
   academy: [{ day: '2026-11-11', person: 'p4' }],
   drafts: [{ key: 'theme|gpt-8w-2026-11-19', day: '2026-11-19', sends: 544 }]
+});
+
+test('an unmatched Squarespace draft is listed in Needs you as "unmatched platform draft" (final fix item 10)', () => {
+  const { m } = model({ drafts: { available: true, drafts: 10, linked: 9, unmatched: [{ email_id: 'b1', subject: 'Academy return — review draft, no audience', link_state: 'unlinked' }] } });
+  const need = m.needs.find((x) => /unmatched platform draft/.test(x.text));
+  assert.ok(need);
+  assert.match(need.text, /^1 unmatched platform draft in Squarespace \(“Academy return/);
+  assert.equal(need.go, 'mkd-drafts');
+  assert.ok(!model().m.needs.some((x) => /unmatched platform draft/.test(x.text)), 'none without drafts data');
 });
 
 test('per person, not per campaign: 5 emails in a week to disjoint cohorts is fine; >2 only with an approved exception', () => {

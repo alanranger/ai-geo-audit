@@ -29,7 +29,8 @@
  *        never sets schedule evidence, refuses a snapshot already reserved by another campaign
  * POST { action: 'collector', kind_of: meter|campaigns|events|run|scheduled, data }   scheduled = one COMPLETE read of
  *      Squarespace's Scheduled tab (lib/marketing/delivery-schedule.mjs); a failed / partial read is never posted
- * POST { action: 'schedule-link', email_id, campaign_key | external: true }   link a Squarespace schedule (review queue)
+ * POST { action: 'schedule-link', email_id, campaign_key | external: true, kind?: 'draft' }   link a Squarespace schedule
+ *      (review queue) or an unmatched Squarespace draft; collector kind_of 'drafts' = one complete Drafts read
  * POST { action: 'collect-request', email_id?, campaign_key? }   collect a sent campaign now (+15 min / 24 h / 72 h)
  * GET  ?action=collect-next  ·  POST collect-done { request_ids, status, error }   (PC job runner) · GET ?action=collect-queue
  * POST cleanup-review / -freeze / -approve / -execute / -verify   clean-up (body.cohort = server-side cohort) · GET cleanup-progress
@@ -40,7 +41,10 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { ingest } from '../../lib/marketing/collector-ingest.mjs';
-import { ingestScheduled } from '../../lib/marketing/delivery-schedule.mjs';
+import { ingestDrafts, ingestScheduled } from '../../lib/marketing/delivery-schedule.mjs';
+
+/** Complete Squarespace reads posted by the PC collector (read-only on Squarespace). */
+const COLLECTOR_READS = { scheduled: ingestScheduled, drafts: ingestDrafts };
 import { checkPlan, deliveryInputs, linkExport, linkSchedule, planPatch } from '../../lib/marketing/delivery.mjs';
 import { frequencyView, recordException } from '../../lib/marketing/frequency.mjs';
 import { enqueueForEmail, finishRequests, listRequests, manualRequest, nextRequests } from '../../lib/marketing/collect-queue.mjs';
@@ -210,7 +214,7 @@ const POSTS = {
   'presend-check': (sb, b) => presendCheck(sb, b.export_id),
   'identity-separate': (sb, b) => separateIdentity(sb, b, () => runStep(sb, 'customers')),
   'plan-import-request': async (sb) => ({ run_id: await logRun(sb, { kind: 'plan-import', status: 'queued', host: 'dashboard', items_total: 0, items_done: 0, checkpoint: { step: 'waiting for Alan\'s PC (checks every 5 min)' } }) }),
-  collector: (sb, b) => (b.kind_of === 'scheduled' ? ingestScheduled(sb, b.data || {}, b.data?.run_id) : ingest(sb, b)),
+  collector: (sb, b) => { const read = COLLECTOR_READS[b.kind_of]; return read ? read(sb, b.data || {}, b.data?.run_id) : ingest(sb, b); },
   'schedule-link': (sb, b) => linkSchedule(sb, b, SET_BY),
   'frequency-exception': (sb, b) => recordException(sb, b, SET_BY),
   'collect-request': (sb, b) => manualRequest(sb, b),

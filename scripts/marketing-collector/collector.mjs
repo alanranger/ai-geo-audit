@@ -24,7 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { listScheduled, listSent, PAGE_HELPERS, readEventUsers, readMeter, readSummary } from './page-reads.mjs';
+import { listDrafts, listScheduled, listSent, PAGE_HELPERS, readEventUsers, readMeter, readSummary } from './page-reads.mjs';
 import { consentStatus, createList, csvSwitchedOn, optOut, readLists, subscribedTotal, uploadCsv } from './page-writes.mjs';
 import { collectQueueJob } from '../../lib/marketing/collect-queue.mjs';
 import { cleanupExecJob } from '../../lib/marketing/cleanup-runner.mjs';
@@ -140,7 +140,7 @@ async function readScheduled(page) {
   try {
     const read = await page.evaluate(listScheduled);
     const r = await post('scheduled', { ...read, run_id: runId });
-    const summary = { scheduled: read.emails.length, read_at: read.read_at, ...(r.dry ? {} : r) };
+    const summary = { scheduled: read.emails.length, read_at: read.read_at, ...(r.dry ? {} : r), drafts: await readDrafts(page, runId) };
     await post('run', { run_id: runId, status: 'ok', session_ok: true, summary });
     console.log(`scheduled: ${JSON.stringify(DRY ? read.emails.map((e) => ({ email_id: e.email_id, scheduled_for: e.scheduled_for, lists: e.mailing_list_ids.length, recipients: e.recipients, basis: e.recipients_basis })) : summary)}`);
     return summary;
@@ -150,6 +150,19 @@ async function readScheduled(page) {
     await post('run', { run_id: runId, status: expired ? 'stale' : 'failed', session_ok: !expired, error: expired ? RELOGIN : msg }).catch(() => {});
     console.error(`scheduled read: ${expired ? RELOGIN : msg}`);
     return null;
+  }
+}
+
+/** Squarespace Drafts (read-only) in the same run; a failure is noted on the run summary and nothing is posted. */
+async function readDrafts(page, runId) {
+  try {
+    const read = await page.evaluate(listDrafts);
+    const r = await post('drafts', { ...read, run_id: runId });
+    if (DRY) console.log(`drafts: ${JSON.stringify(read.drafts.map((x) => ({ email_id: x.email_id, subject: x.subject, lists: x.mailing_list_ids.length })))}`);
+    return r.dry ? { read: read.drafts.length } : r;
+  } catch (err) {
+    console.error(`drafts read: ${String(err?.message || err)}`);
+    return { failed: String(err?.message || err).slice(0, 200) };
   }
 }
 
