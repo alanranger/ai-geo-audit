@@ -163,18 +163,25 @@ function responseState(s, days) {
   return days(latest) <= 180 ? 'cooling' : 'cold';
 }
 
-export function healthOf(s, days = daysFloor) {
+/**
+ * Email health v2 coverage: when every uncollected campaign was sent in the last 48 h, cold / no recorded response are
+ * judged over the fully collected campaigns; an older gap makes those negative states Unknown. Set after load().
+ */
+const COVERAGE = { ok: true };
+const NEGATIVE = new Set(['cold', 'no_response']);
+
+export function healthOf(s, days = daysCal) {
   if (!s) return 'unknown';
   const r = responseState(s, days);
-  if (r) return r;
-  if (s.delivered.size >= MIN_DELIVERED) return 'no_response';
+  if (r) return NEGATIVE.has(r) && !COVERAGE.ok ? 'unknown' : r;
+  if (s.delivered.size >= MIN_DELIVERED) return COVERAGE.ok ? 'no_response' : 'unknown';
   return s.delivered.size > 0 ? 'too_few' : 'unknown';
 }
-const respondedWithin = (s, d) => !!s && within(latestResponse(s), d, daysFloor);
-const clickedWithin = (s, d) => !!s && within(s.click, d, daysFloor);
+const respondedWithin = (s, d) => !!s && within(latestResponse(s), d, daysCal);
+const clickedWithin = (s, d) => !!s && within(s.click, d, daysCal);
 
 // ---------- loading ----------
-const PERSON_COLS = 'person_id, email, display_name, rt:facts->>record_type, stale:facts->>stale, att:facts->>attached_to, admin:facts->>admin, hi:facts->>history_incomplete, subscribed:facts->>subscribed, suppressed:facts->>suppressed, shared:facts->>email_shared, purchases:facts->purchases, future:facts->future, eng:facts->engagement, vnet:facts->value->c->>net';
+const PERSON_COLS = 'person_id, email, display_name, rt:facts->>record_type, stale:facts->>stale, att:facts->>attached_to, admin:facts->>admin, owner:facts->>owner, hi:facts->>history_incomplete, subscribed:facts->>subscribed, suppressed:facts->>suppressed, shared:facts->>email_shared, purchases:facts->purchases, future:facts->future, eng:facts->engagement, vnet:facts->value->c->>net';
 
 async function load() {
   const [persons, profiles, supp, campaigns, meter, camps, orders, plans, payments, bst, runs] = await Promise.all([
@@ -228,10 +235,10 @@ function amberCells(list) {
   return out;
 }
 
-function healthCounts(list, days = daysFloor) {
+function healthCounts(list, days = daysCal) {
   const out = zero(STATES);
   for (const x of list) out[healthOf(x.es, days)] += 1;
-  if (days !== daysFloor) return { ...out, total: list.length };
+  if (days !== daysCal) return { ...out, total: list.length };
   return { ...out, total: list.length, sum_check: STATES.reduce((a, k) => a + out[k], 0) === list.length };
 }
 
@@ -254,11 +261,11 @@ function cards(people) {
 function tile9(d, groups, profiles, blocked) {
   const subs = d.profiles.filter((p) => norm(p.email) && p.accepts_marketing && !p.missing_since && !blocked.has(hash(p.email)));
   const subsEmails = new Set(subs.map((p) => norm(p.email)));
-  const listedEmails = new Set([...groups.people, ...groups.admin, ...groups.orgs].map((x) => x.email).filter(Boolean));
+  const listedEmails = new Set([...groups.people, ...groups.owners, ...groups.orgs].map((x) => x.email).filter(Boolean));
   const otherRecordEmails = new Set(d.persons.filter((r) => !listed(r)).map((r) => norm(r.email)).filter(Boolean));
   const notListed = [...subsEmails].filter((e) => !listedEmails.has(e));
   const can = (xs) => xs.filter((x) => x.consent === 'can_email').length;
-  const parts = { people: can(groups.people), admin: can(groups.admin), organisations: can(groups.orgs), profiles_on_unlisted_records: notListed.filter((e) => otherRecordEmails.has(e)).length, profiles_with_no_record: notListed.filter((e) => !otherRecordEmails.has(e)).length };
+  const parts = { people: can(groups.people), owner: can(groups.owners), organisations: can(groups.orgs), profiles_on_unlisted_records: notListed.filter((e) => otherRecordEmails.has(e)).length, profiles_with_no_record: notListed.filter((e) => !otherRecordEmails.has(e)).length };
   const sum = Object.values(parts).reduce((a, v) => a + v, 0);
   const subscribedAll = d.profiles.filter((p) => norm(p.email) && p.accepts_marketing && !p.missing_since).length;
   return { can_be_emailed: subsEmails.size, subscribed_profiles: subscribedAll, subscribed_but_blocked: subscribedAll - subs.length, reconciliation: { ...parts, sum, reconciles: sum === subsEmails.size } };
@@ -468,12 +475,15 @@ function bandMoves(people, all, d) {
 }
 
 // ---------- main ----------
+/** Owner / test address: Alan's business @alanranger.com records (facts.admin) or an address flagged as his own. */
+const isOwnerRec = (r) => r.admin === 'true' || r.owner === 'true';
+
 function groupsOf(classified) {
   const live = classified.filter((x) => listed(x.rec));
   return {
-    people: live.filter((x) => x.rec.rt === 'person' && x.rec.admin !== 'true'),
-    admin: live.filter((x) => x.rec.admin === 'true'),
-    orgs: live.filter((x) => x.rec.rt === 'organisation' && x.rec.admin !== 'true'),
+    people: live.filter((x) => x.rec.rt === 'person' && !isOwnerRec(x.rec)),
+    owners: live.filter((x) => isOwnerRec(x.rec)),
+    orgs: live.filter((x) => x.rec.rt === 'organisation' && !isOwnerRec(x.rec)),
     excluded: { stale: classified.filter((x) => x.rec.stale).length, attached: classified.filter((x) => !x.rec.stale && x.rec.att).length, system: classified.filter((x) => !x.rec.stale && !x.rec.att && x.rec.rt === 'system').length }
   };
 }
@@ -483,22 +493,21 @@ function summarise(d) {
   const blocked = new Set(d.supp.filter((s) => !s.resolved_at).map((s) => s.email_hash));
   const classified = classify(d.persons, profiles, blocked, d.events.stats).map((x) => ({ ...x, rawSubscribed: !!(x.email && profiles.get(x.email)?.accepts_marketing && !profiles.get(x.email)?.missing_since) }));
   const g = groupsOf(classified);
-  const panel = [...g.people, ...g.admin];
+  const panel = g.people;
   const can = (xs) => xs.filter((x) => x.consent === 'can_email');
   return {
     g, profiles, blocked, classified,
     out: {
-      universe: { records: d.persons.length, people: g.people.length, admin: g.admin.length, organisations: g.orgs.length, excluded: g.excluded, people_with_email: g.people.filter((x) => x.email).length, people_shared_email: g.people.filter((x) => x.rec.shared === 'true').length, panel_universe: 'people + Alan\'s own records (marked); organisations and system labels apart' },
+      universe: { records: d.persons.length, people: g.people.length, owners: g.owners.length, organisations: g.orgs.length, excluded: g.excluded, people_with_email: g.people.filter((x) => x.email).length, people_shared_email: g.people.filter((x) => x.rec.shared === 'true').length, panel_universe: 'people only; owner / test addresses (admin or owner flag), organisations and system labels apart' },
       matrix_panel: matrixOf(panel),
-      matrix_people: matrixOf(g.people),
-      matrix_admin: matrixOf(g.admin),
+      matrix_owners: matrixOf(g.owners),
       matrix_organisations: matrixOf(g.orgs),
       amber_cells: amberCells(panel),
       cards_panel: cards(panel),
-      cards: cards(g.people),
       email_health: {
-        can_email_panel: healthCounts(can(panel)), can_email_people: healthCounts(can(g.people)), can_email_incl_admin_orgs: healthCounts(can([...panel, ...g.orgs])),
-        panel_day_variants: { floor_from_today_midnight: healthCounts(can(panel)), london_calendar_days: healthCounts(can(panel), daysCal), exact_days_from_now: healthCounts(can(panel), daysExact) },
+        coverage_v2: { judged_over_collected_campaigns: COVERAGE.ok, ...COVERAGE },
+        can_email_panel: healthCounts(can(panel)), can_email_incl_owner_orgs: healthCounts(can([...panel, ...g.owners, ...g.orgs])),
+        panel_day_variants: { london_calendar_days: healthCounts(can(panel)), floor_from_today_midnight: healthCounts(can(panel), daysFloor), exact_days_from_now: healthCounts(can(panel), daysExact) },
         sensitivity: sensitivity(can(panel))
       }
     }
@@ -514,6 +523,10 @@ function coverage(d, g) {
 }
 
 const d = await load();
+const uncollected = d.campaigns.filter((c) => !c.events_complete);
+COVERAGE.ok = uncollected.every((c) => c.sent_on && Date.now() - Date.parse(c.sent_on) <= 48 * 3600000);
+COVERAGE.uncollected_campaigns = uncollected.length;
+COVERAGE.last_collected = d.campaigns.filter((c) => c.events_complete).map((c) => c.sent_on).sort().pop() || null;
 const s = summarise(d);
 const strat = await fetch(`${BASE}/api/aigeo/strategy-summary?propertyUrl=${encodeURIComponent(PROPERTY)}`).then((r) => r.json());
 const result = {
@@ -527,7 +540,7 @@ const result = {
   tile10_inputs: tile10Inputs(d.runs),
   sales_sanity: salesSanity(d.bst),
   coverage: coverage(d, s.g),
-  data_checks: { consent: consentChecks([...s.g.people, ...s.g.admin, ...s.g.orgs]), engagement: engagementChecks(s.g.people), purchases: purchaseChecks(s.g.people, d), purchase_band_moves: bandMoves(s.g.people, s.classified, d) }
+  data_checks: { consent: consentChecks([...s.g.people, ...s.g.owners, ...s.g.orgs]), engagement: engagementChecks(s.g.people), purchases: purchaseChecks(s.g.people, d), purchase_band_moves: bandMoves(s.g.people, s.classified, d) }
 };
 result.strategy_vs_sales = { money_this_month_sales: result.strategy.money_this_month.sales, booking_sheet_month_all: result.sales_sanity.all_rows, booking_sheet_month_non_jlr: result.sales_sanity.non_jlr };
 fs.mkdirSync(OUT.replace(/[\\/][^\\/]+$/, ''), { recursive: true });
@@ -535,8 +548,8 @@ fs.writeFileSync(OUT, JSON.stringify(result, null, 2));
 
 const mp = result.matrix_panel;
 console.log(`as of ${TODAY} · cut-offs 6m ${CUT.m6} · 12m ${CUT.m12} · 24m ${CUT.m24}`);
-console.log(`people ${result.universe.people} · admin ${result.universe.admin} · organisations ${result.universe.organisations} · excluded ${JSON.stringify(result.universe.excluded)}`);
-console.log('matrix = panel universe (people + Alan\'s own records); people-only is matrix_people in the JSON');
+console.log(`people ${result.universe.people} · owner addresses ${result.universe.owners} · organisations ${result.universe.organisations} · excluded ${JSON.stringify(result.universe.excluded)}`);
+console.log(`matrix = people only (owners, organisations, system labels apart) · email coverage v2 ${JSON.stringify(result.email_health.coverage_v2)}`);
 console.log(['band'.padEnd(9), ...COLS.map((c) => c.padStart(15)), 'total'.padStart(7)].join(''));
 for (const b of BANDS) console.log([b.padEnd(9), ...COLS.map((c) => String(mp.cells[b][c]).padStart(15)), String(mp.row_totals[b]).padStart(7)].join(''));
 console.log(['total'.padEnd(9), ...COLS.map((c) => String(mp.col_totals[c]).padStart(15)), String(mp.total).padStart(7)].join(''));

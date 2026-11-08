@@ -166,7 +166,7 @@ function deliveryChecks(tiles) {
 }
 
 function audienceChecks(tiles) {
-  const c = X.cards.recent_buyers_not_email_eligible;
+  const c = X.cards_panel.recent_buyers_not_email_eligible;
   const t9 = text(tiles[8]);
   check('tile 9 "N can be emailed" = independent count', intIn(tiles[8].head, /^(\d+) can be emailed/) === X.tile9.can_be_emailed, `${tiles[8].head} vs ${X.tile9.can_be_emailed}`);
   const m = t9.replace(/,/g, '').match(/(\d+) recent buyers \(12 months\) not email-eligible: (\d+) not subscribed · (\d+) blocked · (\d+) no email held/);
@@ -236,7 +236,7 @@ function matrixChecks(mx) {
   }
   colKeys.forEach((c, i) => { if (c && num(mx.foot[i]) !== M.col_totals[c]) bad.push(`col ${c} ${mx.foot[i]} vs ${M.col_totals[c]}`); });
   if (num(mx.foot[5]) !== M.total) bad.push(`grand ${mx.foot[5]} vs ${M.total}`);
-  check('matrix: all 30 cells + row/col/grand totals = independent SQL (people + own address)', !bad.length, bad.join(' · ') || '36 numbers equal');
+  check('matrix: all 30 cells + row/col/grand totals = independent SQL (people only; owners apart)', !bad.length, bad.join(' · ') || '36 numbers equal');
   return colKeys;
 }
 
@@ -287,25 +287,27 @@ async function readHealth(page) {
 function healthChecks(h) {
   const E = X.email_health;
   const denom = intIn(h.heading, /Email health of the (\d+)/);
-  check('email health denominator = can-email count (people + own address)', denom === E.can_email_panel.total, `${denom} vs ${E.can_email_panel.total} (people only ${E.can_email_people.total})`);
+  check('email health denominator = can-email people (owners apart)', denom === E.can_email_panel.total, `${denom} vs ${E.can_email_panel.total}`);
   const got = {};
   for (const l of h.legend) { const st = pick(STATE_OF, l); if (st) got[st] = num(l.split(' · ')[0].match(/(\d[\d,]*)\s*$/)?.[1]); }
   const diff = (pool) => X.email_states.filter((st) => got[st] !== pool[st]).map((st) => `${st} ${got[st]} vs ${pool[st]}`);
   const variants = Object.entries(E.panel_day_variants);
   const hit = variants.find(([, pool]) => !diff(pool).length);
   check('email health: all 8 states shown (Unknown even when 0)', X.email_states.every((st) => st in got), Object.keys(got).join(','));
-  check('email health states = independent (any day-counting convention)', !!hit, hit ? `matches ${hit[0]}` : diff(E.can_email_panel).join(' · '));
+  check('email health states = independent (London calendar days, v2 coverage rule)', !diff(E.can_email_panel).length, hit ? `matches ${hit[0]} · ${JSON.stringify(got)}` : diff(E.can_email_panel).join(' · '));
   check('email health states sum to the denominator', Object.values(got).reduce((a, v) => a + (v || 0), 0) === denom, `${Object.values(got).reduce((a, v) => a + (v || 0), 0)} vs ${denom}`);
 }
 
 async function reconChecks(page, tile9Head) {
   const note = (await page.$$eval(SEL.note, (els) => els.map((e) => e.textContent.replace(/\s+/g, ' ')))).find((t) => /tile 9 count/.test(t)) || '';
   const R = X.tile9.reconciliation;
-  const m = note.replace(/,/g, '').match(/= (\d+) people \+ your own address; add (\d+) organisation clients? = (\d+) · tile 9 count (\d+)/);
+  const m = note.replace(/,/g, '').match(/Can email:? (\d+) people \+ (\d+) of your own address(?:es)? \+ (\d+) organisation clients? = (\d+) · tile 9 count (\d+)/);
+  const got = m ? m.slice(1).map(Number) : [];
+  const want = [R.people, R.owner, R.organisations, R.sum, X.tile9.can_be_emailed];
   check('reconciliation line present and ✓', !!m && /reconciles/.test(note), note.slice(0, 220));
-  check('reconciliation numbers = independent (people + admin + organisations = tile 9)', m && Number(m[1]) === R.people && Number(m[2]) === R.organisations && Number(m[3]) === R.sum && Number(m[4]) === X.tile9.can_be_emailed, `${m?.slice(1).join('/')} vs ${R.people}/${R.organisations}/${R.sum}/${X.tile9.can_be_emailed}`);
-  check('reconciliation tile 9 count = tile 9 headline', m && Number(m[4]) === intIn(tile9Head, /^(\d+)/), `${m?.[4]} vs ${tile9Head}`);
-  check('Alan\'s own address marked; organisations + system labels counted apart', /Your own address is in/.test(note) && /Organisations \(\d+\)/.test(note) && /system/.test(note));
+  check('reconciliation numbers = independent (people + owner addresses + organisations = tile 9)', JSON.stringify(got) === JSON.stringify(want), `${got.join('/')} vs ${want.join('/')}`);
+  check('reconciliation tile 9 count = tile 9 headline', m && got[4] === intIn(tile9Head, /^(\d+)/), `${got[4]} vs ${tile9Head}`);
+  check('owner / test addresses, organisations + system labels counted apart', /owner \/ test address/.test(note) && /organisations \(\d+\)/i.test(note) && /system/.test(note), note.slice(-200));
 }
 
 // ---------- clicks into Customers ----------

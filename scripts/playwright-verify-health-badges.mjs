@@ -86,7 +86,7 @@ async function rerun(page, fn) {
 
 async function readHead(page) {
   const t = (await page.textContent(SEL.results).catch(() => '')).replace(/\s+/g, ' ');
-  return { text: t.slice(0, 400), people: intIn(t, /(\d+) people (?:match|undecided)/), owner: intIn(t, /\+ (\d+) owner address/) ?? 0, undecided: intIn(t, /(\d+) undecided \(unknown data\)/), no: intIn(t, /(\d+) don't match/), watermark: /badges as of/.test(t) };
+  return { text: t.slice(0, 400), people: intIn(t, /(\d+) people (?:match|undecided)/), owner: intIn(t, /\+ (\d+) owner address/) ?? 0, orgs: intIn(t, /\+ (\d+) organisations?/) ?? 0, undecided: intIn(t, /(\d+) undecided \(unknown data\)/), no: intIn(t, /(\d+) don't match/), watermark: /badges as of/.test(t) };
 }
 
 /** Rows of any people table → { key, name, badges[], none, empty }. key = person id, else the email shown. */
@@ -150,8 +150,7 @@ async function chipChecks(page) {
   const inBand = (cells) => Object.entries(cells).filter(([k]) => k.startsWith('m0_6×')).reduce((a, [, v]) => a + v, 0);
   const want = Object.values(M.m0_6).reduce((a, v) => a + v, 0);
   const orgs = inBand(HB.organisations.cells);
-  check('purchase band chip "Recent" = independent (clients + organisation records; owner apart)', h.people === want + orgs && h.owner === inBand(HB.owners.cells) && rows.every((r) => r.badges[0] === 'purchase:p0_6'), `${h.people} + ${h.owner} owner vs ${want} people + ${orgs} organisations`);
-  check('Customers "people" count keeps organisations apart like the health panel', h.people === want, `Customers ${h.people} vs panel 0–6 row ${want}`);
+  check('Customers Recent filter = panel 0–6 row (people) · + organisations · + owners apart', h.people === want && h.orgs === orgs && h.owner === inBand(HB.owners.cells) && rows.every((r) => r.badges[0] === 'purchase:p0_6'), `${h.people} people · + ${h.orgs} organisations · + ${h.owner} owner vs ${want} · ${orgs} · ${inBand(HB.owners.cells)}`);
   await chip(page, 'purchase:p0_6');
   await chip(page, 'purchase:p_unknown');
   const unk = await readRows(page, SEL.qRow);
@@ -208,7 +207,7 @@ async function windowChecks(page) {
   check('can-email drill-down: people = independent (panel column; owners apart)', base.people === HB.can_email.people_not_owner, `${base.people} + ${base.owner} owner shown vs ${HB.can_email.people_not_owner} people (+ ${HB.can_email.owner} owner addresses that can be emailed)`);
   const I = HB.inactivity_6m_can_email_people;
   const ina = await chip(page, 'inactive:6');
-  check('inactivity 6 months (coverage incomplete): 0 confident matches; undecided = independent', ina.people === I.yes && ina.undecided === I.undecided, `match ${ina.people} · undecided ${ina.undecided} · "don't match" ${ina.no} (all records) vs ${I.yes} · ${I.undecided} · active in window ${I.no_active_in_window} (would match when complete: ${I.would_be_yes_if_coverage_complete})`);
+  check('inactivity 6 months: matches + undecided = independent (v2: recent-only gaps judged over collected campaigns)', ina.people === I.yes && ina.undecided === I.undecided, `match ${ina.people} · undecided ${ina.undecided} · "don't match" ${ina.no} (all records) vs ${I.yes} · ${I.undecided} · active in window ${I.no_active_in_window} (would match when complete: ${I.would_be_yes_if_coverage_complete})`);
   await shot(page, SEL.query, '1600-customers-inactive-6m');
   await chip(page, 'inactive:6');
   const op = await chip(page, 'opened:6');
@@ -230,7 +229,9 @@ async function lrCustomers(page, store) {
   await row.locator('[data-q-check]').click();
   await page.waitForSelector(SEL.diff, { timeout: 90000 }).catch(() => {});
   const txt = (await page.textContent(SEL.diff).catch(() => '')).replace(/\s+/g, ' ');
-  check('saved-group preview: N people match now + owner apart', intIn(txt, /(\d+) people match now/) === LR.clients && intIn(txt, /\+ (\d+) owner address/) === LR.owner, txt.replace(/[\w.+-]+@[\w.-]+/g, '<email>').slice(0, 140));
+  check('saved-group preview: N people match now + owner apart', intIn(txt, /(\d+) people match now/) === LR.clients && intIn(txt, /\+ (\d+) owner address/) === LR.owner, txt.replace(/[\w.+-]+@[\w.-]+/g, '<email>').slice(0, 160));
+  const joined = intIn(txt, /(\d+) (?:people )?joined/);
+  check('saved-group preview: joined count is people only (owner apart)', joined === LR.clients, `${joined} joined vs ${LR.clients}`);
   await page.locator(`${SEL.diff} details`).first().evaluate((d) => { d.open = true; }).catch(() => {});
   store.group = badgeChecks(await readRows(page, `${SEL.diff} details li`), 'saved-group preview members');
   await shot(page, '#mq-diff', '1600-saved-group-preview');
@@ -247,6 +248,8 @@ async function segmentMembers(page, store, tag) {
   await page.waitForSelector(SEL.segRow, { timeout: 120000 }).catch(() => {});
   await page.waitForFunction((s) => !document.querySelector(s)?.textContent.includes('badges loading'), SEL.segTable, { timeout: 60000 }).catch(() => {});
   store.members = badgeChecks(await readRows(page, SEL.segRow), `${tag} segment members`);
+  const line = (await page.textContent('#mk-cust-body').catch(() => '')).replace(/\s+/g, ' ').replace(/[\w.+-]+@[\w.-]+/g, '<email>');
+  check(`${tag}: segment members line = 39 people · + owner apart`, intIn(line, /(\d+) people/) === LR.clients && (intIn(line, /\+ (\d+) owner address/) || 0) >= LR.owner, (line.match(/[^·]{0,30}\d+ people[^]{0,120}/) || [line.slice(0, 160)])[0]);
   await shot(page, '#mk-customers', `${tag}-segment-members`);
 }
 

@@ -157,13 +157,10 @@ function ownerCells(owners) {
   return cells;
 }
 
-/** Health-panel matrix (people + admin) minus every owner-flagged record = clients per cell. */
-function clientMatrix(owners) {
+/** Health-panel matrix (people only; owners and organisations apart) from the overview expected file. */
+function clientMatrix() {
   if (!fs.existsSync(OVERVIEW)) return null;
-  const m = JSON.parse(fs.readFileSync(OVERVIEW, 'utf8')).matrix_panel;
-  const cells = JSON.parse(JSON.stringify(m.cells));
-  for (const x of owners) cells[bandOf(x.rec)][x.consent] -= 1;
-  return { cells, note: 'matrix_panel (people + Alan\'s admin records) minus all owner-flagged records' };
+  return { cells: JSON.parse(fs.readFileSync(OVERVIEW, 'utf8')).matrix_panel.cells, note: 'matrix_panel: people only' };
 }
 
 const d = await load();
@@ -174,14 +171,15 @@ const all = d.persons.filter(listed).map((rec) => {
   const email = norm(rec.email);
   return { rec, email, consent: consentOf(email, profiles, blocked), es: email ? stats.get(email) : null, miles: miles(d.centre, { lat: rec.lat, lng: rec.lng }) };
 });
-const coverageComplete = d.campaigns.every((c) => c.events_complete);
+/** Email health v2: a gap made only of campaigns sent in the last 48 h is judged over the fully collected campaigns. */
+const coverageComplete = d.campaigns.every((c) => c.events_complete || (c.sent_on && Date.now() - Date.parse(c.sent_on) <= 48 * 3600000));
 const sentDays = new Set(d.campaigns.filter((c) => c.events_complete).map((c) => londonDate(c.sent_on)));
 const owners = all.filter((x) => isOwner(x.rec));
 const canPeople = all.filter((x) => x.rec.rt === 'person' && !isOwner(x.rec) && x.consent === 'can_email');
 const canOrgs = all.filter((x) => x.rec.rt === 'organisation' && x.consent === 'can_email');
 const result = {
   generated_at: new Date().toISOString(), as_of: TODAY,
-  coverage: { campaigns: d.campaigns.length, complete: d.campaigns.filter((c) => c.events_complete).length, is_complete: coverageComplete },
+  coverage: { campaigns: d.campaigns.length, complete: d.campaigns.filter((c) => c.events_complete).length, judged_over_collected_v2: coverageComplete },
   organisations: { records: all.filter((x) => x.rec.rt === 'organisation').length, cells: ownerCells(all.filter((x) => x.rec.rt === 'organisation' && !isOwner(x.rec))) },
   owners: { records: owners.length, admin: owners.filter((x) => x.rec.admin === 'true').length, owner_flag: owners.filter((x) => x.rec.owner === 'true').length, by_consent: owners.reduce((a, x) => ({ ...a, [x.consent]: (a[x.consent] || 0) + 1 }), {}), cells: ownerCells(owners) },
   lr_segment: lrSegment(all, minusMonths(TODAY, 6)),
@@ -189,7 +187,7 @@ const result = {
   inactivity_6m_can_email_people: windowAnswers(canPeople, 6, coverageComplete, sentDays),
   inactivity_6m_can_email_owner: windowAnswers(owners.filter((x) => x.consent === 'can_email'), 6, coverageComplete, sentDays),
   inactivity_6m_can_email_orgs: windowAnswers(canOrgs, 6, coverageComplete, sentDays),
-  client_matrix: clientMatrix(owners)
+  client_matrix: clientMatrix()
 };
 fs.writeFileSync(OUT, JSON.stringify(result, null, 2));
 console.log(JSON.stringify({ ...result, client_matrix: result.client_matrix ? '(in file)' : null }, null, 1));
