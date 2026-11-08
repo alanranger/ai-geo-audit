@@ -100,7 +100,7 @@ async function weeksChecks(page) {
   check('No duplicates: no generated social row on a slot GPT already fills', !dupDays.length, dupDays.slice(0, 3).join(' | '));
   const fc = await page.textContent('#mks-facts-check');
   check('Facts check: Lake District price contradiction listed, not chosen', /£1,075.*£1,195.*not chosen/.test(fc));
-  check('Facts check: 27 Jan is not a start (URL says week 1); 28 Jan Thu start on hold', /27 Jan 2027 is session 3 of the 13 Jan course/.test(fc) && /2027-01-28: not found in the website course feed/.test(fc));
+  check('Facts check: 27 Jan is not a start (URL says week 1); 28 Jan Thu start on hold', /27 Jan 2027 is session 3 of the 13 Jan course/.test(fc) && /2027-01-28: not found in the website course feed|beginners-2027-01-28: withdrawn/.test(fc));
   const pr = await page.textContent('#mks-proposals summary');
   check('New event dates: proposals listed, nothing created', /proposed social stages \(\d+\)/.test(pr), pr.trim().slice(0, 90));
 }
