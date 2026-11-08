@@ -96,6 +96,29 @@ test('E7: unknown source / probable-only / incomplete history → Unknown row, n
   assert.equal(emailTag({ ...sub, engagement: eng({ last_open_at: '2025-01-01T10:00:00Z', opened_campaigns: 1 }) }, { ...emailCtx, complete: false }).state, 'e_unknown', 'cold needs complete coverage');
 });
 
+test('undated confirmed purchases (plan payments without a date) → Unknown, never "no evidenced purchase"; dated ones still set the band', () => {
+  const undated = [buy(null, { src: 'plan', net: 4500 }), buy(undefined, { src: 'plan', net: 150 })];
+  const t = purchaseTag({ ...sub, purchases: undated }, TODAY);
+  assert.equal(t.band, 'p_unknown');
+  assert.equal(t.reason, 'confirmed_purchases_without_dates');
+  assert.equal(t.undated_confirmed, 2);
+  assert.equal(get('purchase_band', { ...sub, purchases: undated }), 'p_unknown');
+  assert.equal(purchaseTag({ ...sub, purchases: [...undated, buy('2025-12-01')] }, TODAY).band, 'p6_12', 'the latest dated one sets the band');
+  assert.equal(purchaseTag({ ...sub, purchases: [buy(null, { cancelled: true }), buy(null, { duplicate_of: '#9', net: 0 })] }, TODAY).band, 'p_none', 'cancelled / duplicate undated rows are not purchases');
+  const h = clientHealth([person({ ...sub, purchases: undated })], rowOf, { asOf: TODAY });
+  assert.equal(h.cards.purchase_unknown.total.n, 1);
+  assert.equal(h.cards.subscribers_no_purchase.total.n, 0);
+  assert.equal(runQuery([person({ ...sub, purchases: undated })], { root: h.cards.purchase_unknown.total.root }, ctx).total, 1);
+});
+
+test('email day count: whole London calendar days from the response day (180 = cooling, 181 = cold), any time of day', () => {
+  const st = (iso) => emailTag({ ...sub, engagement: eng({ last_open_at: iso, opened_campaigns: 1 }) }, emailCtx);
+  assert.deepEqual([st('2026-05-12T00:05:00+01:00').state, st('2026-05-12T00:05:00+01:00').days], ['cooling', 180]);
+  assert.deepEqual([st('2026-05-12T23:55:00+01:00').state, st('2026-05-12T23:55:00+01:00').days], ['cooling', 180]);
+  assert.deepEqual([st('2026-05-11T23:30:00Z').state, st('2026-05-11T23:30:00Z').days], ['cooling', 180], '23:30 UTC on 11 May is 00:30 on 12 May in London (BST)');
+  assert.deepEqual([st('2026-05-11T22:30:00Z').state, st('2026-05-11T22:30:00Z').days], ['cold', 181], '22:30 UTC = 23:30 on 11 May in London');
+});
+
 test('only paid, own purchases count: cancelled, duplicate, refunded, zero and attendee places do not', () => {
   const nope = [buy('2026-10-01', { cancelled: true }), buy('2026-10-02', { duplicate_of: '#123', net: 0 }), buy('2026-10-03', { net: -50, refund_line: true }), buy('2026-10-04', { net: 0 })];
   assert.equal(get('purchase_band', { ...sub, purchases: nope }), 'p_none');
