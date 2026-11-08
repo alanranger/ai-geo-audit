@@ -78,7 +78,7 @@ if (isMain) {
   const progress = (i, n, step) => (runId ? sb.from('marketing_collector_runs').update({ heartbeat_at: new Date().toISOString(), items_done: i, items_total: n, checkpoint: { step } }).eq('run_id', runId).then(() => {}) : null);
   try {
     const out = await importPlans(sb, { onProgress: progress });
-    if (runId) await sb.from('marketing_collector_runs').update({ status: 'ok', finished_at: new Date().toISOString(), summary: out }).eq('run_id', runId);
+    if (runId) await sb.from('marketing_collector_runs').update({ status: 'ok', finished_at: new Date().toISOString(), items_done: out.files, items_total: out.files, summary: out }).eq('run_id', runId);
     console.log(JSON.stringify(out));
   } catch (e) {
     if (runId) await sb.from('marketing_collector_runs').update({ status: 'failed', finished_at: new Date().toISOString(), error: String(e.message).slice(0, 500) }).eq('run_id', runId);
