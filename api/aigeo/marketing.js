@@ -8,6 +8,7 @@
  * GET  ?action=customer&person_id=                             one person: bookings, links, probable records, segments
  * GET  ?action=export-csv&export_id=                           import CSV (consent re-checked at download)
  * GET  ?action=collector-state                                 which sent campaigns already have complete recipient events
+ * GET  ?action=email-frequency                                 emails per person per rolling 7 days (counts only, read-only)
  * GET  ?action=suppression-review                              suppressed people subscribed again, with the evidence
  * POST { action: 'suppression-resolve', email_hash, reason }   clear one person (typed reason, logged; Squarespace untouched)
  * POST { action: 'list-load-request', export_id }              queue "Load into Squarespace list" (run on Alan's PC)
@@ -40,7 +41,8 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { ingest } from '../../lib/marketing/collector-ingest.mjs';
 import { ingestScheduled } from '../../lib/marketing/delivery-schedule.mjs';
-import { checkPlan, linkExport, linkSchedule, planPatch } from '../../lib/marketing/delivery.mjs';
+import { checkPlan, deliveryInputs, linkExport, linkSchedule, planPatch } from '../../lib/marketing/delivery.mjs';
+import { frequencyView } from '../../lib/marketing/frequency.mjs';
 import { enqueueForEmail, finishRequests, listRequests, manualRequest, nextRequests } from '../../lib/marketing/collect-queue.mjs';
 import { customerDetail, listCustomers } from '../../lib/marketing/customers.mjs';
 import { createExport, createTestExport, exportCsv, setExportStatus } from '../../lib/marketing/exports.mjs';
@@ -148,6 +150,10 @@ const GETS = {
   customers: (sb, q) => listCustomers(sb, { q: q.q, segment_id: q.segment_id, page: q.page || 0, subscribed_only: q.subscribed_only === '1', params: params(q) }),
   customer: (sb, q) => customerDetail(sb, q.person_id, params(q)),
   'collector-state': collectorState,
+  'email-frequency': async (sb) => {
+    const inputs = await deliveryInputs(sb);
+    return { frequency: frequencyView(inputs.frequency, new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' })) };
+  },
   'collect-next': (sb) => nextRequests(sb),
   'collect-queue': (sb) => listRequests(sb),
   'suppression-review': (sb) => reviewList(sb),

@@ -178,6 +178,33 @@ test('backfill + register: dropped this-week step → not needed; earlier weeks 
   assert.equal(summary.not_needed, 1);
 });
 
+test('manual register rows (GPT drafts) are never dropped; future ones join their week or carried.future', () => {
+  const reg = (key, week, day) => ({ step_key: key, week_start: week, scheduled_day: day, channel: 'Facebook + Instagram', step: 'GPT post', covers: [], featured: [], lead_names: [] });
+  const register = [
+    reg('gpt-8w-social-2026-11-06-fbig', WEEK, '2026-11-06'),
+    reg('gpt-8w-social-2026-11-10-fbig', '2026-11-09', '2026-11-10'),
+    reg('gpt-8w-social-2026-12-22-fbig', '2026-12-21', '2026-12-22'),
+    reg('step|2026-11-09|LinkedIn|2026-11-11', '2026-11-09', '2026-11-11')
+  ];
+  const weeks = [{ week: WEEK, steps: [{ ...POST }] }, { week: '2026-11-09', steps: [] }];
+  const { carried, summary } = applyStepStatus(weeks, base({ today: '2026-11-05' }), register);
+  const mine = weeks[0].steps.find((s) => s.key === 'gpt-8w-social-2026-11-06-fbig');
+  assert.deepEqual([mine.manual, mine.state.status, mine.state.resolved], [true, 'pending', false], 'manual: not "dropped from the plan"');
+  assert.deepEqual(weeks[1].steps.map((s) => s.key), ['gpt-8w-social-2026-11-10-fbig'], 'a future generated row is not resurrected');
+  assert.deepEqual(carried.future.map((s) => s.key), ['gpt-8w-social-2026-12-22-fbig'], 'beyond the generated weeks');
+  assert.equal(summary.not_needed || 0, 0);
+});
+
+test('cancelled stays cancelled: the cancelled weekly email record resolves its step after every rebuild', () => {
+  const cancelled = { campaign_key: `email|${WEEK}`, kind: 'weekly_email', stage: 'cancelled', stored: true, audience: null };
+  for (let run = 0; run < 2; run += 1) {
+    const weeks = [{ week: WEEK, steps: [{ ...EMAIL }] }];
+    applyStepStatus(weeks, base({ recordsByKey: new Map([[cancelled.campaign_key, cancelled]]) }), registerRows(WEEK, [EMAIL], 'p', 't'));
+    assert.deepEqual([weeks[0].steps[0].state.status, weeks[0].steps[0].state.resolved], ['not_needed', true]);
+    assert.match(weeks[0].steps[0].state.reason, /cancelled/);
+  }
+});
+
 test('ticks API: who (Alan / ChatGPT), skip needs a reason, untick and move are logged', () => {
   assert.equal(whoOf({}), 'Alan (dashboard)');
   assert.equal(whoOf({ via: 'chatgpt' }), 'ChatGPT');

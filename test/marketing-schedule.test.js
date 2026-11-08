@@ -116,19 +116,51 @@ test('counts per channel: FB+IG is one card per post, late posts fold into one l
   assert.equal(m.byId.get(w9.cells.fbig[0].id).state, 'pl');
 });
 
-test('rolling 7 days: more than 2 emails in any 7 days is red; an approved exception covering the window is not', () => {
-  const { m, win } = model();
-  const R = win.mkScheduleModel.rolling;
-  const counts = new Map([['2026-11-09', 1], ['2026-11-10', 1]]);
-  assert.equal(R(counts, '2026-11-09', '2026-11-15', []).red, false, '2 in 7 days is within the limit');
-  counts.set('2026-11-12', 1);
-  const r = R(counts, '2026-11-09', '2026-11-15', []);
-  assert.deepEqual([r.max, r.at, r.red], [3, '2026-11-12', true]);
-  assert.equal(R(counts, '2026-11-09', '2026-11-15', [{ from: '2026-11-12', to: '2026-11-12' }]).red, false);
-  assert.equal(R(new Map([['2026-11-01', 2], ['2026-11-09', 1]]), '2026-11-09', '2026-11-15', []).red, false, '8 days apart: two windows');
-  assert.equal(R(new Map([['2026-11-08', 2], ['2026-11-09', 1]]), '2026-11-09', '2026-11-15', []).red, true, 'Sun 8 counts against Mon 9');
-  assert.equal(weekOf(m, win, '2026-11-09').emails.red, true);
-  assert.equal(weekOf(m, win, '2026-11-16').emails.red, false, 'judged by its own emails: Thu 19 has 1 in its 7 days');
+/** Per-person inputs (lib/marketing/frequency.mjs shape): disjoint cohorts, one approved third-email exception. */
+const FREQ = (extra = []) => ({
+  emails: [
+    { key: 'theme|a', day: '2026-11-08', people: ['p1', 'p2', 'p3', 'p4'], owners: 1 },
+    { key: 'theme|b', day: '2026-11-10', people: ['p1', 'p2', 'p3'], owners: 1 },
+    { key: 'theme|c', day: '2026-11-12', people: ['p5', 'p6'], owners: 1 },
+    { key: 'theme|third', day: '2026-11-12', people: ['p1'], owners: 1, exception: true },
+    ...extra
+  ],
+  academy: [{ day: '2026-11-11', person: 'p4' }],
+  drafts: [{ key: 'theme|gpt-8w-2026-11-19', day: '2026-11-19', sends: 544 }]
+});
+
+test('per person, not per campaign: 5 emails in a week to disjoint cohorts is fine; >2 only with an approved exception', () => {
+  const { m, win } = model({ inputs: { frequency: FREQ() } });
+  const w = weekOf(m, win, '2026-11-09').emails;
+  assert.equal(w.per_person, '3×2 · 1×3 (approved) · 2×1', 'p2 p3 p4 get 2 (p4 = 1 email + 1 Academy auto), p1 gets 3 under the exception');
+  assert.deepEqual([w.red, w.amber, w.freq.emails, w.freq.sends, w.freq.owner_copies, w.freq.academy_auto], [false, false, 4, 14, 4, 1]);
+  assert.ok(!m.needs.some((x) => /limit|emails in the next 7 days/.test(x.text)), 'no campaign-count limit message');
+  assert.equal(weekOf(m, win, '2026-11-16').emails.freq_estimate, true, 'a draft with no saved audience = estimate');
+});
+
+test('per person: amber at 3 without an approved exception, red only at 4+', () => {
+  const amber = model({ inputs: { frequency: FREQ([{ key: 'theme|d', day: '2026-11-13', people: ['p2'], owners: 1 }]) } });
+  const wa = weekOf(amber.m, amber.win, '2026-11-09').emails;
+  assert.deepEqual([wa.amber, wa.red, wa.per_person], [true, false, '2×2 · 2×3 (1 approved) · 2×1']);
+  assert.match(amber.m.needs.find((x) => x.level === 'amber' && /3 emails/.test(x.text)).text, /^1 person gets 3 emails in 7 days .* without an approved exception \(1 more covered/);
+  const red = model({ inputs: { frequency: FREQ([{ key: 'theme|d', day: '2026-11-13', people: ['p1'], owners: 1, exception: true }]) } });
+  const wr = weekOf(red.m, red.win, '2026-11-09').emails;
+  assert.deepEqual([wr.red, wr.max], [true, 4], 'an exception never covers a 4th email');
+  assert.ok(red.m.needs.some((x) => x.level === 'red' && /4 or more emails/.test(x.text)));
+});
+
+test('drafts: GPT\'s drafted email and manual social step are dashed draft cards, never counted as sends', () => {
+  const draft = { campaign_key: 'theme|gpt-8w-2026-11-19', kind: 'theme', title: 'Small details, new possibilities', stage: 'drafted', planned_send_on: '2026-11-19', estimate_sends: 544, sqs_draft_id: 'a'.repeat(24), audience: 'segments' };
+  const social = { key: 'gpt-8w-social-2026-11-20-fbig', week: '2026-11-16', day: '2026-11-20', scheduled_day: '2026-11-20', channel: 'Facebook + Instagram', step: 'From small details to winter landscapes', brief: 'brief', covers: [], featured: [], manual: true, state: { status: 'pending' } };
+  const s = { ...STRATEGY, campaign: { ...STRATEGY.campaign, carried: { late: [], older: [], future: [social] } } };
+  const { m, win } = model({ inputs: { campaigns: [...CAMPAIGNS, draft] }, s });
+  const em = m.items.find((x) => x.record_key === draft.campaign_key);
+  const fb = m.items.find((x) => x.step_key === social.key);
+  assert.deepEqual([em.draft, em.state, em.time, em.people], [true, 'pl', 'draft · time not set', 544]);
+  assert.deepEqual([fb.draft, fb.state, fb.day], [true, 'pl', '2026-11-20']);
+  const w = weekOf(m, win, '2026-11-16').emails;
+  assert.deepEqual([w.count, w.drafts, w.draft_people], [1, 1, 544], 'the draft is listed apart; only the weekly step counts');
+  assert.equal(weekOf(m, win, '2026-11-09').emails.sends, 770, 'reserved sends unchanged by drafts');
 });
 
 test('Norfolk 8 Nov: the send budget duplicate pair shows on both cards and as the first Needs-you line', () => {
@@ -162,8 +194,41 @@ test('gaps: future weeks with no step say "nothing planned" on Email / FB+IG / L
   const w23 = weekOf(m, win, '2026-11-23');
   assert.deepEqual([w23.gaps.email, w23.gaps.fbig, w23.gaps.linkedin], [true, true, true]);
   assert.equal(Object.values(w23.cells).flat().length, 0, 'nothing invented for a week with no steps');
-  assert.equal(win.mkScheduleModel.weeks(m, 8).length, 8);
   assert.equal(win.mkScheduleModel.weeks(m, 20, win.mkScheduleModel.quarterEnd(STRATEGY)).at(-1).week, '2026-12-28');
+});
+
+test('"This week + 8" from Sun 8 Nov: 9 rows w/c 9 Nov → w/c 4 Jan; the week ending today shows above only with late items', () => {
+  const { m, win } = model();
+  const list = win.mkScheduleModel.weeks(m, 9);
+  const main = list.filter((w) => w.week >= '2026-11-09');
+  assert.deepEqual([main.length, main[0].week, main.at(-1).week], [9, '2026-11-09', '2027-01-04']);
+  assert.deepEqual([list[0].week, list[0].tag, main[0].tag], ['2026-11-02', 'this week · ends today', 'next week · from tomorrow'], 'w/c 2 Nov has late posts');
+  assert.equal(win.mkScheduleModel.firstWeek('2026-11-09'), '2026-11-09', 'Monday: this week');
+  assert.equal(win.mkScheduleModel.firstWeek('2026-11-12'), '2026-11-09', 'Thursday: this week');
+  const quiet = model({ s: { ...STRATEGY, campaign: { ...STRATEGY.campaign, weeks: WEEKS.slice(1) } }, inputs: { campaigns: CAMPAIGNS.filter((c) => !c.scheduled_for || c.scheduled_for >= '2026-11-09') } });
+  const q = win.mkScheduleModel.weeks(quiet.m, 9);
+  assert.equal(q.length >= 9, true, 'never fewer than 9');
+});
+
+test('generator placeholder weekly email is not shown or counted where a real campaign covers that week; its modules show on the campaign', async () => {
+  const { markCoveredEmailSteps } = await import('../lib/strategy-campaigns.mjs');
+  const gpt = (day, title) => ({ campaign_key: `theme|gpt-8w-${day}`, kind: 'theme', title, stage: 'drafted', planned_send_on: day, window_start: day, window_end: day, audience: 'segments', estimate_sends: 546, sqs_draft_id: `draft-${day}` });
+  const drafts = [gpt('2026-11-19', 'Small details, new possibilities — and a photography gift'), gpt('2026-11-26', 'A photography gift they can choose for themselves')];
+  const w23 = { week: '2026-11-23', rows: [], steps: [step('2026-11-23', 'Squarespace email', '2026-11-26', 'Main email of the week: "Woodland masterclass, Abstract & Macro"', { is_email: true, featured: [{ name: 'Woodland masterclass', when: 'Sun 10 Jan', stage: 'Main push' }] })] };
+  const weeks = markCoveredEmailSteps([...WEEKS.map((w) => ({ ...w, steps: w.steps.map((x) => ({ ...x })) })), w23], [...CAMPAIGNS, ...drafts]);
+  assert.deepEqual(plain(weeks[2].steps[0].covered_by), ['theme|gpt-8w-2026-11-19']);
+  const s = { ...STRATEGY, campaign: { ...STRATEGY.campaign, weeks, campaigns: STRATEGY.campaign.campaigns.filter((c) => c.campaign_key !== 'email|2026-11-16') } };
+  const { m, win } = model({ s, inputs: { campaigns: [...CAMPAIGNS, ...drafts] } });
+  for (const wk of ['2026-11-16', '2026-11-23']) {
+    const w = weekOf(m, win, wk);
+    const cards = w.cells.email.map((c) => m.byId.get(c.id));
+    assert.deepEqual(plain(cards.map((x) => x.record_key)), [`theme|gpt-8w-${wk === '2026-11-16' ? '2026-11-19' : '2026-11-26'}`], `${wk}: one weekly email`);
+    assert.equal(w.emails.unknown, 0, `${wk}: no "+1 not drafted"`);
+  }
+  const ph = m.items.find((x) => x.step_key === 'step|2026-11-23|Squarespace email|2026-11-26');
+  assert.deepEqual([ph.state, plain(ph.covered_by)], ['resolved', ['theme|gpt-8w-2026-11-26']]);
+  assert.deepEqual(plain(m.items.find((x) => x.record_key === 'theme|gpt-8w-2026-11-26').suggested), ['Woodland masterclass Sun 10 Jan (main push)']);
+  assert.equal(drafts.length + CAMPAIGNS.length, 11, 'no records created or removed');
 });
 
 test('Days view: today first, late items gathered in today\'s column, offer end on its day', () => {
@@ -186,18 +251,51 @@ test('Selling this week: moments, offer end, events and quarter-plan actions; ho
   const w9 = plain(S(STRATEGY, '2026-11-09').map((x) => `${x.b} ${x.t}`.trim()));
   assert.deepEqual(w9, ['Hay Woods walk last places', 'NORFOLK150 ends Sat 14']);
   const w16 = plain(S(STRATEGY, '2026-11-16').map((x) => `${x.b} ${x.t}`.trim()));
-  assert.deepEqual(w16, ['Norfolk 20 Nov', 'Christmas gift push for beginners course']);
+  assert.deepEqual(w16, ['Norfolk 20 Nov', 'Christmas gift push for…']);
   const quiet = plain(S(STRATEGY, '2026-12-07').map((x) => [x.t, !!x.quiet]));
   assert.deepEqual(quiet, [['Gifts & Christmas revenue', true]]);
 });
 
-test('card titles are at most 4 words; the full title is kept', () => {
+const MOMENTS = [
+  { moment_key: 'bfcm-2026', label: 'Black Friday / Cyber Monday', starts_on: '2026-11-27', ends_on: '2026-11-30', priority: 10 },
+  { moment_key: 'pnm-kickstarter-deadline-2026', label: 'Pick n Mix Kick-Starter deadline', starts_on: '2026-12-15', ends_on: null, priority: 10 },
+  { moment_key: 'christmas-2026', label: 'Christmas', starts_on: '2026-12-25', ends_on: '2026-12-26', priority: 30 },
+  { moment_key: 'gift-vouchers-2026', label: 'Christmas gift vouchers', starts_on: '2026-11-16', ends_on: '2026-12-24', priority: 40 }
+];
+test('Selling this week: fixed moments first (BF/CM w/c 23 Nov, 15 Dec w/c 14 Dec), at most 4; next action replaces the stale wording; "don\'t promote" only as happening', () => {
+  const { win } = model();
+  const S = win.mkScheduleModel.sellingFor;
+  const gifts = { ...STRATEGY.quarter_plan.initiatives.gifts, next_action: 'Gift email', next_action_date: '2026-11-16' };
+  const s = {
+    ...STRATEGY,
+    diary: [...STRATEGY.diary, { date: '2026-12-01', title: 'Camera Courses For Beginners - 3-week beginners - Coventry', url: '/beginners-dec' }],
+    campaign: { ...STRATEGY.campaign, overrides: { ...STRATEGY.campaign.overrides, '2026-12-01|/beginners-dec': { promote_mode: 'dont_promote' } } },
+    quarter_plan: { ...STRATEGY.quarter_plan, initiatives: { ...STRATEGY.quarter_plan.initiatives, gifts } }
+  };
+  const text = (week) => plain(S(s, week, MOMENTS).map((x) => (x.quiet ? `(${x.t})` : `${x.b} ${x.t}`.trim())));
+  assert.deepEqual(text('2026-11-23'), ['Black Friday / Cyber Monday 27–30 Nov', 'Christmas gift vouchers']);
+  assert.deepEqual(text('2026-12-14'), ['Pick n Mix Kick-Starter deadline 15 Dec', 'Christmas gift vouchers']);
+  assert.deepEqual(text('2026-11-16'), ['Christmas gift vouchers', 'Norfolk 20 Nov', 'Gift email 16 Nov']);
+  assert.ok(!text('2026-11-16').some((t) => /beginners course/i.test(t)), 'no "Christmas gift push for beginners course"');
+  assert.deepEqual(text('2026-11-30'), ['Black Friday / Cyber Monday 27–30 Nov', 'Christmas gift vouchers', '(Beginners course 1 Dec (not promoted))'], '1 Dec beginners: happening, not selling');
+  const many = [...MOMENTS, ...['a', 'b', 'c', 'd'].map((k) => ({ moment_key: k, label: `Moment ${k}`, starts_on: '2026-11-24', priority: 60 }))];
+  assert.equal(S(s, '2026-11-23', many).length, 4, 'at most 4');
+});
+
+test('card titles never drop words: short title if set, else cut at a word boundary with "…"; the full title is kept', () => {
   const { win, m } = model();
   const T = win.mkScheduleModel.shortTitle;
-  assert.equal(T('Weekly email (Hay Woods walk, Norfolk)'), 'Weekly: Hay Woods walk');
-  assert.equal(T('Post: "Last 2 places" for Norfolk 20–22 Nov'), 'Last 2 places Norfolk');
-  assert.equal(T('Norfolk, 20–22 November — last 2 places, £150 off'), 'Norfolk, 20–22 November');
+  assert.equal(T('A photography gift they can choose for themselves'), 'A photography gift they can…');
+  assert.equal(T('Give someone time for their photography'), 'Give someone time for their…');
+  assert.equal(T('Still looking for a photography gift? It can arrive by email'), 'Still looking for a…');
+  assert.equal(T('Something to inspire your next photograph'), 'Something to inspire your…');
+  assert.equal(T('A photography gift they can choose for themselves', 'Gift they choose'), 'Gift they choose', 'the campaign\'s short title wins');
+  assert.equal(T('Post: "Last 2 places" for Norfolk 20–22 Nov'), 'Last 2 places for Norfolk…');
   assert.equal(T('Google Business check (5–10 min)'), 'Weekly check');
-  for (const x of m.items) assert.ok(x.short.split(/\s+/).length <= 4, x.short);
+  for (const x of m.items) {
+    assert.ok(x.short.replace(/…$/, '').length <= 28, x.short);
+    const words = x.short.replace(/…$/, '').split(/\s+/);
+    if (!/^Weekly|Auto post/.test(x.short)) assert.ok(x.title.replace(/["“”]/g, '').includes(words.join(' ')), `${x.short} is a prefix of ${x.title}`);
+  }
   assert.ok(m.items.every((x) => x.title));
 });

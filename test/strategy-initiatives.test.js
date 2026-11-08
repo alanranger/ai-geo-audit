@@ -138,6 +138,21 @@ test('purpose mix: deliveries counted once, modules separately; stored tag beats
   assert.deepEqual(purposeRule({ channel: 'Facebook + Instagram', title: 'Post: Norfolk', featured: [{}], is_email: false, brief: '' }), { primary: 'inspire', secondary: ['sell'] });
 });
 
+test('purpose mix: GPT drafts counted on their own line from their stored tags; cancelled never counted', () => {
+  const f = fixture();
+  f.campaignRows.push(
+    { campaign_key: 'theme|gpt-8w-2026-11-19', kind: 'theme', title: 'Draft', stage: 'drafted', planned_send_on: '2026-11-12', reserved_sends: 0 },
+    { campaign_key: 'email|2026-11-09', kind: 'weekly_email', title: 'Cancelled weekly', stage: 'cancelled', scheduled_for: '2026-11-12T17:30:00Z' },
+    { campaign_key: 'event|2026-11-20|/norfolk', kind: 'event', title: 'Cancelled Norfolk row', stage: 'cancelled', planned_send_on: '2026-11-08' }
+  );
+  f.links.push({ ref_type: 'campaign', ref_key: 'theme|gpt-8w-2026-11-19', initiative_key: 'q1-near', role: 'primary', purpose_primary: 'educate' });
+  const p = assemblePlan(f);
+  const m = p.purpose_mix;
+  assert.deepEqual(m.by_primary, { sell: 3, educate: 1, inspire: 0, nurture: 0 }, 'scheduled / approved line unchanged');
+  assert.deepEqual([m.draft.deliveries, m.draft.by_primary.educate, m.draft.set_by_hand], [1, 1, 1]);
+  assert.ok(!p.links['delivery|send|event|2026-11-20|/norfolk'] && !p.links['delivery|send|email|2026-11-09'], 'cancelled records are not deliveries');
+});
+
 test('action mapping: old vs new counts per quarter, unmapped listed', () => {
   const p = assemblePlan(fixture());
   assert.deepEqual(p.action_mapping.by_quarter['q1-2026'], { old: 2, mapped: 2, under_initiatives: 1, housekeeping: 1, ticked: 2 });
