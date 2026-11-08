@@ -253,6 +253,14 @@ async function planImportJob() {
   if (code === 0) await api('POST', { action: 'sync', step: 'customers' }).catch((e) => console.error(e.message));
 }
 
+/** "Render" from the schedule's social panel (AR-social-v1): feed / Story / LinkedIn PNGs rendered on this PC. */
+async function socialRenderJob() {
+  await new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--env-file=.env.local', 'scripts/social-render/render-job.mjs', '--jobs'], { cwd: ROOT, stdio: 'inherit' });
+    child.on('exit', resolve);
+  });
+}
+
 /**
  * Repair queue: anyone a list import switched on and not yet confirmed unsubscribed again. Retried on every scheduled
  * run until the dashboard's fresh consent read confirms them (the list stays BLOCKED meanwhile).
@@ -320,6 +328,7 @@ async function hourlyScheduleWatch() {
 /** Scheduled every few minutes: opens the browser only for a queued job, a waiting repair, or the hourly schedule read. */
 async function jobs() {
   await planImportJob().catch((e) => console.error(`plan import: ${e.message}`));
+  await socialRenderJob().catch((e) => console.error(`social render: ${e.message}`));
   await repairJob().catch((e) => console.error(`repair queue: ${e.message}`));
   await cleanupJob().catch((e) => console.error(`clean-up: ${e.message}`));
   await collectQueueJob({ api, root: ROOT }).catch((e) => console.error(`collect queue: ${e.message}`));
