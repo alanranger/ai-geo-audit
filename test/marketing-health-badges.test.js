@@ -30,7 +30,7 @@ test('recent buyer who unsubscribed: Recent purchase badge, own email badge, Can
   const b = badgesOf(p.facts, R(p));
   assert.deepEqual([b.purchase.key, b.purchase.label, b.email.key, b.consent.key, b.consent.label], ['p0_6', 'Recent', 'warm_open', 'not_subscribed', 'Not subscribed']);
   assert.match(b.purchase.tip, /PURCHASE health v2/);
-  assert.match(b.email.tip, /EMAIL health v1.*first open and first click/);
+  assert.match(b.email.tip, /EMAIL health v2.*first open and first click/);
   assert.match(b.purchase.tip, /8 Sept? 2026/);
 });
 
@@ -146,6 +146,48 @@ test('regression 8 Nov: a just-sent campaign not yet collected must not zero the
   assert.equal(openedWithin(p.facts, { ...R(p), engagementComplete: false }, 6), 'yes');
   assert.equal(noResponseWithin(p.facts, { ...R(p), engagementComplete: false }, 6), 'no');
   assert.equal(noResponseWithin(stale.facts, { ...R(stale), engagementComplete: false }, 6), 'unknown');
+});
+
+test('coverage v2: a campaign sent in the last 48 h and still collecting keeps negatives (as of the last collected); an older gap → Unknown', async () => {
+  const { coverageOf } = await import('../lib/marketing/overview.mjs');
+  const NOW = '2026-11-08T10:30:00Z';
+  const done = [{ sent_on: '2026-10-22T17:38:00Z', events_complete: true }, { sent_on: '2026-10-13T18:15:00Z', events_complete: true }];
+  const recent = coverageOf([...done, { sent_on: '2026-11-08T09:55:00Z', events_complete: false }], NOW);
+  assert.deepEqual([recent.is_complete, recent.covered, recent.pending, recent.covered_through], [false, true, 1, '2026-10-22']);
+  const old = coverageOf([...done, { sent_on: '2026-11-08T09:55:00Z', events_complete: false }, { sent_on: '2026-11-05T09:00:00Z', events_complete: false }], NOW);
+  assert.deepEqual([old.covered, old.pending_recent_only], [false, false]);
+  assert.equal(coverageOf(done, NOW).covered, true);
+
+  const cold = person({ ...sub, camps: allCamps, engagement: eng({ opened_campaigns: 1, last_open_at: '2025-01-10T10:00:00Z' }) });
+  const silent = person({ ...sub, camps: allCamps, engagement: eng({ delivered_campaigns: 6 }) });
+  const at = (cov) => (p) => ({ ...rowCtx(p, { ...ctx, engagementComplete: cov.covered, engagement_coverage: cov }), windows: ctx.windows });
+  const bRecent = badgesOf(cold.facts, at(recent)(cold));
+  assert.equal(bRecent.email.key, 'cold');
+  assert.match(bRecent.email.tip, /As of the last collected campaign \(22 Oct 2026\)/);
+  assert.equal(badgesOf(silent.facts, at(recent)(silent)).email.key, 'no_response');
+  assert.equal(noResponseWithin(silent.facts, at(recent)(silent), 6), 'yes');
+  assert.equal(badgesOf(cold.facts, at(old)(cold)).email.key, 'e_unknown');
+  assert.equal(badgesOf(silent.facts, at(old)(silent)).email.key, 'e_unknown');
+  assert.equal(noResponseWithin(silent.facts, at(old)(silent), 6), 'unknown');
+  const opener = person({ ...sub, engagement: eng({ opened_campaigns: 1, last_open_at: '2026-10-20T10:00:00Z' }) });
+  assert.equal(badgesOf(opener.facts, at(old)(opener)).email.key, 'warm_open', 'positive evidence still counts with an old gap');
+  assert.equal(badgesOf({ ...sub, email: null }, at(recent)(person({ email: null }))).email.key, 'e_unknown', "a person's own missing data stays Unknown");
+});
+
+test('Customers counts people only: organisations and owner addresses apart (headers and tiles), rows still listed', async () => {
+  const { baseSummary } = await import('../lib/marketing/query/table.mjs');
+  const people = [
+    person({ ...sub, purchases: [buy('2026-09-01')] }), person({ ...sub, email: 'b@example.com', purchases: [buy('2026-10-01')] }),
+    person({ ...sub, email: 'org@example.com', record_type: 'organisation', purchases: [buy('2026-08-01')] }),
+    person({ ...sub, email: 'me@hotmail.example', owner: true, purchases: [buy('2026-10-10')] })
+  ];
+  const r = runQuery(people, { root: G([C('purchase_band', 'in', ['p0_6'])]) }, ctx, { columns: ['name'] });
+  assert.deepEqual([r.total, r.header.people, r.header.organisations, r.header.owner_addresses], [4, 2, 1, 1]);
+  assert.ok(r.rows.find((x) => x.badges.organisation) && r.rows.find((x) => x.badges.owner), 'organisation and owner rows stay in the list, labelled');
+  const h = clientHealth(people, R, { asOf: TODAY });
+  assert.equal(h.matrix.rows.find((x) => x.band === 'p0_6').total.people.n, r.header.people, 'a panel row and its Customers filter state the same people count');
+  const s = baseSummary(people, ctx);
+  assert.deepEqual([s.people, s.organisations, s.owner_addresses], [2, 1, 1]);
 });
 
 test('manual snapshot exclusion: reason required, only unloaded snapshots, the row is logged (never added past consent)', async () => {
