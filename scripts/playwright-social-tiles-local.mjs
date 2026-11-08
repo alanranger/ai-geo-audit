@@ -29,7 +29,7 @@ const fmt = (v) => Number(v).toLocaleString('en-GB');
 
 async function counts() {
   const out = {};
-  for (const t of ['social_connections', 'social_oauth_states', 'social_account_daily', 'social_posts', 'acquisition_sync_runs']) {
+  for (const t of ['social_connections', 'social_oauth_states', 'social_account_daily', 'social_posts', 'social_post_snapshots', 'strategy_campaign_ticks', 'acquisition_sync_runs']) {
     const { count } = await sb.from(t).select('*', { count: 'exact', head: true });
     out[t] = count;
   }
@@ -50,10 +50,7 @@ const TAG = LIVE ? 'production-live' : 'live';
 async function openTab(browser, envPatch) {
   const page = await browser.newPage({ viewport: { width: 1700, height: 1100 } });
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.addInitScript(([k, live]) => {
-    sessionStorage.setItem('arp_admin_key', k);
-    if (!live) document.addEventListener('DOMContentLoaded', () => { const s = document.createElement('script'); s.src = '/lib/marketing-social-tiles.js?v=local'; document.body.appendChild(s); });
-  }, [KEY, LIVE]);
+  await page.addInitScript((k) => sessionStorage.setItem('arp_admin_key', k), KEY);
   if (!LIVE) await page.route('**/lib/marketing-social-tiles.js*', (route) => route.fulfill({ status: 200, contentType: 'application/javascript', body: fs.readFileSync('lib/marketing-social-tiles.js', 'utf8') }));
   await page.route('**/api/aigeo/social*', async (route) => {
     const req = route.request();
@@ -98,15 +95,26 @@ async function verify(page, exp) {
   for (const [k, v] of Object.entries(exp.yt)) check(`YouTube ${k} = SQL (${v})`, yt.includes(v), yt.replace(/\s+/g, ' ').slice(0, 160));
   const g = await tileText(page, 'gbp');
   for (const [k, v] of Object.entries(exp.gbp)) check(`Google Business ${k} = SQL (${v})`, g.includes(v));
+  const connected = /Connected · Page/.test(await tileText(page, 'facebook'));
   for (const key of ['facebook', 'instagram']) {
     const t = await tileText(page, key);
-    check(`${key}: "Not connected" + Connect button, no invented figures`, /Not connected/.test(t) && /Connect Facebook & Instagram/.test(t) && !/followers/.test(t), t.replace(/\s+/g, ' ').slice(0, 200));
+    if (connected) check(`${key}: connected, followers shown`, /Connected · Page/.test(t) && /followers/.test(t), t.replace(/\s+/g, ' ').slice(0, 220));
+    else check(`${key}: "Not connected" + Connect button, no invented figures`, /Not connected/.test(t) && /Connect Facebook & Instagram/.test(t) && !/followers/.test(t), t.replace(/\s+/g, ' ').slice(0, 200));
   }
-  check('LinkedIn: not entered / manual', /Not entered/.test(await tileText(page, 'linkedin')) && /manual/.test(await tileText(page, 'linkedin')));
+  if (connected) {
+    const reachRow = await page.locator('[data-mksoc-tile="instagram"] .mksoc-r', { hasText: 'Reach (28 days)' }).innerText();
+    const tip = await page.locator('[data-mksoc-tile="instagram"] .mksoc-r', { hasText: 'Reach (28 days)' }).locator('[title]').first().getAttribute('title').catch(() => '');
+    check('Instagram reach: "not comparable yet" or a change on a ≥90%-covered earlier period (tooltip gives the days)', /not comparable yet/.test(reachRow) ? /have data/.test(tip) : /[▲▼±]/.test(reachRow), `${reachRow.replace(/\s+/g, ' ')} | ${tip}`);
+  }
+  check('LinkedIn: not entered / manual / GPT', /Not entered|manual|GPT/.test(await tileText(page, 'linkedin')));
   const first = await page.$$eval('#mksoc-posts tbody tr', (rows) => rows.length);
+  const ev = await page.$$eval('#mksoc-posts tbody tr', (rows) => rows.map((r) => [...r.querySelectorAll('td')].map((td) => td.textContent.trim())).filter((c) => c[13] && c[13] !== '—').map((c) => `${c[2]}|${c[3].slice(0, 30)}|${c[6]}|${c[13].slice(0, 20)}`));
+  check('posts table: today\'s evidenced placements listed (2 Stories, LinkedIn, FB + IG feed)', ev.filter((x) => x.startsWith('Story')).length === 2 && ev.length >= 7, ev.join(' || '));
+  const ids = await page.$$eval('#mksoc-posts tbody tr td:nth-child(4) a', (as) => as.map((a) => a.href));
+  check('no collected post listed twice', new Set(ids).size === ids.length, `${ids.length} links`);
   await page.click('#mksoc-posts th[data-mksoc-sort="reach"]');
-  const reach = await page.$$eval('#mksoc-posts tbody tr td:nth-child(4)', (tds) => tds.map((t) => Number(t.textContent.replace(/[^\d]/g, '')) || 0));
-  check('posts table: 10 rows, sorts by reach', first === 10 && reach.every((v, i) => i === 0 || reach[i - 1] >= v), reach.join(','));
+  const reach = await page.$$eval('#mksoc-posts tbody tr td:nth-child(7)', (tds) => tds.map((t) => Number(t.textContent.replace(/[^\d]/g, '')) || 0));
+  check('posts table: ≥10 rows, sorts by reach', first >= 10 && reach.every((v, i) => i === 0 || reach[i - 1] >= v), reach.join(','));
   await page.click('#mksoc-posts th[data-mksoc-sort="posted_at"]');
 }
 
@@ -119,6 +127,7 @@ async function linkedinDryRun(page) {
   await page.click('[data-mksoc="li-save"]');
   await page.waitForTimeout(800);
   const w = writes.slice(before);
+  if (w.length !== 1) console.log('linkedin writes seen:', JSON.stringify(w));
   check('LinkedIn Save sends exactly one linkedin-entry request (dry run, not saved)', w.length === 1 && w[0].body.action === 'linkedin-entry' && w[0].body.followers === '3050' && w[0].body.posts.length === 0, JSON.stringify(w[0]?.body || {}));
   await page.click('[data-mksoc="close"]').catch(() => {});
 }
@@ -149,6 +158,7 @@ if (LIVE) {
 }
 await page.locator('#mk-social').screenshot({ path: `${OUT}/social-channels-${TAG}-1700px-20261108.png` });
 await page.locator('#mk-social .mksoc-g').screenshot({ path: `${OUT}/social-channels-tiles-${TAG}-1700px-20261108.png` });
+await page.locator('#mksoc-posts').screenshot({ path: `${OUT}/social-recent-posts-evidence-${TAG}-1700px-20261108.png` });
 await verify(page, exp);
 if (LIVE) check('Connect button disabled while the Meta env vars are missing', await page.$eval('[data-mksoc-tile="facebook"] [data-mksoc="connect"]', (b) => b.disabled) && /META_APP_ID, META_APP_SECRET, SOCIAL_TOKEN_KEY/.test(await tileText(page, 'facebook')));
 const c1 = await counts();
@@ -158,7 +168,7 @@ await page.waitForSelector('#mk-social-rules h3');
 await page.locator('#mk-social-rules').screenshot({ path: `${OUT}/social-connections-rules-${TAG}-1700px-20261108.png` });
 await linkedinDryRun(page);
 await page.close();
-if (!LIVE) {
+if (!LIVE && c0.social_connections === 0) {
   const ready = await openTab(browser, { META_APP_ID: 'set-in-vercel', META_APP_SECRET: 'set-in-vercel', SOCIAL_TOKEN_KEY: 'c2V0LWluLXZlcmNlbC1zZXQtaW4tdmVyY2VsLTMyYg==' });
   await ready.locator('#mk-social .mksoc-g').screenshot({ path: `${OUT}/social-channels-tiles-after-env-1700px-20261108.png` });
   const enabled = await ready.$eval('[data-mksoc-tile="facebook"] [data-mksoc="connect"]', (b) => !b.disabled);

@@ -13,7 +13,9 @@ import { makeCallbackHandler } from '../api/aigeo/social-oauth-callback.js';
 import { decryptToken, hashState } from '../lib/social/crypto.mjs';
 import { READ_SCOPES } from '../lib/social/meta.mjs';
 import { keepGood } from '../lib/social/collect.mjs';
-import { gbpTile, vsChannelAvg, youtubeTile, youtubeVs, ga4Visits } from '../lib/social/summary.mjs';
+import { gbpTile, vsChannelAvg, youtubeTile, youtubeVs, ga4Visits, compare, windowCoverage, pointCompare, sameAgeVs } from '../lib/social/summary.mjs';
+import { evidencedRows, igCode } from '../lib/social/evidence.mjs';
+import { linkedinPostId } from '../lib/social/linkedin.mjs';
 
 const ADMIN = 'test-admin-key';
 process.env.ARP_ADMIN_KEY = ADMIN;
@@ -26,7 +28,7 @@ const SECRETS = ['PAGE-TOKEN-SECRET-123', 'LONG-USER-TOKEN-xyz', 'SHORT-USER-TOK
 /* ---------- in-memory store with the same interface as lib/social/repo.mjs ---------- */
 
 function memRepo(seed = {}) {
-  const t = { social_connections: [], social_oauth_states: [], social_account_daily: [], social_posts: [], ...structuredClone(seed.tables || {}) };
+  const t = { social_connections: [], social_oauth_states: [], social_account_daily: [], social_posts: [], social_post_snapshots: [], ...structuredClone(seed.tables || {}) };
   const writes = [];
   const upsert = (table, keyOf) => async (rows) => {
     for (const r of rows) {
@@ -55,6 +57,12 @@ function memRepo(seed = {}) {
     upsertPosts: upsert('social_posts', (r) => `${r.channel}|${r.post_id}`),
     readYoutube: async () => seed.youtube || { channel: [], videos: [] },
     readGbpMonths: async () => seed.gbp || [],
+    upsertSnapshots: upsert('social_post_snapshots', (r) => `${r.channel}|${r.post_id}|${r.captured_date}`),
+    readSnapshots: async (ch, since) => t.social_post_snapshots.filter((r) => ch.includes(r.channel) && r.captured_date >= since),
+    readEvidence: async (since) => (seed.ticks || []).filter((x) => x.set_at >= since),
+    readSteps: async (keys) => (seed.steps || []).filter((s) => keys.includes(s.step_key)),
+    readDeliveryPurposes: async (keys) => (seed.tags || []).filter((s) => keys.includes(s.ref_key)),
+    ga4Days: async (from, to) => (seed.ga4Days || []).filter((d) => d >= from && d <= to),
     readGa4Social: async () => seed.ga4 || [],
     ga4LatestDate: async () => seed.ga4Latest || null
   };
@@ -285,7 +293,8 @@ test('YouTube and Google Business tiles match their tables; GA4 visits by source
     { month: '2026-09-01', impressions_search_mobile: 1307, impressions_search_desktop: 0, impressions_maps_mobile: 0, impressions_maps_desktop: 0, interactions: 85, website_clicks: 40, direction_requests: 43, call_clicks: 2 }
   ];
   const ga4 = [{ date: '2026-11-05', source: 'm.facebook.com', medium: 'referral', sessions: 10 }, { date: '2026-11-01', source: 'facebook.com', medium: 'referral', sessions: 14 }, { date: '2026-10-01', source: 'facebook.com', medium: 'referral', sessions: 19 }, { date: '2026-11-06', source: 'youtube.com', medium: 'referral', sessions: 28 }, { date: '2026-11-02', source: 'ig', medium: 'social', sessions: 3 }];
-  const repo = memRepo({ youtube: yt, gbp, ga4, ga4Latest: '2026-11-07' });
+  const ga4Days = Array.from({ length: 56 }, (_, i) => new Date(Date.parse('2026-11-07T00:00:00Z') - i * DAY).toISOString().slice(0, 10));
+  const repo = memRepo({ youtube: yt, gbp, ga4, ga4Latest: '2026-11-07', ga4Days });
   const h = harness(repo);
   const s = (await h.call('GET', { action: 'summary' })).json;
   const y = tile(s, 'youtube');
@@ -326,4 +335,129 @@ test('YouTube "vs channel avg" compares views at the same age (daily snapshots),
   assert.deepEqual([r.avg, r.n, r.badge, r.basis], [292, 3, 'below', 'views at 10 days old']);
   assert.equal(r.pct, Math.round(((187 - 292) / 292) * 100));
   assert.equal(youtubeVs(vids[0], vids, [], '2026-11-08'), null, 'no same-age snapshots → no comparison');
+});
+
+/* ---------- 8 Nov follow-ups: 90% rule, null-not-0, GPT LinkedIn entry, evidenced posts ---------- */
+
+const days = (n, from, value) => Array.from({ length: n }, (_, i) => ({ channel: 'instagram', date: new Date(Date.parse(`${from}T00:00:00Z`) + i * DAY).toISOString().slice(0, 10), reach: value, period_days: 1 }));
+
+test('90% rule: a change only when ≥ 90% of the earlier 28 days have non-null data; otherwise "not comparable yet"', () => {
+  const today = '2026-11-08';
+  const sparse = [...days(3, '2026-10-09', 30), ...days(28, '2026-10-12', 50)];
+  const cov = windowCoverage(sparse, 'reach', today, 28, 56);
+  assert.deepEqual([cov.covered, cov.of, cov.ok], [3, 28, false]);
+  const nc = compare(1436, 92, cov);
+  assert.equal(nc.not_comparable, true);
+  assert.match(nc.note, /3 have data \(needs 26\)/);
+  const full = [...days(26, '2026-09-14', 3), ...days(28, '2026-10-12', 50)];
+  assert.equal(windowCoverage(full, 'reach', today, 28, 56).ok, true, '26 of 28 days = 93%');
+  assert.equal(compare(1400, 78, windowCoverage(full, 'reach', today, 28, 56)).dir, 'up');
+  const nulls = [...days(28, '2026-09-14', null), ...days(28, '2026-10-12', 50)];
+  assert.equal(compare(1400, null, windowCoverage(nulls, 'reach', today, 28, 56)).not_comparable, true, 'null days are not data');
+  const weekly = [7, 14, 21, 28].map((d) => ({ date: new Date(Date.parse('2026-10-11T00:00:00Z') - (28 - d) * DAY).toISOString().slice(0, 10), impressions: 100, period_days: 7 }));
+  assert.equal(windowCoverage(weekly, 'impressions', today, 28, 56).covered, 28, 'four weekly rows cover the 28 days');
+  const f = pointCompare(2180, [{ date: '2026-11-08', followers: 2180 }], 'followers', 'date', '2026-11-08', 3);
+  assert.equal(f.not_comparable, true, 'followers first read today → not comparable');
+  assert.match(f.note, /first reading 2026-11-08/);
+  assert.equal(pointCompare(356, [{ d: '2026-11-08', v: 356 }, { d: '2026-10-10', v: 286 }], 'v', 'd', '2026-11-08', 3).abs, 70, 'a reading within 3 days of 28 days back is comparable');
+  const g = ga4Visits([{ date: '2026-11-01', source: 'ig', medium: 'social', sessions: 8 }], '2026-11-07', ['2026-11-01']);
+  assert.equal(g.prev_coverage.ok, false);
+});
+
+test('null, not 0: a Facebook post without a shares field stores null; the tile never turns missing into 0', async () => {
+  const repo = memRepo();
+  const h = harness(repo);
+  await connect(h);
+  await h.call('POST', {}, { action: 'collect' });
+  const noShares = repo.t.social_posts.find((p) => p.post_id === '111_2');
+  assert.equal(noShares.shares, null, 'Meta omitted shares → null');
+  assert.equal(repo.t.social_posts.find((p) => p.post_id === '111_1').shares, 2);
+  assert.ok(repo.t.social_post_snapshots.length === 3, 'one same-age snapshot per collected post');
+  const s = (await h.call('GET', { action: 'summary' })).json;
+  const reach = tile(s, 'instagram').rows.find((r) => /Reach/.test(r.label));
+  assert.equal(reach.delta.not_comparable, true, 'only 1–2 days of earlier reach → not comparable yet');
+});
+
+const GPT_WEEK = {
+  action: 'linkedin-gpt', week_ending: '2026-11-08', followers: 3050, impressions_7d: 1400, reactions: 30, comments: 4, reposts: 1,
+  posts: [{ posted_at: '2026-11-08T16:20:00Z', title: 'Lightroom course starts Thu 12 Nov', permalink: 'https://www.linkedin.com/feed/update/urn:li:activity:7525230995168509952/', impressions: 920, reactions: 18, comments: 3, reposts: 1 }]
+};
+
+test('GPT LinkedIn entry: one week row + its post rows, idempotent by week and permalink; tile says "GPT · entered"', async () => {
+  const repo = memRepo();
+  const h = harness(repo);
+  const r = await h.call('POST', {}, GPT_WEEK);
+  assert.deepEqual([r.status, r.json.ok, r.json.source, r.json.daily_rows, r.json.post_rows], [200, true, 'gpt', 1, 1]);
+  assert.deepEqual(repo.writes, ['social_account_daily', 'social_posts', 'social_post_snapshots'], 'week row, its post row, that post\'s same-age snapshot');
+  assert.equal(repo.t.social_posts[0].post_id, 'li:7525230995168509952');
+  assert.deepEqual([repo.t.social_account_daily[0].source, repo.t.social_account_daily[0].entered_by], ['gpt', 'GPT']);
+  await h.call('POST', {}, { ...GPT_WEEK, followers: 3055, posts: [{ ...GPT_WEEK.posts[0], impressions: 990, permalink: 'https://www.linkedin.com/feed/update/urn:li:activity:7525230995168509952' }] });
+  assert.deepEqual([repo.t.social_account_daily.length, repo.t.social_posts.length, repo.t.social_post_snapshots.length], [1, 1, 1], 'updated, never duplicated');
+  assert.deepEqual([repo.t.social_account_daily[0].followers, repo.t.social_posts[0].impressions], [3055, 990]);
+  const t = tile((await h.call('GET', { action: 'summary' })).json, 'linkedin');
+  assert.match(t.source.text, /^GPT · entered 2026-11-08$/);
+  assert.equal(linkedinPostId('https://www.linkedin.com/feed/update/urn:li:share:7525230995168509952?utm=x'), 'li:7525230995168509952');
+  assert.equal((await h.call('POST', {}, GPT_WEEK, {})).status, 401, 'admin key required');
+});
+
+test('GPT LinkedIn entry: invalid bodies are refused and write nothing', async () => {
+  const repo = memRepo();
+  const h = harness(repo);
+  const bad = [
+    [{ ...GPT_WEEK, followers: -1 }, /followers must be a whole number/],
+    [{ ...GPT_WEEK, reactions: '12abc' }, /reactions must be a whole number/],
+    [{ ...GPT_WEEK, comments: 2.5 }, /comments must be a whole number/],
+    [{ ...GPT_WEEK, impressions_7d: 20 }, /impressions must be at least reactions \+ comments/],
+    [{ ...GPT_WEEK, posts: [{ ...GPT_WEEK.posts[0], impressions: 10 }] }, /post 1: impressions must be at least/],
+    [{ ...GPT_WEEK, posts: [{ ...GPT_WEEK.posts[0], permalink: null }] }, /permalink is required/],
+    [{ ...GPT_WEEK, posts: [{ ...GPT_WEEK.posts[0], permalink: 'https://example.com/x' }] }, /linkedin\.com/],
+    [{ ...GPT_WEEK, week_ending: '2026-12-01' }, /future/],
+    [{ action: 'linkedin-gpt', week_ending: '2026-11-08' }, /at least followers or impressions/],
+    [{ ...GPT_WEEK, posts: [GPT_WEEK.posts[0], GPT_WEEK.posts[0]] }, /twice/]
+  ];
+  for (const [body, re] of bad) {
+    const r = await h.call('POST', {}, body);
+    assert.equal(r.status, 400, JSON.stringify(body).slice(0, 60));
+    assert.match(r.json.error, re);
+  }
+  assert.deepEqual(repo.writes, [], 'nothing written');
+});
+
+test('evidenced posts: joined by permalink (IG shortcode, LinkedIn activity), Facebook by the matched IG caption, Stories stay unknown', () => {
+  const at = '2026-11-08T16:35:09Z';
+  const ticks = [
+    { tick_key: 'step|2026-11-02|Facebook + Instagram|2026-11-06|ig', status: 'done', set_by: 'GPT', set_at: at, reason: 'Norfolk published on Instagram https://www.instagram.com/alanrangerphotography/p/DffMdBLkVlZ/ on 8 Nov.', history: [{ at, action: 'done', evidence: 'Norfolk published on Instagram https://www.instagram.com/alanrangerphotography/p/DffMdBLkVlZ/ on 8 Nov.' }, { at: '2026-11-08T16:53:04Z', action: 'instagram_caption_url_and_linked_story_published', evidence: 'Meta confirmation: Your story has been published.' }] },
+    { tick_key: 'step|2026-11-02|Facebook + Instagram|2026-11-06|fb', status: 'done', set_by: 'GPT', set_at: at, reason: 'Norfolk published on Facebook (Your post has been published confirmation).', history: [{ at, action: 'done', evidence: 'Norfolk published on Facebook.' }] },
+    { tick_key: 'step|2026-11-02|LinkedIn|2026-11-04', status: 'done', set_by: 'GPT', set_at: '2026-11-08T16:22:20Z', reason: 'Published and verified on LinkedIn: https://www.linkedin.com/feed/update/urn:li:activity:7525230995168509952/', history: [] }
+  ];
+  const steps = [{ step_key: 'step|2026-11-02|Facebook + Instagram|2026-11-06', channel: 'Facebook + Instagram', step: 'Post: "Last 2 places" for Norfolk 20–22 Nov', featured: [{ title: 'Norfolk' }] }, { step_key: 'step|2026-11-02|LinkedIn|2026-11-04', channel: 'LinkedIn', step: 'Post: Lightroom course starts Thu 12 Nov', featured: [] }];
+  const posts = [
+    { channel: 'instagram', post_id: '18108', posted_at: '2026-11-08T16:33:11Z', title: 'A few days with your camera, changing coastal light', permalink: 'https://www.instagram.com/p/DffMdBLkVlZ/', reach: 41, source: 'api' },
+    { channel: 'facebook', post_id: '1715715080112405', posted_at: '2026-11-08T16:34:33Z', title: 'A few days with your camera, changing coastal light', permalink: 'https://www.facebook.com/x/posts/1715715080112405', reach: 22, source: 'api' },
+    { channel: 'facebook', post_id: 'other', posted_at: '2026-11-08T16:33:17Z', title: 'Editing your photographs', reach: 24, source: 'api' }
+  ];
+  assert.equal(igCode('https://www.instagram.com/alanrangerphotography/p/DffMdBLkVlZ/'), igCode(posts[0].permalink));
+  const { rows, replaced } = evidencedRows({ ticks, steps, tags: [], posts });
+  const by = (ch, pl) => rows.find((r) => r.channel === ch && r.placement === pl);
+  assert.equal(by('instagram', 'feed').post_id, '18108');
+  assert.equal(by('instagram', 'feed').reach, 41);
+  assert.equal(by('facebook', 'feed').post_id, '1715715080112405', 'Facebook matched through the Instagram caption');
+  assert.match(by('facebook', 'feed').match_basis, /first line as the matched Instagram post/);
+  const story = by('instagram', 'story');
+  assert.deepEqual([story.reach, story.likes, story.comments, story.matched], [null, null, null, false], 'Story figures unknown, never 0');
+  const li = by('linkedin', 'feed');
+  assert.deepEqual([li.matched, li.reach, li.provider_url], [false, null, 'https://www.linkedin.com/feed/update/urn:li:activity:7525230995168509952/']);
+  assert.equal(by('instagram', 'feed').purpose, 'sell', 'purpose by the channel rule when no tag is stored');
+  assert.equal(by('instagram', 'feed').purpose_source, 'rule');
+  assert.deepEqual([...replaced].sort(), ['facebook|1715715080112405', 'instagram|18108'], 'matched posts are not listed twice');
+  const tagged = evidencedRows({ ticks, steps, tags: [{ ref_key: 'step|2026-11-02|LinkedIn|2026-11-04', purpose_primary: 'educate' }], posts });
+  assert.deepEqual([tagged.rows.find((r) => r.channel === 'linkedin').purpose, tagged.rows.find((r) => r.channel === 'linkedin').purpose_source], ['educate', 'set']);
+});
+
+test('equal-age comparison for Facebook / Instagram / LinkedIn uses the daily post snapshots', () => {
+  const p = (id, d, reach) => ({ channel: 'facebook', post_id: id, posted_at: `${d}T10:00:00Z`, reach, source: 'api' });
+  const posts = [p('new', '2026-11-08', 22), p('old', '2026-11-01', 300)];
+  assert.equal(sameAgeVs(posts[0], posts, [], '2026-11-08'), null, 'no snapshot of the older post at age 0 → no comparison');
+  const r = sameAgeVs(posts[0], posts, [{ channel: 'facebook', post_id: 'old', captured_date: '2026-11-01', reach: 20 }], '2026-11-08');
+  assert.deepEqual([r.avg, r.n, r.basis], [21, 2, 'reach at 0 days old']);
 });

@@ -7,7 +7,8 @@
  *   POST {action:'connect-start'}   one-use state → Meta login URL ({ with_business: true } adds business_management)
  *   POST {action:'disconnect'}      deletes the social_connections row only (collected figures stay)
  *   POST|GET action=collect&step=…  one collector step (progress window) or all steps (no step / cron)
- *   POST {action:'linkedin-entry'}  LinkedIn weekly figures (source = manual)
+ *   POST {action:'linkedin-entry'}  LinkedIn weekly figures from the dashboard form (source = manual)
+ *   POST {action:'linkedin-gpt'}    the same write path for GPT (source = gpt; posts need a permalink)
  */
 export const config = { runtime: 'nodejs', maxDuration: 120 };
 
@@ -49,7 +50,8 @@ const ACTIONS = {
   'POST disconnect': async (d) => ({ ok: true, removed: await d.repo.deleteConnection() }),
   'POST collect': (d, req, who) => collect(d, req, who),
   'GET collect': (d, req, who) => collect(d, req, who),
-  'POST linkedin-entry': (d, req) => saveLinkedinEntry(d.repo, bodyOf(req), { now: d.now(), by: 'admin' })
+  'POST linkedin-entry': (d, req) => saveLinkedinEntry(d.repo, bodyOf(req), { now: d.now(), by: 'dashboard form', source: 'manual' }),
+  'POST linkedin-gpt': (d, req) => saveLinkedinEntry(d.repo, bodyOf(req), { now: d.now(), by: bodyOf(req).entered_by || 'GPT', source: 'gpt' })
 };
 
 /** Admin key for everything; Vercel Cron only for collect. */
