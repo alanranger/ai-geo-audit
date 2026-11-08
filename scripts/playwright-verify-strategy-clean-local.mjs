@@ -85,6 +85,16 @@ async function strategy(browser) {
   check('visible page = tiles + Decisions + Quarter plan (+ Next delivery) + 2 closed folds', ['st-where', 'st-decisions', 'st-quarter-plan', 'st-next-delivery', 'st-fold-why', 'st-fold-targets'].every((id) => layout.blocks.includes(id)) && layout.why === false && layout.targets === false && !layout.outside.length, `visible blocks: ${layout.blocks.join(' > ')} · outside folds: ${layout.outside.join(', ') || 'none'}`);
   check('page height < 4,000px with the folds closed', layout.height < 4000, `${layout.height}px (document ${layout.doc}px)`);
   check('Why fold holds the chart, Top 3 weights, the analysis tiles and the task lists; Targets fold holds the Targets panel', ['st-gp-chart', 'st-weights', 'st-insights', 'st-action-list', 'st-next4', 'st-targets-host'].every((id) => layout.ids.includes(id)), layout.ids.join(', '));
+  const qp = await page.evaluate(() => {
+    const host = document.getElementById('st-quarter-plan');
+    const lines = (el) => { const cs = getComputedStyle(el); const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2; return Math.round(el.getBoundingClientRect().height / lh); };
+    const shown = (el) => el.offsetParent !== null && !el.closest('details:not([open]) > :not(summary)');
+    const paras = [...host.querySelectorAll('p, .qp-p, .qp-intro, .qp-foot')].filter(shown).map((el) => ({ lines: lines(el), text: el.textContent.trim().slice(0, 60) })).filter((x) => x.text);
+    const inis = [...host.querySelectorAll('.qp-ini')].filter(shown).map((ini) => ({ title: ini.querySelector('.qp-it')?.textContent.trim().slice(0, 40), lines: [...ini.children].filter((c) => shown(c) && !c.matches('details')).reduce((a, c) => a + lines(c), 0) }));
+    return { paras, inis, kpis: host.querySelectorAll('.qp-kpis .qp-kpi').length };
+  });
+  check('Quarter plan: no visible paragraph over 2 lines (intro behind ⓘ)', qp.paras.every((x) => x.lines <= 2), qp.paras.filter((x) => x.lines > 2).map((x) => `${x.lines}: ${x.text}`).join(' | ') || `${qp.paras.length} short texts`);
+  check('Quarter plan: each initiative ≤ 3 visible lines; KPI boxes kept', qp.inis.length && qp.inis.every((x) => x.lines <= 3) && qp.kpis > 0, `${qp.inis.map((x) => `${x.title}=${x.lines}`).join(' · ')} · KPI boxes ${qp.kpis}`);
   const dec = (await page.locator('#st-decisions').innerText()).replace(/\s+/g, ' ');
   check('beginners decision row shows real figures (next promoted course 13 Jan, 1 booked)', /beginners/i.test(dec) && /13 Jan/.test(dec) && /1 booked/.test(dec) && /Keep/.test(dec), dec.slice(0, 260));
   const next = await page.locator('#st-next-delivery').evaluate((el) => ({ text: el.textContent.replace(/\s+/g, ' ').trim(), key: el.dataset.nextKey }));
