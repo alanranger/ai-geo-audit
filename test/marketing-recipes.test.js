@@ -61,6 +61,9 @@ test('recipe 9: opened campaign X, no click on X; a campaign outside the stored 
   const old = G('all', [C('campaign_opened', 'exists', { email_id: 'c01' })]);
   assert.equal(run(old, p), 'unknown');
   assert.equal(run(R9, { ...p, camps: undefined }), 'unknown');
+  const heavy = { ...p, clicks: Array.from({ length: 60 }, (_, i) => ({ email_id: 'c09', url: `alanranger.com/p${i}`, at: '2026-10-01T09:00:00Z' })) };
+  assert.equal(run(R9, heavy), 'yes');
+  assert.equal(run(R9, { ...heavy, camps: { d: ['c10'], o: ['c10'], k: ['c10'] } }), 'no');
 });
 
 test('recipe 11: clean-up review needs enough exposure and no opens or clicks in the window', () => {
