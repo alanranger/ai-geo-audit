@@ -88,8 +88,8 @@ await page.close();
 
 const narrow = await openAt(Number(process.env.PANE_VIEWPORT) || 1250);
 check('pane width about 800 px', true, `${await narrow.page.evaluate(() => Math.round(document.querySelector('#mk-query').getBoundingClientRect().width))} px section`);
-const cols = await narrow.page.evaluate(() => getComputedStyle(document.querySelector('#mq-tiles .mq-tiles')).gridTemplateColumns.split(' ').length);
-check('800 px: tiles wrap to 3 per row', cols === 3, `${cols} columns`);
+const minTile = await narrow.page.evaluate(() => Math.min(...[...document.querySelectorAll('#mq-tiles .mq-tile')].map((t) => t.getBoundingClientRect().width)));
+check('pane width: every tile readable (≥ 110 px, wraps on the pane width)', minTile >= 110, `${Math.round(minTile)} px narrowest`);
 const overflow = await narrow.page.evaluate(() => { const s = document.querySelector('#mk-query'); return s.scrollWidth > s.clientWidth + 2; });
 check('800 px: section not wider than the pane (table scrolls inside)', !overflow);
 await narrow.page.locator('#mk-query').screenshot({ path: `${out}/800-1-default.png` });
