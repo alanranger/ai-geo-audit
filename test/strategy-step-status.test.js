@@ -147,10 +147,15 @@ test('quarter actions: Pick n Mix launch newsletter waits for the relaunch email
   const pnm = { key: 'plan|14', week: WEEK, plan_id: 14, channel: 'Quarter action', step: 'Pick n Mix launch newsletter', scheduled_day: WEEK, day: TODAY, covers: [], featured: [] };
   assert.equal(stepState(pnm, base({ sqs: [sq('x', 'Pick n Mix is back', '2026-11-07')] })).status, 'awaiting', 'an email before 10 Nov is not the relaunch');
   assert.equal(stepState(pnm, base({ today: '2026-11-11' })).status, 'late');
-  const hit = stepState(pnm, base({ today: '2026-11-11', sqs: [sq('y', "Pick 'n' Mix plans relaunch", '2026-11-10')] }));
+  const hit = stepState(pnm, base({ today: '2026-11-11', sqs: [{ ...sq('y', "Pick 'n' Mix plans relaunch", '2026-11-10'), message_count: 127 }] }));
   assert.equal(hit.status, 'auto_done');
+  assert.equal(stepState(pnm, base({ today: '2026-11-11', sqs: [sq('z', "Pick 'n' Mix plans relaunch", '2026-11-10')] })).status, 'late', 'a report with no recipients is not a send');
   assert.equal(stepState({ ...pnm, step: 'Christmas gift push for beginners course' }, base()).status, 'late');
-  assert.equal(stepState(pnm, base({ actionsById: new Map([['14', { is_ticked: true, ticked_at: 't' }]]) })).status, 'done');
+  const manual = new Map([['14', { action_key: 'q1-pnm-newsletter', label: 'Pick n Mix launch newsletter', is_ticked: true, ticked_at: 't' }]]);
+  assert.equal(stepState(pnm, base({ actionsById: manual })).status, 'awaiting', 'a hand tick never stands in for the send evidence');
+  assert.equal(stepState(pnm, base({ actionsById: manual, ticks: { 'plan|14': { is_ticked: true } } })).status, 'awaiting');
+  const gift = { ...pnm, plan_id: 15, step: 'Christmas gift push for beginners course' };
+  assert.equal(stepState(gift, base({ actionsById: new Map([['15', { action_key: 'q1-xmas-gift', label: gift.step, is_ticked: true, ticked_at: 't' }]]) })).status, 'done', 'actions with no evidence rule stay manual');
 });
 
 test('backfill + register: dropped this-week step → not needed; earlier weeks → late or older; counts for tile 7', () => {
