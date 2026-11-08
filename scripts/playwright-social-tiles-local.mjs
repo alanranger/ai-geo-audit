@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Local check of the "Social channels" row before deploy, at 1700px, against LIVE data:
  * the production dashboard is opened, but /lib/marketing-social-tiles.js is served from this folder and
  * /api/aigeo/social is answered in-process by this repo's api/aigeo/social.js (live Supabase, .env.vercel.prod).
@@ -44,20 +44,24 @@ async function callHandler(req) {
   return res;
 }
 
+const LIVE = process.argv.includes('--live');
+const TAG = LIVE ? 'production-live' : 'live';
+
 async function openTab(browser, envPatch) {
   const page = await browser.newPage({ viewport: { width: 1700, height: 1100 } });
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.addInitScript((k) => {
+  await page.addInitScript(([k, live]) => {
     sessionStorage.setItem('arp_admin_key', k);
-    document.addEventListener('DOMContentLoaded', () => { const s = document.createElement('script'); s.src = '/lib/marketing-social-tiles.js?v=local'; document.body.appendChild(s); });
-  }, KEY);
-  await page.route('**/lib/marketing-social-tiles.js*', (route) => route.fulfill({ status: 200, contentType: 'application/javascript', body: fs.readFileSync('lib/marketing-social-tiles.js', 'utf8') }));
+    if (!live) document.addEventListener('DOMContentLoaded', () => { const s = document.createElement('script'); s.src = '/lib/marketing-social-tiles.js?v=local'; document.body.appendChild(s); });
+  }, [KEY, LIVE]);
+  if (!LIVE) await page.route('**/lib/marketing-social-tiles.js*', (route) => route.fulfill({ status: 200, contentType: 'application/javascript', body: fs.readFileSync('lib/marketing-social-tiles.js', 'utf8') }));
   await page.route('**/api/aigeo/social*', async (route) => {
     const req = route.request();
     if (req.method() !== 'GET') {
       writes.push({ method: req.method(), body: JSON.parse(req.postData() || '{}') });
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, daily_rows: 1, post_rows: 0, week_ending: 'DRY RUN (not saved)' }) });
     }
+    if (LIVE) return route.continue();
     const saved = { ...process.env };
     Object.assign(process.env, envPatch || {});
     const r = await callHandler(req).finally(() => { for (const k of Object.keys(envPatch || {})) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
@@ -110,7 +114,7 @@ async function linkedinDryRun(page) {
   await page.click('[data-mksoc-tile="linkedin"] [data-mksoc="linkedin"]');
   await page.fill('[data-li="followers"]', '3050');
   await page.fill('[data-li="impressions_7d"]', '1400');
-  await page.screenshot({ path: `${OUT}/social-linkedin-entry-form-1700px-20261108.png` });
+  await page.screenshot({ path: `${OUT}/social-linkedin-entry-form-${TAG}-1700px-20261108.png` });
   const before = writes.length;
   await page.click('[data-mksoc="li-save"]');
   await page.waitForTimeout(800);
@@ -121,26 +125,50 @@ async function linkedinDryRun(page) {
 
 const exp = await expectedFromSql();
 const c0 = await counts();
+/** Production only: the collect route the nightly cron calls. No auth → 401; with the admin key (same GET handler) → skipped. */
+async function cronPath() {
+  const url = 'https://ai-geo-audit.vercel.app/api/aigeo/social?action=collect';
+  const open = await fetch(url);
+  check('collect route refuses a call without the cron secret / admin key (401)', open.status === 401, String(open.status));
+  const before = await counts();
+  const r = await fetch(url, { headers: { 'x-arp-admin-key': KEY } });
+  const j = await r.json().catch(() => ({}));
+  const after = await counts();
+  check('collect without a connection: 200, skipped "not_connected", not an error', r.status === 200 && j.ok === true && j.skipped === 'not_connected' && j.rows === 0, `${r.status} ok=${j.ok} skipped=${j.skipped} rows=${j.rows}`);
+  const social = (c) => JSON.stringify([c.social_connections, c.social_oauth_states, c.social_account_daily, c.social_posts]);
+  check('collect without a connection writes no social rows (one "skipped" run-log row only)', social(before) === social(after) && after.acquisition_sync_runs - before.acquisition_sync_runs <= 1, `runs ${before.acquisition_sync_runs} → ${after.acquisition_sync_runs}`);
+  const { data } = await sb.from('acquisition_sync_runs').select('status,error_message,trigger_source').eq('job', 'social_meta').order('started_at', { ascending: false }).limit(1);
+  check('run log says skipped', data?.[0]?.status === 'skipped' && data[0].error_message === 'not_connected', JSON.stringify(data?.[0] || {}));
+}
+
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const page = await openTab(browser);
-await page.locator('#mk-social').screenshot({ path: `${OUT}/social-channels-live-1700px-20261108.png` });
-await page.locator('#mk-social .mksoc-g').screenshot({ path: `${OUT}/social-channels-tiles-live-1700px-20261108.png` });
+if (LIVE) {
+  const tags = await page.evaluate(() => [...document.querySelectorAll('script[src*="marketing-social-tiles"]')].map((s) => s.getAttribute('src')));
+  check('deployed script tag', tags.length === 1 && tags[0].includes('v=social-20261108a'), tags.join(' '));
+}
+await page.locator('#mk-social').screenshot({ path: `${OUT}/social-channels-${TAG}-1700px-20261108.png` });
+await page.locator('#mk-social .mksoc-g').screenshot({ path: `${OUT}/social-channels-tiles-${TAG}-1700px-20261108.png` });
 await verify(page, exp);
+if (LIVE) check('Connect button disabled while the Meta env vars are missing', await page.$eval('[data-mksoc-tile="facebook"] [data-mksoc="connect"]', (b) => b.disabled) && /META_APP_ID, META_APP_SECRET, SOCIAL_TOKEN_KEY/.test(await tileText(page, 'facebook')));
 const c1 = await counts();
 check('viewing writes nothing (row counts unchanged, no POST)', JSON.stringify(c0) === JSON.stringify(c1) && writes.length === 0, `${JSON.stringify(c0)} → ${JSON.stringify(c1)}`);
 await page.click('#mk-fold-rules > summary');
 await page.waitForSelector('#mk-social-rules h3');
-await page.locator('#mk-social-rules').screenshot({ path: `${OUT}/social-connections-rules-1700px-20261108.png` });
+await page.locator('#mk-social-rules').screenshot({ path: `${OUT}/social-connections-rules-${TAG}-1700px-20261108.png` });
 await linkedinDryRun(page);
 await page.close();
-const ready = await openTab(browser, { META_APP_ID: 'set-in-vercel', META_APP_SECRET: 'set-in-vercel', SOCIAL_TOKEN_KEY: 'c2V0LWluLXZlcmNlbC1zZXQtaW4tdmVyY2VsLTMyYg==' });
-await ready.locator('#mk-social .mksoc-g').screenshot({ path: `${OUT}/social-channels-tiles-after-env-1700px-20261108.png` });
-const enabled = await ready.$eval('[data-mksoc-tile="facebook"] [data-mksoc="connect"]', (b) => !b.disabled);
-check('once the env vars exist the Connect button is enabled (not clicked)', enabled);
-await ready.close();
+if (!LIVE) {
+  const ready = await openTab(browser, { META_APP_ID: 'set-in-vercel', META_APP_SECRET: 'set-in-vercel', SOCIAL_TOKEN_KEY: 'c2V0LWluLXZlcmNlbC1zZXQtaW4tdmVyY2VsLTMyYg==' });
+  await ready.locator('#mk-social .mksoc-g').screenshot({ path: `${OUT}/social-channels-tiles-after-env-1700px-20261108.png` });
+  const enabled = await ready.$eval('[data-mksoc-tile="facebook"] [data-mksoc="connect"]', (b) => !b.disabled);
+  check('once the env vars exist the Connect button is enabled (not clicked)', enabled);
+  await ready.close();
+}
 await browser.close();
 const c2 = await counts();
-check('nothing written by the whole run', JSON.stringify(c0) === JSON.stringify(c2), JSON.stringify(c2));
+check('nothing written by viewing / the LinkedIn dry run', JSON.stringify(c0) === JSON.stringify(c2), JSON.stringify(c2));
+if (LIVE) await cronPath();
 check('no page errors', !errors.length, errors.slice(0, 3).join(' | '));
 for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.note ? ` (${r.note})` : ''}`);
 console.log(results.every((r) => r.ok) ? 'ALL PASS' : `${results.filter((r) => !r.ok).length} FAILED`);
