@@ -27,6 +27,9 @@
  * POST { action: 'collector', kind_of: meter|campaigns|events|run, data }
  * POST { action: 'collect-request', email_id?, campaign_key? }   collect a sent campaign now (+15 min / 24 h / 72 h)
  * GET  ?action=collect-next  ·  POST collect-done { request_ids, status, error }   (PC job runner) · GET ?action=collect-queue
+ * POST cleanup-review / -freeze / -approve / -execute / -verify   clean-up (body.cohort = server-side cohort) · GET cleanup-progress
+ * GET  ?action=cleanup-exec-next  ·  POST cleanup-exec-start / -batch / -result / -finish   (PC job runner: approved
+ *      unsubscribe manifests only — the one Squarespace write besides list loads, see lib/marketing/cleanup-exec.mjs)
  */
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -41,7 +44,8 @@ import { evaluate } from '../../lib/marketing/segments.mjs';
 import { resolveOne, reviewList } from '../../lib/marketing/suppression-review.mjs';
 import { finishLoad, fixFlips, nextLoad, postcheck, precheck, presendCheck, repairFailed, repairQueue, requestLoad, runProgress } from '../../lib/marketing/list-load.mjs';
 import { QUERY_GETS, QUERY_POSTS } from '../../lib/marketing/query/api.mjs';
-import { approveManifest, executeDryRun, freezeManifest, listManifests, reviewCleanup, verifyManifest } from '../../lib/marketing/cleanup.mjs';
+import { approveManifest, listManifests } from '../../lib/marketing/cleanup.mjs';
+import { claimBatch, executeManifest, finishExecution, freeze, nextExecution, progress, recordResult, review, startExecution, verify } from '../../lib/marketing/cleanup-exec.mjs';
 import { cronOrAdmin } from '../../lib/api/cronAuth.js';
 import { validateQuery } from '../../lib/marketing/query/english.mjs';
 import { finishRun, logRun, serviceClient } from '../../lib/marketing/store.mjs';
@@ -141,6 +145,8 @@ const GETS = {
   'suppression-review': (sb) => reviewList(sb),
   'list-load-next': (sb) => nextLoad(sb),
   'cleanup-list': (sb) => listManifests(sb),
+  'cleanup-progress': (sb, q) => progress(sb, q),
+  'cleanup-exec-next': (sb) => nextExecution(sb),
   'plan-import-next': async (sb) => {
     const { data } = await sb.from('marketing_collector_runs').select('run_id').eq('kind', 'plan-import').eq('status', 'queued').order('started_at').limit(1).maybeSingle();
     if (!data) return { job: null };
@@ -172,11 +178,15 @@ const POSTS = {
   'suppression-resolve': (sb, b) => resolveOne(sb, b, () => runStep(sb, 'customers')),
   'list-load-request': (sb, b) => requestLoad(sb, b.export_id, SET_BY, { automations_checked: b.automations_checked === true }),
   'list-repair-next': (sb) => repairQueue(sb),
-  'cleanup-review': async (sb, b) => { const { rows, ...r } = await reviewCleanup(sb, b); return r; },
-  'cleanup-freeze': (sb, b) => freezeManifest(sb, b, SET_BY),
+  'cleanup-review': async (sb, b) => { const { rows, ...r } = await review(sb, b); return r; },
+  'cleanup-freeze': (sb, b) => freeze(sb, b, SET_BY),
   'cleanup-approve': (sb, b) => approveManifest(sb, b, SET_BY),
-  'cleanup-execute': (sb, b) => executeDryRun(sb, b, SET_BY),
-  'cleanup-verify': (sb, b) => verifyManifest(sb, b, SET_BY),
+  'cleanup-execute': (sb, b) => executeManifest(sb, b, SET_BY),
+  'cleanup-verify': (sb, b) => verify(sb, b, SET_BY),
+  'cleanup-exec-start': (sb, b) => startExecution(sb, b),
+  'cleanup-exec-batch': (sb, b) => claimBatch(sb, b),
+  'cleanup-exec-result': (sb, b) => recordResult(sb, b),
+  'cleanup-exec-finish': (sb, b) => finishExecution(sb, b),
   'list-repair-failed': (sb, b) => repairFailed(sb, b.export_id, b.error),
   'list-load-precheck': (sb, b) => precheck(sb, b.export_id),
   'list-load-postcheck': (sb, b) => postcheck(sb, b.export_id, b),

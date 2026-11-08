@@ -7,7 +7,8 @@
  *                                          for recent campaigns and any not yet complete (resumes where it stopped)
  *   npm run marketing:collector-backfill   every sent campaign's recipient events (checkpoint per campaign; re-runnable)
  *   npm run marketing:list-jobs            every 5 min (scheduled task): runs any "Load into Squarespace list" the
- *                                          dashboard queued — consent checked by the dashboard before and after
+ *                                          dashboard queued — consent checked by the dashboard before and after —
+ *                                          and an approved clean-up manifest (Squarespace opt-out, 25 per batch)
  *   add --dry to read without posting (prints counts only)
  *   live repair-queue test only (acts on "ARP | TEST |" lists, ignored for any other list):
  *     --jobs --test-abort-undo    stop after the after-check, before the load's own undo (as a crash would)
@@ -23,8 +24,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { listSent, PAGE_HELPERS, readEventUsers, readMeter, readSummary } from './page-reads.mjs';
-import { createList, csvSwitchedOn, optOut, readLists, subscribedTotal, uploadCsv } from './page-writes.mjs';
+import { consentStatus, createList, csvSwitchedOn, optOut, readLists, subscribedTotal, uploadCsv } from './page-writes.mjs';
 import { collectQueueJob } from '../../lib/marketing/collect-queue.mjs';
+import { cleanupExecJob } from '../../lib/marketing/cleanup-runner.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PROFILE = path.join(process.env.LOCALAPPDATA || os.homedir(), 'AlanRanger', 'sqs-collector-profile');
@@ -254,10 +256,21 @@ async function repairJob() {
   }
 }
 
+async function signedInSite() {
+  const site = await openSite(true);
+  if (await signedIn(site.page)) return site;
+  await site.ctx.close();
+  throw new Error(RELOGIN);
+}
+
+/** Approved clean-up manifest (Squarespace opt-out, batches of 25, each person re-checked by the dashboard first). */
+const cleanupJob = () => cleanupExecJob({ api, open: signedInSite, pageFns: { optOut, consentStatus, subscribedTotal }, dry: DRY });
+
 /** Scheduled every few minutes: opens the browser only when the dashboard has queued a load or a repair is waiting. */
 async function jobs() {
   await planImportJob().catch((e) => console.error(`plan import: ${e.message}`));
   await repairJob().catch((e) => console.error(`repair queue: ${e.message}`));
+  await cleanupJob().catch((e) => console.error(`clean-up: ${e.message}`));
   await collectQueueJob({ api, root: ROOT }).catch((e) => console.error(`collect queue: ${e.message}`));
   for (let n = 0; n < 5; n += 1) {
     const { job } = await api('GET', null, '?action=list-load-next');
