@@ -102,9 +102,12 @@ test('owner / test addresses: counted apart in segments, query counts and the pa
   assert.ok(isOwner(personal.facts) && isOwner(business.facts) && !isOwner(clients[0].facts));
   const seg = { query: { version: 1, root: G([C('purchase', 'exists', {})]) } };
   const r = evaluate(people, [seg], ctx);
-  assert.deepEqual([r.count, r.owner_included, r.owner_kinds], [3, 2, { personal: 1, business: 1 }]);
-  assert.equal(r.members.length, 5, 'owners get an owner copy by default');
-  const out = evaluate(people, [seg], ctx, { includeOwner: false });
+  assert.deepEqual([r.count, r.owner_included, r.business_copy], [3, 0, 1], 'the personal address has no purchase, so it is not an owner copy here; the business copy is always on');
+  const matchAll = { query: { version: 1, root: G([C('eligible', 'is_true')]) } };
+  const all = evaluate(people, [matchAll], ctx);
+  assert.deepEqual([all.count, all.owner_included, all.owner_kinds, all.business_copy], [3, 2, { personal: 1, business: 1 }, 0]);
+  assert.equal(all.members.length, 5, 'owners get an owner copy by default');
+  const out = evaluate(people, [matchAll], ctx, { includeOwner: false });
   assert.deepEqual([out.count, out.owner_included, out.members.length, out.exclusions.owner_address_left_out], [3, 0, 3, 2]);
   const q = runQuery(people, { root: G([C('eligible', 'is_true')]) }, ctx, { columns: ['name'] });
   assert.deepEqual([q.header.people, q.header.owner_addresses, q.header.eligible_addresses], [3, 2, 3]);
@@ -114,6 +117,35 @@ test('owner / test addresses: counted apart in segments, query counts and the pa
   const marks = badgesOf(personal.facts, R(personal)).marks.map((m) => m.key);
   assert.ok(marks.includes('owner'));
   assert.equal(badgesOf(personal.facts, R(personal)).consent.key, 'can_email', 'consent is unchanged by the owner flag');
+});
+
+test('regression 8 Nov: a just-sent campaign not yet collected must not zero the LR segment (39 people + 1 owner, business copy apart)', () => {
+  const lr = { query: { version: 1, root: G([
+    C('booking', 'exists', { cats: ['beginners'], _when: 'any' }), C('booking', 'none', { cats: ['lightroom'], _when: 'any' }),
+    C('miles', 'lte', 30), C('eligible', 'is_true'), C('last_open', 'within_last', { n: 6, unit: 'months' })
+  ]) } };
+  const here = { lat: 52.4, lng: -1.56, postcode: 'CV4 9HW' };
+  const local = (i, open) => person({ ...sub, ...here, email: `lr${i}@example.com`, bookings: [{ key: `b${i}`, cats: ['beginners'], date: '2025-03-01', role: 'buyer' }], booking_count: 1, cats: { beginners: { c: 1, p: 0 } }, history_incomplete: false, engagement: eng({ opened_campaigns: 2, last_open_at: open }) });
+  const clients = Array.from({ length: 39 }, (_, i) => local(i, '2026-10-01T10:00:00Z'));
+  const stale = local(99, '2025-01-01T10:00:00Z');
+  const personal = { ...local(100, '2026-10-20T10:00:00Z'), facts: { ...local(100, '2026-10-20T10:00:00Z').facts, owner: true } };
+  const business = person({ ...sub, email: 'info@alanranger.com', admin: true });
+  const people = [...clients, stale, personal, business];
+  const lrCtx = { ...ctx, centre: here, engagementComplete: false };
+  const r = evaluate(people, [lr], lrCtx);
+  assert.deepEqual([r.count, r.owner_included, r.owner_kinds, r.business_copy], [39, 1, { personal: 1 }, 1]);
+  assert.match(Object.keys(r.exclusions).join('|'), /undecided: First open/, 'an old open is undecided while collection is incomplete (never a confident no)');
+  const done = evaluate(people, [lr], { ...lrCtx, engagementComplete: true });
+  assert.deepEqual([done.count, done.owner_included, done.business_copy], [39, 1, 1]);
+  assert.ok(Object.keys(done.exclusions).some((k) => k.startsWith('not: First open')), 'with complete coverage the old open is a firm no');
+  const q = runQuery(people, lr.query, lrCtx, { columns: ['name'] });
+  assert.deepEqual([q.header.people, q.header.owner_addresses], [39, 1], 'Customers shows the same 39 + 1 owner');
+  const p = clients[0];
+  assert.equal(evalNode(C('last_open', 'before', '2026-10-15'), { ...R(p), engagementComplete: false }).r, 'unknown', 'a "before" date stays undecided while collecting');
+  assert.equal(evalNode(C('click', 'exists', {}), { ...R(person({ ...sub, clicks: [{ url: 'alanranger.com/x', at: '2026-10-02T10:00:00Z' }] })), engagementComplete: false }).r, 'yes', 'a recorded click still proves "has clicked"');
+  assert.equal(openedWithin(p.facts, { ...R(p), engagementComplete: false }, 6), 'yes');
+  assert.equal(noResponseWithin(p.facts, { ...R(p), engagementComplete: false }, 6), 'no');
+  assert.equal(noResponseWithin(stale.facts, { ...R(stale), engagementComplete: false }, 6), 'unknown');
 });
 
 test('manual snapshot exclusion: reason required, only unloaded snapshots, the row is logged (never added past consent)', async () => {
