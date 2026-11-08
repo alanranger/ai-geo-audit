@@ -5,6 +5,8 @@
  * POST { type: 'stage', campaign_key, kind, title, event_key, window_start, window_end, categories, stage }
  *      → public.strategy_campaigns (stage + appended stage_history)
  * POST { type: 'theme', title, window_start, window_end, categories } → new theme campaign at stage "proposed"
+ * POST { type: 'audience', campaign_key, kind, title, window_start, window_end, audience: full_list|segments, segment_ids }
+ * POST { type: 'link-send', campaign_key, sqs_email_id } → send evidence (sqs_email_id + sent_on) on a stored record
  */
 import { createClient } from '@supabase/supabase-js';
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
@@ -60,8 +62,45 @@ export function stageRow(b, propertyUrl, now) {
   return {
     property_url: propertyUrl, campaign_key: key, kind: b.kind, title: text(b.title, 200) || key,
     event_key: text(b.event_key, 250), window_start: dateOrNull(b.window_start, 'window_start'), window_end: dateOrNull(b.window_end, 'window_end'),
-    categories: categories(b.categories), stage: b.stage, set_by: SET_BY, updated_at: now
+    categories: categories(b.categories), stage: b.stage, set_by: SET_BY, updated_at: now,
+    ...(Array.isArray(b.event_keys) ? { event_keys: b.event_keys.map((k) => String(k).slice(0, 250)).slice(0, 60) } : {}),
+    ...(b.stage === 'measured' && b.results && typeof b.results === 'object' ? { results_snapshot: { ...b.results, frozen_at: now } } : {})
   };
+}
+
+/** The weekly email's audience, chosen on purpose: the full list, or one or more segments. Creates the record if new. */
+export function audienceRow(b, propertyUrl, now) {
+  const base = stageRow({ ...b, stage: b.stage || 'proposed' }, propertyUrl, now);
+  if (!['full_list', 'segments'].includes(b?.audience)) throw new Error('audience must be full_list or segments');
+  const ids = b.audience === 'segments' ? (Array.isArray(b.segment_ids) ? b.segment_ids.map(String).filter(Boolean).slice(0, 20) : []) : [];
+  if (b.audience === 'segments' && !ids.length) throw new Error('choose at least one segment');
+  const { stage, ...rest } = base;
+  return { row: { ...rest, audience: b.audience, segment_ids: ids, audience_set_at: now }, stage };
+}
+
+async function writeAudience(supabase, { row, stage }) {
+  const { data: prev, error } = await supabase.from('strategy_campaigns').select('stage, stage_history').eq('property_url', row.property_url).eq('campaign_key', row.campaign_key).maybeSingle();
+  if (error) throw new Error(error.message);
+  const full = prev ? row : { ...row, stage, stage_history: [{ stage, at: row.updated_at, by: SET_BY, note: 'record stored when its audience was chosen' }] };
+  const { error: e2 } = await supabase.from('strategy_campaigns').upsert(full, { onConflict: 'property_url,campaign_key' });
+  if (e2) throw new Error(e2.message);
+  return { table: 'strategy_campaigns', columns: Object.keys(full) };
+}
+
+/** Send evidence: link the Squarespace campaign that was actually sent; its send date becomes the record's sent_on. */
+async function linkSend(supabase, b, propertyUrl, now) {
+  const key = String(b?.campaign_key || '');
+  const { data: camp, error } = await supabase.from('sqs_email_campaigns').select('email_id, sent_on, subject').eq('email_id', String(b?.sqs_email_id || '')).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!camp) throw new Error('that Squarespace campaign is not in the collected reports');
+  const { data: prev } = await supabase.from('strategy_campaigns').select('campaign_key').eq('property_url', propertyUrl).eq('campaign_key', key).maybeSingle();
+  const evidence = { sqs_email_id: camp.email_id, sent_on: String(camp.sent_on).slice(0, 10), updated_at: now };
+  const write = prev
+    ? supabase.from('strategy_campaigns').update(evidence).eq('property_url', propertyUrl).eq('campaign_key', key)
+    : supabase.from('strategy_campaigns').insert({ ...stageRow({ ...b, stage: 'sent' }, propertyUrl, now), ...evidence, stage_history: [{ stage: 'sent', at: now, by: SET_BY, note: `send evidence linked: ${String(camp.subject || '').slice(0, 80)}` }] });
+  const { error: e2 } = await write;
+  if (e2) throw new Error(e2.message);
+  return { table: 'strategy_campaigns', linked: { email_id: camp.email_id, sent_on: String(camp.sent_on).slice(0, 10), subject: camp.subject } };
 }
 
 async function writeOverride(supabase, row) {
@@ -91,7 +130,9 @@ function themeBody(b) {
 const HANDLERS = {
   override: (supabase, b, prop, now) => writeOverride(supabase, overrideRow(b, prop, now)),
   stage: (supabase, b, prop, now) => writeStage(supabase, stageRow(b, prop, now)),
-  theme: (supabase, b, prop, now) => writeStage(supabase, stageRow(themeBody(b), prop, now))
+  theme: (supabase, b, prop, now) => writeStage(supabase, stageRow(themeBody(b), prop, now)),
+  audience: (supabase, b, prop, now) => writeAudience(supabase, audienceRow(b, prop, now)),
+  'link-send': (supabase, b, prop, now) => linkSend(supabase, b, prop, now)
 };
 
 export default async function handler(req, res) {
@@ -100,7 +141,7 @@ export default async function handler(req, res) {
   if (!requireAdminKeyOnly(req, res, send)) return undefined;
   const b = req.body || {};
   const run = HANDLERS[b.type];
-  if (!run) return send(res, 400, { ok: false, error: 'type must be override, stage or theme' });
+  if (!run) return send(res, 400, { ok: false, error: 'type must be override, stage, theme, audience or link-send' });
   try {
     const out = await run(client(), b, String(b.propertyUrl || DEFAULT_PROPERTY), new Date().toISOString());
     return send(res, 200, { ok: true, set_by: setByOf(b), ...out });
