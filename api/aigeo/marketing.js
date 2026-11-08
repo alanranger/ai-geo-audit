@@ -42,7 +42,7 @@ import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { ingest } from '../../lib/marketing/collector-ingest.mjs';
 import { ingestScheduled } from '../../lib/marketing/delivery-schedule.mjs';
 import { checkPlan, deliveryInputs, linkExport, linkSchedule, planPatch } from '../../lib/marketing/delivery.mjs';
-import { frequencyView } from '../../lib/marketing/frequency.mjs';
+import { frequencyView, recordException } from '../../lib/marketing/frequency.mjs';
 import { enqueueForEmail, finishRequests, listRequests, manualRequest, nextRequests } from '../../lib/marketing/collect-queue.mjs';
 import { customerDetail, listCustomers } from '../../lib/marketing/customers.mjs';
 import { createExport, createTestExport, exportCsv, setExportStatus } from '../../lib/marketing/exports.mjs';
@@ -212,6 +212,7 @@ const POSTS = {
   'plan-import-request': async (sb) => ({ run_id: await logRun(sb, { kind: 'plan-import', status: 'queued', host: 'dashboard', items_total: 0, items_done: 0, checkpoint: { step: 'waiting for Alan\'s PC (checks every 5 min)' } }) }),
   collector: (sb, b) => (b.kind_of === 'scheduled' ? ingestScheduled(sb, b.data || {}, b.data?.run_id) : ingest(sb, b)),
   'schedule-link': (sb, b) => linkSchedule(sb, b, SET_BY),
+  'frequency-exception': (sb, b) => recordException(sb, b, SET_BY),
   'collect-request': (sb, b) => manualRequest(sb, b),
   'collect-done': (sb, b) => finishRequests(sb, { ...b, status: b.status === 'ok' ? 'ok' : 'failed' }),
   ...QUERY_POSTS
