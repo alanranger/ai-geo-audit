@@ -36,8 +36,9 @@ import { allSegments, evalCtx, loadPeople, overview, withParams } from '../../li
 import { rebuildCustomers } from '../../lib/marketing/rebuild.mjs';
 import { evaluate } from '../../lib/marketing/segments.mjs';
 import { resolveOne, reviewList } from '../../lib/marketing/suppression-review.mjs';
-import { finishLoad, fixFlips, nextLoad, postcheck, precheck, presendCheck, requestLoad, runProgress } from '../../lib/marketing/list-load.mjs';
+import { finishLoad, fixFlips, nextLoad, postcheck, precheck, presendCheck, repairFailed, repairQueue, requestLoad, runProgress } from '../../lib/marketing/list-load.mjs';
 import { QUERY_GETS, QUERY_POSTS } from '../../lib/marketing/query/api.mjs';
+import { approveManifest, executeDryRun, freezeManifest, listManifests, reviewCleanup, verifyManifest } from '../../lib/marketing/cleanup.mjs';
 import { cronOrAdmin } from '../../lib/api/cronAuth.js';
 import { validateQuery } from '../../lib/marketing/query/english.mjs';
 import { finishRun, logRun, serviceClient } from '../../lib/marketing/store.mjs';
@@ -132,6 +133,7 @@ const GETS = {
   'collector-state': collectorState,
   'suppression-review': (sb) => reviewList(sb),
   'list-load-next': (sb) => nextLoad(sb),
+  'cleanup-list': (sb) => listManifests(sb),
   'plan-import-next': async (sb) => {
     const { data } = await sb.from('marketing_collector_runs').select('run_id').eq('kind', 'plan-import').eq('status', 'queued').order('started_at').limit(1).maybeSingle();
     if (!data) return { job: null };
@@ -161,7 +163,14 @@ const POSTS = {
   'export-test-create': (sb, b) => createTestExport(sb, { ...b, created_by: SET_BY }),
   'campaign-plan': campaignPlan,
   'suppression-resolve': (sb, b) => resolveOne(sb, b, () => runStep(sb, 'customers')),
-  'list-load-request': (sb, b) => requestLoad(sb, b.export_id, SET_BY),
+  'list-load-request': (sb, b) => requestLoad(sb, b.export_id, SET_BY, { automations_checked: b.automations_checked === true }),
+  'list-repair-next': (sb) => repairQueue(sb),
+  'cleanup-review': async (sb, b) => { const { rows, ...r } = await reviewCleanup(sb, b); return r; },
+  'cleanup-freeze': (sb, b) => freezeManifest(sb, b, SET_BY),
+  'cleanup-approve': (sb, b) => approveManifest(sb, b, SET_BY),
+  'cleanup-execute': (sb, b) => executeDryRun(sb, b, SET_BY),
+  'cleanup-verify': (sb, b) => verifyManifest(sb, b, SET_BY),
+  'list-repair-failed': (sb, b) => repairFailed(sb, b.export_id, b.error),
   'list-load-precheck': (sb, b) => precheck(sb, b.export_id),
   'list-load-postcheck': (sb, b) => postcheck(sb, b.export_id, b),
   'list-load-fixed': (sb, b) => fixFlips(sb, b.export_id, b),

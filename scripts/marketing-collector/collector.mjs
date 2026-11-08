@@ -157,11 +157,12 @@ const csvCell = (v) => {
 };
 const loadStep = (job, n, step) => api('POST', { action: 'list-load-progress', run_id: job.run_id, export_id: job.export_id, items_done: n, items_total: 4, step }).catch(() => {});
 
-async function targetList(page, name) {
+/** A list with this name already in Squarespace (any size) is a collision: refuse before anything is read or imported. */
+async function assertNoList(page, name) {
   const same = (await page.evaluate(readLists)).find((l) => l.name === name);
-  if (same && same.count > 0) throw new Error(`a Squarespace list called "${name}" already has ${same.count} contacts; rename the snapshot`);
-  return same || page.evaluate(createList, name);
+  if (same) throw new Error(`NAME_COLLISION: a Squarespace list called "${name}" already exists (${same.count} contacts). Nothing was imported or changed. Next: cancel this snapshot and make a new one with a different list name, or rename / delete the old list in Squarespace yourself.`);
 }
+const targetList = (page, name) => page.evaluate(createList, name);
 
 async function waitForCount(page, listId, want) {
   let seen = null;
@@ -175,6 +176,7 @@ async function waitForCount(page, listId, want) {
 
 /** One "Load into Squarespace list" job: check → create list → import passed people → re-check (dashboard decides). */
 async function runLoad(page, job) {
+  await assertNoList(page, job.list_name);
   await loadStep(job, 1, 'Re-reading consent from Squarespace before the import');
   const pre = await api('POST', { action: 'list-load-precheck', export_id: job.export_id });
   if (!pre.import.length) throw new Error(`nobody passed the consent check (${JSON.stringify(pre.dropped)}); nothing imported`);
@@ -216,9 +218,36 @@ async function planImportJob() {
   if (code === 0) await api('POST', { action: 'sync', step: 'customers' }).catch((e) => console.error(e.message));
 }
 
-/** Scheduled every few minutes: opens the browser only when the dashboard has queued a load. */
+/**
+ * Repair queue: anyone a list import switched on and not yet confirmed unsubscribed again. Retried on every scheduled
+ * run until the dashboard's fresh consent read confirms them (the list stays BLOCKED meanwhile).
+ */
+async function repairJob() {
+  const { items } = await api('POST', { action: 'list-repair-next' });
+  if (!items?.length) return;
+  const site = await openSite(true);
+  try {
+    if (!(await signedIn(site.page))) throw new Error(RELOGIN);
+    for (const it of items) {
+      try {
+        await site.page.evaluate(optOut, it.profile_ids);
+        await new Promise((ok) => setTimeout(ok, 15000));
+        const count = (await site.page.evaluate(readLists)).find((l) => l.id === it.list_id)?.count ?? null;
+        const r = await api('POST', { action: 'list-load-fixed', export_id: it.export_id, list_count: count, all_subscribers_after_fix: await site.page.evaluate(subscribedTotal) });
+        console.log(`repair ${it.list_name}: ${r.fixed} of ${r.flipped} confirmed (${r.status})`);
+      } catch (err) {
+        await api('POST', { action: 'list-repair-failed', export_id: it.export_id, error: String(err?.message || err) }).catch(() => {});
+      }
+    }
+  } finally {
+    await site.ctx.close();
+  }
+}
+
+/** Scheduled every few minutes: opens the browser only when the dashboard has queued a load or a repair is waiting. */
 async function jobs() {
   await planImportJob().catch((e) => console.error(`plan import: ${e.message}`));
+  await repairJob().catch((e) => console.error(`repair queue: ${e.message}`));
   for (let n = 0; n < 5; n += 1) {
     const { job } = await api('GET', null, '?action=list-load-next');
     if (!job) return;
