@@ -70,8 +70,8 @@ test('board: ≤6 rows a week, far announcements share one row, rest under +N mo
 test('campaign steps come from the same rows: Thu email (Light & Logic week of the 15th), FB+IG Tue/Fri, LinkedIn Wed, Christmas by 23 Dec', () => {
   const rules = campaignRules();
   const w = campaignWeeks([], '2026-11-09', 1, rules)[0];
-  assert.deepEqual(w.steps.map((x) => `${x.day}|${x.channel}`), ['2026-11-10|Facebook + Instagram', '2026-11-11|LinkedIn', '2026-11-12|Squarespace email']);
-  assert.match(w.steps[2].brief, /Light & Logic/);
+  assert.deepEqual(w.steps.map((x) => `${x.day}|${x.channel}`), ['2026-11-09|Google Business', '2026-11-10|Facebook + Instagram', '2026-11-11|LinkedIn', '2026-11-12|Squarespace email']);
+  assert.match(w.steps[3].brief, /Light & Logic/);
   assert.ok(w.steps.every((s) => !/Prepare both posts|full list/i.test(`${s.step} ${s.brief}`)), 'specific steps, no generic rows, no default full list');
   const xmas = campaignWeeks([], '2026-12-21', 1, rules)[0].steps.find((x) => x.channel.startsWith('Squarespace'));
   assert.equal(xmas.day, '2026-12-23');

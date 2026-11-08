@@ -6,11 +6,16 @@
  *      → public.strategy_campaigns (stage + appended stage_history)
  * POST { type: 'theme', title, window_start, window_end, categories } → new theme campaign at stage "proposed"
  * POST { type: 'audience', campaign_key, kind, title, window_start, window_end, audience: full_list|segments, segment_ids }
- * POST { type: 'link-send', campaign_key, sqs_email_id } → send evidence (sqs_email_id + sent_on) on a stored record
+ * POST { type: 'link-send', campaign_key, sqs_email_id } → send evidence (sqs_email_id + sent_on) on a stored record,
+ *      and freezes its sent audience (sent_audience: list names + count; DELIVERED person ids once collected)
+ * POST { type: 'freeze-audience', campaign_key } → fills sent_audience parts still missing (write-once, never rewritten)
+ * GET  ?view=gbp → Google Business Profile last post / posts in 28 days / reviews summary, read-only (lib/strategy-gbp.mjs)
  */
 import { createClient } from '@supabase/supabase-js';
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
-import { SIDE_STAGES, STAGES, slug } from '../../lib/strategy-campaigns.mjs';
+import { SIDE_STAGES, STAGES, freezeSentAudience, slug } from '../../lib/strategy-campaigns.mjs';
+import { loadGbpStatus } from '../../lib/strategy-gbp.mjs';
+import { enqueueForCampaignRecord } from '../../lib/marketing/collect-queue.mjs';
 
 const DEFAULT_PROPERTY = 'https://www.alanranger.com';
 const SET_BY = 'Alan (dashboard, admin key)';
@@ -100,7 +105,9 @@ async function linkSend(supabase, b, propertyUrl, now) {
     : supabase.from('strategy_campaigns').insert({ ...stageRow({ ...b, stage: 'sent' }, propertyUrl, now), ...evidence, stage_history: [{ stage: 'sent', at: now, by: SET_BY, note: `send evidence linked: ${String(camp.subject || '').slice(0, 80)}` }] });
   const { error: e2 } = await write;
   if (e2) throw new Error(e2.message);
-  return { table: 'strategy_campaigns', linked: { email_id: camp.email_id, sent_on: String(camp.sent_on).slice(0, 10), subject: camp.subject } };
+  await enqueueForCampaignRecord(supabase, { property_url: propertyUrl, campaign_key: key }, 'strategy-link-send').catch(() => {});
+  const audience = await freezeSentAudience(supabase, propertyUrl, key, now).catch((e) => ({ error: e.message }));
+  return { table: 'strategy_campaigns', linked: { email_id: camp.email_id, sent_on: String(camp.sent_on).slice(0, 10), subject: camp.subject }, sent_audience: audience };
 }
 
 async function writeOverride(supabase, row) {
@@ -117,6 +124,7 @@ async function writeStage(supabase, row) {
   const full = { ...row, stage_history: history };
   const { error: e2 } = await supabase.from('strategy_campaigns').upsert(full, { onConflict: 'property_url,campaign_key' });
   if (e2) throw new Error(e2.message);
+  if (row.stage === 'sent') await enqueueForCampaignRecord(supabase, row, 'strategy-stage').catch(() => {});
   return { table: 'strategy_campaigns', columns: Object.keys(full), stage_history: history };
 }
 
@@ -132,16 +140,24 @@ const HANDLERS = {
   stage: (supabase, b, prop, now) => writeStage(supabase, stageRow(b, prop, now)),
   theme: (supabase, b, prop, now) => writeStage(supabase, stageRow(themeBody(b), prop, now)),
   audience: (supabase, b, prop, now) => writeAudience(supabase, audienceRow(b, prop, now)),
-  'link-send': (supabase, b, prop, now) => linkSend(supabase, b, prop, now)
+  'link-send': (supabase, b, prop, now) => linkSend(supabase, b, prop, now),
+  'freeze-audience': (supabase, b, prop, now) => freezeSentAudience(supabase, prop, String(b?.campaign_key || ''), now)
 };
+
+/** GET ?view=gbp: Google Business Profile posts / reviews evidence, read-only (nothing is posted). */
+async function getView(req, res) {
+  if (String(req.query?.view || '') !== 'gbp') return send(res, 400, { ok: false, error: 'view must be gbp' });
+  return send(res, 200, { ok: true, gbp: await loadGbpStatus() });
+}
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return send(res, 204, {});
-  if (req.method !== 'POST') return send(res, 405, { ok: false, error: 'Method not allowed' });
+  if (!['POST', 'GET'].includes(req.method)) return send(res, 405, { ok: false, error: 'Method not allowed' });
   if (!requireAdminKeyOnly(req, res, send)) return undefined;
+  if (req.method === 'GET') return getView(req, res);
   const b = req.body || {};
   const run = HANDLERS[b.type];
-  if (!run) return send(res, 400, { ok: false, error: 'type must be override, stage, theme, audience or link-send' });
+  if (!run) return send(res, 400, { ok: false, error: 'type must be override, stage, theme, audience, link-send or freeze-audience' });
   try {
     const out = await run(client(), b, String(b.propertyUrl || DEFAULT_PROPERTY), new Date().toISOString());
     return send(res, 200, { ok: true, set_by: setByOf(b), ...out });
