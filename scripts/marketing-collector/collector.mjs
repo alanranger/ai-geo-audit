@@ -9,6 +9,9 @@
  *   npm run marketing:list-jobs            every 5 min (scheduled task): runs any "Load into Squarespace list" the
  *                                          dashboard queued — consent checked by the dashboard before and after
  *   add --dry to read without posting (prints counts only)
+ *   live repair-queue test only (acts on "ARP | TEST |" lists, ignored for any other list):
+ *     --jobs --test-abort-undo    stop after the after-check, before the load's own undo (as a crash would)
+ *     --jobs --test-fail-repair   make this run's repair attempt fail before the opt-out (recorded; next run retries)
  *
  * Posts to /api/aigeo/marketing (action=collector) with the admin key from this machine's env files. Expired login,
  * a changed Squarespace response or an interrupted run is reported as a stale / failed run, never as zero.
@@ -164,6 +167,10 @@ async function assertNoList(page, name) {
 }
 const targetList = (page, name) => page.evaluate(createList, name);
 
+function testStop(flag, listName) {
+  if (args.has(flag) && String(listName || '').startsWith('ARP | TEST |')) throw new Error(`${flag.slice(2).toUpperCase()}: test stop on a TEST list; the repair queue must pick this up`);
+}
+
 async function waitForCount(page, listId, want) {
   let seen = null;
   for (let i = 0; i < 36; i += 1) {
@@ -192,6 +199,7 @@ async function runLoad(page, job) {
   await loadStep(job, 4, 'Re-reading consent after the import');
   const sw = await page.evaluate(csvSwitchedOn, { ids: pre.import.map((m) => m.profile_id).filter(Boolean), sinceMs: importStart });
   const post2 = await api('POST', { action: 'list-load-postcheck', export_id: job.export_id, list_id: list.id, list_count: count, all_subscribers_before: before, all_subscribers_after: after, switched_ids: sw.switched, unreadable: sw.unreadable.length });
+  if (post2.fix_ids?.length) testStop('--test-abort-undo', job.list_name);
   const fix = post2.fix_ids?.length ? await undoFlips(page, job, list.id, post2.fix_ids) : null;
   return { list_id: list.id, imported: pre.import.length, dropped: pre.dropped, list_count: count, all_subscribers_before: before, all_subscribers_after: after, status: fix?.status || post2.status, flips: post2.flips, fixed: fix?.fixed ?? 0, all_subscribers_after_fix: fix?.all_subscribers ?? null };
 }
@@ -230,6 +238,7 @@ async function repairJob() {
     if (!(await signedIn(site.page))) throw new Error(RELOGIN);
     for (const it of items) {
       try {
+        testStop('--test-fail-repair', it.list_name);
         await site.page.evaluate(optOut, it.profile_ids);
         await new Promise((ok) => setTimeout(ok, 15000));
         const count = (await site.page.evaluate(readLists)).find((l) => l.id === it.list_id)?.count ?? null;

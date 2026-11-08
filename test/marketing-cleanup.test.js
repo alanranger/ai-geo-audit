@@ -26,10 +26,16 @@ test('protected records: buyers, bookings, members, active plans, organisations,
   assert.ok(ACTIONS.delete_record && ACTIONS.retain && Object.keys(ACTIONS).length === 7);
 });
 
-test('list loads: production off until the residual risk is accepted; TEST lists only; automations check required', () => {
+test('list loads: production on since Alan accepted the residual risk; automations check still required; TEST names only for tests', () => {
   const real = { status: 'pending_import', is_test: false, campaign_key: 'email|2026-11-09', list_name: 'ARP | Jan | Beginners | 2026-11-08' };
-  assert.equal(IMPORT_BLOCK.production_load_blocked, true);
-  assert.match(loadRefusal(real, { automations_checked: true }), /residual risk/);
+  assert.equal(IMPORT_BLOCK.production_load_blocked, false);
+  assert.equal(IMPORT_BLOCK.residual_risk_accepted_by, 'Alan, 8 Nov 2026, via Claude');
+  assert.equal(IMPORT_BLOCK.csv_blocked, true);
+  assert.equal(loadRefusal(real, { automations_checked: true }), null);
+  assert.match(loadRefusal(real, {}), /automations check/);
+  assert.match(loadRefusal(real), /automations check/);
+  assert.match(loadRefusal({ ...real, status: 'load_queued' }, { automations_checked: true }), /snapshot is load_queued/);
+  assert.match(loadRefusal({ ...real, status: 'blocked_do_not_send' }, { automations_checked: true }), /snapshot is blocked_do_not_send/);
   assert.match(loadRefusal({ ...real, campaign_key: null }), /campaign record/);
   assert.equal(loadRefusal({ status: 'pending_import', is_test: true, list_name: 'ARP | TEST | load 3' }), null);
   assert.match(loadRefusal({ status: 'pending_import', is_test: true, list_name: 'ARP | Jan' }), /TEST/);

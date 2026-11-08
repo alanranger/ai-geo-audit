@@ -25,13 +25,18 @@ re-subscribes anyone in the file who had unsubscribed (proved 7 Nov 2026: All Su
    "ARP Squarespace List Jobs") and retries Squarespace's own opt-out until each is confirmed; attempts, last try and
    last error are shown on the snapshot. The list stays **BLOCKED — DO NOT SEND** until every repair is confirmed.
 6. **Pre-send check**: consent + suppression for everyone loaded. A PASS is valid for 30 minutes; a campaign record
-   only shows READY TO SEND while it lasts.
-7. **After the send**: recipients of a campaign sent to the list are reconciled against the people who passed.
+   only shows READY TO SEND while it lasts. Every loaded list and its campaign record show the rule **"Press Pre-send
+   check, then send in Squarespace within 30 minutes"**; once PASS, a live mm:ss countdown runs, then "PASS expired —
+   check again" (the pill drops to NOT CHECKED / NOT READY TO SEND). Each check is kept in
+   `load_result.presend_log` (last 50).
+7. **After the send**: recipients of a campaign sent to the list are reconciled against the people who passed, and the
+   send time (`sqs_email_campaigns.sent_on`) is compared with the pre-send log. A send with no PASS in the 30 minutes
+   before it is flagged on the Marketing tab and in the Monday brief's marketing alerts (`lib/marketing/health.mjs`).
 
 TEST snapshots (Alan's own @alanranger.com addresses, list names `ARP | TEST |`) are hidden from the snapshot table by
 default, can't carry a campaign record, and never count as a campaign's audience.
 
-## Residual risk (needs Alan's acceptance before production loads)
+## Residual risk (accepted: Alan, 8 Nov 2026, via Claude)
 
 - A campaign started in Squarespace outside the dashboard, or sent after its 30-minute PASS has run out, skips the
   pre-send check.
@@ -39,5 +44,20 @@ default, can't carry a campaign record, and never count as a campaign's audience
   triggered by subscribing, or a manual send in that window, would reach them.
 - The PC must be on and signed in to Squarespace for the repair queue to run; until then the list stays blocked.
 
-Production loads are switched off in `lib/marketing/import-block.mjs` (`production_load_blocked: true`) until Alan
-accepts this via Claude.
+**Acceptance:** Alan accepted this residual risk on 8 Nov 2026, via Claude (QUESTION-2026-11-08, decision "A"). Production
+loads are switched on in `lib/marketing/import-block.mjs` (`production_load_blocked: false`,
+`residual_risk_accepted_by: 'Alan, 8 Nov 2026, via Claude'`). Every check above still runs; setting the flag back to
+`true` switches production loads off again (TEST loads keep working).
+
+## Live repair-queue test (8 Nov 2026)
+
+TEST list `ARP | TEST | repair-queue | 2026-11-08`, info@ (subscribed) + marketing@ (unsubscribed, forced in). The
+5-minute task was paused; the load was run with `--jobs --test-abort-undo` (stops after the after-check, before the
+load's own undo, as a crash would) → BLOCKED, marketing@ re-subscribed by the CSV, All Subscribers 925 → 926; pre-send
+check FAIL, still blocked. A run with `--jobs --test-fail-repair` recorded a failed attempt (attempt 1, last try, error)
+and the list stayed blocked. Two scheduled slots were missed with the browser closed; the task was re-enabled and the next
+scheduled run (11:12) repaired it (attempt 2), confirmed by a fresh consent read → LOADED. Both addresses are back in
+their original state (info@ subscribed with its 2024 source unchanged; marketing@ unsubscribed). All Subscribers
+925 → 926 → 924: the extra −1 is an unrelated contact who unsubscribed themselves at 11:06 (source "OTHER", no collector
+running); a scan of every contact found only that change and the test address in the window. Both flags act only on
+`ARP | TEST |` lists.
