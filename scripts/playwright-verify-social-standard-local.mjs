@@ -17,6 +17,7 @@ for (const k of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'ARP_ADMIN_KEY']) 
 const BASE = process.env.DASH_BASE || 'https://ai-geo-audit.vercel.app';
 const LOCAL = process.env.LOCAL !== '0';
 const RENDER = process.argv.includes('--render');
+const MODE = LOCAL ? 'local' : 'live';
 const OUT = path.resolve('outputs');
 const STAMP = '20261108';
 const NORFOLK = 'gpt-8w-social-2026-11-13-fbig';
@@ -111,11 +112,23 @@ async function panelChecks(page) {
   check('Panel: final caption', /If you have been thinking about the North Norfolk coast/.test(p));
   check('Panel: FB first-comment URL, IG written URL, IG Story sticker URL', /FB first comment/.test(p) && /IG written URL/.test(p) && /IG Story sticker/.test(p));
   check('Panel: Facebook caption-link quota shown before a link post', /Facebook caption links this month: \d of 2 used/.test(p));
-  await page.screenshot({ path: `${OUT}/social-panel-norfolk-local-1700px-${STAMP}.png` });
+  const caps = await page.$$eval('#mks-panel .sps-prev figcaption', (els) => els.map((e) => e.textContent));
+  await page.waitForFunction(() => [...document.querySelectorAll('#mks-panel .sps-prev img')].every((i) => i.complete), null, { timeout: 30000 }).catch(() => {});
+  const loaded = await page.$$eval('#mks-panel .sps-prev img', (els) => els.filter((i) => i.complete && i.naturalWidth > 0).map((i) => `${i.naturalWidth}×${i.naturalHeight}`));
+  check('Panel: stored renders read back (feed + Story PNGs, photo unchanged)', caps.length === 2 && caps.every((c) => /photo unchanged/.test(c)) && loaded.length === 2, `${caps.join(' | ')} · loaded ${loaded.join(', ')}`);
+  check('Item 5: planned time + purpose shown from stored fields (or "needs time / purpose")', /Planned/.test(p) && /(Fri 13 Nov 18:30|needs time)/.test(p), (p.match(/Planned.{0,60}/) || [''])[0]);
+  await page.screenshot({ path: `${OUT}/social-panel-norfolk-${MODE}-1700px-${STAMP}.png` });
   await page.click('#mks-panel [data-mks-close]');
   const li = await openCard(page, 'gpt-8w-social-2026-11-11-li');
   check('Panel (LinkedIn 11 Nov): LinkedIn body link + missing facts listed for Abstract & Macro', /LinkedIn body link/.test(li) && /missing: (location|outcome|inclusions|original photo)/.test(li), (li.match(/missing: [a-z ]+/g) || []).slice(0, 4).join(', '));
-  await page.screenshot({ path: `${OUT}/social-panel-linkedin-local-1700px-${STAMP}.png` });
+  await page.screenshot({ path: `${OUT}/social-panel-linkedin-${MODE}-1700px-${STAMP}.png` });
+  await page.click('#mks-panel [data-mks-close]');
+  await openCard(page, 'gpt-event-2026-11-09-norfolk-li');
+  const rowText = (k) => page.locator('#mks-panel .mks-kv tr', { has: page.locator(`th:text-is("${k}")`) }).first().innerText().catch(() => '');
+  const item5 = { state: await page.textContent('#mks-panel .mks-pstate'), when: await rowText('When'), planned: await rowText('Planned'), purpose: await rowText('Purpose'), initiative: await rowText('Initiative') };
+  console.log('ITEM5', MODE, JSON.stringify(item5));
+  check('Item 5: 9 Nov Norfolk LinkedIn shows 08:30 and its stored purpose (Sell + Inspire)', /08:30/.test(`${item5.state} ${item5.when}`) && /Sell \+ Inspire/i.test(`${item5.purpose} ${item5.initiative}`) && !/time not set/.test(item5.state), JSON.stringify(item5).slice(0, 300));
+  await page.locator('#mks-panel').screenshot({ path: `${OUT}/item5-norfolk-li-${MODE}-1700px-${STAMP}.png` });
   await page.click('#mks-panel [data-mks-close]');
 }
 
@@ -136,8 +149,8 @@ async function renderOne(page, stepKey, shot) {
   return { code, caps };
 }
 async function render(page) {
-  const fbig = await renderOne(page, NORFOLK, `social-panel-norfolk-rendered-local-1700px-${STAMP}.png`);
-  const li = await renderOne(page, 'gpt-event-2026-11-09-norfolk-li', `social-panel-norfolk-li-rendered-local-1700px-${STAMP}.png`);
+  const fbig = await renderOne(page, NORFOLK, `social-panel-norfolk-rendered-${MODE}-1700px-${STAMP}.png`);
+  const li = await renderOne(page, 'gpt-event-2026-11-09-norfolk-li', `social-panel-norfolk-li-rendered-${MODE}-1700px-${STAMP}.png`);
   check('Render: PC job ran for both Norfolk deliveries (FB+IG 13 Nov, LinkedIn 9 Nov)', fbig.code === 0 && li.code === 0, `exit ${fbig.code} / ${li.code}`);
   const { data: runs } = await sb.from('marketing_collector_runs').select('status, summary').eq('kind', 'social-render').order('started_at', { ascending: false }).limit(2);
   const all = (runs || []).flatMap((r) => Object.entries(r.summary?.assets || {}));
@@ -150,13 +163,13 @@ async function render(page) {
 const before = await dbState();
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const page = await openTab(browser, 1700);
-await page.locator('#mk-schedule').screenshot({ path: `${OUT}/social-weeks-local-1700px-${STAMP}.png` });
+await page.locator('#mk-schedule').screenshot({ path: `${OUT}/social-weeks-${MODE}-1700px-${STAMP}.png` });
 await weeksChecks(page);
 await page.click('#mk-schedule [data-mks-view="days"]');
 await page.waitForSelector('#mk-schedule .mks-days');
 await page.click('#mk-schedule [data-mks-range="4w"]');
 await page.waitForTimeout(800);
-await page.locator('#mk-schedule').screenshot({ path: `${OUT}/social-days-local-1700px-${STAMP}.png` });
+await page.locator('#mk-schedule').screenshot({ path: `${OUT}/social-days-${MODE}-1700px-${STAMP}.png` });
 await page.click('#mk-schedule [data-mks-view="weeks"]');
 await page.waitForSelector('#mk-schedule .mks-weeks');
 await panelChecks(page);

@@ -134,7 +134,29 @@ test('social panel: facts joined from the record, final caption, per-placement l
   assert.deepEqual(JSON.parse(JSON.stringify(p.coverage)), ['Norfolk coastal workshop']);
   assert.equal(p.links.facebook_first_comment, FACT.booking_url);
   assert.equal(p.links.instagram_written_in_caption, true);
-  assert.deepEqual(JSON.parse(JSON.stringify(p.readiness.map((r) => [r.label, r.ok]))), [['event facts complete', true], ['no contradictory facts', true], ['final caption drafted', true], ['rendered preview', false], ['Facebook caption link available', false]]);
+  assert.deepEqual(JSON.parse(JSON.stringify(p.readiness.map((r) => [r.label, r.ok]))), [['planned time stored', false], ['explicit purpose stored', false], ['event facts complete', true], ['no contradictory facts', true], ['final caption drafted', true], ['rendered preview', false], ['Facebook caption link available', false]]);
+});
+
+test('item 5: planned time and purpose come from stored fields only; without them the delivery says "needs time / purpose"', () => {
+  const SS = browser().SocialStandard;
+  const x = { row: 'linkedin', step_key: LI.key, day: '2026-11-09' };
+  const bare = SS.panelFor(x, SS.context(S({}), { facts: [FACT], placements: [] }));
+  assert.equal(bare.plan, null, 'the 08:30 in the brief text is not parsed at display time');
+  assert.deepEqual(JSON.parse(JSON.stringify(bare.readiness.slice(0, 2).map((r) => [r.label, r.ok]))), [['planned time stored', false], ['explicit purpose stored', false]]);
+  const qp = { initiatives: { a: { deliveries: [{ key: LI.key, purpose: { primary: 'sell', secondary: ['inspire'] }, purpose_source: 'set' }] } } };
+  const rows = [{ step_key: LI.key, placement: 'linkedin_feed', stage: null, planned_at: '2026-11-09T08:30:00+00:00', planned_tz: 'Europe/London', plan_source: 'GPT brief: "planned Monday 9 November 2026, 08:30 GMT"', assets: {}, evidence: [] }];
+  const full = SS.panelFor(x, SS.context({ ...S({}), quarter_plan: qp }, { facts: [FACT], placements: rows }));
+  assert.deepEqual(JSON.parse(JSON.stringify([full.plan.planned_at, full.purpose])), ['2026-11-09T08:30:00+00:00', { primary: 'sell', secondary: ['inspire'], source: 'stored' }]);
+  assert.equal(full.placements[0].stage, 'factual_review', 'a row with only a planned time records no stage: the stage is still derived');
+  const rule = SS.purposeOf(LI.key, { quarter_plan: { initiatives: { a: { deliveries: [{ key: LI.key, purpose: { primary: 'sell', secondary: ['educate'] }, purpose_source: 'rule' }] } } } });
+  assert.equal(rule.source, 'rule', 'a channel rule is never shown as stored');
+});
+
+test('item 5: one definition of purpose sources for both tabs (stored = explicit tag, rule = channel default; drafts apart)', async () => {
+  const { purposeMix } = await import('../lib/strategy-initiatives.mjs');
+  const d = (draft, source) => ({ draft, purpose: { primary: 'sell', secondary: [] }, purpose_source: source, modules: [] });
+  const m = purposeMix([d(false, 'set'), d(false, 'rule'), d(false, 'rule'), d(true, 'set'), d(true, 'rule')], { from: 'a', to: 'b' });
+  assert.equal(m.source_text, 'purpose source: scheduled / approved 1 stored · 2 channel rule; drafts 1 stored · 1 channel rule (stored = explicit tag, rule = channel default)');
 });
 
 test('generated social rows on a slot GPT already fills are hidden (not counted), the manual row stays', () => {
