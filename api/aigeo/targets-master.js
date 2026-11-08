@@ -20,8 +20,16 @@ function client() {
   return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 }
 
+/** KPI thresholds as sent; the Pick n Mix relaunch date must be a real YYYY-MM-DD day. */
+function kpiPatch(kpi) {
+  const { pnm_relaunch_date: d, ...rest } = kpi;
+  if (d == null || d === '') return rest;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d)) || Number.isNaN(Date.parse(`${d}T00:00:00Z`))) throw new Error('pnm_relaunch_date must be a date (YYYY-MM-DD)');
+  return { ...rest, pnm_relaunch_date: String(d) };
+}
+
 /** Only the panel's own fields, validated: GP a month must be a positive £ figure, stretch above survival. */
-export function targetsPatch(body) {
+function moneyPatch(body) {
   const patch = {};
   for (const k of MONEY_KEYS) {
     const v = body?.[`${k}_gp_monthly`];
@@ -31,10 +39,16 @@ export function targetsPatch(body) {
     patch[`${k}_gp_monthly`] = n;
     patch[`${k}_gp_annual`] = n * 12;
   }
-  if (body?.funnel_targets && typeof body.funnel_targets === 'object') patch.funnel_targets = body.funnel_targets;
-  if (body?.kpi_targets && typeof body.kpi_targets === 'object') patch.kpi_targets = body.kpi_targets;
+  return patch;
+}
+
+const isObject = (v) => !!v && typeof v === 'object';
+
+export function targetsPatch(body) {
+  const patch = moneyPatch(body);
+  for (const k of ['funnel_targets', 'campaign_targets']) if (isObject(body?.[k])) patch[k] = body[k];
+  if (isObject(body?.kpi_targets)) patch.kpi_targets = kpiPatch(body.kpi_targets);
   if (Array.isArray(body?.roadmap_targets)) patch.roadmap_targets = body.roadmap_targets;
-  if (body?.campaign_targets && typeof body.campaign_targets === 'object') patch.campaign_targets = body.campaign_targets;
   return patch;
 }
 
