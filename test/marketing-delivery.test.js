@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { capacityOf, cycleOf, cycleSide, reservationOf } from '../lib/marketing/delivery-reserve.mjs';
 import { deliveryView, planPatch, readState } from '../lib/marketing/delivery.mjs';
-import { changesOf, ingestScheduled, linkOf } from '../lib/marketing/delivery-schedule.mjs';
+import { changesOf, ingestScheduled, linkOf, liveCandidates } from '../lib/marketing/delivery-schedule.mjs';
 import { meterView } from '../lib/marketing/meter.mjs';
 
 const RESET = '2026-11-12T12:51:47.184Z';
@@ -111,6 +111,15 @@ test('Scheduled-tab links by ids: one match linked, two ambiguous (budgeted once
   const review = v.deliveries.filter((d) => d.review);
   assert.equal(review.length, 1, 'the ambiguous schedule is one delivery, not one per candidate');
   assert.ok(v.warnings.some((w) => /not matched to a campaign/.test(w.text)));
+});
+
+test('a cancelled record is not a link candidate: the draft id moved to the live record links cleanly (8 Nov Norfolk case)', () => {
+  const camps = [{ campaign_key: 'event|norfolk', stage: 'cancelled', sqs_draft_id: 'e1' }, { campaign_key: 'theme|norfolk-8nov', stage: 'scheduled', sqs_draft_id: 'e1' }];
+  const exps = [{ sqs_list_id: 'L9', campaign_key: 'theme|norfolk-8nov', status: 'loaded' }, { sqs_list_id: 'L9', campaign_key: 'event|norfolk', status: 'blocked' }];
+  const c = liveCandidates(camps, exps);
+  const l = linkOf({ email_id: 'e1', mailing_list_ids: ['L9'] }, c.campaigns, c.exports, null);
+  assert.deepEqual([l.link_state, l.campaign_key, l.link_basis], ['linked', 'theme|norfolk-8nov', 'draft_id+list_id']);
+  assert.equal(linkOf({ email_id: 'e1', mailing_list_ids: ['L9'] }, camps, exps, null).link_state, 'ambiguous', 'without the filter it was ambiguous');
 });
 
 test('ingest: upsert + link, an edit is recorded, a schedule missing from a later complete read becomes gone (kept)', async () => {
