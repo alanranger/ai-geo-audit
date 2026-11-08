@@ -97,7 +97,8 @@ function waitingWith(items, needs, queue) {
     mkScheduleModel: { build: () => ({ items: items(today), needs }) },
     mkDeliveryItems: () => [],
     mkNeedsAlanQueue: () => queue,
-    SocialStandard: { captionOf: (st) => (st?.brief?.startsWith('DRAFT') ? 'caption' : null) }
+    SocialStandard: { captionOf: () => { throw new Error('the production brief must not be read'); } },
+    mkSocialReviewState: (k) => ({ 'li-ready': { public_caption: true, ready: true, blockers: [] }, gpt: { public_caption: true, ready: false, blockers: ['rendered image'] } }[k] || null)
   });
   return { rows: win.mkWaitingRows({}, { campaign: { weeks: [{ steps: [{ key: 'li-ready', brief: 'DRAFT\n\ncaption' }, { key: 'li-nocap', brief: '' }] }] } }).rows, today };
 }
@@ -107,7 +108,7 @@ test('waiting on you: only Alan\'s own actions; GPT drafts as one approve row; s
   const items = (t) => [
     { id: 'linkedin|li-ready', row: 'linkedin', step_key: 'li-ready', state: 'pl', day: plus(t, 1), short: 'Norfolk: offer ends Saturday', draft: true },
     { id: 'linkedin|li-nocap', row: 'linkedin', step_key: 'li-nocap', state: 'pl', day: t, short: 'No caption yet (GPT writes it)', draft: true },
-    { id: 'fbig|gpt', row: 'fbig', step_key: 'gpt', state: 'pl', day: plus(t, 2), short: 'Focus bracketing', draft: true },
+    { id: 'fbig|gpt', row: 'fbig', step_key: 'gpt', state: 'pl', day: plus(t, 1), short: 'Focus bracketing', draft: true },
     { id: 'email|gpt', row: 'email', record_key: 'theme|gpt-8w', state: 'pl', day: plus(t, 5), short: 'Gift email', draft: true },
     { id: 'email|old', row: 'email', record_key: 'email|2026-11-02', state: 'resolved', day: t, short: 'Superseded weekly', draft: false },
     { id: 'outlook|future', row: 'outlook', state: 'pl', day: plus(t, 4), short: 'Later note', draft: false },
@@ -120,10 +121,14 @@ test('waiting on you: only Alan\'s own actions; GPT drafts as one approve row; s
   const needs = [{ text: '3 late (FB/IG 3): do it or skip it.', ids: ['fbig|late'] }, { text: '1 marked scheduled with no platform evidence: confirm in Squarespace.', ids: ['email|x'] }];
   const { rows } = waitingWith(items, needs, queue);
   const text = rows.map((r) => `${r.what} | ${r.why} | ${strip(r.btn)}`).join('\n');
-  assert.match(text, /Norfolk: offer ends Saturday \| Caption ready · post it \| Open · Copy caption · Done/);
-  assert.match(text, /Approve GPT's \d-week plan \(1 email · 2 posts\) \| Drafts ready · nothing goes out until you approve \| Review/, 'GPT drafts: one approve row (FB/IG + uncaptioned LinkedIn draft), the hands-on LinkedIn item not counted in it');
-  assert.ok(!/No caption yet/.test(text), 'LinkedIn without GPT\'s caption is GPT\'s job, not listed');
-  assert.ok(!/Focus bracketing|Gift email|GPT post late/.test(text), 'GPT-owned items never listed one by one');
+  assert.match(text, /Approve caption & artwork: Norfolk: offer ends Saturday \| Caption & artwork ready · GPT posts after you approve \| Review/);
+  assert.match(text, /Approve caption & artwork: Focus bracketing \| Caption ready · missing: rendered image \| Review/, 'blockers from the stored-caption state');
+  assert.ok(!/post it|Copy caption/.test(text), 'never a "post it" task: GPT publishes');
+  const li = rows.find((r) => /Norfolk: offer ends/.test(r.what));
+  assert.match(li.btn, /data-mkw-review="li-ready"/, 'Review calls the review-first hook');
+  assert.match(text, /Approve GPT's \d-week plan \(1 email · 1 post\) \| Drafts ready · nothing goes out until you approve \| Review/, 'GPT drafts: one approve row (uncaptioned LinkedIn draft); posts listed for approval are not counted in it');
+  assert.ok(!/No caption yet/.test(text), 'a post without GPT\'s stored caption is GPT\'s job, not listed');
+  assert.ok(!/Gift email|GPT post late/.test(text), 'GPT-owned items never listed one by one');
   assert.ok(!/Superseded|late \(FB\/IG/.test(text), 'superseded items and the generic late line never listed');
   assert.ok(!/Later note/.test(text), 'future items stay in Planned');
   assert.ok(!/Choose the audience for the weekly email, Sun 1 Nov/.test(text), 'audience decision for a week with no live weekly email (superseded) is dropped');
