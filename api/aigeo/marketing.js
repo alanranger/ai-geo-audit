@@ -25,11 +25,14 @@
  * POST { action: 'export-status', export_id, status, note }
  * POST { action: 'campaign-plan', campaign_key, reserved_sends?, sqs_email_id?, segment_ids? }
  * POST { action: 'collector', kind_of: meter|campaigns|events|run, data }
+ * POST { action: 'collect-request', email_id?, campaign_key? }   collect a sent campaign now (+15 min / 24 h / 72 h)
+ * GET  ?action=collect-next  ·  POST collect-done { request_ids, status, error }   (PC job runner) · GET ?action=collect-queue
  */
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { ingest } from '../../lib/marketing/collector-ingest.mjs';
+import { enqueueForEmail, finishRequests, listRequests, manualRequest, nextRequests } from '../../lib/marketing/collect-queue.mjs';
 import { customerDetail, listCustomers } from '../../lib/marketing/customers.mjs';
 import { createExport, createTestExport, exportCsv, setExportStatus } from '../../lib/marketing/exports.mjs';
 import { allSegments, evalCtx, loadPeople, overview, withParams } from '../../lib/marketing/overview.mjs';
@@ -122,8 +125,10 @@ async function campaignPlan(sb, b) {
   const { data, error } = await sb.from('strategy_campaigns').update({ ...patch, updated_at: new Date().toISOString() }).eq('campaign_key', b.campaign_key).select('campaign_key');
   if (error) throw new Error(error.message);
   if (!data?.length) throw new Error('campaign not found (create it from Campaign records first)');
-  if (patch.sqs_email_id) await sb.from('sqs_email_campaigns').update({ campaign_key: b.campaign_key }).eq('email_id', patch.sqs_email_id);
-  return { campaign_key: b.campaign_key, ...patch };
+  if (!patch.sqs_email_id) return { campaign_key: b.campaign_key, ...patch };
+  await sb.from('sqs_email_campaigns').update({ campaign_key: b.campaign_key }).eq('email_id', patch.sqs_email_id);
+  const queue = await enqueueForEmail(sb, { email_id: patch.sqs_email_id, campaign_key: b.campaign_key, source: 'campaign-plan' }).catch((e) => ({ queued: 0, queue_error: String(e?.message || e) }));
+  return { campaign_key: b.campaign_key, ...patch, collect_queued: queue.queued };
 }
 
 const GETS = {
@@ -131,6 +136,8 @@ const GETS = {
   customers: (sb, q) => listCustomers(sb, { q: q.q, segment_id: q.segment_id, page: q.page || 0, subscribed_only: q.subscribed_only === '1', params: params(q) }),
   customer: (sb, q) => customerDetail(sb, q.person_id, params(q)),
   'collector-state': collectorState,
+  'collect-next': (sb) => nextRequests(sb),
+  'collect-queue': (sb) => listRequests(sb),
   'suppression-review': (sb) => reviewList(sb),
   'list-load-next': (sb) => nextLoad(sb),
   'cleanup-list': (sb) => listManifests(sb),
@@ -180,6 +187,8 @@ const POSTS = {
   'identity-separate': (sb, b) => separateIdentity(sb, b, () => runStep(sb, 'customers')),
   'plan-import-request': async (sb) => ({ run_id: await logRun(sb, { kind: 'plan-import', status: 'queued', host: 'dashboard', items_total: 0, items_done: 0, checkpoint: { step: 'waiting for Alan\'s PC (checks every 5 min)' } }) }),
   collector: ingest,
+  'collect-request': (sb, b) => manualRequest(sb, b),
+  'collect-done': (sb, b) => finishRequests(sb, { ...b, status: b.status === 'ok' ? 'ok' : 'failed' }),
   ...QUERY_POSTS
 };
 

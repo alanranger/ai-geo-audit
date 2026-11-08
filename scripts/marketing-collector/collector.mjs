@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { listSent, PAGE_HELPERS, readEventUsers, readMeter, readSummary } from './page-reads.mjs';
 import { createList, csvSwitchedOn, optOut, readLists, subscribedTotal, uploadCsv } from './page-writes.mjs';
+import { collectQueueJob } from '../../lib/marketing/collect-queue.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PROFILE = path.join(process.env.LOCALAPPDATA || os.homedir(), 'AlanRanger', 'sqs-collector-profile');
@@ -257,6 +258,7 @@ async function repairJob() {
 async function jobs() {
   await planImportJob().catch((e) => console.error(`plan import: ${e.message}`));
   await repairJob().catch((e) => console.error(`repair queue: ${e.message}`));
+  await collectQueueJob({ api, root: ROOT }).catch((e) => console.error(`collect queue: ${e.message}`));
   for (let n = 0; n < 5; n += 1) {
     const { job } = await api('GET', null, '?action=list-load-next');
     if (!job) return;
