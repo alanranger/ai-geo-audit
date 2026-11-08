@@ -117,6 +117,9 @@ async function marketing(browser) {
     return cards[0] || null;
   });
   const tiles = (await page.locator('#mk-overview-tiles').evaluate((el) => el.textContent)).replace(/\s+/g, ' ');
+  const secs = await page.evaluate(() => ({ waiting: (document.querySelector('#mk-waiting')?.textContent || '').trim().length, planned: !!document.querySelector('#mk-planned .mks-days'), results: (document.querySelector('#mk-results')?.textContent || '').trim().length, behind: document.querySelector('#mk-behind') ? (document.querySelector('#mk-behind').open ? 'open' : 'closed') : 'missing' }));
+  check('Marketing still loads cleanly: Waiting on you / Planned / Results present, Behind-the-scenes fold closed', secs.waiting > 0 && secs.planned && secs.results > 0 && secs.behind === 'closed', JSON.stringify(secs));
+  if (LIVE) await page.screenshot({ path: `${OUT}/strategy-clean-marketing-check-live-1700px-${STAMP}.png` });
   await page.close();
   return { first, tiles };
 }
