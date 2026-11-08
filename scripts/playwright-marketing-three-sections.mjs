@@ -121,15 +121,16 @@ async function correctionChecks(page, res, wait) {
   const whats = cells.map((c) => c[1]);
   check('C1.3: no URL as a Results title', !whats.some((w) => /https?:|www\.|youtu\.?be/.test(w)), whats.find((w) => /Style|YouTube/.test(w)) || '');
   check('C1.4: Waiting on you = 4 rows, no platform-link plumbing', wait.length === 4 && !wait.some((r) => /unmatched platform draft|not matched to a campaign/.test(r)), wait.map((r) => r.slice(0, 60)).join(' || '));
-  await page.locator('#mk-results').screenshot({ path: `${OUT}/correction1-results-local-1700px-20261108.png` });
-  await page.locator('#mk-waiting').screenshot({ path: `${OUT}/correction1-waiting-local-1700px-20261108.png` });
-  await page.locator('#mk-overview-tiles').screenshot({ path: `${OUT}/correction1-social-fold-local-1700px-20261108.png` });
+  const where = MODE === 'live' ? 'live' : 'local';
+  await page.locator('#mk-results').screenshot({ path: `${OUT}/correction1-results-${where}-1700px-20261108.png` });
+  await page.locator('#mk-waiting').screenshot({ path: `${OUT}/correction1-waiting-${where}-1700px-20261108.png` });
+  await page.locator('#mk-overview-tiles').screenshot({ path: `${OUT}/correction1-social-fold-${where}-1700px-20261108.png` });
 }
 
 const before = await dbState();
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const page = await openTab(browser);
-if (MODE === 'after') await afterChecks(page);
+if (MODE !== 'before') await afterChecks(page);
 await page.locator('#marketing-root').screenshot({ path: `${OUT}/marketing-tab-${MODE}-clean-1700px.png` });
 await page.close();
 await browser.close();
