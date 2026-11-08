@@ -88,5 +88,5 @@ test('Stage B: topic clicks, period spend, plan status', () => {
   assert.equal(run(C('pnm_status', 'in', ['active']), base({ plans: [{ starts: '2026-10-01', ends: '2027-09-30' }] })), 'yes');
   assert.equal(run(C('pnm_status', 'in', ['active']), base({ plans: [{ starts: '2025-01-01', ends: '2025-12-31' }] })), 'no');
   assert.match(describe(validateQuery({ root: R9 }).root), /campaign/);
-  assert.throws(() => validateQuery({ root: C('relationship_hold', 'is_true') }), /not available yet/);
+  assert.throws(() => validateQuery({ root: C('email_invalid', 'is_true') }), /not available yet/);
 });
