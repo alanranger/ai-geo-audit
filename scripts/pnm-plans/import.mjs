@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import XLSX from 'xlsx';
 import { serviceClient, upsertChunks } from '../../lib/marketing/store.mjs';
-import { parseSheet, planSheets, SKIP_FILE } from './parse.mjs';
+import { parseSheet, planSheets, SKIP_FILE, TEMPLATE_FILE } from './parse.mjs';
 
 export const PLAN_ROOT = process.env.PNM_PLAN_ROOT || 'G:/Dropbox/1. Bookings/Pick n Mix Agreements';
 const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'signatures' ? [] : walk(path.join(d, e.name))) : [path.join(d, e.name)]));
@@ -22,10 +22,11 @@ function readAll(files, onFile) {
     const modified = fs.statSync(f).mtime.toISOString();
     onFile?.(i, files.length);
     if (SKIP_FILE.test(path.basename(f))) { fileRows.push({ source_file: rel(f), sheet: '*', status: 'skipped_name', problem: 'draft / option / conflicted copy', file_modified: modified }); return; }
+    if (TEMPLATE_FILE.test(path.basename(f))) { fileRows.push({ source_file: rel(f), sheet: '*', status: 'skipped_name', problem: 'template (no client in the file name)', file_modified: modified }); return; }
     let wb;
     try { wb = XLSX.readFile(f); } catch (e) { fileRows.push({ source_file: rel(f), sheet: '*', status: 'unreadable', problem: String(e.message).slice(0, 200), file_modified: modified }); return; }
     for (const sheet of planSheets(wb)) {
-      const r = parseSheet(wb.Sheets[sheet]);
+      const r = parseSheet(wb.Sheets[sheet], path.basename(f));
       if (r.problem) fileRows.push({ source_file: rel(f), sheet, status: 'unparsed', problem: r.problem, file_modified: modified });
       else parsed.push({ ...r, source_file: rel(f), sheet, file_modified: modified });
     }

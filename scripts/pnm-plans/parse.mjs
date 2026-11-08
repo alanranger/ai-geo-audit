@@ -56,13 +56,33 @@ function lineOf(r, col, plan) {
   };
 }
 
+const NAME_HEADING = /^((first|last)\s+)?name$/i;
+/** "<Client> 2018 pick n mix plan II.xlsx" → "Client"; null when the file name carries no client (a template). */
+export function clientFromFile(fileName) {
+  const m = /^(.*?)\s*\d{4}\s*pick\s*n\s*mix\s*plan/i.exec(String(fileName || '').split('/').pop());
+  const n = m ? m[1].replace(/\s+/g, ' ').trim() : '';
+  return n || null;
+}
+/**
+ * Client name: B1 (or A1) in the current layout. Older statements have "First Name | Last Name" headings in row 1 and
+ * the name in row 2; a heading is never a name. The file name is the fallback.
+ */
+export function clientName(rows, fileName) {
+  const r0 = [text(rows[0]?.[1]), text(rows[0]?.[0])];
+  if (r0.some((c) => NAME_HEADING.test(c))) {
+    const below = [text(rows[1]?.[0]), text(rows[1]?.[1])].filter((c) => c && !c.includes('@')).join(' ').trim();
+    if (below) return below;
+  }
+  return r0.find((c) => c && !NAME_HEADING.test(c)) || clientFromFile(fileName);
+}
+
 /** Parse one sheet → { plan, payments, events } or { problem }. */
-export function parseSheet(ws) {
+export function parseSheet(ws, fileName) {
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, blankrows: true });
   const head = headerRow(rows);
   if (!head) return { problem: 'no "Payment Schedule" header with date and price columns' };
   const plan = {
-    client_name: text(rows[0]?.[1]) || text(rows[0]?.[0]) || null, email: emailOf(rows), plan_type: text(labelled(rows, 'plan type')) || null,
+    client_name: clientName(rows, fileName), email: emailOf(rows), plan_type: text(labelled(rows, 'plan type')) || null,
     starts: iso(labelled(rows, 'starts')), ends: iso(labelled(rows, 'ends'))
   };
   if (!plan.email && !plan.client_name) return { problem: 'no client name or email in the header' };
@@ -81,6 +101,8 @@ export function parseSheet(ws) {
 
 /** Year sheets look like "Plan Statement 2024"; drafts / options / conflicted copies are skipped by file name. */
 export const SKIP_FILE = /(conflicted copy|option\s*\d|draft|copy of|~\$)/i;
+/** A blank template: the file name starts with the year (no client), e.g. "2018 pick n mix plan.xlsx". */
+export const TEMPLATE_FILE = /^\d{4}\s*pick\s*n\s*mix\s*plan/i;
 export function planSheets(wb) {
   const named = wb.SheetNames.filter((n) => /plan statement/i.test(n));
   return named.length ? named : wb.SheetNames.slice(0, 1);
