@@ -78,7 +78,8 @@ check('dry-run execution re-checks every record, changes nothing', /re-checked \
 await page.click('[data-mc="verify"]');
 await page.waitForFunction(() => /Verified:/.test(document.querySelector('#mc-out')?.textContent || ''), null, { timeout: 120000 }).catch(() => {});
 check('verification: outcomes + protected still protected + nothing changed', /Verified: .*would_do.*nothing changed/.test(await page.textContent('#mc-out')));
-check('ledger lists the manifest with approval and verification', /verified .* changed anything: no/.test(await page.textContent('#mc-ledger')));
+await page.waitForFunction(() => /changed anything: no/.test(document.querySelector('#mc-ledger')?.textContent || ''), null, { timeout: 60000 }).catch(() => {});
+check('ledger lists the manifest with approval and verification', /APPROVE \d+ · .*verified .* changed anything: no/.test(await page.textContent('#mc-ledger')));
 
 /* clean-up review of real records = recipe 11 from Customers (read-only review, no manifest) */
 await page.click('[data-q-ex="10"]');
