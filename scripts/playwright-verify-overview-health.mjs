@@ -45,6 +45,7 @@ const BAND_OF = [[/^0\D6/, 'm0_6'], [/^6\D12/, 'm6_12'], [/^12\D24/, 'm12_24'], 
 const STATE_OF = [[/^Hot/, 'hot'], [/^Warm, click/, 'warm_click'], [/^Warm, open/, 'warm_open'], [/^Cooling/, 'cooling'], [/^Cold/, 'cold'], [/^No recorded/, 'no_response'], [/^Too few/, 'too_few'], [/^Unknown/, 'unknown']];
 
 const results = [];
+const READ = {};
 const check = (name, ok, note = '') => results.push({ name, ok: !!ok, note: String(note) });
 const num = (s) => { const m = String(s ?? '').replace(/,/g, '').match(/-?\d+(\.\d+)?/); return m ? Number(m[0]) : null; };
 const intIn = (txt, re) => { const m = String(txt).replace(/,/g, '').match(re); return m ? Number(m[1]) : null; };
@@ -200,6 +201,7 @@ async function tileSuite(page, tag, full) {
   deliveryChecks(tiles);
   audienceChecks(tiles);
   console.log('tiles read:', JSON.stringify(tiles.map((t, i) => ({ n: i + 1, rag: rag[i], head: t.head }))));
+  READ.tiles = tiles.map((t, i) => ({ n: i + 1, rag: rag[i], head: t.head, lines: t.lines, src: t.src }));
   return tiles;
 }
 
@@ -344,8 +346,13 @@ async function panelSuite(page, tag, full) {
   const mx = await readMatrix(page);
   const colKeys = matrixChecks(mx);
   amberChecks(mx, colKeys);
-  cardChecks(await readCards(page));
-  healthChecks(await readHealth(page));
+  const cards = await readCards(page);
+  cardChecks(cards);
+  const health = await readHealth(page);
+  healthChecks(health);
+  READ.matrix = mx;
+  READ.cards = cards.map((c) => ({ title: c.title, big: c.big, text: c.text }));
+  READ.health = health;
   await reconChecks(page, t9);
   if (!process.env.SKIP_CLICKS) await clickSuite(page, mx, colKeys);
 }
@@ -378,5 +385,6 @@ check('no page errors (pane)', !narrow.errors.length, narrow.errors.slice(0, 3).
 await browser.close();
 
 fs.writeFileSync(path.join(OUT, 'results.json'), JSON.stringify(results, null, 2));
+fs.writeFileSync(path.join(OUT, 'dashboard-read.json'), JSON.stringify(READ, null, 2));
 for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.note !== '' ? ` (${r.note})` : ''}`);
 console.log(results.every((r) => r.ok) ? 'ALL PASS' : `${results.filter((r) => !r.ok).length} FAILED of ${results.length}`);

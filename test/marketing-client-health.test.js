@@ -173,13 +173,13 @@ test('people vs addresses: a shared email is two people and one address; organis
     person({ ...sub, email: 'gone@example.com', stale: true }, 'sqs:4')
   ];
   const h = clientHealth(people, rowOf, { asOf: TODAY });
-  assert.equal(h.matrix.total.people.n, 3);
-  assert.equal(h.matrix.total.addresses, 2);
-  assert.equal(h.matrix.rows.find((r) => r.band === 'p_none').total.addresses, 2);
+  assert.equal(h.matrix.total.people.n, 2, 'owner / test addresses are not people in the matrix');
+  assert.equal(h.matrix.total.addresses, 1);
+  assert.equal(h.matrix.rows.find((r) => r.band === 'p_none').total.addresses, 1);
   assert.equal(h.apart.organisations.total, 1);
   assert.equal(h.apart.system_labels, 1);
-  assert.equal(h.apart.admin.consent, 'can_email');
-  assert.deepEqual([h.reconciliation.can_email_people, h.reconciliation.admin_address, h.reconciliation.organisations, h.reconciliation.tile9, h.reconciliation.gap], [1, 1, 1, 3, 0]);
+  assert.equal(h.apart.owners.total, 1);
+  assert.deepEqual([h.reconciliation.can_email_people, h.reconciliation.owner_addresses, h.reconciliation.organisations, h.reconciliation.tile9, h.reconciliation.gap], [1, 1, 1, 3, 0]);
 });
 
 /** Minimal stand-in for the Supabase client: records each chain, answers select / insert / update. */
