@@ -23,7 +23,9 @@
  * POST { action: 'segment-save', segment_id?, name, description, definition }
  * POST { action: 'export-create', segment_ids, params, campaign_key, list_name }
  * POST { action: 'export-status', export_id, status, note }
- * POST { action: 'campaign-plan', campaign_key, reserved_sends?, sqs_email_id?, segment_ids? }
+ * POST { action: 'campaign-plan', campaign_key, reserved_sends?, sqs_email_id?, segment_ids?, export_id?, sqs_draft_id?,
+ *        planned_send_on?, scheduled_for? (+ scheduled_tz), estimate? { sends, as_of, rule } | null }   plan fields only:
+ *        never sets schedule evidence, refuses a snapshot already reserved by another campaign
  * POST { action: 'collector', kind_of: meter|campaigns|events|run|scheduled, data }   scheduled = one COMPLETE read of
  *      Squarespace's Scheduled tab (lib/marketing/delivery-schedule.mjs); a failed / partial read is never posted
  * POST { action: 'schedule-link', email_id, campaign_key | external: true }   link a Squarespace schedule (review queue)
@@ -38,7 +40,7 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { ingest } from '../../lib/marketing/collector-ingest.mjs';
 import { ingestScheduled } from '../../lib/marketing/delivery-schedule.mjs';
-import { linkSchedule } from '../../lib/marketing/delivery.mjs';
+import { checkPlan, linkExport, linkSchedule, planPatch } from '../../lib/marketing/delivery.mjs';
 import { enqueueForEmail, finishRequests, listRequests, manualRequest, nextRequests } from '../../lib/marketing/collect-queue.mjs';
 import { customerDetail, listCustomers } from '../../lib/marketing/customers.mjs';
 import { createExport, createTestExport, exportCsv, setExportStatus } from '../../lib/marketing/exports.mjs';
@@ -125,15 +127,17 @@ async function separateIdentity(sb, b, rebuild) {
 }
 
 async function campaignPlan(sb, b) {
-  const patch = {};
+  const patch = planPatch(b);
   if (b.reserved_sends != null) patch.reserved_sends = Math.max(0, Math.round(Number(b.reserved_sends)) || 0);
   if (b.sqs_email_id !== undefined) patch.sqs_email_id = b.sqs_email_id ? String(b.sqs_email_id) : null;
   if (Array.isArray(b.segment_ids)) patch.segment_ids = b.segment_ids.map(String);
   if (!b.campaign_key || !Object.keys(patch).length) throw new Error('campaign_key and something to change are needed');
+  const exportToLink = await checkPlan(sb, b.campaign_key, patch);
   const { data, error } = await sb.from('strategy_campaigns').update({ ...patch, updated_at: new Date().toISOString() }).eq('campaign_key', b.campaign_key).select('campaign_key');
   if (error) throw new Error(error.message);
   if (!data?.length) throw new Error('campaign not found (create it from Campaign records first)');
-  if (!patch.sqs_email_id) return { campaign_key: b.campaign_key, ...patch };
+  const linked = await linkExport(sb, exportToLink, b.campaign_key);
+  if (!patch.sqs_email_id) return { campaign_key: b.campaign_key, ...patch, ...(linked ? { export_linked: linked } : {}) };
   await sb.from('sqs_email_campaigns').update({ campaign_key: b.campaign_key }).eq('email_id', patch.sqs_email_id);
   const queue = await enqueueForEmail(sb, { email_id: patch.sqs_email_id, campaign_key: b.campaign_key, source: 'campaign-plan' }).catch((e) => ({ queued: 0, queue_error: String(e?.message || e) }));
   return { campaign_key: b.campaign_key, ...patch, collect_queued: queue.queued };

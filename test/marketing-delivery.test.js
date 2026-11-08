@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { capacityOf, cycleOf, cycleSide, reservationOf } from '../lib/marketing/delivery-reserve.mjs';
-import { deliveryView, readState } from '../lib/marketing/delivery.mjs';
+import { deliveryView, planPatch, readState } from '../lib/marketing/delivery.mjs';
 import { changesOf, ingestScheduled, linkOf } from '../lib/marketing/delivery-schedule.mjs';
 import { meterView } from '../lib/marketing/meter.mjs';
 
@@ -137,6 +137,54 @@ test('initiative + purpose come from the quarter-plan links when present (delive
   assert.deepEqual([v.deliveries[0].initiative, v.deliveries[0].purpose], ['Pick n Mix plans', ['sell', 'nurture']]);
   assert.deepEqual([v.deliveries[1].initiative, v.deliveries[1].purpose], [null, null]);
   assert.deepEqual(v.step_tags['step|2026-11-09|LinkedIn|2026-11-11'].purpose, ['educate']);
+});
+
+const NORFOLK = { campaign_key: 'event|2026-11-20|/norfolk', kind: 'event', title: 'Norfolk last places', stage: 'drafted', export_id: 'x-nor', sqs_draft_id: '6af06c3b60d4554034f330ba', planned_send_on: '2026-11-08', window_end: '2026-11-20' };
+const NORFOLK_EXPORT = { export_id: 'x-nor', campaign_key: null, list_name: 'ARP | Norfolk150', eligible_count: 313, status: 'blocked', sqs_list_id: null, load_result: null, owner: { included: true, count: 0, business_copy: 1 } };
+const WEEKLY = { campaign_key: 'email|2026-11-09', kind: 'weekly_email', title: 'Weekly 12 Nov', stage: 'proposed', window_start: '2026-11-12', scheduled_for: '2026-11-12T17:30:00Z', estimate_sends: 543, estimate_as_of: '2026-11-08', estimate_rule: 'opened in 6 months, Norfolk bookers out, + business copy', event_keys: ['2026-11-20|/norfolk', '2026-11-28|/macro'] };
+
+test('Norfolk + weekly (8 Nov): 2,563 − 127 committed − 314 provisional = 2,122 projected; weekly 543 estimate in the next cycle', () => {
+  const v = view({ campaigns: [PNM, NORFOLK, WEEKLY], exports: [PNM_EXPORT, NORFOLK_EXPORT], schedules: [PNM_SCHED] });
+  const c = v.capacity;
+  assert.deepEqual([c.remaining, c.committed, c.free_after_commitments, c.provisional, c.projected_free, c.projected_incomplete], [2563, 127, 2436, 314, 2122, false]);
+  assert.deepEqual([c.next_cycle.committed, c.next_cycle.provisional, c.next_cycle.free_after_commitments], [0, 543, 5000]);
+  const nor = v.deliveries.find((d) => d.key === NORFOLK.campaign_key);
+  assert.deepEqual([nor.stage, nor.amount, nor.bucket, nor.side, nor.sent], ['review_snapshot', 314, 'provisional', 'current', null], 'held review snapshot: provisional, draft id is not sent evidence');
+  const wk = v.deliveries.find((d) => d.key === WEEKLY.campaign_key);
+  assert.deepEqual([wk.stage, wk.amount, wk.bucket, wk.side, wk.estimate.live, wk.estimate.as_of], ['estimate', 543, 'provisional', 'next', false, '2026-11-08']);
+  const scheduled = view({ campaigns: [PNM, NORFOLK, WEEKLY], exports: [PNM_EXPORT, NORFOLK_EXPORT], schedules: [PNM_SCHED, { ...PNM_SCHED, email_id: NORFOLK.sqs_draft_id, campaign_key: NORFOLK.campaign_key, scheduled_for: '2026-11-08T18:00:00Z', recipients: 314, mailing_list_ids: ['L2'] }] });
+  assert.deepEqual([scheduled.deliveries.length, scheduled.capacity.committed, scheduled.capacity.provisional, scheduled.capacity.projected_free], [3, 441, 0, 2122], 'scheduled later: the same reservation moves to committed, never doubled');
+});
+
+test('an intended time recorded only in stage_history places the send in its cycle (not evidence, not unallocated)', () => {
+  const gpt = { campaign_key: 'theme|x-12nov', kind: 'theme', title: 'X', stage: 'drafted', export_id: 'x-x', stage_history: [{ stage: 'drafted', at: '2026-11-08T13:23:33Z', scheduled_for: '2026-11-12T10:00:00Z', note: 'not yet confirmed in Squarespace' }] };
+  const v = view({ campaigns: [PNM, gpt], exports: [PNM_EXPORT, { export_id: 'x-x', eligible_count: 381, status: 'pending_import', owner: { included: true, count: 0, business_copy: 1 } }], schedules: [PNM_SCHED] });
+  const d = v.deliveries.find((x) => x.key === 'theme|x-12nov');
+  assert.deepEqual([d.stage, d.amount, d.bucket, d.side, d.evidence], ['snapshot', 382, 'committed', 'current', null]);
+  assert.equal(v.capacity.committed, 127 + 382);
+});
+
+test('same-day snapshots with (nearly) the same people are flagged as a possible duplicate; neither is changed', () => {
+  const ids = (n, from = 0) => new Set(Array.from({ length: n }, (_, i) => `p${i + from}`));
+  const recut = { campaign_key: 'theme|norfolk-8nov', kind: 'theme', title: 'Norfolk recut', stage: 'drafted', export_id: 'x-recut', stage_history: [{ stage: 'drafted', at: '2026-11-08T13:23:28Z', scheduled_for: '2026-11-08T17:00:00Z' }] };
+  const other = { ...recut, campaign_key: 'theme|other-8nov', title: 'Other', export_id: 'x-other' };
+  const exports = [PNM_EXPORT, NORFOLK_EXPORT, { export_id: 'x-recut', eligible_count: 310, status: 'pending_import', owner: { included: true, count: 0, business_copy: 1 } }, { export_id: 'x-other', eligible_count: 230, status: 'pending_import', owner: { included: true, count: 0, business_copy: 1 } }];
+  const members = new Map([['x-nor', ids(314)], ['x-recut', ids(311)], ['x-other', ids(231, 313)]]);
+  const v = view({ campaigns: [PNM, NORFOLK, recut, other], exports, schedules: [PNM_SCHED], members });
+  const dup = v.warnings.filter((w) => /Possible duplicate/.test(w.text));
+  assert.equal(dup.length, 1, 'only the Norfolk pair (311 of 311 shared); 1 shared with the other email is not a duplicate');
+  assert.match(dup[0].text, /311 shared of 314 \/ 311/);
+  assert.equal(v.capacity.committed + v.capacity.provisional, 127 + 311 + 231 + 314, 'flagged, still both counted until a person decides');
+});
+
+test('campaign-plan fields: labelled estimate, planned day, app-intended time; bad ids refused; never schedule evidence', () => {
+  const p = planPatch({ sqs_draft_id: '6af06c3b60d4554034f330ba', planned_send_on: '2026-11-08', scheduled_for: '2026-11-12T17:30:00Z', estimate: { sends: 543, as_of: '2026-11-08', rule: 'r' }, export_id: 'x' });
+  assert.deepEqual(p, { sqs_draft_id: '6af06c3b60d4554034f330ba', planned_send_on: '2026-11-08', scheduled_for: '2026-11-12T17:30:00.000Z', scheduled_tz: 'Europe/London', estimate_sends: 543, estimate_as_of: '2026-11-08', estimate_rule: 'r', export_id: 'x' });
+  assert.equal('schedule_evidence' in p, false);
+  assert.throws(() => planPatch({ sqs_draft_id: 'nope' }), /24 hex/);
+  assert.throws(() => planPatch({ scheduled_for: '2026-11-12' }), /date-time/);
+  assert.throws(() => planPatch({ estimate: { sends: -1 } }), /whole number/);
+  assert.deepEqual(planPatch({ estimate: null }), { estimate_sends: null, estimate_as_of: null, estimate_rule: null });
 });
 
 test('legacy meterView fields equal the new committed / free-after-commitments lines', () => {
