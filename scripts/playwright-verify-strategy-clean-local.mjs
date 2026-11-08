@@ -95,12 +95,26 @@ async function strategy(browser) {
   });
   check('Quarter plan: no visible paragraph over 2 lines (intro behind ⓘ)', qp.paras.every((x) => x.lines <= 2), qp.paras.filter((x) => x.lines > 2).map((x) => `${x.lines}: ${x.text}`).join(' | ') || `${qp.paras.length} short texts`);
   check('Quarter plan: each initiative ≤ 3 visible lines; KPI boxes kept', qp.inis.length && qp.inis.every((x) => x.lines <= 3) && qp.kpis > 0, `${qp.inis.map((x) => `${x.title}=${x.lines}`).join(' · ')} · KPI boxes ${qp.kpis}`);
+  const tl = await page.evaluate(() => {
+    const card = document.querySelector('#st-quarter-plan .qp-card.is-current');
+    const box = [...(card?.querySelectorAll('.qp-kpi') || [])].find((k) => /Pick n Mix plans/.test(k.textContent));
+    const pnm = [...(card?.querySelectorAll('.qp-ini') || [])].find((i) => /Pick n Mix/.test(i.querySelector('.qp-it')?.textContent || ''));
+    const all = [...document.querySelectorAll('#st-quarter-plan .qp-card')].flatMap((c) => [...c.querySelectorAll('.qp-ini')].map((i) => `${c.querySelector('.qp-h b')?.textContent.split(' ·')[0]} ${i.querySelector('.qp-it')?.textContent.trim()}: ${i.querySelector('.qp-l')?.textContent.trim()}`));
+    return { box: box?.querySelector('.qp-kv')?.textContent.trim(), boxSub: box?.querySelector('.qp-ks')?.textContent.trim(), line: pnm?.querySelector('.qp-l')?.textContent.trim(), all };
+  });
+  const [bActual, bTarget] = String(tl.box || '').split('/').map((x) => x.trim());
+  check('Pick n Mix initiative target line agrees with its KPI box (same roadmap target and actual)', tl.line && new RegExp(`^Target ${bTarget} plans · Actual ${bActual} · Gap ${Number(bTarget) - Number(bActual)} \\(by 31 Dec\\)`).test(tl.line), `box "${tl.box}" (${tl.boxSub}) · line "${tl.line}"`);
+  fs.writeFileSync(`${OUT}/_correction3-${TAG}-target-lines.json`, JSON.stringify(tl.all, null, 1));
   const dec = (await page.locator('#st-decisions').innerText()).replace(/\s+/g, ' ');
   check('beginners decision row shows real figures (next promoted course 13 Jan, 1 booked)', /beginners/i.test(dec) && /13 Jan/.test(dec) && /1 booked/.test(dec) && /Keep/.test(dec), dec.slice(0, 260));
   const next = await page.locator('#st-next-delivery').evaluate((el) => ({ text: el.textContent.replace(/\s+/g, ' ').trim(), key: el.dataset.nextKey }));
   const tiles = (await page.locator('#st-where').innerText()).replace(/\s+/g, ' ');
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: `${OUT}/strategy-clean-AFTER-${TAG}-folds-closed-1700px-${STAMP}.png`, fullPage: true });
+  await page.evaluate(() => { const d = document.querySelector('#st-quarter-plan .qp-ini details.qp-links'); if (d) d.open = true; });
+  await page.waitForTimeout(500);
+  await page.locator('#st-quarter-plan').screenshot({ path: `${OUT}/correction2-quarter-plan-${TAG}-initiative-details-open-1700px-${STAMP}.png` });
+  await page.evaluate(() => { const d = document.querySelector('#st-quarter-plan .qp-ini details.qp-links'); if (d) d.open = false; });
   await page.evaluate(() => { document.getElementById('st-fold-why').open = true; document.getElementById('st-fold-targets').open = true; document.getElementById('st-fold-tasks').open = true; });
   await page.waitForFunction(() => document.querySelector('#st-gp-chart canvas'), null, { timeout: 120000 }).catch(() => {});
   await page.waitForTimeout(4000);
