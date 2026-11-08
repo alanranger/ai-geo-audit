@@ -9,6 +9,7 @@
  *   npm run marketing:list-jobs            every 5 min (scheduled task): runs any "Load into Squarespace list" the
  *                                          dashboard queued — consent checked by the dashboard before and after —
  *                                          and an approved clean-up manifest (Squarespace opt-out, 25 per batch)
+ *   npm run marketing:collector -- --scheduled   send meter + Squarespace's Scheduled tab only (also hourly from --jobs)
  *   add --dry to read without posting (prints counts only)
  *   live repair-queue test only (acts on "ARP | TEST |" lists, ignored for any other list):
  *     --jobs --test-abort-undo    stop after the after-check, before the load's own undo (as a crash would)
@@ -23,7 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { listSent, PAGE_HELPERS, readEventUsers, readMeter, readSummary } from './page-reads.mjs';
+import { listScheduled, listSent, PAGE_HELPERS, readEventUsers, readMeter, readSummary } from './page-reads.mjs';
 import { consentStatus, createList, csvSwitchedOn, optOut, readLists, subscribedTotal, uploadCsv } from './page-writes.mjs';
 import { collectQueueJob } from '../../lib/marketing/collect-queue.mjs';
 import { cleanupExecJob } from '../../lib/marketing/cleanup-runner.mjs';
@@ -130,9 +131,32 @@ async function postEvents(emailId, rows) {
 
 const eta = (t0, done, total) => (done ? Math.round(((Date.now() - t0) / done) * (total - done) / 60000) : null);
 
+/**
+ * Squarespace's Scheduled tab (read-only), as its own run ("collector:scheduled"). Only a complete read is posted; a
+ * failure is recorded on the run and nothing is sent to the dashboard, so no reservation is released.
+ */
+async function readScheduled(page) {
+  const { run_id: runId } = DRY ? { run_id: null } : await post('run', { kind: 'collector:scheduled', host: os.hostname() });
+  try {
+    const read = await page.evaluate(listScheduled);
+    const r = await post('scheduled', { ...read, run_id: runId });
+    const summary = { scheduled: read.emails.length, read_at: read.read_at, ...(r.dry ? {} : r) };
+    await post('run', { run_id: runId, status: 'ok', session_ok: true, summary });
+    console.log(`scheduled: ${JSON.stringify(DRY ? read.emails.map((e) => ({ email_id: e.email_id, scheduled_for: e.scheduled_for, lists: e.mailing_list_ids.length, recipients: e.recipients, basis: e.recipients_basis })) : summary)}`);
+    return summary;
+  } catch (err) {
+    const msg = String(err?.message || err);
+    const expired = /SESSION_EXPIRED/.test(msg);
+    await post('run', { run_id: runId, status: expired ? 'stale' : 'failed', session_ok: !expired, error: expired ? RELOGIN : msg }).catch(() => {});
+    console.error(`scheduled read: ${expired ? RELOGIN : msg}`);
+    return null;
+  }
+}
+
 async function collect(page, runId, backfill, maxMinutes) {
   const meter = await page.evaluate(readMeter);
   await post('meter', { ...meter, run_id: runId });
+  const scheduled = await readScheduled(page);
   const sent = await page.evaluate(listSent);
   const state = DRY ? [] : (await api('GET', null, '?action=collector-state')).campaigns;
   const known = new Set(state.map((s) => s.email_id));
@@ -154,7 +178,7 @@ async function collect(page, runId, backfill, maxMinutes) {
     await post('run', { run_id: runId, items_done: done, items_total: targets.length, checkpoint: { last_email_id: c.email_id }, session_ok: true });
     console.log(`${done}/${targets.length} (${Math.round((done / targets.length) * 100)}%) · ${rows.length} events · ETA ${eta(t0, done, targets.length) ?? '?'} min`);
   }
-  return { meter_used: meter.used, meter_quota: meter.quota, campaigns_listed: sent.length, summaries_refreshed: refresh.length, event_campaigns_done: done, event_campaigns_target: targets.length, events, complete: done === targets.length };
+  return { meter_used: meter.used, meter_quota: meter.quota, scheduled_read: scheduled ? scheduled.scheduled : 'failed', campaigns_listed: sent.length, summaries_refreshed: refresh.length, event_campaigns_done: done, event_campaigns_target: targets.length, events, complete: done === targets.length };
 }
 
 const csvCell = (v) => {
@@ -266,12 +290,44 @@ async function signedInSite() {
 /** Approved clean-up manifest (Squarespace opt-out, batches of 25, each person re-checked by the dashboard first). */
 const cleanupJob = () => cleanupExecJob({ api, open: signedInSite, pageFns: { optOut, consentStatus, subscribedTotal }, dry: DRY });
 
-/** Scheduled every few minutes: opens the browser only when the dashboard has queued a load or a repair is waiting. */
+/** Send meter + Scheduled tab only (read-only): `--scheduled`, and hourly from the job runner. */
+async function scheduleWatch() {
+  const site = await signedInSite();
+  try {
+    await post('meter', await site.page.evaluate(readMeter));
+    await readScheduled(site.page);
+  } finally {
+    await site.ctx.close();
+  }
+}
+
+const WATCH_FILE = path.join(process.env.LOCALAPPDATA || os.homedir(), 'AlanRanger', 'sqs-schedule-watch.json');
+const WATCH_MINUTES = 60;
+/**
+ * At most once an hour (stamp file on this PC, written whatever the outcome so an expired login isn't retried every
+ * 5 min); never in the 05:00 hour, so it can't hold the profile when the nightly collector starts at 05:40.
+ */
+async function hourlyScheduleWatch() {
+  const last = fs.existsSync(WATCH_FILE) ? Date.parse(JSON.parse(fs.readFileSync(WATCH_FILE, 'utf8')).at || 0) : 0;
+  if (Date.now() - last < WATCH_MINUTES * 60000) return;
+  const hour = Number(new Date().toLocaleString('en-GB', { hour: '2-digit', hour12: false, timeZone: 'Europe/London' }));
+  if (hour === 5) return;
+  fs.mkdirSync(path.dirname(WATCH_FILE), { recursive: true });
+  fs.writeFileSync(WATCH_FILE, JSON.stringify({ at: new Date().toISOString() }));
+  await scheduleWatch();
+}
+
+/** Scheduled every few minutes: opens the browser only for a queued job, a waiting repair, or the hourly schedule read. */
 async function jobs() {
   await planImportJob().catch((e) => console.error(`plan import: ${e.message}`));
   await repairJob().catch((e) => console.error(`repair queue: ${e.message}`));
   await cleanupJob().catch((e) => console.error(`clean-up: ${e.message}`));
   await collectQueueJob({ api, root: ROOT }).catch((e) => console.error(`collect queue: ${e.message}`));
+  await listLoadJobs();
+  await hourlyScheduleWatch().catch((e) => console.error(`schedule watch: ${e.message}`));
+}
+
+async function listLoadJobs() {
   for (let n = 0; n < 5; n += 1) {
     const { job } = await api('GET', null, '?action=list-load-next');
     if (!job) return;
@@ -294,7 +350,7 @@ async function jobs() {
   }
 }
 
-const MODES = { '--login': login, '--print-login': () => console.log(JSON.stringify(loginLaunch())), '--jobs': jobs };
+const MODES = { '--login': login, '--print-login': () => console.log(JSON.stringify(loginLaunch())), '--jobs': jobs, '--scheduled': scheduleWatch };
 
 async function main() {
   const mode = Object.keys(MODES).find((m) => args.has(m));

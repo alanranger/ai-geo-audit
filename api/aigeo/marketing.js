@@ -24,7 +24,9 @@
  * POST { action: 'export-create', segment_ids, params, campaign_key, list_name }
  * POST { action: 'export-status', export_id, status, note }
  * POST { action: 'campaign-plan', campaign_key, reserved_sends?, sqs_email_id?, segment_ids? }
- * POST { action: 'collector', kind_of: meter|campaigns|events|run, data }
+ * POST { action: 'collector', kind_of: meter|campaigns|events|run|scheduled, data }   scheduled = one COMPLETE read of
+ *      Squarespace's Scheduled tab (lib/marketing/delivery-schedule.mjs); a failed / partial read is never posted
+ * POST { action: 'schedule-link', email_id, campaign_key | external: true }   link a Squarespace schedule (review queue)
  * POST { action: 'collect-request', email_id?, campaign_key? }   collect a sent campaign now (+15 min / 24 h / 72 h)
  * GET  ?action=collect-next  ·  POST collect-done { request_ids, status, error }   (PC job runner) · GET ?action=collect-queue
  * POST cleanup-review / -freeze / -approve / -execute / -verify   clean-up (body.cohort = server-side cohort) · GET cleanup-progress
@@ -35,6 +37,8 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { ingest } from '../../lib/marketing/collector-ingest.mjs';
+import { ingestScheduled } from '../../lib/marketing/delivery-schedule.mjs';
+import { linkSchedule } from '../../lib/marketing/delivery.mjs';
 import { enqueueForEmail, finishRequests, listRequests, manualRequest, nextRequests } from '../../lib/marketing/collect-queue.mjs';
 import { customerDetail, listCustomers } from '../../lib/marketing/customers.mjs';
 import { createExport, createTestExport, exportCsv, setExportStatus } from '../../lib/marketing/exports.mjs';
@@ -196,7 +200,8 @@ const POSTS = {
   'presend-check': (sb, b) => presendCheck(sb, b.export_id),
   'identity-separate': (sb, b) => separateIdentity(sb, b, () => runStep(sb, 'customers')),
   'plan-import-request': async (sb) => ({ run_id: await logRun(sb, { kind: 'plan-import', status: 'queued', host: 'dashboard', items_total: 0, items_done: 0, checkpoint: { step: 'waiting for Alan\'s PC (checks every 5 min)' } }) }),
-  collector: ingest,
+  collector: (sb, b) => (b.kind_of === 'scheduled' ? ingestScheduled(sb, b.data || {}, b.data?.run_id) : ingest(sb, b)),
+  'schedule-link': (sb, b) => linkSchedule(sb, b, SET_BY),
   'collect-request': (sb, b) => manualRequest(sb, b),
   'collect-done': (sb, b) => finishRequests(sb, { ...b, status: b.status === 'ok' ? 'ok' : 'failed' }),
   ...QUERY_POSTS

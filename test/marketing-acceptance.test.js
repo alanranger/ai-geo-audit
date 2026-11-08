@@ -127,11 +127,13 @@ test('billing cycle: provider reset (not calendar month), reservations, repeated
   const c = cycleOf('2026-11-12T12:51:47.184Z');
   assert.equal(c.start, '2026-10-12T12:51:47.184Z');
   const latest = { captured_at: '2026-11-07T12:00:00Z', cycle_reset_at: '2026-11-12T12:51:47.184Z', quota_emails: 5000, used_emails: 2398 };
-  const camps = [{ campaign_key: 'a', stage: 'approved', reserved_sends: 900 }, { campaign_key: 'b', stage: 'sent', reserved_sends: 900 }, { campaign_key: 'c', stage: 'scheduled', reserved_sends: 500, sqs_email_id: 'e9' }];
+  const camps = [{ campaign_key: 'a', stage: 'approved', reserved_sends: 900, export_id: 'x-a', scheduled_for: '2026-11-10T10:00:00Z' }, { campaign_key: 'b', stage: 'sent', reserved_sends: 900 }, { campaign_key: 'c', stage: 'scheduled', reserved_sends: 500, sqs_email_id: 'e9' }, { campaign_key: 'd', stage: 'approved', reserved_sends: 300 }];
   const sent = [{ email_id: 'e1', sent_on: '2026-10-22T17:38:46Z', message_count: 1103 }, { email_id: 'e2', sent_on: '2026-10-23T09:00:00Z', message_count: 1103 }, { email_id: 'e0', sent_on: '2026-10-10T09:00:00Z', message_count: 900 }];
   const v = meterView(latest, camps, sent, new Date('2026-11-07T14:00:00Z'));
   assert.equal(v.state, 'fresh');
-  assert.equal(v.reserved, 900);
+  assert.equal(v.reserved, 900, 'committed = the frozen snapshot only (a typed reservation is provisional, question 2026-11-08)');
+  assert.equal(v.capacity.provisional, 0, 'd has no send day or time: unallocated, not this cycle');
+  assert.equal(v.capacity.unallocated.provisional, 300);
   assert.equal(v.after_reservations, 5000 - 2398 - 900);
   assert.equal(v.sent_recipients_this_cycle, 2206);
   assert.deepEqual(capacityCheck(v, 2000), { ok: false, reason: 'over_capacity', short_by: 298 });

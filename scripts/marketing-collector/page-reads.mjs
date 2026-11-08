@@ -44,6 +44,56 @@ export async function listSent() {
   return out;
 }
 
+/**
+ * Squarespace's Scheduled tab (same list route as Sent, emailState=SCHEDULED) + each email's own record for its list
+ * ids, + the mailing-list counts for the recipient number (one list = its unique contacts; several = a sum, labelled an
+ * upper bound; a list not in the response = unknown, never 0). Throws unless every page and every record was read.
+ */
+export async function listScheduled() {
+  const readPages = async () => {
+    const out = [];
+    let cursor = '';
+    let pages = 0;
+    let max = null;
+    do {
+      const j = await window.__arpGet(`/api/newsletters/v1.0/composer/emails?emailState=SCHEDULED&pageCursor=${encodeURIComponent(cursor)}&pageSize=50`);
+      if (!Array.isArray(j.results) || typeof j.hasNextPage !== 'boolean') throw new Error('UNEXPECTED_SHAPE scheduled list');
+      max = j.maxCount ?? max;
+      out.push(...j.results);
+      cursor = j.hasNextPage ? j.nextPageCursor : null;
+      pages += 1;
+    } while (cursor && pages < 20);
+    if (cursor || (max != null && out.length !== max)) throw new Error(`INCOMPLETE scheduled list ${out.length}/${max}`);
+    return out;
+  };
+  const isScheduled = (e, d) => !!e.id && d.id === e.id && d.emailState === 'SCHEDULED' && !!d.scheduledSendDate && Array.isArray(d.mailingListIds);
+  const all = await readPages();
+  const counts = new Map();
+  const readLists = async (allTypes) => {
+    const l = await window.__arpGet(`/api/newsletters/v1.0/composer/mailing-lists?includeAllGroupTypes=${allTypes}`);
+    if (!Array.isArray(l.results)) throw new Error('UNEXPECTED_SHAPE mailing-lists');
+    for (const x of l.results) if (x.id && typeof x.count === 'number') counts.set(x.id, x.count);
+  };
+  if (all.length) await readLists(false);
+  const details = [];
+  for (const e of all) {
+    const d = await window.__arpGet(`/api/newsletters/v1.0/composer/emails/${encodeURIComponent(e.id)}`);
+    if (!isScheduled(e, d)) throw new Error(`UNEXPECTED_SHAPE scheduled email ${e.id}`);
+    details.push({ e, d });
+  }
+  if (details.some(({ d }) => d.mailingListIds.some((id) => !counts.has(id)))) await readLists(true);
+  const recipientsOf = (ids) => {
+    const n = ids.map((id) => counts.get(id));
+    if (!ids.length || n.some((v) => typeof v !== 'number')) return { recipients: null, recipients_basis: 'unknown' };
+    return { recipients: n.reduce((s, v) => s + v, 0), recipients_basis: ids.length === 1 ? 'single_list_count' : 'sum_of_lists_upper_bound' };
+  };
+  const emails = details.map(({ e, d }) => ({
+    email_id: d.id, subject: d.subject || d.derivedSubject || e.subject || null, email_type: d.emailType || e.emailType || null, scheduled_for: d.scheduledSendDate, scheduled_tz: 'UTC',
+    mailing_list_ids: d.mailingListIds, mailing_list_names: Array.isArray(d.mailingLists) ? d.mailingLists : (e.mailingListNames || []), ...recipientsOf(d.mailingListIds)
+  }));
+  return { complete: true, read_at: new Date().toISOString(), emails };
+}
+
 export async function readSummary(emailId) {
   const s = await window.__arpGet(`/api/newsletters/v1.0/composer/analytics/emails/${emailId}/summary`);
   if (typeof s.emailMessageCount !== 'number' || typeof s.deliveredCount !== 'number' || !Array.isArray(s.urlClickCounts)) throw new Error(`UNEXPECTED_SHAPE summary ${emailId}`);
