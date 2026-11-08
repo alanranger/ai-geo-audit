@@ -15,7 +15,7 @@ const MODE = process.argv[2] || 'before';
 const BASE = process.env.DASH_BASE || 'https://ai-geo-audit.vercel.app';
 const OUT = path.resolve('outputs');
 const BLUR = '#mk-review-table td:first-child, #mk-cust-body, .mk-detail, #mk-cleanup table td.left, #mk-query table td:first-child, #mk-client-health table td:first-child, #mk-exp-review, #mk-snap-review { filter: blur(6px) !important; }';
-const LOCAL_FILES = ['marketing-tab.js', 'marketing-waiting.js', 'marketing-results.js', 'marketing-schedule.js', 'marketing-schedule-model.js', 'marketing-overview-tiles.js'];
+const LOCAL_FILES = ['marketing-waiting.js', 'marketing-results.js', 'marketing-social-tiles.js'];
 const sb = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const results = [];
 const check = (name, ok, note = '') => results.push({ name, ok: !!ok, note });
@@ -38,11 +38,9 @@ async function localResults() {
   return { ok: true, ...(await buildMarketingResults(sb, {})) };
 }
 
-/** New files are not in the deployed HTML yet: served ahead of lib/marketing-tab.js. */
-const fileBody = (f) => (f === 'marketing-tab.js' ? ['marketing-waiting.js', 'marketing-results.js', f] : [f]).map((x) => fs.readFileSync(`lib/${x}`, 'utf8')).join('\n;\n');
 async function localRoutes(page) {
-  for (const f of LOCAL_FILES.filter((x) => !/waiting|results/.test(x))) {
-    await page.route(`**/lib/${f}*`, (route) => route.fulfill({ status: 200, contentType: 'application/javascript', body: fileBody(f) }));
+  for (const f of LOCAL_FILES) {
+    await page.route(`**/lib/${f}*`, (route) => route.fulfill({ status: 200, contentType: 'application/javascript', body: fs.readFileSync(`lib/${f}`, 'utf8') }));
   }
   const body = JSON.stringify(await localResults());
   await page.route('**/api/aigeo/marketing-results*', (route) => route.fulfill({ status: 200, contentType: 'application/json', body }));
@@ -96,6 +94,7 @@ async function afterChecks(page) {
   check('Waiting on you: no GPT / Claude / Cursor-owned rows', !wait.some((r) => /\b(GPT|Claude|Cursor)\b(?!'s 8-week)/.test(r) && !/Approve|Review/.test(r)), wait.join(' || '));
   check('Waiting on you: no superseded / cancelled / not needed', !wait.some((r) => /superseded|cancelled|not needed/i.test(r)));
   results.push({ name: 'facts', ok: true, note: `results ${res.length} rows · waiting ${wait.length} rows` });
+  await correctionChecks(page, res, wait);
   fs.writeFileSync(`${OUT}/_three-sections-after.json`, JSON.stringify({ res, wait, heads }, null, 1));
   const box = await page.evaluate(() => {
     const a = document.querySelector('#mk-waiting').getBoundingClientRect();
@@ -103,6 +102,28 @@ async function afterChecks(page) {
     return { y: a.top + window.scrollY - 10, h: b.bottom - a.top + 30 };
   });
   await page.screenshot({ path: `${OUT}/marketing-tab-after-clean-sections-1700px.png`, fullPage: true, clip: { x: 0, y: box.y, width: 1700, height: box.h } });
+}
+
+/** Correction 1: bookings after computed, Recent posts folded, no URL titles, Waiting on you = 4 Alan rows. */
+async function correctionChecks(page, res, wait) {
+  const cells = await page.$$eval('#mk-results tbody tr[data-mkr-row]', (rows) => rows.map((r) => [...r.querySelectorAll('td')].map((td) => td.innerText.trim())));
+  const row = (re) => cells.find((c) => re.test(c.join(' '))) || [];
+  const bk = (c) => `${c[7]} / ${c[8]}`;
+  check('C1.1: LR30 row 0 / £0', bk(row(/09:55.*\b39\b/)) === '0 / £0', bk(row(/09:55.*\b39\b/)));
+  check('C1.1: Norfolk and Creative rows computed (not "—")', /^\d+ \/ £[\d,]+$/.test(bk(row(/17:00.*311/))) && /^\d+ \/ £[\d,]+$/.test(bk(row(/17:00.*231/))), `Norfolk ${bk(row(/17:00.*311/))} · Creative ${bk(row(/17:00.*231/))}`);
+  await page.click('#mk-results tbody tr[data-mkr-row]:nth-child(2)');
+  const detail = await page.$eval('#mk-results .mkr-detail', (e) => e.innerText.replace(/\s+/g, ' ')).catch(() => '');
+  check('C1.1: detail lists the promoted events and the basis', /After the send/.test(detail) && /matched by subject|campaign record/.test(detail), (detail.match(/After the send.{0,200}/) || [''])[0]);
+  await page.click('#mk-results tbody tr[data-mkr-row]:nth-child(1)').catch(() => {});
+  const fold = await page.$eval('#mksoc-posts-fold', (e) => ({ open: e.open, visibleTable: !!e.querySelector('table')?.checkVisibility() })).catch(() => null);
+  const outside = await page.$$eval('#marketing-root table#mksoc-posts', (els) => els.filter((t) => t.checkVisibility()).length);
+  check('C1.2: Recent posts across channels inside a closed fold (not visible)', fold && !fold.open && !outside, JSON.stringify(fold));
+  const whats = cells.map((c) => c[1]);
+  check('C1.3: no URL as a Results title', !whats.some((w) => /https?:|www\.|youtu\.?be/.test(w)), whats.find((w) => /Style|YouTube/.test(w)) || '');
+  check('C1.4: Waiting on you = 4 rows, no platform-link plumbing', wait.length === 4 && !wait.some((r) => /unmatched platform draft|not matched to a campaign/.test(r)), wait.map((r) => r.slice(0, 60)).join(' || '));
+  await page.locator('#mk-results').screenshot({ path: `${OUT}/correction1-results-local-1700px-20261108.png` });
+  await page.locator('#mk-waiting').screenshot({ path: `${OUT}/correction1-waiting-local-1700px-20261108.png` });
+  await page.locator('#mk-overview-tiles').screenshot({ path: `${OUT}/correction1-social-fold-local-1700px-20261108.png` });
 }
 
 const before = await dbState();

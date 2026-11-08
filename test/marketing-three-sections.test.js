@@ -8,7 +8,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { emailRows, postRows, shortWhat } from '../lib/marketing/results.mjs';
+import { emailRows, postRows, shortWhat, titleOf, youtubeId } from '../lib/marketing/results.mjs';
+import { bookingsFor, eventFromKey, eventsBySubject, linkedEvents, onePerPage } from '../lib/marketing/results-bookings.mjs';
+import { campaignSheets } from '../lib/strategy-campaigns.mjs';
 
 const NOW = Date.parse('2026-11-08T21:00:00Z');
 
@@ -89,6 +91,49 @@ test('results cells: unknown is never 0 (tomorrow / collecting / Mon entry / —
   assert.equal(strip(C.reactCell(li)), 'Mon entry');
 });
 
+/* ---------- correction 1: bookings after, titles ---------- */
+
+const NORFOLK = eventFromKey('2026-11-20|/photographic-workshops-near-me/norfolk-photography-workshop', 'Norfolk Photography Workshop | Cromer to Hunstanton', 'Norfolk');
+const LR = eventFromKey('2026-11-12|/beginners-photography-lessons/lightroom-photo-editing-classes-wk1-kdh5k', 'Lightroom Classic Photo Editing Classes - Week 1 of 3 -12-11', 'Lightroom course');
+const MACRO = eventFromKey('2026-11-28|/photographic-workshops-near-me/abstract-macro', 'Abstract and Macro Photography', 'Abstract & Macro');
+const LAKES = eventFromKey('2027-01-22|/photo-workshops-uk/lake-district', 'Lake District Photography Workshop', 'Lake District');
+
+test('bookings after: linked event with nothing booked = 0 / £0 (not "—"); no linked event = null; booked after the send counted', () => {
+  const sheets = campaignSheets(
+    [{ txn_date: '2026-10-01', category_order: 2, amount: 345, client_name: 'A' }, { txn_date: '2026-11-09', category_order: 2, amount: 345, client_name: 'B' }],
+    [], [{ event_start: '2026-11-20', theme_location: 'Norfolk', client_name: 'A' }, { event_start: '2026-11-20', theme_location: 'Norfolk', client_name: 'B' }]
+  );
+  const row = { kind: 'email', sent_at: '2026-11-08T17:00:00Z' };
+  assert.deepEqual(bookingsFor(row, [{ ev: NORFOLK, basis: 'campaign record' }], sheets).after, { bookings: 1, revenue: 345 }, 'only the booking on/after the send day');
+  assert.deepEqual(bookingsFor(row, [{ ev: LR, basis: 'campaign record' }], campaignSheets([], [], [])).after, { bookings: 0, revenue: 0 });
+  assert.equal(bookingsFor(row, [], sheets), null);
+  const C = browser(['marketing-results.js']).mkResultsCells;
+  assert.equal(strip(C.bookCells({ bookings: { after: { bookings: 0, revenue: 0 }, events: [] } })), '0£0');
+  assert.equal(strip(C.bookCells({ bookings: null })), '——');
+});
+
+test('promoted events: record key, the post\'s featured event, or subject words for a theme email (never "District" alone)', () => {
+  const catalog = onePerPage([NORFOLK, LR, MACRO, LAKES, eventFromKey('2026-11-13|https://www.alanranger.com/photographic-workshops-near-me/norfolk-photography-workshop', 'https://www.alanranger.com/x', 'Norfolk: offer ends Saturday'), eventFromKey('2026-11-20|/photo-workshops-uk/landscape-photography-workshop-norfolk', 'Norfolk: offer ends Saturday', 'Norfolk: offer ends Saturday')]);
+  assert.equal(catalog.filter((e) => /norfolk/.test(e.url)).length, 1, 'one Norfolk event: same page / same date + name merged');
+  const ctx = { catalog, featured: new Map([['step|fb', [{ event_key: NORFOLK.event_key, title: NORFOLK.title, name: 'Norfolk' }]]]) };
+  const titles = (r) => linkedEvents(r, ctx).map((x) => x.ev.title);
+  assert.deepEqual(titles({ kind: 'email', sent_at: '2026-11-08T17:00:00Z', step_keys: [], event_keys: [], copy: 'Norfolk, Macro and something to watch' }), ['Norfolk Photography Workshop | Cromer to Hunstanton', 'Abstract and Macro Photography']);
+  assert.deepEqual(titles({ kind: 'email', sent_at: '2026-11-08T09:55:00Z', step_keys: [], event_keys: [LR.event_key], event_title: LR.title, copy: 'x' }), [LR.title]);
+  assert.deepEqual(titles({ kind: 'social', sent_at: '2026-11-08T16:53:00Z', step_keys: ['step|fb'] }), [NORFOLK.title]);
+  assert.deepEqual(eventsBySubject('Autumn in the Peak District', catalog, '2026-10-22'), [], '"District" alone never links the Lake District');
+});
+
+test('Results titles: never a URL (linked video title, else first text line)', () => {
+  const yt = new Map([['sWIDyUVp260', 'How to Find Your Photography Style']]);
+  assert.equal(youtubeId('https://youtu.be/sWIDyUVp260'), 'sWIDyUVp260');
+  assert.equal(titleOf({ title: 'https://youtu.be/sWIDyUVp260' }, yt), 'How to Find Your Photography Style');
+  assert.equal(titleOf({ title: 'https://youtu.be/sWIDyUVp260' }), 'YouTube video');
+  assert.equal(titleOf({ title: 'https://example.com/a\nA walk in the woods https://x.y' }), 'A walk in the woods');
+  assert.equal(titleOf({ title: '' }), 'Post (no caption)');
+  const rows = postRows([{ channel: 'facebook', post_id: 'f9', posted_at: '2026-11-02T13:31:45Z', title: 'https://youtu.be/sWIDyUVp260', reach: 37, source: 'api' }], { replaced: new Set(), rows: [] }, yt);
+  assert.ok(!/https?:/.test(rows[0].what) && !/https?:/.test(rows[0].title));
+});
+
 /* ---------- waiting on you: Alan-only ---------- */
 
 function waitingWith(items, needs, queue) {
@@ -118,7 +163,11 @@ test('waiting on you: only Alan\'s own actions; GPT drafts as one approve row; s
     decisions: [{ text: 'Review 2 blocked contacts showing as subscribed again', go: 'review' }, { text: 'Choose the audience for the weekly email, Sun 1 Nov', go: 'campaign' }],
     actions: [{ action_key: 'a-alan', label: 'Approve the gift copy', due_week_start: '2026-10-26' }]
   };
-  const needs = [{ text: '3 late (FB/IG 3): do it or skip it.', ids: ['fbig|late'] }, { text: '1 marked scheduled with no platform evidence: confirm in Squarespace.', ids: ['email|x'] }];
+  const needs = [
+    { text: '3 late (FB/IG 3): do it or skip it.', ids: ['fbig|late'] }, { text: '1 marked scheduled with no platform evidence: confirm in Squarespace.', ids: ['email|x'] },
+    { text: '1 unmatched platform draft in Squarespace (“Academy return — review…”): link it to its campaign.', ids: [], go: 'mkd-drafts' },
+    { text: '1 Squarespace schedule not matched to a campaign: link it.', ids: ['email|y'], link: true }
+  ];
   const { rows } = waitingWith(items, needs, queue);
   const text = rows.map((r) => `${r.what} | ${r.why} | ${strip(r.btn)}`).join('\n');
   assert.match(text, /Approve caption & artwork: Norfolk: offer ends Saturday \| Caption & artwork ready · GPT posts after you approve \| Review/);
@@ -135,6 +184,7 @@ test('waiting on you: only Alan\'s own actions; GPT drafts as one approve row; s
   assert.match(text, /Review 2 blocked contacts/);
   assert.match(text, /Approve the gift copy \| Late · quarter action/);
   assert.match(text, /no platform evidence/);
+  assert.ok(!/unmatched platform draft|not matched to a campaign/.test(text), 'linking drafts / schedules is plumbing (GPT / Claude), not in Waiting on you');
   assert.ok(rows.every((r) => !/\b(email|event|theme|step)\|/.test(r.what)), 'no raw keys');
 });
 
