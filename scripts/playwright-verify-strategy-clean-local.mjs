@@ -167,6 +167,14 @@ async function strategy(browser) {
   });
   check('Prospects under the Remedy plan: 4 stage tiles + Pipeline, weighted; enquiry table (admin API) + "+ Add enquiry"', pp.tiles === 5 && pp.table && pp.add && pp.ord[0] < pp.ord[1] && pp.ord[1] < pp.ord[2], `${pp.tiles} tiles · table ${pp.table} · order ${pp.ord.join(',')} · ${pp.text.slice(0, 300)}`);
   check('Remedy lever 3 shows "Still to find" per month; current quarter card shows it too', /Still to find/.test(pp.remedyHead) && pp.find.length === 3 && /Still to find \(Nov \+ Dec, after pipeline\)/.test(pp.q1), `${pp.find.join(' | ')} · Q1: ${(pp.q1.match(/Still to find[^·]*·[^·]*/) || [''])[0]}`);
+  const kk = await page.evaluate(() => {
+    const t = (document.getElementById('st-sales-gap')?.innerText || '').replace(/\s+/g, ' ');
+    const months = [...document.querySelectorAll('#st-sales-gap [data-sg-month]')].map((c) => (c.innerText || '').replace(/\s+/g, ' '));
+    const heads = [...document.querySelectorAll('#st-prospects .pp-table th')].map((h) => h.textContent.replace(/[▲▼]/g, '').trim()).filter(Boolean);
+    return { prime: months.map((m) => (m.match(/In prime buying window this month (\d+ events · \d+ places · £[\d.,k]+)/) || [])[1] || ''), oldLine: /Dated places sellable this month|every sellable place sells/.test(t), stockNow: (t.match(/Stock on sale now ([^L]*?) Likely/) || [])[1] || '', foot: /months don't add up to the quarter/.test(t), asOf: (t.match(/as of Booking Sheet sync [^·]+· events [^·]+· recalculated on every load/) || [''])[0], rules: /set 9 Nov, review later/.test(document.getElementById('st-sales-gap')?.innerHTML || ''), from: months.map((m) => (m.match(/from ([^N]*?) Non-dated/) || [])[1] || ''), heads };
+  });
+  check('(k) monthly tiles: "In prime buying window this month" (no "Dated places sellable", no monthly best case); quarter "Stock on sale now"; overlap footnote; as-of line; likely names its events', kk.prime.every(Boolean) && !kk.oldLine && kk.stockNow && kk.foot && kk.asOf && kk.from.filter(Boolean).length >= 2, `prime ${kk.prime.join(' | ')} · stock now ${kk.stockNow} · ${kk.asOf} · from: ${kk.from.join(' | ')}`);
+  check('(j) Rules carry the 4 editable assumptions "set 9 Nov, review later"; Prospects table: Ref, Received, Client ID, Days open', kk.rules && ['Ref', 'Received', 'Client ID', 'Days open'].every((h) => kk.heads.includes(h)), kk.heads.join(' | '));
   await page.evaluate(() => window.scrollTo(0, 0));
   for (const id of ['st-prospects']) await page.locator(`#${id}`).screenshot({ path: `${OUT}/prospects-${TAG}-1700px-${STAMP}.png` }).catch(() => {});
   for (const id of ['st-sales-gap', 'st-remedy', 'st-quarter-cards']) await page.locator(`#${id}`).screenshot({ path: `${OUT}/sales-gap-${id.replace('st-', '')}-${TAG}-1700px-${STAMP}.png` });
