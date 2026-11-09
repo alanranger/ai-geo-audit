@@ -54,14 +54,14 @@ test('(k) month tiles: prime window + outside list + likely contributors; footno
   vm.runInNewContext(fs.readFileSync(new URL('../lib/strategy-sales-gap.js', import.meta.url), 'utf8'), ctx);
   const html = ctx.stSalesGapHtml({ sales_gap: g }).tiles;
   assert.match(html, /In prime buying window this month/);
-  assert.match(html, /Stock on sale now/);
+  assert.match(html, /Dated events[\s\S]*Unsold places/, 'quarter stock on sale now = the Dated events table (QUESTION (n))');
   assert.doesNotMatch(html, /Dated places sellable this month|every sellable place sells/);
   assert.match(html, /months don't add up to the quarter/);
   assert.match(html, /On-sale stock outside the prime window/);
   assert.match(html, /as of Booking Sheet sync .* · events 9 Nov · recalculated on every load/);
   assert.match(html, /set 9 Nov, review later/);
   assert.ok(g.rolling.best_case > 0, 'small fixture stock: the quarter best case is above £0, so it shows');
-  assert.match(html, /Best case: all stock on sale sells/);
+  assert.match(html, /Best case, all stock on sale sells/, 'in the quarter tile\'s details fold (QUESTION (n))');
   const big = buildSalesGap({ today: TODAY, txns: [], targets: Array(12).fill(100), events: [lake, macro, spring], fill: FILL, lead: LEAD });
   assert.equal(big.rolling.best_case, 0);
   assert.doesNotMatch(ctx.stSalesGapHtml({ sales_gap: big }).tiles, /Best case/, 'quarter best case hidden at £0');

@@ -40,6 +40,25 @@ test('Strategy: quarter + 3 month tiles, Remedy plan (3 months + total), 4 quart
   assert.match(w.stSalesGapHtml({}).tiles, /Sales gap unavailable/);
 });
 
+test('Strategy quarter tile v2: dated events table + total, non-dated needed by month, pipeline line, details fold, no verdict box', () => {
+  const w = browser();
+  const h = w.stSalesGapHtml({ sales_gap: g }).tiles;
+  const q = h.slice(h.indexOf('sg-card sg-q'), h.indexOf('data-sg-month'));
+  assert.match(q, /Quarter · 9 Nov → 31 Jan/);
+  assert.match(q, /still to sell/);
+  const live = w.stSalesGapHtml({ sales_gap: { ...g, rolling: { ...g.rolling, still_to_sell: 15028, likely: 8389 } } }).tiles;
+  assert.match(live, /sg-big">£15\.0k <span class="sg-u">still to sell[\s\S]*£8\.4k likely dated[\s\S]*£6\.6k non-dated</, 'header figure + bar labels as in the mock-up');
+  assert.match(q, /Dated events[\s\S]*Category[\s\S]*Events[\s\S]*Unsold places[\s\S]*If all sold[\s\S]*Fill rate[\s\S]*Likely £/);
+  assert.match(q, /Courses[\s\S]*One-day workshops[\s\S]*Residential[\s\S]*sg-qtot[\s\S]*Total/);
+  assert.match(q, /Non-dated needed[\s\S]*Nov[\s\S]*Dec[\s\S]*Jan[\s\S]*Total[\s\S]*Needed/);
+  assert.match(q, /From gift vouchers, Pick n Mix, 1-2-1s, mentoring, Academy, commissions, prints &amp; royalties\./);
+  assert.match(q, /Prospects pipeline:<\/b> £0 weighted · dated £0 · undated £0/);
+  assert.match(q, /<summary>details<\/summary>[\s\S]*Booked \/ capacity[\s\S]*Avg people per event[\s\S]*Normal non-dated \(same months last year\)[\s\S]*Still to find after normal and pipeline[\s\S]*data-sg-rules/);
+  assert.doesNotMatch(q, /sg-v|Stock on sale now|Likely dated bookings \(fill rate\)/, 'old lines and the yellow verdict box are retired');
+  assert.match(h, /id="sg-rules"/);
+  assert.match(w.stSalesGapHtml({ sales_gap: { ...g, rolling: { ...g.rolling, pipeline: { error: 'x' } } } }).tiles, /Prospects pipeline:<\/b> unavailable/);
+});
+
 test('Marketing: no duplicate sales-gap tiles; one link line with the same rolling figures; Repeat / Academy moved', () => {
   const w = browser();
   const html = w.mkOverviewTiles.gridHtml({ d: {}, s: { sales_gap: g, insights: { rows: {} } }, error: null, health: { state: 'loading' } });

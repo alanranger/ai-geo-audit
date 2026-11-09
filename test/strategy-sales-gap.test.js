@@ -4,7 +4,8 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSalesGap, eventLikely, fillRates, monthsFrom, stockIn } from '../lib/strategy-sales-gap.mjs';
+import { buildSalesGap, categoryOf, eventLikely, fillRates, monthsFrom, quarterPipeline, stockIn } from '../lib/strategy-sales-gap.mjs';
+import { summarizeProspects } from '../lib/strategy-prospects.mjs';
 
 const TODAY = '2026-11-09';
 const LEAD = {
@@ -96,6 +97,77 @@ test('Q1 reconciles with the months (Oct sold + Nov + Dec); future quarters with
   const q4 = g.quarters[3];
   assert.equal(q4.no_events_on_sale, true);
   assert.equal(q4.stock.events, 0);
+});
+
+const course = { eventKey: 'c1', date: '2026-12-02', title: 'Beginners Camera Course', type: 'course', cap: 4, booked: 1, left: 3, price: 150 };
+const walk = { eventKey: 'w1', date: '2026-12-12', title: 'Woodland Photography Walk', type: 'walk', cap: 8, booked: 2, left: 6, price: 30 };
+const kenilworth = { eventKey: 'k1', date: '2027-03-22', title: 'Long Exposure - Kenilworth 22/03', cap: 4, booked: 2, left: 2, price: 50 };
+const odd = { eventKey: 'o1', date: '2026-12-20', title: 'Something new', type: 'masterclass', cap: 4, booked: 0, left: 4, price: 95 };
+const ALL = [lake, macro, course, walk, kenilworth, odd];
+
+test('quarter tile: the category rows add up to the stock totals and the tile\'s likely total', () => {
+  const g = gap(ALL);
+  const c = g.rolling.categories;
+  const sum = (f) => c.rows.reduce((a, r) => a + r[f], 0);
+  assert.deepEqual(c.rows.map((r) => r.label), ['Courses', 'One-day workshops', 'Residential']);
+  assert.equal(sum('events'), g.rolling.stock.events);
+  assert.equal(sum('places'), g.rolling.stock.places);
+  assert.equal(sum('gbp'), g.rolling.stock.gbp);
+  assert.ok(Math.abs(sum('likely') - g.rolling.likely) < 0.01, 'Likely £ rows = the tile\'s likely total');
+  assert.equal(c.total.events, g.rolling.stock.events);
+  assert.ok(c.adds_up);
+  assert.deepEqual(c.rows.map((r) => r.fill), [FILL.course, FILL.day, FILL.residential], 'each type\'s own fill rate');
+  assert.equal(c.total.fill, FILL.all, 'the total row shows the all-events rate');
+  assert.equal(c.total.booked, ALL.reduce((a, e) => a + e.booked, 0));
+});
+
+test('quarter tile: no event drops out of the split (walks, untyped and unknown types are one-day workshops)', () => {
+  assert.deepEqual([undefined, null, '', 'walk', 'masterclass', 'day', 'course', 'residential'].map(categoryOf), ['day', 'day', 'day', 'day', 'day', 'day', 'course', 'residential']);
+  const g = gap(ALL);
+  const day = g.rolling.categories.rows.find((r) => r.key === 'day');
+  assert.equal(g.rolling.stock.events, ALL.length, 'every test event is on sale in the quarter');
+  assert.equal(day.events, 4, 'macro + walk + Kenilworth 22/03 (no type) + unknown type');
+  assert.equal(day.places, 4 + 6 + 2 + 4);
+  const listed = g.months.flatMap((m) => [...m.prime.list, ...m.outside.list]);
+  const ken = listed.find((e) => e.date === '2027-03-22');
+  assert.equal(ken.type, 'day', 'Long Exposure - Kenilworth 22/03 is a one-day workshop');
+  assert.ok(listed.every((e) => ['course', 'day', 'residential'].includes(e.type)));
+});
+
+test('quarter tile: non-dated needed per month adds up to the total and matches each month tile', () => {
+  const g = gap(ALL);
+  const nd = g.rolling.non_dated;
+  assert.deepEqual(nd.months.map((m) => m.label), ['Nov', 'Dec', 'Jan']);
+  nd.months.forEach((m, i) => assert.equal(m.gbp, g.months[i].non_dated_needed, `${m.label} = its monthly tile`));
+  assert.ok(Math.abs(nd.months.reduce((a, m) => a + m.gbp, 0) - nd.total) < 0.01);
+  assert.ok(Math.abs(nd.total - g.rolling.non_dated_needed) < 0.01);
+  const n = g.rolling.normal;
+  assert.ok(Math.abs(n.by_cat.reduce((a, x) => a + x.gbp, 0) - n.total) < 0.01, 'normal non-dated by category adds up');
+  assert.ok(Math.abs(n.still_to_find - g.months.reduce((a, m) => a + m.still_to_find, 0)) < 0.01);
+});
+
+test('quarter tile: prospects pipeline dated (cash month in the quarter) / undated (no cash month)', () => {
+  const rows = [
+    { id: 'a', stage: 'quote', value_gbp: 1000, cash_month: '2026-12-01', type: '1-2-1' },
+    { id: 'b', stage: 'qualify', value_gbp: 500, cash_month: '2026-10-01', type: 'mentoring' },
+    { id: 'c', stage: 'scheduled', value_gbp: 800, cash_month: null, type: 'commission' },
+    { id: 'd', stage: 'quote', value_gbp: 2000, cash_month: '2027-03-01', type: 'Academy' },
+    { id: 'e', stage: 'closed_lost', value_gbp: 900, cash_month: null, type: 'other' },
+    { id: 'f', stage: 'booked_paid', value_gbp: 700, cash_month: '2026-11-01', type: '1-2-1' }
+  ];
+  const pr = summarizeProspects({ rows, config: [], history: [], today: TODAY, months: monthsFrom(TODAY, 3) });
+  assert.equal(pr.pipeline.undated_weighted, 800 * 0.75, 'open with no cash month');
+  const keys = ['2026-11', '2026-12', '2027-01'];
+  const q = quarterPipeline(pr.by_month, pr.pipeline, keys);
+  assert.equal(q.dated, 1000 * 0.4 + 500 * 0.2, 'Dec quote + the overdue Oct qualify (counts in the current month)');
+  assert.equal(q.undated, 600);
+  assert.equal(q.weighted, 400 + 100 + 600 + 800, 'all open weighted £');
+  assert.equal(q.later, 800, 'the March cash month is outside the quarter');
+  const g = gap(ALL, { pipeline: pr.by_month, pipeline_open: pr.pipeline });
+  assert.deepEqual([g.rolling.pipeline.weighted, g.rolling.pipeline.dated, g.rolling.pipeline.undated], [1900, 500, 600]);
+  const empty = summarizeProspects({ rows: [], config: [], history: [], today: TODAY, months: monthsFrom(TODAY, 3) });
+  assert.deepEqual(quarterPipeline(empty.by_month, empty.pipeline, keys), { weighted: 0, dated: 0, undated: 0, later: 0, loaded: true }, '£0 until enquiries are loaded');
+  assert.deepEqual(quarterPipeline(null, { error: 'boom' }, keys), { error: 'boom' }, 'a failed read is an error, never £0');
 });
 
 test('stock: events starting after the period begins with their booking window open by its end', () => {
