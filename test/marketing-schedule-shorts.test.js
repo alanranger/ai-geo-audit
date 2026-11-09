@@ -121,6 +121,28 @@ test('Content record: format, purpose with its source, and every use with its ow
   assert.match(html, /Native Facebook \/ Instagram \/ LinkedIn uses: none planned or approved yet/);
 });
 
+test('Time passing never marks a Short Public: past 18:00 with YouTube still saying Scheduled, the row stays Scheduled (never late / done)', () => {
+  const { win } = load();
+  const L = win.mkScheduleList;
+  const m = win.mkScheduleModel.build({ items: [], content, today: '2026-11-11' });
+  const x = m.byId.get('youtube|video|short|check-whole-frame');
+  assert.equal(x.state, 'sch');
+  assert.equal(L.statusOf(x, { board }).code, 'scheduled');
+  const chk = { ...content[0], uses: [{ ...content[0].uses[0], status: { code: 'checking', label: 'Checking YouTube', at: '2026-11-10T18:00:00Z' } }, content[0].uses[1]] };
+  const cx = win.mkScheduleModel.build({ items: [], content: [chk], today: '2026-11-11' }).items[0];
+  assert.deepEqual([cx.state, L.statusOf(cx, {}).code], ['pl', 'checking'], 'the server\'s "checking" after release time shows as checking, never Public');
+  const pub = { ...content[0], uses: [{ ...content[0].uses[0], status: { code: 'published', label: 'Public', at: '2026-11-10T18:00:00Z' } }, content[0].uses[1]] };
+  assert.equal(win.mkScheduleModel.build({ items: [], content: [pub], today: '2026-11-11' }).items[0].state, 'done', 'Public only from YouTube\'s own status');
+});
+
+test('window.mkOpenContent(assetKey): false when the Short is not on the schedule (Waiting falls back to the YouTube link)', () => {
+  const { win, setBoard } = load();
+  assert.equal(typeof win.mkOpenContent, 'function');
+  assert.equal(win.mkOpenContent('video|short|check-whole-frame'), false, 'no model built yet');
+  setBoard(board);
+  assert.equal(win.mkOpenContent('video|short|not-a-short'), false);
+});
+
 test('Tasks & reminders: empty "·" segments are dropped (never "· ·" before the badge)', () => {
   const { L } = setup();
   const gbp = { id: 'gbp|u', row: 'gbp', key: 'u', step_key: 'step|u', title: 'Google Business update: £150 off, book by Sat 14 Nov 23:59 · ', short: 'x', day: '2026-11-13', state: 'pl', raw: {} };

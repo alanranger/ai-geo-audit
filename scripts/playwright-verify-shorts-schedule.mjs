@@ -62,6 +62,13 @@ await page.waitForFunction(() => document.querySelector('#mk-schedule .mkl') && 
 await page.waitForTimeout(3000);
 check('board carries 7 Short content records', (board.content || []).length === 7, `${(board.content || []).length} content records`);
 
+if (typeof (await page.evaluate(() => typeof window.mkOpenContent)) === 'string' && await page.evaluate(() => typeof window.mkOpenContent === 'function')) {
+  const hook = await page.evaluate(() => [window.mkOpenContent('video|short|not-a-short'), window.mkOpenContent('video|short|check-whole-frame')]);
+  await page.waitForTimeout(500);
+  const p = await text(page, '#mks-panel');
+  check('window.mkOpenContent: false for an unknown asset; opens the per-video panel for a Short', hook[0] === false && hook[1] === true && /Content record/.test(p) && /Check the Whole Frame/.test(p), `${hook.join(', ')}`);
+  await page.click('#mks-panel [data-mks-close]');
+}
 const tasks = await text(page, '#mk-schedule .mkl-tasks');
 check('Tasks & reminders: no empty "· ·" segment', tasks && !/·\s*·/.test(tasks), (tasks.match(/[^·]{0,30}Google Business update[^📄]{0,90}/) || [''])[0]);
 
