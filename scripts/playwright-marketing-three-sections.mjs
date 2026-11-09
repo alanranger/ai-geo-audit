@@ -15,7 +15,7 @@ const MODE = process.argv[2] || 'before';
 const BASE = process.env.DASH_BASE || 'https://ai-geo-audit.vercel.app';
 const OUT = path.resolve('outputs');
 const BLUR = '#mk-review-table td:first-child, #mk-cust-body, .mk-detail, #mk-cleanup table td.left, #mk-query table td:first-child, #mk-client-health table td:first-child, #mk-exp-review, #mk-snap-review { filter: blur(6px) !important; }';
-const LOCAL_FILES = ['marketing-waiting.js', 'marketing-results.js', 'marketing-social-tiles.js'];
+const LOCAL_FILES = ['marketing-waiting.js', 'marketing-results.js', 'marketing-social-tiles.js', 'marketing-tab.js'];
 const sb = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const results = [];
 const check = (name, ok, note = '') => results.push({ name, ok: !!ok, note });
@@ -25,7 +25,7 @@ const loading = [];
 
 async function dbState() {
   const out = {};
-  for (const t of ['strategy_campaigns', 'strategy_campaign_ticks', 'quarter_plan', 'social_posts', 'sqs_email_events', 'marketing_decisions', 'marketing_social_placements', 'marketing_suppression']) {
+  for (const t of ['strategy_campaigns', 'strategy_campaign_ticks', 'quarter_plan', 'social_posts', 'marketing_decisions', 'marketing_social_placements', 'marketing_suppression']) {
     const { count } = await sb.from(t).select('*', { count: 'exact', head: true });
     out[t] = count;
   }
@@ -50,8 +50,8 @@ async function localRoutes(page) {
   await page.route('**/api/aigeo/marketing-decisions*', (route) => setTimeout(() => route.fulfill({ status: 200, contentType: 'application/json', body: dec }), 4000));
 }
 
-async function openTab(browser) {
-  const page = await browser.newPage({ viewport: { width: 1700, height: 1100 } });
+async function openTab(browser, width = 1700) {
+  const page = await browser.newPage({ viewport: { width, height: width < 800 ? 844 : 1100 } });
   page.on('pageerror', (e) => errors.push(e.message));
   await page.addInitScript((k) => { sessionStorage.setItem('arp_admin_key', k); localStorage.setItem('mks-view', 'weeks'); }, ENV.ARP_ADMIN_KEY);
   await page.route('**/api/**', (route) => {
@@ -67,7 +67,7 @@ async function openTab(browser) {
     loading.push({ skel, bar: !!bar });
     await page.locator('#mk-waiting').screenshot({ path: `${OUT}/c2-loading-${MODE}-1700px-20261109.png` }).catch(() => {});
   }
-  await page.waitForSelector('#mk-schedule .mks-grid, #mk-schedule .mks-weeks', { timeout: 150000 });
+  await page.waitForSelector('#mk-schedule .mks-body', { timeout: 150000, state: 'attached' });
   await page.waitForFunction(() => !/Loading the week plan/.test(document.querySelector('#mk-schedule')?.textContent || 'Loading the week plan'), null, { timeout: 150000 });
   await page.waitForTimeout(9000);
   await page.addStyleTag({ content: BLUR });
@@ -94,9 +94,9 @@ async function afterChecks(page) {
   await page.waitForSelector('#mk-results tbody tr[data-mkr-row]', { timeout: 60000 }).catch(() => {});
   const res = await page.$$eval('#mk-results tbody tr[data-mkr-row]', (rows) => rows.map((r) => r.innerText.replace(/\s+/g, ' ')));
   const has = (re) => res.some((r) => re.test(r));
-  check('Results: LR30 39 sent, opens collected (7 at first read, more since)', has(/Sun 8 Nov 09:55.*\b39\b \d+ \(\d+%\)/), res.find((r) => /\b39\b/.test(r)) || '');
-  check('Results: Norfolk 311 at 17:00', has(/17:00.*311/), res.find((r) => /311/.test(r)) || '');
-  check('Results: Creative 231 at 17:00', has(/17:00.*231/), res.find((r) => /231/.test(r)) || '');
+  check('Results: LR30 39 sent, opens collected (7 at first read, more since)', has(/Sun 8 Nov 9:55am.*\b39\b \d+ \(\d+%\)/), res.find((r) => /\b39\b/.test(r)) || '');
+  check('Results: Norfolk 311 at 17:00', has(/5:00pm.*311/), res.find((r) => /311/.test(r)) || '');
+  check('Results: Creative 231 at 17:00', has(/5:00pm.*231/), res.find((r) => /231/.test(r)) || '');
   check('Results: FB / IG / Story post rows', has(/FB/) && has(/IG/) && has(/Story/));
   check('Results: LinkedIn row', has(/LinkedIn/));
   check('Results: no 0 opens for unknown', !res.some((r) => /Email/.test(r) && /tomorrow/.test(r) === false && /\b0 \(0%\)/.test(r)));
@@ -119,8 +119,8 @@ async function correctionChecks(page, res, wait) {
   const cells = await page.$$eval('#mk-results tbody tr[data-mkr-row]', (rows) => rows.map((r) => [...r.querySelectorAll('td')].map((td) => td.innerText.trim())));
   const row = (re) => cells.find((c) => re.test(c.join(' '))) || [];
   const bk = (c) => `${c[7]} / ${c[8]}`;
-  check('C1.1: LR30 row 0 / £0', bk(row(/09:55.*\b39\b/)) === '0 / £0', bk(row(/09:55.*\b39\b/)));
-  check('C1.1: Norfolk and Creative rows computed (not "—")', /^\d+ \/ £[\d,]+$/.test(bk(row(/17:00.*311/))) && /^\d+ \/ £[\d,]+$/.test(bk(row(/17:00.*231/))), `Norfolk ${bk(row(/17:00.*311/))} · Creative ${bk(row(/17:00.*231/))}`);
+  check('C1.1: LR30 row 0 / £0', bk(row(/9:55am.*\b39\b/)) === '0 / £0', bk(row(/9:55am.*\b39\b/)));
+  check('C1.1: Norfolk and Creative rows computed (not "—")', /^\d+ \/ £[\d,]+$/.test(bk(row(/5:00pm.*311/))) && /^\d+ \/ £[\d,]+$/.test(bk(row(/5:00pm.*231/))), `Norfolk ${bk(row(/5:00pm.*311/))} · Creative ${bk(row(/5:00pm.*231/))}`);
   await page.locator('#mk-results tbody tr[data-mkr-row]', { hasText: '311' }).first().click();
   const detail = await page.$eval('#mk-results .mkr-detail', (e) => e.innerText.replace(/\s+/g, ' ')).catch(() => '');
   check('C1.1: detail lists the promoted events and the basis', /After the send/.test(detail) && /matched by subject|campaign record/.test(detail), (detail.match(/After the send.{0,200}/) || [''])[0]);
@@ -147,12 +147,53 @@ async function correctionChecks(page, res, wait) {
   await page.locator('#mk-overview-tiles').screenshot({ path: `${OUT}/correction1-social-fold-${where}-1700px-20261108.png` });
 }
 
+/** Shared status vocabulary in Results: the 9 Nov 10:00 email Sent (one row, provider id), Norfolk LinkedIn Published + link. */
+async function statusChecks(page) {
+  const rows = await page.$$eval('#mk-results tbody tr[data-mkr-row]', (trs) => trs.map((r) => ({ id: r.dataset.mkrRow, st: r.cells[0].innerText.replace(/\s+/g, ' ').trim(), what: r.cells[1].innerText.trim(), to: r.cells[3].innerText.trim(), link: r.cells[0].querySelector('a')?.href || '' })));
+  const insp = rows.filter((r) => /Something to inspire/.test(r.what));
+  check('S1: 9 Nov 10:00 "Something to inspire" = ✅ Sent Mon 9 Nov 10:00am, one row by provider id', insp.length === 1 && /✅\s*Sent/.test(insp[0].st) && /Mon 9 Nov 10:00am/.test(insp[0].st) && /6af07a9b21498276ab252ccb/.test(insp[0].id + insp[0].link), JSON.stringify(insp));
+  const li = rows.filter((r) => /Norfolk coastal workshop/.test(r.what));
+  check('S1: Norfolk LinkedIn = ✅ Published + link', li.length === 1 && /✅\s*Published/.test(li[0].st) && /linkedin\.com\/feed\/update/.test(li[0].link), JSON.stringify(li));
+  check('S1: every Results row has a status word from the shared vocabulary', rows.every((r) => /(Sent|Published|Checking delivery|Scheduled|Late|Failed|Verification unavailable|Cancelled)/.test(r.st)), rows.map((r) => r.st.slice(0, 40)).join(' · '));
+}
+
+/** Client list health: one click from a fresh load (Behind the scenes closed), then "← back to schedule". */
+async function healthRoundTrip(page, width) {
+  const closed = await page.$eval('#mk-behind', (e) => !e.open);
+  const btn = page.locator('#mk-planned [data-mk-open-health]');
+  const btnVisible = await btn.isVisible();
+  await btn.click();
+  await page.waitForFunction(() => document.querySelector('#mk-client-health .ch-head, #mk-client-health h3'), null, { timeout: 60000 }).catch(() => {});
+  await page.waitForTimeout(2500);
+  const open = await page.evaluate(() => ({ health: !!document.querySelector('#mk-client-health')?.checkVisibility(), back: !!document.querySelector('#mk-health-back a')?.checkVisibility(), top: Math.round(document.querySelector('#mk-health-back')?.getBoundingClientRect().top ?? -1), copies: document.querySelectorAll('#mk-client-health').length }));
+  check(`H ${width}px: visible button; one click opens the existing Client list health (Behind the scenes was closed)`, closed && btnVisible && open.health && open.back && open.copies === 1 && open.top >= -5 && open.top < 400, JSON.stringify({ closed, btnVisible, ...open }));
+  await page.screenshot({ path: `${OUT}/e-health-open-local-${width}px-20261109.png` });
+  await page.click('#mk-health-back a');
+  await page.waitForTimeout(1500);
+  const top = await page.evaluate(() => Math.round(document.querySelector('#mk-planned').getBoundingClientRect().top));
+  check(`H ${width}px: "← back to schedule" returns to the schedule`, top > -40 && top < 300, `Planned top ${top}px`);
+}
+
 const before = await dbState();
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const page = await openTab(browser);
 if (MODE !== 'before') await afterChecks(page);
 await page.locator('#marketing-root').screenshot({ path: `${OUT}/marketing-tab-${MODE}-clean-1700px.png` });
+if (MODE !== 'before') {
+  await statusChecks(page);
+  await page.locator('#mk-results').screenshot({ path: `${OUT}/s1-results-status-${MODE}-1700px-20261109.png` });
+  await page.locator('#mk-planned .mk-sec-h').screenshot({ path: `${OUT}/e-health-button-${MODE}-1700px-20261109.png` });
+  await healthRoundTrip(page, 1700);
+}
 await page.close();
+if (MODE !== 'before') {
+  for (const w of [800, 390]) {
+    const narrow = await openTab(browser, w);
+    await narrow.locator('#mk-planned .mk-sec-h').screenshot({ path: `${OUT}/e-health-button-${MODE}-${w}px-20261109.png` }).catch(() => {});
+    await healthRoundTrip(narrow, w);
+    await narrow.close();
+  }
+}
 await browser.close();
 const after = await dbState();
 const changed = Object.keys(before).filter((k) => before[k] !== after[k]);

@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { emailRows, placementRows, postRows, shortWhat, titleOf, youtubeId } from '../lib/marketing/results.mjs';
+import { emailRows, emailStatusOf, placementRows, postRows, postStatusOf, shortWhat, titleOf, youtubeId } from '../lib/marketing/results.mjs';
 import { alanActions, decisionIndex, isPublished, openDecisions, outlookDue, releaseBlockers, releaseSplit } from '../lib/marketing/decision-state.mjs';
 import { bookingsFor, eventFromKey, eventsBySubject, linkedEvents, onePerPage } from '../lib/marketing/results-bookings.mjs';
 import { campaignSheets } from '../lib/strategy-campaigns.mjs';
@@ -221,3 +221,44 @@ test('Results: a placement GPT recorded as published is a post row (joined to it
   assert.equal(joined[0].reach, 120, 'collected figures used when the permalink matches');
 });
 
+
+/* ---------- shared delivery status vocabulary (Results + Waiting) ---------- */
+
+test('Results status: Sent only from the collected Sent report (time + link), a scheduled record joins it by provider id; posts Published + link', () => {
+  const sqs = [{ email_id: '6af07a9b21498276ab252ccb', subject: 'Something to inspire your next photograph', sent_at: '2026-11-09T10:00:17Z', delivered: 110, opened: 0, events_collected_at: null }];
+  const recs = [
+    { campaign_key: 'theme|return-to-photography-9nov', title: 'Something to inspire your next photograph', stage: 'scheduled', scheduled_for: '2026-11-09T10:00:00Z', schedule_evidence: 'operator_verified', sqs_draft_id: '6af07a9b21498276ab252ccb' },
+    { campaign_key: 'theme|later', title: 'Later email', stage: 'scheduled', scheduled_for: '2026-11-12T09:30:00Z', schedule_evidence: 'operator_verified', sqs_draft_id: 'zzz' }
+  ];
+  const rows = emailRows(recs, sqs, NOW);
+  assert.equal(rows.length, 1, 'one row per actual send; a scheduled record without a Sent report is not a result');
+  const s = rows[0].status;
+  assert.deepEqual([s.code, s.label, s.icon, s.tone, s.when], ['sent', 'Sent', '✅', 'green', 'Sent Mon 9 Nov 10:00am']);
+  assert.match(s.link, /composer\/6af07a9b21498276ab252ccb$/);
+  assert.equal(rows[0].campaign_key, 'theme|return-to-photography-9nov');
+  assert.equal(rows[0].opens_state, 'collecting', 'opens 0 before the events are read: unknown, not 0');
+  const chk = emailStatusOf(null, { scheduled_for: '2026-11-08T17:00:00Z' });
+  assert.deepEqual([chk.code, chk.label], ['checking', 'Checking delivery'], 'time passing never marks sent');
+  const p = postStatusOf([{ source: 'evidence', provider_url: 'https://www.linkedin.com/feed/update/urn:li:activity:1/', evidence: 'published (provider id recorded)' }], '2026-11-09T09:06:19Z');
+  assert.deepEqual([p.code, p.label, p.when, p.link], ['published', 'Published', 'Published Mon 9 Nov 9:06am', 'https://www.linkedin.com/feed/update/urn:li:activity:1/']);
+});
+
+test('Results status cell: the status board wins by provider id; word + icon + colour, then the time', () => {
+  const win = browser(['marketing-results.js'], { mkScheduleList: { badge: (s) => `<b class="badge">${s.icon}${s.label}</b>` } });
+  const C = win.mkResultsCells;
+  const row = { kind: 'email', provider_id: 'p1', step_keys: [], sent_at: '2026-11-09T10:00:17Z', status: { code: 'checking', label: 'Checking delivery', icon: '…', tone: 'neutral', when: 'Due Mon 9 Nov 10:00am' } };
+  assert.equal(strip(C.statusCell(row)), '…Checking deliveryMon 9 Nov 10:00am');
+  assert.match(C.statusCell({ ...row, status: { code: 'sent', label: 'Sent', icon: '✅', tone: 'green', when: 'Sent Mon 9 Nov 10:00am', link: 'https://x/composer/p1' } }), /✅Sent<\/b> <a href="https:\/\/x\/composer\/p1"/);
+});
+
+test('Waiting on you: "⚠ Needs approval" only where the status board marks the same item needs_approval', () => {
+  const win = browser(['marketing-waiting.js'], { mkScheduleModel: { build: () => ({ items: [], needs: [] }) }, mkDeliveryItems: () => [], mkScheduleList: { badge: (s) => `[${s.icon} ${s.label}]` } });
+  const dec = { open: [
+    { type: 'release_approval', key: 'release|r', step_key: 'r', due: '2026-11-10', what: 'Approve caption & artwork: X', channel: 'linkedin', why: 'ready' },
+    { type: 'release_approval', key: 'release|q', step_key: 'q', due: '2026-11-10', what: 'Approve caption & artwork: Y', channel: 'fbig', why: 'ready' },
+    { type: 'blocked_review', key: 'blocked', what: 'Review 1 blocked contact', channel: 'none', why: 'Your decision' }
+  ], count: 3 };
+  const board = { placements: [{ step_key: 'r', status: { code: 'needs_approval', label: 'Needs approval', icon: '⚠', tone: 'amber' } }, { step_key: 'q', status: { code: 'in_preparation', label: 'In preparation', icon: '📄', tone: 'grey' } }], tasks: [], emails: [] };
+  const { rows } = win.mkWaitingRows(dec, { items: [] }, board);
+  assert.deepEqual(rows.map((r) => r.chip), ['[⚠ Needs approval]', '', ''], 'chip only when the board agrees; decisions without a delivery get none');
+});
