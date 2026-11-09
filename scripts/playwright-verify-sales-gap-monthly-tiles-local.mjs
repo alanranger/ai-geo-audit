@@ -4,6 +4,8 @@
  * with the local handlers, refuses every non-GET, and compares DB row counts + newest timestamps before / after.
  *   PHASE=before node scripts/playwright-verify-sales-gap-monthly-tiles-local.mjs   (committed browser files; capture only)
  *   PHASE=after  node scripts/playwright-verify-sales-gap-monthly-tiles-local.mjs   (working-tree files; checks + diff vs before)
+ *   PHASE=live-before node …   (production, only strategy-sales-gap.js swapped back to the parent commit: the production "before")
+ *   PHASE=live   node …        (deployed files + APIs only; same checks vs live-before, plus the served ?v= file)
  */
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
@@ -12,7 +14,11 @@ import { createClient } from '@supabase/supabase-js';
 
 const ENV = Object.fromEntries(fs.readFileSync('.env.vercel.prod', 'utf8').split(/\r?\n/).filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).replace(/^"|"$/g, '').trim()]));
 Object.assign(process.env, ENV);
-const PHASE = process.env.PHASE === 'after' ? 'after' : 'before';
+const PHASE = ['after', 'live', 'live-before'].includes(process.env.PHASE) ? process.env.PHASE : 'before';
+const LIVE = PHASE.startsWith('live');
+const CHECKS = PHASE === 'after' || PHASE === 'live';
+const PRE_COMMIT = '9e1704f5';
+const VERSION = 'mt2-20261109a';
 const BASE = 'https://ai-geo-audit.vercel.app';
 const OUT = 'outputs';
 const LOCAL_FILES = ['strategy-tab.js', 'strategy-layout.js', 'strategy-sales-gap.js', 'strategy-prospects.js', 'strategy-quarter-plan.js'];
@@ -46,12 +52,21 @@ async function localProspects() {
   await handler({ method: 'GET', query: {}, headers: { 'x-arp-admin-key': ENV.ARP_ADMIN_KEY } }, fakeRes((b) => { body = b; }));
   return body;
 }
+/** Production: deployed files + APIs (GET only); live-before swaps just the sales-gap view back; the summary shown is kept. */
+async function liveRoute(route, url) {
+  if (PHASE === 'live-before' && url.pathname === '/lib/strategy-sales-gap.js') return route.fulfill({ status: 200, contentType: 'application/javascript', body: execSync(`git show ${PRE_COMMIT}:lib/strategy-sales-gap.js`, { encoding: 'utf8' }) });
+  if (url.pathname !== '/api/aigeo/strategy-summary') return route.fallback();
+  const resp = await route.fetch();
+  summaryBody = await resp.text();
+  return route.fulfill({ response: resp, body: summaryBody });
+}
 async function routes(page) {
   await page.addInitScript((k) => { sessionStorage.setItem('arp_admin_key', k); }, ENV.ARP_ADMIN_KEY);
   await page.route('**/*', async (route) => {
     const req = route.request();
     const url = new URL(req.url());
     if (req.method() !== 'GET') { if (url.pathname.startsWith('/api/')) blocked.push(`${req.method()} ${url.pathname}`); return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true,"dry_run":true}' }); }
+    if (LIVE) return liveRoute(route, url);
     const file = LOCAL_FILES.find((f) => url.pathname === `/lib/${f}`);
     if (file) return route.fulfill({ status: 200, contentType: 'application/javascript', body: PHASE === 'before' ? execSync(`git show HEAD:lib/${file}`, { encoding: 'utf8' }) : fs.readFileSync(`lib/${file}`, 'utf8') });
     if (url.pathname === '/api/aigeo/prospects') return route.fulfill({ status: 200, contentType: 'application/json', body: await localProspects() });
@@ -204,13 +219,22 @@ await page.waitForFunction(() => !/Loading enquiries|Loading prospects/.test(doc
 await page.waitForTimeout(4000);
 const layout = await page.evaluate(layoutOf);
 await page.evaluate(() => [...document.querySelectorAll('body *')].filter((el) => getComputedStyle(el).position === 'fixed' && el.getBoundingClientRect().top > window.innerHeight / 2).forEach((el) => { el.style.visibility = 'hidden'; }));
-const shot = (name) => `${OUT}/sales-gap-monthly-tiles-v2-${name}-${PHASE}-local-1700px-20261109.png`;
+const TAGS = { before: 'before-local', after: 'after-local', live: 'live', 'live-before': 'before-live' };
+const shot = (name) => `${OUT}/sales-gap-monthly-tiles-v2-${name}-${TAGS[PHASE]}-1700px-20261109.png`;
+if (PHASE === 'live') {
+  const served = await page.evaluate(async () => {
+    const src = document.querySelector('script[src*="/lib/strategy-sales-gap.js"]')?.getAttribute('src') || '';
+    return { src, body: src ? await (await fetch(src, { cache: 'no-store' })).text() : '' };
+  });
+  const committed = execSync('git show HEAD:lib/strategy-sales-gap.js', { encoding: 'utf8' }).replace(/\r\n/g, '\n');
+  check(`production serves strategy-sales-gap.js?v=${VERSION}, byte-identical to the committed file`, served.src.endsWith(`?v=${VERSION}`) && served.body.replace(/\r\n/g, '\n') === committed, `${served.src} · ${served.body.length} bytes`);
+}
 await page.locator('#st-sales-gap').screenshot({ path: shot('tiles') });
 await page.locator('#st-remedy').screenshot({ path: shot('remedy') });
 await page.locator('#st-quarter-cards').screenshot({ path: shot('quarter-cards') });
 let tiles = null;
 let pageText = null;
-if (PHASE === 'after') {
+if (CHECKS) {
   tiles = await page.evaluate(monthTilesOf);
   await page.evaluate(() => document.querySelectorAll('#st-sales-gap details.sg-md').forEach((d) => { d.open = true; }));
   await page.waitForTimeout(300);
@@ -233,7 +257,7 @@ check('every non-GET refused', true, `${blocked.length} refused: ${[...new Set(b
 check('no page errors', !errors.length, errors.slice(0, 3).join(' | '));
 
 fs.writeFileSync(`${OUT}/_mt2-${PHASE}-layout.json`, JSON.stringify({ layout, tiles }, null, 1));
-if (PHASE === 'after') {
+if (CHECKS) {
   const s = JSON.parse(summaryBody);
   const sg = s.sales_gap;
   PIPE_BY_MONTH = s.prospects?.by_month || {};
@@ -241,7 +265,7 @@ if (PHASE === 'after') {
   workingChecks(sg, pageText.rules);
   retiredChecks(s, pageText);
   headingChecks(layout, pageText, sg);
-  movedChecks(layout, JSON.parse(fs.readFileSync(`${OUT}/_mt2-before-layout.json`, 'utf8')).layout);
+  movedChecks(layout, JSON.parse(fs.readFileSync(`${OUT}/_mt2-${LIVE ? 'live-before' : 'before'}-layout.json`, 'utf8')).layout);
 }
 fs.writeFileSync(`${OUT}/_mt2-${PHASE}-result.json`, JSON.stringify({ results, before, after }, null, 1));
 for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.note ? ` (${r.note})` : ''}`);

@@ -4,8 +4,10 @@
  * non-GET refused, DB row counts + newest timestamps compared before / after.
  *   PHASE=live    node scripts/playwright-verify-prospects-v2-local.mjs   (live prospects tables)
  *   PHASE=fixture node scripts/playwright-verify-prospects-v2-local.mjs   (obviously fake TEST rows: every flag, filters)
+ *   PHASE=prod    node scripts/playwright-verify-prospects-v2-local.mjs   (PRODUCTION files + APIs only, live data; non-GET still refused)
  */
 import fs from 'node:fs';
+import { execSync } from 'node:child_process';
 import { chromium } from 'playwright';
 import { createClient } from '@supabase/supabase-js';
 import { summarizeProspects } from '../lib/strategy-prospects.mjs';
@@ -13,7 +15,9 @@ import { monthsFrom } from '../lib/strategy-sales-gap.mjs';
 
 const ENV = Object.fromEntries(fs.readFileSync('.env.vercel.prod', 'utf8').split(/\r?\n/).filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).replace(/^"|"$/g, '').trim()]));
 Object.assign(process.env, ENV);
-const PHASE = process.env.PHASE === 'fixture' ? 'fixture' : 'live';
+const PHASE = ['fixture', 'prod'].includes(process.env.PHASE) ? process.env.PHASE : 'live';
+const PROD = PHASE === 'prod';
+const VERSION = 'pp-20261109a';
 const BASE = 'https://ai-geo-audit.vercel.app';
 const TODAY = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
 const TABLES = { prospect_enquiry: 'updated_at', prospect_enquiry_history: 'at', customer_person: 'updated_at', prospect_stage_config: 'stage' };
@@ -72,6 +76,7 @@ async function routes(page) {
     const req = route.request();
     const url = new URL(req.url());
     if (req.method() !== 'GET') { if (url.pathname.startsWith('/api/')) blocked.push(`${req.method()} ${url.pathname}`); return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true,"dry_run":true}' }); }
+    if (PROD) return route.fallback();
     if (url.pathname === '/lib/strategy-prospects.js') return route.fulfill({ status: 200, contentType: 'application/javascript', body: fs.readFileSync('lib/strategy-prospects.js', 'utf8') });
     if (url.pathname === '/api/aigeo/prospects') return route.fulfill({ status: 200, contentType: 'application/json', body: await localProspects() });
     if (url.pathname === '/api/aigeo/strategy-summary') return route.fulfill({ status: 200, contentType: 'application/json', body: await localSummary() });
@@ -83,7 +88,7 @@ function readUi() {
   const txt = (el) => (el?.innerText || '').replace(/\s+/g, ' ').trim();
   return {
     heads: [...host.querySelectorAll('.pp-table thead th')].map(txt), filters: [...host.querySelectorAll('[data-pp-f]')].map((el) => el.dataset.ppF),
-    tile: txt(host.querySelector('.pp-total')), rows: host.querySelectorAll('.pp-table tbody tr').length, table: txt(host.querySelector('.pp-table tbody')),
+    tile: txt(host.querySelector('.pp-total')), rows: host.querySelectorAll('.pp-table tbody tr').length, table: txt(host.querySelector('.pp-table tbody')), section: txt(host),
     pipe: txt(document.querySelector('#st-sales-gap .sg-q .sg-pipe'))
   };
 }
@@ -94,10 +99,20 @@ const page = await browser.newPage({ viewport: { width: 1700, height: 1100 } });
 page.on('pageerror', (e) => errors.push(e.message));
 await routes(page);
 await page.goto(`${BASE}/audit-dashboard.html#strategy`, { waitUntil: 'domcontentloaded' });
-await page.waitForFunction(() => document.querySelector('#st-prospects .pp-total') && document.querySelector('#st-prospects .pp-table'), null, { timeout: 110000 });
+await page.waitForFunction(() => document.querySelector('#st-prospects .pp-total') && (document.querySelector('#st-prospects .pp-table') || /Enquiries unavailable/.test(document.getElementById('st-prospects').textContent)), null, { timeout: 110000 });
 await page.waitForTimeout(2500);
 await page.evaluate(() => [...document.querySelectorAll('body *')].filter((el) => getComputedStyle(el).position === 'fixed' && el.getBoundingClientRect().top > window.innerHeight / 2).forEach((el) => { el.style.visibility = 'hidden'; }));
-const shot = (name) => `outputs/prospects-v2-${PHASE}-${name}-local-1700px-20261109.png`;
+const shot = (name) => (PROD ? `outputs/prospects-v2-${name}-live-1700px-20261109.png` : `outputs/prospects-v2-${PHASE}-${name}-local-1700px-20261109.png`);
+if (PROD) {
+  const served = await page.evaluate(async () => {
+    const src = document.querySelector('script[src*="/lib/strategy-prospects.js"]')?.getAttribute('src') || '';
+    return { src, body: src ? await (await fetch(src, { cache: 'no-store' })).text() : '' };
+  });
+  const norm = (s) => s.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  const committed = norm(execSync('git show e9ac0666:lib/strategy-prospects.js', { encoding: 'utf8' }));
+  check(`production serves strategy-prospects.js?v=${VERSION}, identical to e9ac0666 (BOM / line endings ignored)`, served.src.endsWith(`?v=${VERSION}`) && norm(served.body) === committed, `${served.src} · ${served.body.length} chars`);
+  summaryBody = await page.evaluate(async () => JSON.stringify(window.stLastData ? window.stLastData() : await (await fetch('/api/aigeo/strategy-summary')).json()));
+}
 await page.locator('#st-prospects').screenshot({ path: shot('section') });
 await page.locator('#st-prospects .pp-tiles').screenshot({ path: shot('tiles') });
 const ui = await page.evaluate(readUi);
@@ -121,6 +136,12 @@ if (PHASE === 'fixture') {
   check('Review filter revalidate → only revalidate rows', rv.rows === FIXTURE.filter((r) => r.review_status === 'revalidate').length, `${rv.rows} rows`);
   await page.locator('#st-prospects').screenshot({ path: shot('filter-revalidate') });
 } else {
+  if (PROD) {
+    const pl = JSON.parse(summaryBody || '{}').prospects?.pipeline || {};
+    check('empty state: no enquiries yet (Claude loads the first list)', ui.rows === 1 && /No enquiries yet/.test(ui.table), ui.table);
+    check('Pipeline tile at £0: D2C £0 · B2B £0, dated £0 · undated £0, no overdue line', /£0 D2C £0 · B2B £0 dated £0 · undated £0/.test(ui.tile) && !/overdue/.test(ui.tile), ui.tile);
+    check('production summary carries the new pipeline fields', ['dated_gbp', 'undated_gbp', 'overdue_gbp', 'overdue_count', 'by_market', 'undated_weighted', 'total'].every((k) => k in pl), JSON.stringify({ total: pl.total, dated_gbp: pl.dated_gbp, undated_gbp: pl.undated_gbp, overdue_gbp: pl.overdue_gbp, overdue_count: pl.overdue_count, unknown_count: pl.unknown_count, markets: Object.keys(pl.by_market || {}) }));
+  }
   const sg = JSON.parse(summaryBody).sales_gap?.rolling?.pipeline;
   check('quarter tile pipeline line reads the summary feed (dated / undated)', !!ui.pipe && /dated/.test(ui.pipe) && /undated/.test(ui.pipe), `${ui.pipe} · feed ${JSON.stringify(sg)}`);
   await page.locator('#st-sales-gap .sg-q').screenshot({ path: shot('quarter-tile') }).catch(() => {});
