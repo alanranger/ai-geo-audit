@@ -308,3 +308,26 @@ test('card titles never drop words: short title if set, else cut at a word bound
   }
   assert.ok(m.items.every((x) => x.title));
 });
+
+test('Rows: Channels | Dates — the same cards in all four layouts (Days × 2, Weeks × 2); choice remembered per time unit', () => {
+  const { win, m } = model();
+  const document = { getElementById: () => null, addEventListener: () => {}, createElement: () => ({}), head: { appendChild: () => {}, insertAdjacentHTML: () => {} } };
+  const ctx = vm.createContext({ window: win, document, localStorage: win.localStorage, Intl, Date, Number, String, Map, Set, JSON, Math, Promise, Array, Object, console, encodeURIComponent, setTimeout, MutationObserver: class { observe() {} } });
+  vm.runInContext(fs.readFileSync(new URL('../lib/marketing-schedule.js', import.meta.url), 'utf8'), ctx);
+  const ids = (html) => [...html.matchAll(/data-mks-items?="([^"]+)"/g)].map((x) => x[1]).sort();
+  const L = win.mkScheduleLayout;
+  const daysCh = L(m, 'days', 'channels');
+  const daysDt = L(m, 'days', 'dates');
+  const wkDt = L(m, 'weeks', 'dates');
+  const wkCh = L(m, 'weeks', 'channels');
+  assert.ok(ids(daysCh).length > 0 && ids(wkDt).length > 0);
+  assert.deepEqual(ids(daysDt), ids(daysCh), 'Days: rows = dates shows exactly the cards of rows = channels');
+  assert.deepEqual(ids(wkCh), ids(wkDt), 'Weeks: rows = channels shows exactly the cards of rows = dates');
+  assert.match(daysDt, /class="mks-grid mks-days-dates"/);
+  assert.match(daysDt, /<th>Day<\/th><th>Selling<\/th><th>Emails<\/th>/);
+  assert.match(wkCh, /<td class="mks-ch mks-sumh"><b>Selling<\/b>/);
+  assert.match(wkCh, /<td class="mks-ch mks-sumh"><b>Emails<\/b>/);
+  assert.equal((wkCh.match(/data-mks-week="/g) || []).length, (wkDt.match(/data-mks-week="/g) || []).length, 'one w/c column per week row');
+  const card = (html) => (html.match(/<button type="button" class="mks-card[^"]*"[^>]*data-mks-item="email\|theme\|return-9nov"[^>]*>[\s\S]*?<\/button>/) || [''])[0];
+  assert.equal(card(daysDt), card(daysCh), 'the card itself is identical in both arrangements');
+});
