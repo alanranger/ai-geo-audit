@@ -47,9 +47,9 @@ export default async function handler(req, res) {
   try {
     const sb = createClient(url, key, { auth: { persistSession: false } });
     const propertyUrl = String(req.query.propertyUrl || PROP);
-    const [moments, drafts] = await Promise.all([loadMoments(sb, propertyUrl), loadDrafts(sb, propertyUrl)]);
+    const [moments, drafts, gbp] = await Promise.all([loadMoments(sb, propertyUrl), loadDrafts(sb, propertyUrl), sb.from('gbp_performance_monthly').select('fetched_at').order('fetched_at', { ascending: false }).limit(1).maybeSingle()]);
     res.setHeader('Cache-Control', 'no-store');
-    return send(res, 200, { ok: true, moments, drafts });
+    return send(res, 200, { ok: true, moments, drafts, gbp_stats_fetched_at: gbp?.data?.fetched_at || null });
   } catch (e) {
     return send(res, 500, { ok: false, error: e?.message || String(e) });
   }

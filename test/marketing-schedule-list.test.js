@@ -132,3 +132,45 @@ test('Squarespace email view: real cycle boundaries, budget after each step, one
   assert.match(next, /Draft estimates <b>2,167<\/b> → left 2,833/);
   assert.match(next, /LinkedIn newsletter editions never use Squarespace credits/);
 });
+
+test('M\'s board status wins in List and grids (emails, placements, tasks); the adapter is only a fallback', () => {
+  const { win } = load();
+  const L = win.mkScheduleList;
+  const board = {
+    emails: [{ key: 'theme|academy', status: { code: 'checking', label: 'Checking delivery', icon: '…', tone: 'neutral', when: 'Due Thu 12 Nov 9:30am' } }],
+    placements: [{ step_key: 'gpt-x', placement: 'facebook_feed', status: { code: 'published', label: 'Published', icon: '✅', tone: 'green', at: '2026-11-10T18:31:00Z', link: 'https://www.facebook.com/p/1' } }, { step_key: 'gpt-x', placement: 'instagram_feed', status: { code: 'checking', label: 'Checking delivery', icon: '…', tone: 'neutral' } }],
+    tasks: []
+  };
+  const e = { board, review: () => ({ ready: false, blocker: 'x' }) };
+  e.status = (x) => L.statusOf(x, e);
+  assert.equal(e.status(THU[0]).label, 'Checking delivery');
+  assert.equal(e.status(THU[0]).server, true);
+  const p = e.status(post);
+  assert.deepEqual([p.code, p.label, p.blocker], ['published', 'Published (FB feed)', 'IG feed: Checking delivery'], 'one placement never stands in for another');
+  const html = L.listHtml(model([THU[0], post]), opts(), e);
+  assert.match(html, /…<\/i>Checking delivery/);
+  assert.match(html, /Published \(FB feed\)/);
+});
+
+test('Google Business weekly review: a GPT task in Tasks & reminders only; Due / Checked from GPT\'s tick; never Scheduled / Published', async () => {
+  const { gbpReviewStatus, taskStatus, isGbpReview } = await import('../lib/marketing/delivery-status.mjs');
+  const step = { key: 'step|2026-11-09|Google Business|2026-11-09', channel: 'Google Business', title: 'Google Business check (5–10 min)', day: '2026-11-09', done: false };
+  assert.ok(isGbpReview(step));
+  const due = taskStatus(step, { today: '2026-11-12' });
+  assert.deepEqual([due.code, due.label, due.blocker], ['due', 'Due', 'Review latest posts and reviews'], 'past its day it is still "Due", never Late / Scheduled');
+  const collectedOnly = taskStatus({ ...step, collected_at: '2026-11-09T10:00:00Z', posts_28d: 12 }, { today: '2026-11-09' });
+  assert.equal(collectedOnly.code, 'due', 'collecting data / pressing Refresh never ticks the review');
+  const checked = gbpReviewStatus({ ...step, tick: { is_ticked: true, status: 'done', reason: 'Viking Local posts correct; 1 new review, reply drafted for Alan', set_by: 'GPT', set_at: '2026-11-09T16:05:00Z' } });
+  assert.deepEqual([checked.code, checked.when, checked.evidence], ['checked', 'Checked by GPT Mon 9 Nov 4:05pm', 'Viking Local posts correct; 1 new review, reply drafted for Alan']);
+  const issue = gbpReviewStatus({ ...step, tick: { status: 'in_progress', history: [{ issues: [{ what: 'wrong offer date on a Viking Local post', owner: 'GPT', next: 'ask Viking Local to correct the date' }] }] } });
+  assert.deepEqual([issue.code, issue.blocker], ['needs_attention', 'ask Viking Local to correct the date (owner GPT)']);
+  for (const s of [due, collectedOnly, checked, issue]) assert.ok(!['scheduled', 'published', 'sent'].includes(s.code));
+  const { win } = load();
+  const L = win.mkScheduleList;
+  const gbp = { id: 'gbp|g', row: 'gbp', key: 'g', step_key: step.key, title: step.title, short: 'Weekly check', day: '2026-11-09', state: 'pl', raw: { gbp: 'check' } };
+  const e = { board: { tasks: [{ step_key: step.key, type: 'gbp_review', status: due }] } };
+  e.status = (x) => L.statusOf(x, e);
+  const m = model([gbp, post]);
+  assert.ok(!L.listHtml(m, opts(), e).includes('Google Business'), 'not with publications');
+  assert.match(L.tasksHtml(m, opts(), e), /Weekly Google Business review · owner GPT · next: Review latest posts and reviews · <span class="mkl-st mini mkl-prep"[^>]*><i>📋<\/i>Due/);
+});
