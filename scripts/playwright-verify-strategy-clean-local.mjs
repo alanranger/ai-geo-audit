@@ -15,14 +15,14 @@ const BASE = 'https://ai-geo-audit.vercel.app';
 const TAG = LIVE ? 'live' : 'local';
 const OUT = 'outputs';
 const STAMP = process.env.STAMP || '20261108';
-const LOCAL_FILES = ['strategy-tab.js', 'strategy-layout.js', 'strategy-sales-gap.js', 'strategy-quarter-plan.js', 'marketing-overview-tiles.js', 'marketing-schedule-model.js', 'revenue-truth-controller.mjs'];
+const LOCAL_FILES = ['strategy-tab.js', 'strategy-layout.js', 'strategy-sales-gap.js', 'strategy-prospects.js', 'strategy-quarter-plan.js', 'marketing-overview-tiles.js', 'marketing-schedule-model.js', 'revenue-truth-controller.mjs'];
 const BLUR = '.mk-detail, #mk-cust-body, #mq-results td:first-child, #mk-review-table td:first-child { filter: blur(6px) !important; }';
 const sb = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const results = [];
 const check = (name, ok, note = '') => results.push({ name, ok: !!ok, note });
 const blocked = [];
 const errors = [];
-const TABLES = { strategy_campaign_steps: 'last_seen_at', strategy_campaign_ticks: 'updated_at', strategy_campaigns: 'updated_at', strategy_quarter_actions: 'updated_at', strategy_initiatives: 'updated_at', strategy_event_snapshots: 'created_at', sqs_send_meter: 'captured_at', marketing_segment_exports: 'created_at', marketing_event_facts: 'set_at', marketing_segment_evaluations: 'evaluated_at', business_targets: 'updated_at', strategy_initiative_links: 'set_at', marketing_decisions: 'decided_at', marketing_social_placements: 'updated_at' };
+const TABLES = { strategy_campaign_steps: 'last_seen_at', strategy_campaign_ticks: 'updated_at', strategy_campaigns: 'updated_at', strategy_quarter_actions: 'updated_at', strategy_initiatives: 'updated_at', strategy_event_snapshots: 'created_at', sqs_send_meter: 'captured_at', marketing_segment_exports: 'created_at', marketing_event_facts: 'set_at', marketing_segment_evaluations: 'evaluated_at', business_targets: 'updated_at', strategy_initiative_links: 'set_at', marketing_decisions: 'decided_at', marketing_social_placements: 'updated_at', prospect_enquiry: 'updated_at', prospect_enquiry_history: 'at' };
 
 async function dbState() {
   const out = {};
@@ -43,6 +43,15 @@ async function localSummary() {
   return summaryBody;
 }
 
+/** GET /api/aigeo/prospects answered by the local handler (admin key from the env file; read-only). */
+async function localProspects() {
+  process.env.ARP_ADMIN_KEY = ENV.ARP_ADMIN_KEY;
+  const { default: handler } = await import('../api/aigeo/prospects.js');
+  let body = null;
+  await handler({ method: 'GET', query: {}, headers: { 'x-arp-admin-key': ENV.ARP_ADMIN_KEY } }, { status() { return this; }, setHeader() {}, send(t) { body = t; return this; } });
+  return body;
+}
+
 async function routes(page) {
   await page.addInitScript((k) => { sessionStorage.setItem('arp_admin_key', k); localStorage.setItem('mks-view', 'days'); localStorage.setItem('mks-layout', 'days'); }, ENV.ARP_ADMIN_KEY);
   await page.route('**/*', async (route) => {
@@ -52,10 +61,11 @@ async function routes(page) {
     if (LIVE) return route.fallback();
     const file = LOCAL_FILES.find((f) => url.pathname === `/lib/${f}`);
     if (file) return route.fulfill({ status: 200, contentType: 'application/javascript', body: fs.readFileSync(`lib/${file}`, 'utf8') });
+    if (url.pathname === '/api/aigeo/prospects') return route.fulfill({ status: 200, contentType: 'application/json', body: await localProspects() });
     if (url.pathname === '/api/aigeo/strategy-summary') return route.fulfill({ status: 200, contentType: 'application/json', body: await localSummary() });
     if (url.pathname === '/audit-dashboard.html') {
       const res = await route.fetch();
-      const html = (await res.text()).replace(/(<script src="\/lib\/strategy-tab\.js[^"]*"><\/script>)/, '$1\n  <script src="/lib/strategy-sales-gap.js?v=local"></script>\n  <script src="/lib/strategy-layout.js?v=local"></script>');
+      const html = (await res.text()).replace(/(<script src="\/lib\/strategy-tab\.js[^"]*"><\/script>)/, '$1\n  <script src="/lib/strategy-sales-gap.js?v=local"></script>\n  <script src="/lib/strategy-prospects.js?v=local"></script>\n  <script src="/lib/strategy-layout.js?v=local"></script>');
       return route.fulfill({ response: res, body: html, headers: { ...res.headers(), 'content-type': 'text/html; charset=utf-8' } });
     }
     return route.fallback();
@@ -148,7 +158,17 @@ async function strategy(browser) {
   });
   check('Sales gap: quarter tile + Nov / Dec / Jan tiles; Remedy = Nov, Dec, Jan + Total; 4 quarter cards; Q1 reconciles', sg.cards === 4 && sg.months.join() === 'November,December,January' && sg.remedyRows.join() === 'Nov,Dec,Jan,Total' && sg.qcards === 4 && /✓$/.test(sg.rec), `${sg.cards} tiles (${sg.months.join(', ')}) · remedy rows ${sg.remedyRows.join(', ')} · ${sg.qcards} quarter cards · ${sg.rec}`);
   check('Where we are: Sales still needed / This month / Booked ahead retired; Repeat clients + Academy progression moved here; sales gap first', !/Sales still needed|This month ·|Booked ahead ·/.test(sg.where) && /Repeat clients/.test(sg.where) && /Academy progression/.test(sg.where) && sg.order.every((o, i, a) => i === 0 || o > a[i - 1]), `${sg.where.slice(0, 160)} · order ${sg.order.join(',')}`);
+  await page.waitForFunction(() => !/Loading enquiries|Loading prospects/.test(document.getElementById('st-prospects')?.textContent || 'Loading'), null, { timeout: 60000 }).catch(() => {});
+  const pp = await page.evaluate(() => {
+    const el = document.getElementById('st-prospects');
+    const t = (el?.innerText || '').replace(/\s+/g, ' ');
+    const ord = ['st-remedy', 'st-prospects', 'st-quarter-cards'].map((id) => Number(document.getElementById(id)?.style.order ?? -1));
+    return { tiles: el?.querySelectorAll('.pp-tile').length || 0, text: t.slice(0, 420), table: !!el?.querySelector('.pp-table'), add: !!el?.querySelector('[data-pp-add]'), ord, remedyHead: (document.querySelector('#st-remedy thead')?.innerText || '').replace(/\s+/g, ' '), find: [...document.querySelectorAll('#st-remedy .sg-find')].map((x) => x.innerText.replace(/\s+/g, ' ')), q1: (document.querySelector('#st-quarter-cards .sg-current')?.innerText || '').replace(/\s+/g, ' ') };
+  });
+  check('Prospects under the Remedy plan: 4 stage tiles + Pipeline, weighted; enquiry table (admin API) + "+ Add enquiry"', pp.tiles === 5 && pp.table && pp.add && pp.ord[0] < pp.ord[1] && pp.ord[1] < pp.ord[2], `${pp.tiles} tiles · table ${pp.table} · order ${pp.ord.join(',')} · ${pp.text.slice(0, 300)}`);
+  check('Remedy lever 3 shows "Still to find" per month; current quarter card shows it too', /Still to find/.test(pp.remedyHead) && pp.find.length === 3 && /Still to find \(Nov \+ Dec, after pipeline\)/.test(pp.q1), `${pp.find.join(' | ')} · Q1: ${(pp.q1.match(/Still to find[^·]*·[^·]*/) || [''])[0]}`);
   await page.evaluate(() => window.scrollTo(0, 0));
+  for (const id of ['st-prospects']) await page.locator(`#${id}`).screenshot({ path: `${OUT}/prospects-${TAG}-1700px-${STAMP}.png` }).catch(() => {});
   for (const id of ['st-sales-gap', 'st-remedy', 'st-quarter-cards']) await page.locator(`#${id}`).screenshot({ path: `${OUT}/sales-gap-${id.replace('st-', '')}-${TAG}-1700px-${STAMP}.png` });
   await page.evaluate(() => { const d = document.querySelector('#st-sales-gap [data-sg-month] details'); if (d) d.open = true; });
   await page.locator('#st-sales-gap').screenshot({ path: `${OUT}/sales-gap-tiles-working-open-${TAG}-1700px-${STAMP}.png` });
@@ -216,6 +236,9 @@ check('published posts (shared state) are published on Strategy: not drafts, not
 const roll = st.s?.sales_gap?.rolling;
 const kfmt = (v) => `£${(Math.round(Math.abs(v) / 100) / 10).toLocaleString('en-GB')}k`;
 check('Marketing: no duplicate sales-gap tiles; one link "Sales gap by month → Strategy" with the same rolling figures', !mk.ov.titles.some((t) => /Sales still needed|Dated places|Non-dated sales needed|Repeat clients|Academy progression/.test(t)) && /Sales gap by month → Strategy/.test(mk.ov.link) && roll && mk.ov.link.includes(kfmt(roll.still_to_sell)) && mk.ov.link.includes(kfmt(roll.non_dated_needed)), `tiles: ${mk.ov.titles.join(' | ')} · ${mk.ov.link}`);
+const nm = st.s?.sales_gap?.months || [];
+check('normal non-dated (same month last year) = Nov £815 · Dec £737 · Jan £1,710', nm.map((m) => Math.round(m.normal_non_dated)).join() === '815,737,1710', nm.map((m) => `${m.label} ${m.normal_non_dated.toFixed(2)} (adjusted ${Math.round(m.normal_adjusted)}, pipeline ${Math.round(m.pipeline_weighted)}, still to find ${Math.round(m.still_to_find)})`).join(' · '));
+check('Prospects in the summary: aggregates only (no names); pipeline empty until Claude loads enquiries', st.s?.prospects && !st.s.prospects.error && !('rows' in st.s.prospects), JSON.stringify({ total: st.s?.prospects?.total, pipeline: st.s?.prospects?.pipeline?.total, error: st.s?.prospects?.error || null }));
 const gapM = st.s?.sales_gap?.remedy?.rows || [];
 check('Remedy levers add up to each month\'s gap (live)', gapM.length === 3 && gapM.every((r) => Math.abs(r.lever1.gbp + r.lever2.gbp + r.lever3.gbp - r.gap) < 0.5), gapM.map((r) => `${r.label}: gap ${Math.round(r.gap)} = ${Math.round(r.lever1.gbp)} + ${Math.round(r.lever2.gbp)} + ${Math.round(r.lever3.gbp)}`).join(' · '));
 const q2a = st.s?.quarter_plan?.initiatives?.['q2-academy-mentoring-rps'];
