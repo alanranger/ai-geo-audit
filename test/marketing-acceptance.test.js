@@ -61,15 +61,16 @@ test('one known Squarespace order also in the Booking Sheet counts once (both so
   assert.equal(b[0].event_date, '2025-05-10');
 });
 
-test('a JLR booking absent from Squarespace is kept (probable for the matching profile, never merged)', () => {
+test('a JLR booking absent from Squarespace joins the one contact with that exact full name (confirmed, 9 Nov rule)', () => {
   const { st, f } = world();
   const link = st.links.find((l) => l.source === 'bs_workshop' && l.source_id === 'w2');
-  assert.equal(link.match_method, 'name_probable');
-  assert.equal(link.confirmed, false);
+  assert.equal(link.match_method, 'name_exact_unique');
+  assert.equal(link.confirmed, true);
+  assert.equal(link.anchor, 'sqs:p2');
   assert.equal(link.raw_ref, 'JLR#1234567890ABC');
-  assert.equal(f('sqs:p2').cats.residential.c, 0);
-  assert.equal(f('sqs:p2').cats.residential.p, 1);
-  assert.equal(f('name:jo sample').cats.residential.c, 1);
+  assert.equal(f('sqs:p2').cats.residential.c, 1);
+  assert.equal(f('sqs:p2').cats.residential.p, 0);
+  assert.equal(f('name:jo sample'), undefined, 'no separate name-only record');
 });
 
 test('buyer vs attendee: a place bought for someone else is the attendee\'s history, not the buyer\'s', () => {
@@ -82,7 +83,7 @@ test('buyer vs attendee: a place bought for someone else is the attendee\'s hist
 test('refunds create no history; booked is never "attended" and future bookings are not past history', () => {
   const { f } = world({ workshops: [{ id: 'w9', event_start: '2027-01-10', theme_location: 'Woodland Walk', source: 'Google', order_ref: 'x', client_name: 'Jo Sample', is_multi_day: false }] });
   assert.equal(f('sqs:p2').cats.lightroom, undefined);
-  const name = f('name:jo sample');
+  const name = f('sqs:p2');
   assert.equal(name.cats.woodland.future_c, 1);
   assert.equal(name.cats.woodland.last_c, null);
   assert.ok(!JSON.stringify(name).includes('attended'));
@@ -261,11 +262,11 @@ test('value: a Booking Sheet sale that is the same Squarespace order counts once
     ]
   });
   const ann = st.persons.get('sqs:p1');
-  const nameRec = st.persons.get('name:ann lee');
-  const v = valueFacts(ann, [nameRec], '2026-11-07').value;
-  assert.equal(v.c.net, 150);
-  assert.equal(v.c.orders, 1);
-  assert.equal(v.p.net, 90);
+  assert.equal(st.persons.get('name:ann lee'), undefined, 'exact unique name: the sheet sales are Ann\'s own (confirmed)');
+  const v = valueFacts(ann, [], '2026-11-07').value;
+  assert.equal(v.c.net, 240);
+  assert.equal(v.c.orders, 2);
+  assert.equal(v.p.net, 0);
   assert.equal(v.cp.orders, 2);
 });
 

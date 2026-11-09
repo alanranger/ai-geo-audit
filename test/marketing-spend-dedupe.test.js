@@ -58,14 +58,15 @@ test('planSheetWindow: Pick n Mix Inc within 10 days; Bank within plan period ±
   assert.ok(!planSheetWindow({ date: '2026-06-20', category: '7. 1-2-1', funding: 'Bank' }, { date: '2026-06-01' }));
 });
 
-test('identity: plan payments only absorb Pick n Mix Inc / Bank-in-period sheet rows on the client name record', () => {
+test('identity: plan payments only absorb Pick n Mix Inc / Bank-in-period sheet rows of the plan client', () => {
   const tx = (row, date, amount, category, funding) => ({ source_workbook: 'w', source_row: row, txn_date: date, client_name: 'Client A', category_label: category, event_label: 'x', channel: null, is_redemption: false, amount, funding });
   const st = buildIdentities({
     transactions: [tx(1, '2025-10-09', 50, '7. 1-2-1', 'Stripe'), tx(2, '2026-06-28', 496.2, '3. Workshops Residential', 'Bank'), tx(3, '2026-02-18', 286, '4. Pick n Mix Inc', 'Stripe')],
     plans: [{ plan_key: 'pk', client_name: 'Client A', email: 'a@example.com', plan_type: 'annual', starts: '2025-09-22', ends: '2026-09-21', paid_total: 832.2 }],
     planPayments: [{ plan_key: 'pk', line_no: 1, amount: 50, paid_on: '2025-10-01', date_reliable: true }, { plan_key: 'pk', line_no: 2, amount: 496.2, paid_on: '2026-06-01', date_reliable: true }, { plan_key: 'pk', line_no: 3, amount: 286, paid_on: '2026-02-17', date_reliable: true }]
   });
-  const rows = st.persons.get('name:client a').payments;
+  assert.equal(st.persons.get('name:client a'), undefined, 'the plan email names Client A: the sheet rows are theirs');
+  const rows = st.persons.get('email:a@example.com').payments;
   assert.deepEqual(rows.map((x) => !!x.plan_attributed), [false, true, true]);
   assert.deepEqual(st.persons.get('email:a@example.com').plan_payments.map((p) => !!p.on_sheet), [false, true, true]);
 });

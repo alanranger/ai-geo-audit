@@ -67,6 +67,7 @@ import {
   parseBookingSheetTruth
 } from '../../lib/booking-sheet-truth-parser.mjs';
 import { parseWorkshopsTab, persistWorkshopAttendees } from '../../lib/booking-sheet-workshops.mjs';
+import { syncContactTabs } from '../../lib/booking-sheet-contacts.mjs';
 import { parseWorkshopCosts, persistWorkshopCostModel } from '../../lib/booking-sheet-workshop-costs.mjs';
 import { parseSalesTargets, persistSalesTargets } from '../../lib/booking-sheet-sales-targets.mjs';
 import {
@@ -247,6 +248,8 @@ export default async function handler(req, res) {
       salesTargets = { written: 0, warnings: [], error: targetErr.message || String(targetErr) };
     }
 
+    const contactTabs = await syncContactTabs(supabase, property, wb, filename);
+
     // Persist date-quality flag for Strategy / Monday brief
     await supabase.from('booking_sheet_sheet_presence').upsert({
       property_url: property,
@@ -297,6 +300,7 @@ export default async function handler(req, res) {
       sales_targets_written: salesTargets.written,
       sales_targets_error: salesTargets.error,
       sales_targets_warnings: salesTargets.warnings,
+      contact_tabs: contactTabs,
       workshop_date_null_pct: workshops.dateNullPct || 0,
       courses_date_null_pct: courses.dateNullPct || 0,
       attendee_date_health: dateHealth,

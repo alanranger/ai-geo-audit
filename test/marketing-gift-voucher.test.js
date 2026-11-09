@@ -52,7 +52,8 @@ test('the same voucher sale on Squarespace and the Booking Sheet counts once for
     lines: [giftCard('o1')],
     transactions: [tx(1, '2025-11-20', 'Bea Buyer', 100, '8. Gift Vouchers Inc', 'Stripe')]
   });
-  const f = valueFacts(st.persons.get('sqs:p1'), [st.persons.get('name:bea buyer')], TODAY);
+  assert.equal(st.persons.get('name:bea buyer'), undefined, 'the sheet row joins Bea (exact unique name)');
+  const f = valueFacts(st.persons.get('sqs:p1'), [], TODAY);
   assert.equal(f.value.c.net, 100);
   assert.equal(f.value.cp.net, 100);
   assert.equal(everyoneNet(st), 100);
@@ -77,7 +78,7 @@ test('redemption paid with the voucher at Squarespace checkout: the order counts
     lines: [giftCard('o1'), service('o2')],
     transactions: redemptionPair(1, '2026-03-10', 'Rita Redeemer', 100)
   });
-  const rita = valueFacts(st.persons.get('sqs:p2'), [st.persons.get('name:rita redeemer')], TODAY);
+  const rita = valueFacts(st.persons.get('sqs:p2'), [], TODAY);
   assert.equal(rita.value.cp.net, 0);
   assert.equal(rita.value.c.places, 1);
   const row = rita.purchases.find((x) => x.key === 'sqs:5002');
@@ -107,7 +108,7 @@ test('a card-paid Squarespace order with no voucher row on the sheet stays full 
     lines: [service('o2')],
     transactions: [tx(1, '2026-03-10', 'Rita Redeemer', 100, '2. Workshops Non Residential', 'Stripe')]
   });
-  const f = valueFacts(st.persons.get('sqs:p2'), [st.persons.get('name:rita redeemer')], TODAY);
+  const f = valueFacts(st.persons.get('sqs:p2'), [], TODAY);
   assert.equal(f.value.cp.net, 100);
   assert.equal(f.purchases.find((x) => x.key === 'sqs:5002').voucher_funded, undefined);
 });

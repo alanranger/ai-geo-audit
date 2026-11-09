@@ -68,15 +68,15 @@ test('tab first, statements as history: the same client + start in both is one p
   assert.equal(m.duplicates, 1);
 });
 
-test('person link: Email = confirmed; no email = probable by exact Client name; status, filter and overlay follow', () => {
+test('person link: Email = confirmed; no email = the one contact with that exact Client name (confirmed); status, filter and overlay follow', () => {
   const { st, facts } = computeAll(src(), TODAY);
   const link = (id) => st.links.find((l) => l.source === 'bs_plan' && l.source_id === `bsp:PNM-${id}`);
   assert.deepEqual([link(1).anchor, link(1).match_method, link(1).confirmed], ['sqs:pa', 'plan_sheet_email', true]);
-  assert.deepEqual([link(4).anchor, link(4).match_method, link(4).confirmed, link(4).candidate_anchor], ['name:client noemail', 'plan_sheet_name_only', false, 'sqs:pn']);
+  assert.deepEqual([link(4).anchor, link(4).match_method, link(4).confirmed, link(4).candidate_anchor], ['sqs:pn', 'plan_sheet_name_exact_unique', true, null]);
   const f = (a) => facts.get(a);
   assert.deepEqual(f('sqs:pa').plans.map((p) => [p.plan_key, p.source, p.level]), [['bsp:PNM-1', 'booking_sheet', 'c']]);
-  assert.deepEqual(f('sqs:pn').plans.map((p) => [p.plan_key, p.level]), [['bsp:PNM-4', 'p']]);
-  assert.equal(f('name:client noemail').attached_to, 'sqs:pn');
+  assert.deepEqual(f('sqs:pn').plans.map((p) => [p.plan_key, p.level]), [['bsp:PNM-4', 'c']]);
+  assert.equal(f('name:client noemail'), undefined);
   const has = (a) => run(HAS_PLAN, f(a), a);
   assert.deepEqual(['sqs:pa', 'sqs:pf', 'sqs:pe', 'sqs:pn'].map(has), ['yes', 'yes', 'no', 'yes']);
   assert.deepEqual(['sqs:pa', 'sqs:pf', 'sqs:pe', 'sqs:pn'].map((a) => run(HASNT_PLAN, f(a), a)), ['no', 'no', 'yes', 'no']);
