@@ -46,7 +46,7 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { ingest } from '../../lib/marketing/collector-ingest.mjs';
 import { ingestDrafts, ingestScheduled } from '../../lib/marketing/delivery-schedule.mjs';
-import { buildStatusBoard, metaCheck, refreshProgress, refreshStatus, watchDue } from '../../lib/marketing/delivery-status-board.mjs';
+import { buildStatusBoard, metaCheck, recordRefreshOutcome, refreshProgress, refreshStatus, watchDue } from '../../lib/marketing/delivery-status-board.mjs';
 import { readShortsStatus } from '../../lib/marketing/delivery-content.mjs';
 
 /** Complete Squarespace reads posted by the PC collector (read-only on Squarespace). */
@@ -230,7 +230,10 @@ const POSTS = {
   'schedule-link': (sb, b) => linkSchedule(sb, b, SET_BY),
   'frequency-exception': (sb, b) => recordException(sb, b, SET_BY),
   'collect-request': (sb, b) => manualRequest(sb, b),
-  'collect-done': (sb, b) => finishRequests(sb, { ...b, status: b.status === 'ok' ? 'ok' : 'failed' }),
+  'collect-done': async (sb, b) => {
+    const r = await finishRequests(sb, { ...b, status: b.status === 'ok' ? 'ok' : 'failed' });
+    return { ...r, refresh: await recordRefreshOutcome(sb).catch(() => null) };
+  },
   ...QUERY_POSTS
 };
 
