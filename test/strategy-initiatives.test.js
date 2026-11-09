@@ -167,7 +167,7 @@ test('gift: vouchers from issue receipts only (redemptions excluded), gift 1-to-
   assert.equal(v.gap, 1000);
   assert.equal(o.actual, null);
   assert.match(o.evidence_basis, /unknown, not £0/);
-  assert.deepEqual([g.status.label, g.status.rag], ['Needs review', 'grey']);
+  assert.deepEqual([g.status.label, g.status.rag, g.status.owner], ['Needs review · GPT by Mon 30 Nov', 'grey', 'GPT']);
 });
 
 test('status: RAG only against a disclosed dated benchmark; never red for an unticked task', () => {
@@ -177,8 +177,10 @@ test('status: RAG only against a disclosed dated benchmark; never red for an unt
   const after = initiativeStatus(pnm, { pace: { actual: 0, target: 3, start: '2026-11-10', end: '2026-12-31' } }, '2026-12-01');
   assert.equal(after.rag, 'red');
   assert.equal(after.benchmark, 'straight-line');
-  const notSet = initiativeStatus({ kind: 'initiative', status_rule: { type: 'not_set' } }, { lines: [] }, TODAY);
-  assert.deepEqual([notSet.label, notSet.rag], ['Target not set', 'grey']);
+  const notSet = initiativeStatus({ kind: 'initiative', owner: 'GPT', review_date: '2026-11-16', status_rule: { type: 'not_set' } }, { lines: [] }, TODAY);
+  assert.deepEqual([notSet.label, notSet.rag, notSet.kind], ['Target: GPT proposal due Mon 16 Nov', 'grey', 'target_proposal']);
+  const proposed = initiativeStatus({ kind: 'initiative', owner: 'GPT', review_date: '2026-11-16', status_rule: { type: 'not_set', proposal: { owner: 'Claude', due: '2026-11-11', basis: 'per Claude question' } } }, { lines: [] }, TODAY);
+  assert.deepEqual([proposed.label, proposed.owner, proposed.due, proposed.basis], ['Target: Claude proposal due Wed 11 Nov', 'Claude', '2026-11-11', 'per Claude question']);
   const p = assemblePlan(fixture({ actions: fixture().actions.map((a) => ({ ...a, is_ticked: false, due_week_start: '2026-10-01' })) }));
   assert.ok(Object.values(p.initiatives).every((i) => !i.status || i.status.rag !== 'red'));
   assert.equal(initiativeStatus({ kind: 'housekeeping', status_rule: { type: 'none' } }, {}, TODAY), null);

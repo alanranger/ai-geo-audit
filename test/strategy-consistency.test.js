@@ -46,7 +46,7 @@ test('initiative next action from linked deliveries (actual before recommendatio
 
 test('unknown target: owner, next step and due date; never an invented target', () => {
   const ini = { owner: 'GPT', owner_detail: 'GPT (targeting) · Claude (capacity)', review_date: '2026-11-16' };
-  assert.deepEqual(unknownTargetOf(ini, { label: 'Target not set' }, null), { owner: 'GPT (targeting) · Claude (capacity)', next_step: 'propose a dated target from actuals for Alan to approve', due: '2026-11-16' });
+  assert.deepEqual(unknownTargetOf(ini, { kind: 'target_proposal', owner: 'GPT', due: '2026-11-16' }, null), { owner: 'GPT', next_step: 'propose a dated target from actuals for Alan to approve', due: '2026-11-16', basis: null });
   assert.equal(unknownTargetOf(ini, { label: 'In progress' }, null), null);
 });
 

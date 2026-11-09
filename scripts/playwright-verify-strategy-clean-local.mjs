@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Strategy clean layout on LIVE data with the LOCAL code (before deploy), 1700px. Read-only: serves the local strategy /
  * marketing scripts (+ injects lib/strategy-layout.js), answers /api/aigeo/strategy-summary with the local handler, and
  * refuses every non-GET. DB row counts + newest timestamps compared before / after. Screenshots: folds closed + open.
@@ -127,9 +127,19 @@ async function strategy(browser) {
   check('Q1 KPI box "Non-JLR beginners: moved to Jan course"; Q2 box "8 by 27 Jan · 17 by Mar"', /^Non-JLR beginners: moved to Jan course/.test(boxes[0] || '') && /^Non-JLR beginners: 8 by 27 Jan · 17 by Mar 27/.test(boxes[1] || ''), boxes.join(' | '));
   const academy = await page.evaluate(() => [...document.querySelectorAll('#st-quarter-plan .qp-card.is-current .qp-ini')].filter((i) => /Academy/.test(i.querySelector('.qp-it')?.textContent || '')).map((i) => [...i.querySelectorAll('.qp-l')].map((l) => l.textContent.replace(/\s+/g, ' ').trim()).join(' | '))[0] || '');
   if (process.env.EXPECT_ACADEMY_NEXT) check(`Academy initiative next action reads ${process.env.EXPECT_ACADEMY_NEXT}; "Target not set" kept`, academy.includes('Next: Email: Your next step with the Photography Academy · ') && academy.includes(process.env.EXPECT_ACADEMY_NEXT), academy);
-  const WORD = /(✅ (Sent|Published)|🕒 Scheduled|⚠ Needs approval|📄 In preparation|… Checking delivery|⏰ Late|✖ Failed|\? Verification unavailable|⊘ Cancelled|✓ Done)/;
-  const nextLines = await page.evaluate(() => [...document.querySelectorAll('#st-quarter-plan .qp-l')].map((l) => l.textContent.replace(/\s+/g, ' ').trim()).filter((t) => /^Next:/.test(t) && !/\(manual\)|Next: —/.test(t)));
-  check('every initiative next action shows the shared status word + icon', nextLines.length > 0 && nextLines.every((t) => WORD.test(t)), nextLines.map((t) => t.replace(/ → Marketing$/, '')).join(' | '));
+  const g4 = await page.evaluate(() => {
+    const panel = document.querySelector('section[data-panel="strategy"]');
+    const text = panel.innerText.replace(/\s+/g, ' ');
+    const plan = [...panel.querySelectorAll('a')].filter((a) => /plan document/i.test(a.textContent)).map((a) => a.href);
+    const card = (re) => [...document.querySelectorAll('#st-quarter-plan .qp-ini')].filter((i) => re.test(i.querySelector('.qp-it')?.textContent || '')).map((i) => i.textContent.replace(/\s+/g, ' ').trim().slice(0, 260));
+    return { bare: (text.match(/Target not set|Needs review(?! ·)/g) || []).length, plan, near: card(/Near-term workshop/)[0] || '', academy: card(/^4 · Academy/)[0] || '', q2: card(/Academy, mentoring/)[0] || '', gifts: card(/Gifts & Christmas/)[0] || '' };
+  });
+  check('no bare "Target not set" / "Needs review" on Strategy; near-term + Academy read "Target: Claude proposal due Wed 11 Nov"; gifts names GPT + date', !g4.bare && /Target: Claude proposal due Wed 11 Nov/.test(g4.near) && /Target: Claude proposal due Wed 11 Nov/.test(g4.academy) && /Needs review · GPT by \w{3} \d+ \w{3}/.test(g4.gifts), `bare ${g4.bare} · near: ${g4.near.slice(0, 120)} · academy: ${g4.academy.slice(0, 120)} · gifts: ${g4.gifts.slice(0, 90)}`);
+  check('plan document link: never the homepage (removed: no strategy document is stored)', g4.plan.every((h) => !/^https:\/\/www\.alanranger\.com\/?$/.test(h)), g4.plan.length ? g4.plan.join(', ') : 'no plan document link');
+  check('Q2 Academy cohort linked to academy_trial_history (next action labelled with the data source)', /data: academy_trial_history/.test(g4.q2), g4.q2);
+  const WORD = /(✅ (Sent|Published)|🕒 Scheduled|⚠ Needs approval|📄 In preparation|… Checking delivery|⏰ Late|✖ Failed|\? Verification unavailable|⊘ Cancelled|✓ Done|⏸ Deferred)/;
+  const nextLines = await page.evaluate(() => [...document.querySelectorAll('#st-quarter-plan .qp-l')].map((l) => l.textContent.replace(/\s+/g, ' ').trim()).filter((t) => /^Next:/.test(t) && !/\(manual\)|\(data: |Next: —/.test(t)));
+  check('every initiative next action shows the shared status word + icon', nextLines.length > 0 && nextLines.every((t) => WORD.test(t)), (nextLines.some((t) => !WORD.test(t)) ? nextLines.filter((t) => !WORD.test(t)) : nextLines).map((t) => t.replace(/ → Marketing$/, '')).join(' | '));
   const next = await page.locator('#st-next-delivery').evaluate((el) => ({ text: el.textContent.replace(/\s+/g, ' ').trim(), key: el.dataset.nextKey }));
   const tiles = (await page.locator('#st-where').innerText()).replace(/\s+/g, ' ');
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -185,8 +195,10 @@ check('Strategy Needs Alan count = Marketing "Waiting on you" count', String(st.
 const pubKeys = st.s?.needs_alan?.published || [];
 const pubRows = Object.values(st.s?.quarter_plan?.initiatives || {}).flatMap((i) => (i.deliveries || []).filter((d) => pubKeys.includes(d.key)).map((d) => `${i.key}: ${d.key} ${d.status}${d.draft ? ' draft' : ''}${i.next?.key === d.key ? ' NEXT' : ''}`));
 check('published posts (shared state) are published on Strategy: not drafts, not a next action', pubKeys.length > 0 && pubRows.length > 0 && pubRows.every((r) => / published$/.test(r)) && !st.norfolk.length, `published ${pubKeys.join(', ')} → ${pubRows.join(' | ')} · Norfolk "Next:" lines: ${st.norfolk.length}`);
+const q2a = st.s?.quarter_plan?.initiatives?.['q2-academy-mentoring-rps'];
+check('Q2 Academy cohort figures come from academy_trial_history', q2a?.measure?.data_source === 'academy_trial_history' && /trials started/.test(q2a.measure.lines[0]?.value || ''), (q2a?.measure?.lines || []).slice(0, 2).map((l) => `${l.label}: ${l.value} [${l.sub}]`).join(' | '));
 const nexts = Object.values(st.s?.quarter_plan?.initiatives || {}).flatMap((i) => [i.next, i.next?.then].filter((n) => n && n.status));
-check('no sent / published / done item is a next action; Next delivery line uses the same status vocabulary', nexts.length && nexts.every((n) => !['sent', 'published', 'done', 'cancelled'].includes(n.status.code)) && /(🕒 Scheduled|📄 In preparation|⚠ Needs approval|… Checking delivery|⏰ Late|\? Verification unavailable)/.test(st.next.text), `${nexts.length} next items: ${[...new Set(nexts.map((n) => n.status.code))].join(', ')} · ${st.next.text} · board ${st.s?.delivery_status?.error || `${Object.keys(st.s?.delivery_status?.by_key || {}).length} keys, last checked ${st.s?.delivery_status?.last_checked}`}`);
+check('no sent / published / done item is a next action; Next delivery line uses the same status vocabulary', nexts.length && nexts.every((n) => !['sent', 'published', 'done', 'cancelled'].includes(n.status.code)) && /(🕒 Scheduled|📄 In preparation|⚠ Needs approval|… Checking delivery|⏰ Late|\? Verification unavailable|⏸ Deferred)/.test(st.next.text), `${nexts.length} next items: ${[...new Set(nexts.map((n) => n.status.code))].join(', ')} · ${st.next.text} · board ${st.s?.delivery_status?.error || `${Object.keys(st.s?.delivery_status?.by_key || {}).length} keys, last checked ${st.s?.delivery_status?.last_checked}`}`);
 const n3 = st.s?.insights?.rows?.money?.find((t) => t.key === 'money-next-3')?.numbers;
 const ret = st.s?.roadmap_now?.returning_r12;
 const k = (v) => `£${(Math.round(Math.abs(v) / 100) / 10).toLocaleString('en-GB')}k`;

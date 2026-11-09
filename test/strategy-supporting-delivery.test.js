@@ -34,7 +34,8 @@ test('a campaign supporting link makes its scheduled send the Academy next actio
   assert.equal(a.next.key, 'send|theme|academy-return');
   assert.equal(a.next.then.day, '2026-12-01');
   assert.equal(a.deliveries.find((d) => d.key === 'send|theme|academy-return').role, 'supporting');
-  assert.equal(a.status.label, 'Target not set', 'a supporting delivery does not invent a target');
+  assert.equal(a.status.kind, 'target_proposal', 'a supporting delivery does not invent a target');
+  assert.equal(a.status.label, 'Target: GPT proposal due no date set');
 });
 
 test('a supporting link never moves the primary attribution or double-counts the mix', () => {
