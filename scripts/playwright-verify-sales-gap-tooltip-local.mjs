@@ -3,7 +3,8 @@
  * on production data. Read-only: production pages + GET APIs; only /lib/strategy-sales-gap.js is swapped (before = HEAD,
  * after = working tree), rendered back-to-back per viewport from the same API bodies; every non-GET is refused; DB row
  * counts + newest timestamps compared before / after.
- *   node scripts/playwright-verify-sales-gap-tooltip-local.mjs
+ *   node scripts/playwright-verify-sales-gap-tooltip-local.mjs              (local: HEAD vs working tree)
+ *   PHASE=live node scripts/playwright-verify-sales-gap-tooltip-local.mjs   (production files + APIs only)
  */
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
@@ -22,6 +23,8 @@ const results = [];
 const check = (name, ok, note = '') => results.push({ name, ok: !!ok, note });
 const blocked = [];
 const errors = [];
+const LIVE = process.env.PHASE === 'live';
+const VERSION = 'tt-20261109a';
 const VIEW = { before: execSync('git show HEAD:lib/strategy-sales-gap.js', { encoding: 'utf8' }), after: fs.readFileSync('lib/strategy-sales-gap.js', 'utf8') };
 /** Both renders of a viewport get the SAME strategy-summary / prospects bodies, so live data churn can't show as a change. */
 const CACHED = ['/api/aigeo/strategy-summary', '/api/aigeo/prospects'];
@@ -39,7 +42,7 @@ const makeRoute = (view, cache) => async (r) => {
   const req = r.request();
   const url = new URL(req.url());
   if (req.method() !== 'GET') { if (url.pathname.startsWith('/api/')) blocked.push(`${req.method()} ${url.pathname}`); return r.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true,"dry_run":true}' }); }
-  if (url.pathname === '/lib/strategy-sales-gap.js') return r.fulfill({ status: 200, contentType: 'application/javascript', body: view });
+  if (view && url.pathname === '/lib/strategy-sales-gap.js') return r.fulfill({ status: 200, contentType: 'application/javascript', body: view });
   if (!CACHED.includes(url.pathname)) return r.fallback();
   if (cache[url.pathname]) return r.fulfill({ status: 200, contentType: 'application/json', body: cache[url.pathname] });
   const resp = await r.fetch();
@@ -81,7 +84,7 @@ async function openPage(browser, v, view, cache) {
   await page.evaluate(() => [...document.querySelectorAll('body *')].filter((el) => getComputedStyle(el).position === 'fixed' && el.getBoundingClientRect().top > window.innerHeight / 2).forEach((el) => { el.style.visibility = 'hidden'; }));
   return { ctx, page };
 }
-const shot = (name, v, phase = 'after') => `${OUT}/sales-gap-tooltip-${name}-${phase}-local-${v.key}-20261109.png`;
+const shot = (name, v, phase = LIVE ? 'live' : 'after-local') => `${OUT}/sales-gap-tooltip-${name}-${phase}-${v.key}-20261109.png`;
 async function exercise(page, v, key) {
   const icon = page.locator(`#st-sales-gap [data-sg-month="${key}"] [data-sg-tip]`);
   const card = page.locator(`#st-sales-gap [data-sg-month="${key}"]`);
@@ -117,10 +120,29 @@ function diffChecks(v, layout, prior) {
   check(`${v.key}: quarter tile unchanged (same HTML, position and size)`, layout.quarter.html === prior.quarter.html && same({ ...layout.quarter, text: '' }, { ...prior.quarter, text: '' }), `${prior.quarter.w}×${prior.quarter.h} → ${layout.quarter.w}×${layout.quarter.h}`);
 }
 
+/** PHASE=live: the deployed files and APIs only (GET), served ?v= checked against the committed file. */
+async function liveView(browser, v) {
+  const cache = {};
+  const { ctx, page } = await openPage(browser, v, null, cache);
+  const served = await page.evaluate(async () => {
+    const src = document.querySelector('script[src*="/lib/strategy-sales-gap.js"]')?.getAttribute('src') || '';
+    return { src, body: src ? await (await fetch(src, { cache: 'no-store' })).text() : '' };
+  });
+  const committed = execSync('git show 2c15cbb9:lib/strategy-sales-gap.js', { encoding: 'utf8' }).replace(/\r\n/g, '\n');
+  check(`${v.key}: production serves strategy-sales-gap.js?v=${VERSION}, byte-identical to 2c15cbb9`, served.src.endsWith(`?v=${VERSION}`) && served.body.replace(/\r\n/g, '\n') === committed, `${served.src} · ${served.body.length} bytes`);
+  await page.locator('#st-sales-gap').screenshot({ path: shot('tiles', v) });
+  const summary = JSON.parse(cache['/api/aigeo/strategy-summary']);
+  for (const key of ['2026-11', '2026-12', '2027-01']) tipChecks(v, key, await exercise(page, v, key), summary);
+  const q = await page.evaluate(() => document.querySelector('#st-sales-gap .sg-q')?.outerHTML || '');
+  check(`${v.key}: quarter tile has no tooltip (its If all sold is the true total)`, q && !/data-sg-tip|title="/.test(q), `${q.length} chars`);
+  await ctx.close();
+}
+
 const before = await dbState();
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const snap = {};
 for (const v of VIEWS) {
+  if (LIVE) { await liveView(browser, v); continue; }
   const cache = {};
   const a = await openPage(browser, v, VIEW.before, cache);
   const prior = await a.page.evaluate(layoutOf);
@@ -140,7 +162,7 @@ const changed = Object.keys(before).filter((x) => before[x] !== after[x]);
 check('viewing writes nothing (row counts + newest timestamps)', !changed.length, changed.map((x) => `${x}: ${before[x]} → ${after[x]}`).join(' | ') || `${Object.keys(TABLES).length} tables unchanged`);
 check('every non-GET refused', true, `${blocked.length} refused: ${[...new Set(blocked)].join(', ') || 'none attempted'}`);
 check('no page errors', !errors.length, errors.slice(0, 3).join(' | '));
-fs.writeFileSync(`${OUT}/_tt-layout.json`, JSON.stringify(snap, null, 1));
-fs.writeFileSync(`${OUT}/_tt-result.json`, JSON.stringify({ results, before, after }, null, 1));
+if (!LIVE) fs.writeFileSync(`${OUT}/_tt-layout.json`, JSON.stringify(snap, null, 1));
+fs.writeFileSync(`${OUT}/_tt-${LIVE ? 'live-' : ''}result.json`, JSON.stringify({ results, before, after }, null, 1));
 for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.note ? ` (${r.note})` : ''}`);
 process.exit(0);

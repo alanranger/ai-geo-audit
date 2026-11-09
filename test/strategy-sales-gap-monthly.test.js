@@ -139,6 +139,25 @@ test('(s) tap toggles the tooltip open / closed; a click elsewhere closes it', (
   assert.equal(tip.attrs['aria-expanded'], 'false');
 });
 
+test('committed work: "− committed £y" named in the monthly / Remedy / quarter "Still to find" when above £0; nothing at £0', () => {
+  const plain = gap(EVENTS);
+  const g = gap(EVENTS, { pipeline: { '2026-11': { total: 0, cats: {}, committed: 300, committed_cats: {} } } });
+  const nov = g.months[0];
+  assert.equal(nov.committed_gbp, 300);
+  assert.equal(nov.still_to_find, plain.months[0].still_to_find - 300, 'the .mjs already takes committed work off still to find');
+  assert.equal(g.remedy.rows[0].committed_gbp, 300);
+  const h = browser().stSalesGapHtml({ sales_gap: g });
+  const tile = h.tiles.slice(h.tiles.indexOf('data-sg-month="2026-11"'), h.tiles.indexOf('data-sg-month="2026-12"'));
+  assert.match(tile, new RegExp(`Still to find after normal and pipeline − committed £300: <span class="sg-amber">£${Math.round(nov.still_to_find).toLocaleString('en-GB')}</span>`));
+  assert.match(h.remedy, /− £0 pipeline − committed £300<\/div>/, 'Remedy "Still to find" cell names the arithmetic');
+  assert.match(h.remedy, /\(pipeline £0 · committed £300 counted\)/);
+  assert.match(h.tiles, /− pipeline £0 − committed £300<\/p>/, 'quarter details arithmetic');
+  const dec = h.remedy.slice(h.remedy.indexOf('<b>Dec</b>'));
+  assert.doesNotMatch(dec.slice(0, dec.indexOf('</tr>')), /committed/, 'a month with £0 committed shows nothing');
+  const zero = browser().stSalesGapHtml({ sales_gap: plain });
+  assert.doesNotMatch(`${zero.tiles}${zero.remedy}`.replace(/<li>[^<]*<\/li>/g, ''), /− committed|· committed/, '£0 committed: no wording anywhere');
+});
+
 test('monthly pipeline line reads pipeline_by_month; missing fields are £0; a failed read is an error', () => {
   assert.deepEqual(monthPipeline(undefined, null), { weighted: 0, dated: 0, undated: 0, overdue: 0 });
   assert.deepEqual(monthPipeline({ total: 530, cats: {} }, { total: 1410 }), { weighted: 530, dated: 0, undated: 0, overdue: 0 });
