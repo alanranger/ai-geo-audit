@@ -1,6 +1,6 @@
 # Runs cheatsheet — what each button does
 
-**Last updated:** 2026-09-28  
+**Last updated:** 2026-11-09  
 **Authoritative step list (code):** `audit-dashboard.html` → `globalRunStepCatalog()`  
 **Monday overnight:** same Full keys via `lib/ceo-weekly/dashboard-full-catalog.js`  
 **Full architecture:** [`GLOBAL-RUN.md`](./GLOBAL-RUN.md)  
@@ -94,6 +94,7 @@ If you ran **Standard** today but not **Full**, GA4, Schema QA, and 13-month rev
 ## Nightly / Monday cron
 
 - **Monday overnight** `ceo-weekly-full-refresh` = Dashboard **Full** step keys (server runners).
+- **The Monday overnight ranking scan is the only capture used for the dials and the CEO brief (rule from 9 Nov 2026).** No daytime or ad-hoc DataForSEO re-runs to "re-check" a scan. **Standard** and **Full** both include the Ranking & AI scan, so running either during the week replaces that week's dial figures; get Alan's approval first. Reason: the 2 Nov daytime re-run published Surface / Top of page 33 / 41, while the overnight scan of the same 94 keywords scored 18 / 25.
 - Other nightly jobs (citation, mentions, GSC) may still run on their own schedules — Full now also covers citation/mentions so Monday is not blind to them.
 
 ---
