@@ -18,12 +18,17 @@
  *     Sheet sale linked to the SAME client is matched; another client's sale is refused; several possible sales (or one
  *     not linked yet) leave it unmatched and flagged for review (history changes.match_review);
  *   - stage closed_lost needs lost_reason.
+ *   - revenue_type (QUESTION-2026-11-09 (r)): new_sale (default) / partner_development / committed_work / receivable, with
+ *     delivery_due + invoice_by (committed work). Stage "allocated" (Allocated · delivery pending) is committed work only
+ *     and is the default for it; a receivable defaults to "scheduled". A receivable is paid (booked_paid) only on a
+ *     same-client Booking Sheet matched_sale or paid_evidence { provider: paypal | stripe | squarespace | bank, ref } —
+ *     never on the buyer's word; committed work only on a Booking Sheet matched_sale (never automatically).
  * The same rules for Claude's loads through Supabase SQL: public.prospect_upsert(p jsonb) (migrations/prospect_upsert_function_20261109.sql).
  */
 import { createClient } from '@supabase/supabase-js';
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { randomUUID } from 'node:crypto';
-import { MARKETS, OWNERS, REVIEW, SOURCES, STAGES, TYPES, VALUE_BASES, pickClient, pickSale, prospectPersonRow, rowFlags, shortClientId } from '../../lib/strategy-prospects.mjs';
+import { DEFAULT_STAGE, MARKETS, OWNERS, PROVIDERS, REVENUE_TYPES, REVIEW, SOURCES, STAGES, TYPES, VALUE_BASES, pickClient, pickSale, prospectPersonRow, rowFlags, shortClientId } from '../../lib/strategy-prospects.mjs';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH_RE = /^(\d{4}-\d{2})(-\d{2})?$/;
@@ -86,7 +91,8 @@ const FIELDS = {
   enquiry_date: received, client_or_org: text(200), person_id: uuid, type: oneOf(TYPES, 'type'), value_gbp: money, stage: oneOf(STAGES, 'stage'), cash_month: cashMonth,
   next_action: text(300), next_action_date: date, owner: oneOf(OWNERS, 'owner'), last_touch_at: stamp, source: oneOfOrNull(SOURCES, 'source'),
   lost_reason: text(300), notes: text(500), customer_market: oneOf(MARKETS, 'customer_market'), value_basis: oneOf(VALUE_BASES, 'value_basis'),
-  value_basis_note: text(500), review_status: oneOf(REVIEW, 'review_status'), source_ref: text(200)
+  value_basis_note: text(500), review_status: oneOf(REVIEW, 'review_status'), source_ref: text(200),
+  revenue_type: oneOf(REVENUE_TYPES, 'revenue_type'), delivery_due: date, invoice_by: date
 };
 /** Only the fields sent are validated and written. */
 export function enquiryPatch(e) {
@@ -101,10 +107,11 @@ export function idOf(v) {
   return String(v);
 }
 const same = (a, b) => (a == null && b == null) || String(a) === String(b) || (Number.isFinite(Number(a)) && Number(a) === Number(b) && a !== '' && b !== '');
+const DATE_COLS = new Set(['cash_month', 'next_action_date', 'delivery_due', 'invoice_by']);
 export function changesOf(prev, patch) {
   const out = {};
   for (const [k, v] of Object.entries(patch)) {
-    const was = k === 'cash_month' || k === 'next_action_date' ? (prev?.[k] ? String(prev[k]).slice(0, 10) : null) : prev?.[k] ?? null;
+    const was = DATE_COLS.has(k) ? (prev?.[k] ? String(prev[k]).slice(0, 10) : null) : prev?.[k] ?? null;
     if (!same(was, v)) out[k] = { from: was, to: v };
   }
   return out;
@@ -120,9 +127,15 @@ function requiredFields(prev, patch) {
   if (!patch.value_basis && Number(patch.value_gbp) > 0) throw new Error('a new enquiry with a value needs value_basis (agreed / quoted / estimated / unknown)');
 }
 /** Stage rules: booked_paid needs a Booking Sheet match; closed_lost needs a reason; a new row needs who and what. */
+/** The row's revenue type and stage after this patch (a new row starts at its type's default stage). */
+function typeAndStage(prev, patch) {
+  const type = patch.revenue_type || prev?.revenue_type || 'new_sale';
+  return { type, stage: patch.stage || prev?.stage || DEFAULT_STAGE[type] };
+}
 export function stageRule(prev, patch, matched) {
-  const stage = patch.stage || prev?.stage || 'qualify';
+  const { type, stage } = typeAndStage(prev, patch);
   requiredFields(prev, patch);
+  if (stage === 'allocated' && type !== 'committed_work') throw new Error('stage allocated (Allocated · delivery pending) is for revenue_type committed_work only');
   if (stage === 'booked_paid' && prev?.stage !== 'booked_paid' && !matched) throw new Error('booked_paid needs matched_sale { txn_date, amount } from the Booking Sheet');
   if (stage === 'closed_lost' && !(patch.lost_reason || prev?.lost_reason)) throw new Error('closed_lost needs lost_reason');
   return stage;
@@ -198,6 +211,14 @@ async function writeHistory(sb, row) {
   const { error } = await sb.from('prospect_enquiry_history').insert(row);
   if (error) throw new Error(`history: ${error.message}`);
 }
+/** A receivable's payment seen at the provider (transaction id required): never the buyer's word alone. */
+export function providerEvidence(p, revenueType) {
+  if (revenueType !== 'receivable') throw new Error('paid_evidence is for receivables only; other types need a Booking Sheet matched_sale');
+  if (!PROVIDERS.includes(p?.provider) || !ID_RE.test(String(p?.ref ?? ''))) throw new Error(`paid_evidence needs { provider: ${PROVIDERS.join(' | ')}, ref: the provider transaction id }`);
+  return { evidence: 'provider', provider: p.provider, ref: String(p.ref) };
+}
+/** What lets a row become booked_paid: a matched sale; a review flag only for new sales (receivables / committed work need evidence). */
+export const proofOf = (sale, revenueType) => sale.sale || (['receivable', 'committed_work'].includes(revenueType) ? null : sale.review) || null;
 /** De-duplication for loads: the same source message (source_ref) for the same client is the same enquiry. */
 async function bySourceRef(sb, patch) {
   if (!patch.source_ref || !patch.person_id) return null;
@@ -208,12 +229,12 @@ async function upsertEnquiry(sb, b, now, by) {
   const id = idOf(e.id);
   const patch = enquiryPatch(e);
   const byId = id ? await one(sb.from('prospect_enquiry').select('*').eq('id', id)) : null;
-  stageRule(byId, patch, b.matched_sale);
+  stageRule(byId, patch, b.matched_sale || b.paid_evidence);
   const client = await resolveClient(sb, e, patch, byId, now);
   if (client) patch.person_id = client.person_id;
   const prev = byId || (await bySourceRef(sb, patch));
-  const sale = await matchSale(sb, b.matched_sale, patch.person_id || prev?.person_id);
-  const ctx = { patch, sale, stage: stageRule(prev, patch, sale.sale || sale.review), now, by, via: viaOf(b), client };
+  const sale = b.paid_evidence ? { sale: providerEvidence(b.paid_evidence, patch.revenue_type || prev?.revenue_type) } : await matchSale(sb, b.matched_sale, patch.person_id || prev?.person_id);
+  const ctx = { patch, sale, stage: stageRule(prev, patch, proofOf(sale, patch.revenue_type || prev?.revenue_type)), now, by, via: viaOf(b), client };
   return prev ? updateEnquiry(sb, prev, ctx) : createEnquiry(sb, id, ctx);
 }
 const reviewOut = (sale) => (sale.review ? { sale_review: sale.review } : {});

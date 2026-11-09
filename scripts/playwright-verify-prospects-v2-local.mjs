@@ -17,6 +17,8 @@ const ENV = Object.fromEntries(fs.readFileSync('.env.vercel.prod', 'utf8').split
 Object.assign(process.env, ENV);
 const PHASE = ['fixture', 'prod'].includes(process.env.PHASE) ? process.env.PHASE : 'live';
 const PROD = PHASE === 'prod';
+/** R=1 (QUESTION-2026-11-09 (r)): live phase with one TEST row per revenue type → prospects-r-* screenshots + line checks. */
+const R = process.env.R === '1' && PHASE === 'live';
 const VERSION = 'pp-20261109a';
 const BASE = 'https://ai-geo-audit.vercel.app';
 const TODAY = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
@@ -93,6 +95,23 @@ function readUi() {
   };
 }
 
+/** (r): each TEST row in its own line on the tile and table; Revenue type filter; Remedy carries committed only. */
+async function rChecks(page) {
+  const ui = await page.evaluate(readUi);
+  const s = JSON.parse(summaryBody);
+  const pr = s.prospects;
+  check('(r) tile lines: Pipeline weighted (new sales only) · Committed work by cash month · Cash to collect · Partner relationships', /Pipeline, weighted new sales, open stages £200/.test(ui.tile) && /Committed work £125 \(1 allocated, delivery pending: Dec £125/.test(ui.tile) && /Cash to collect £250 \(1 invoiced, payment unverified/.test(ui.tile) && /Partner relationships 1 \(unvalued: 1 of 1/.test(ui.tile), ui.tile);
+  check('(r) table: Revenue type column; Allocated · delivery pending with delivery / invoice-by dates; committed / to collect / not in totals', ui.heads.includes('Revenue type') && ['Allocated · delivery pending', 'delivery 3 Dec · invoice by 11 Dec', 'Invoiced · payment unverified', 'Partner · ongoing', '£125 committed', '£250 to collect', 'not in totals'].every((x) => ui.table.includes(x)), `${ui.rows} rows`);
+  const rem = s.sales_gap?.remedy?.rows || [];
+  check('(r) summary: lines apart, Remedy has committed in Dec only, receivable in no month', pr.pipeline.total === 200 && pr.committed.total_gbp === 125 && pr.cash_to_collect.total_gbp === 250 && pr.partners.count === 1 && !pr.by_month['2026-11'] && rem.map((r) => r.committed_gbp).join(',') === '0,125,0', JSON.stringify({ remedy: rem.map((r) => [r.label, r.pipeline_weighted, r.committed_gbp]), by_month: pr.by_month }));
+  await page.locator('#st-prospects .pp-total').screenshot({ path: shot('pipeline-tile') });
+  await page.selectOption('#st-prospects [data-pp-f="rtype"]', 'committed_work');
+  await page.waitForTimeout(300);
+  const f = await page.evaluate(readUi);
+  check('(r) Revenue type filter: committed work → 1 row', f.rows === 1 && f.table.includes('Allocated · delivery pending'), `${f.rows} rows`);
+  await page.locator('#st-prospects').screenshot({ path: shot('filter-committed') });
+  await page.selectOption('#st-prospects [data-pp-f="rtype"]', '');
+}
 const before = await dbState();
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const page = await browser.newPage({ viewport: { width: 1700, height: 1100 } });
@@ -102,7 +121,8 @@ await page.goto(`${BASE}/audit-dashboard.html#strategy`, { waitUntil: 'domconten
 await page.waitForFunction(() => document.querySelector('#st-prospects .pp-total') && (document.querySelector('#st-prospects .pp-table') || /Enquiries unavailable/.test(document.getElementById('st-prospects').textContent)), null, { timeout: 110000 });
 await page.waitForTimeout(2500);
 await page.evaluate(() => [...document.querySelectorAll('body *')].filter((el) => getComputedStyle(el).position === 'fixed' && el.getBoundingClientRect().top > window.innerHeight / 2).forEach((el) => { el.style.visibility = 'hidden'; }));
-const shot = (name) => (PROD ? `outputs/prospects-v2-${name}-live-1700px-20261109.png` : `outputs/prospects-v2-${PHASE}-${name}-local-1700px-20261109.png`);
+const shotOf = { prod: (name) => `outputs/prospects-v2-${name}-live-1700px-20261109.png`, r: (name) => `outputs/prospects-r-${name}-local-1700px-20261109.png` };
+const shot = shotOf[PROD ? 'prod' : R ? 'r' : ''] || ((name) => `outputs/prospects-v2-${PHASE}-${name}-local-1700px-20261109.png`);
 if (PROD) {
   const served = await page.evaluate(async () => {
     const src = document.querySelector('script[src*="/lib/strategy-prospects.js"]')?.getAttribute('src') || '';
@@ -142,6 +162,7 @@ if (PHASE === 'fixture') {
     check('Pipeline tile at £0: D2C £0 · B2B £0, dated £0 · undated £0, no overdue line', /£0 D2C £0 · B2B £0 dated £0 · undated £0/.test(ui.tile) && !/overdue/.test(ui.tile), ui.tile);
     check('production summary carries the new pipeline fields', ['dated_gbp', 'undated_gbp', 'overdue_gbp', 'overdue_count', 'by_market', 'undated_weighted', 'total'].every((k) => k in pl), JSON.stringify({ total: pl.total, dated_gbp: pl.dated_gbp, undated_gbp: pl.undated_gbp, overdue_gbp: pl.overdue_gbp, overdue_count: pl.overdue_count, unknown_count: pl.unknown_count, markets: Object.keys(pl.by_market || {}) }));
   }
+  if (R) await rChecks(page);
   const sg = JSON.parse(summaryBody).sales_gap?.rolling?.pipeline;
   check('quarter tile pipeline line reads the summary feed (dated / undated)', !!ui.pipe && /dated/.test(ui.pipe) && /undated/.test(ui.pipe), `${ui.pipe} · feed ${JSON.stringify(sg)}`);
   await page.locator('#st-sales-gap .sg-q').screenshot({ path: shot('quarter-tile') }).catch(() => {});

@@ -64,7 +64,7 @@ test('revalidate is a flag only: nothing is lost or closed by age', () => {
   assert.deepEqual(rows, JSON.parse(JSON.stringify(ROWS)), 'rows untouched');
   assert.equal(s.closed_lost, 0);
   assert.equal(s.pipeline.open, ROWS.length, 'every enquiry still open months later');
-  assert.deepEqual(rowFlags(ROWS[3], TODAY), { overdue_cash: false, undated: true, value_unknown: false, estimated: true, revalidate: true });
+  assert.deepEqual(rowFlags(ROWS[3], TODAY), { overdue_cash: false, undated: true, value_unknown: false, estimated: true, revalidate: true, revenue_type: 'new_sale', line: 'pipeline', allocated: false });
   assert.equal(rowFlags(ROWS[2], TODAY).overdue_cash, true);
 });
 
