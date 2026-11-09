@@ -44,7 +44,7 @@ async function localSummary() {
 }
 
 async function routes(page) {
-  await page.addInitScript((k) => { sessionStorage.setItem('arp_admin_key', k); localStorage.setItem('mks-view', 'days'); }, ENV.ARP_ADMIN_KEY);
+  await page.addInitScript((k) => { sessionStorage.setItem('arp_admin_key', k); localStorage.setItem('mks-view', 'days'); localStorage.setItem('mks-layout', 'days'); }, ENV.ARP_ADMIN_KEY);
   await page.route('**/*', async (route) => {
     const req = route.request();
     const url = new URL(req.url());
@@ -126,7 +126,10 @@ async function strategy(browser) {
   const boxes = await page.evaluate(() => [...document.querySelectorAll('#st-quarter-plan .qp-card')].slice(0, 2).map((c) => [...c.querySelectorAll('.qp-kpi')].map((k) => `${k.querySelector('.qp-kl')?.textContent.trim()}: ${k.querySelector('.qp-kv')?.textContent.trim()} (${k.querySelector('.qp-ks')?.textContent.trim()})`).find((t) => /beginners/i.test(t))));
   check('Q1 KPI box "Non-JLR beginners: moved to Jan course"; Q2 box "8 by 27 Jan · 17 by Mar"', /^Non-JLR beginners: moved to Jan course/.test(boxes[0] || '') && /^Non-JLR beginners: 8 by 27 Jan · 17 by Mar 27/.test(boxes[1] || ''), boxes.join(' | '));
   const academy = await page.evaluate(() => [...document.querySelectorAll('#st-quarter-plan .qp-card.is-current .qp-ini')].filter((i) => /Academy/.test(i.querySelector('.qp-it')?.textContent || '')).map((i) => [...i.querySelectorAll('.qp-l')].map((l) => l.textContent.replace(/\s+/g, ' ').trim()).join(' | '))[0] || '');
-  if (process.env.EXPECT_ACADEMY_NEXT) check(`Academy initiative next action reads ${process.env.EXPECT_ACADEMY_NEXT}; "Target not set" kept`, academy.includes(`Next: Email: Your next step with the Photography Academy · ${process.env.EXPECT_ACADEMY_NEXT}`), academy);
+  if (process.env.EXPECT_ACADEMY_NEXT) check(`Academy initiative next action reads ${process.env.EXPECT_ACADEMY_NEXT}; "Target not set" kept`, academy.includes('Next: Email: Your next step with the Photography Academy · ') && academy.includes(process.env.EXPECT_ACADEMY_NEXT), academy);
+  const WORD = /(✅ (Sent|Published)|🕒 Scheduled|⚠ Needs approval|📄 In preparation|… Checking delivery|⏰ Late|✖ Failed|\? Verification unavailable|⊘ Cancelled|✓ Done)/;
+  const nextLines = await page.evaluate(() => [...document.querySelectorAll('#st-quarter-plan .qp-l')].map((l) => l.textContent.replace(/\s+/g, ' ').trim()).filter((t) => /^Next:/.test(t) && !/\(manual\)|Next: —/.test(t)));
+  check('every initiative next action shows the shared status word + icon', nextLines.length > 0 && nextLines.every((t) => WORD.test(t)), nextLines.map((t) => t.replace(/ → Marketing$/, '')).join(' | '));
   const next = await page.locator('#st-next-delivery').evaluate((el) => ({ text: el.textContent.replace(/\s+/g, ' ').trim(), key: el.dataset.nextKey }));
   const tiles = (await page.locator('#st-where').innerText()).replace(/\s+/g, ' ');
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -147,19 +150,20 @@ async function strategy(browser) {
   return { next, tiles, s, openH, layout, needs, norfolk };
 }
 
-async function marketing(browser) {
+async function marketing(browser, closedKeys = []) {
   const page = await open(browser, 'marketing', () => document.querySelector('#mk-schedule .mks-days') && document.querySelector('#mk-overview-tiles .mko-tile') && !/Loading/.test(document.querySelector('#mk-overview-tiles')?.textContent || 'Loading'));
-  const first = await page.evaluate(() => {
+  const first = await page.evaluate((closed) => {
     const t = document.querySelector('#mk-schedule table.mks-days');
     const cards = [];
+    const isClosed = (id) => String(id).split('|').some((part, i, a) => closed.includes(part) || closed.includes(a.slice(i).join('|')));
     [...t.querySelectorAll('tr')].slice(1).forEach((tr, ri) => [...tr.querySelectorAll('td')].slice(1).forEach((td, ci) => td.querySelectorAll('.mks-card[data-mks-item]').forEach((c) => {
-      if (/s-(done|late|resolved)/.test(c.className)) return;
+      if (/s-(done|late|resolved)/.test(c.className) || isClosed(c.dataset.mksItem)) return;
       const time = (c.textContent.match(/\b(\d{2}:\d{2})\b/) || [])[1] || '99';
       cards.push({ id: c.dataset.mksItem, ci, ri, time, title: c.title });
     })));
     cards.sort((a, b) => a.ci - b.ci || a.time.localeCompare(b.time) || a.ri - b.ri);
     return cards[0] || null;
-  });
+  }, closedKeys);
   const tiles = (await page.locator('#mk-overview-tiles').evaluate((el) => el.textContent)).replace(/\s+/g, ' ');
   await page.waitForFunction(() => /^\d+$/.test(document.querySelector('.mkw-n')?.textContent.trim() || '') || /Decisions unavailable/.test(document.body.textContent), null, { timeout: 120000 }).catch(() => {});
   const waiting = await page.evaluate(() => (document.querySelector('.mkw-n')?.textContent || '').trim());
@@ -173,7 +177,7 @@ async function marketing(browser) {
 const before = await dbState();
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const st = await strategy(browser);
-const mk = await marketing(browser);
+const mk = await marketing(browser, Object.entries(st.s?.delivery_status?.by_key || {}).filter(([, v]) => ['sent', 'published', 'done', 'cancelled'].includes(v.code)).map(([k]) => k));
 await browser.close();
 const after = await dbState();
 check('Next delivery matches Marketing Planned\'s first item', mk.first && st.next.key === mk.first.id, `Strategy: ${st.next.text} [${st.next.key}] · Marketing first card: ${mk.first?.title} [${mk.first?.id}]`);
@@ -181,6 +185,8 @@ check('Strategy Needs Alan count = Marketing "Waiting on you" count', String(st.
 const pubKeys = st.s?.needs_alan?.published || [];
 const pubRows = Object.values(st.s?.quarter_plan?.initiatives || {}).flatMap((i) => (i.deliveries || []).filter((d) => pubKeys.includes(d.key)).map((d) => `${i.key}: ${d.key} ${d.status}${d.draft ? ' draft' : ''}${i.next?.key === d.key ? ' NEXT' : ''}`));
 check('published posts (shared state) are published on Strategy: not drafts, not a next action', pubKeys.length > 0 && pubRows.length > 0 && pubRows.every((r) => / published$/.test(r)) && !st.norfolk.length, `published ${pubKeys.join(', ')} → ${pubRows.join(' | ')} · Norfolk "Next:" lines: ${st.norfolk.length}`);
+const nexts = Object.values(st.s?.quarter_plan?.initiatives || {}).flatMap((i) => [i.next, i.next?.then].filter((n) => n && n.status));
+check('no sent / published / done item is a next action; Next delivery line uses the same status vocabulary', nexts.length && nexts.every((n) => !['sent', 'published', 'done', 'cancelled'].includes(n.status.code)) && /(🕒 Scheduled|📄 In preparation|⚠ Needs approval|… Checking delivery|⏰ Late|\? Verification unavailable)/.test(st.next.text), `${nexts.length} next items: ${[...new Set(nexts.map((n) => n.status.code))].join(', ')} · ${st.next.text} · board ${st.s?.delivery_status?.error || `${Object.keys(st.s?.delivery_status?.by_key || {}).length} keys, last checked ${st.s?.delivery_status?.last_checked}`}`);
 const n3 = st.s?.insights?.rows?.money?.find((t) => t.key === 'money-next-3')?.numbers;
 const ret = st.s?.roadmap_now?.returning_r12;
 const k = (v) => `£${(Math.round(Math.abs(v) / 100) / 10).toLocaleString('en-GB')}k`;
