@@ -293,3 +293,29 @@ test('Waiting: a restricted Short row has one "Open" button (per-video view hook
   assert.match(rows[0].btn, />Open</);
   assert.match(rows[0].chip, /Needs attention/);
 });
+
+/* ---------- live audit (g): frequency double count, blocked labelling ---------- */
+
+test('frequency: a Sent report already counted from its snapshot (same provider id) is not counted again', async () => {
+  const F = await import('../lib/marketing/frequency.mjs');
+  const live = [{ campaign_key: 'theme|return-9nov', sqs_email_id: null, sqs_draft_id: 'p9' }, { campaign_key: 'theme|gifts-12nov', sqs_draft_id: 'p12' }];
+  const ids = F.knownIdsOf(live);
+  assert.equal(F.notCounted({ email_id: 'p9', campaign_key: null }, new Set(['theme|return-9nov']), ids), false, 'the 9 Nov Sent report is the snapshot campaign itself');
+  assert.equal(F.notCounted({ email_id: 'other', campaign_key: null }, new Set(), ids), true);
+  const people = Array.from({ length: 109 }, (_, i) => `p${i}@x`);
+  const emails = [{ key: 'theme|return-9nov', day: '2026-11-09', people, owners: 0, exception: false }, { key: 'theme|gifts-12nov', day: '2026-11-12', people, owners: 0, exception: false }];
+  const w = F.windowStats({ emails }, '2026-11-09', '2026-11-15');
+  assert.deepEqual([w.by_count[2], w.by_count[3], w.unapproved_over], [109, 0, 0], 'two emails each, not three');
+  const dup = F.windowStats({ emails: [...emails, { key: 'sqs:p9', day: '2026-11-09', people, owners: 0, exception: false }] }, '2026-11-09', '2026-11-15');
+  assert.equal(dup.unapproved_over, 109, 'the old double count produced the false "109 people get 3"');
+});
+
+test('decision state: only people a third email reaches WITHOUT an approved exception are a decision (exact count); blocked label 3 / 2 / 1', () => {
+  const base = { today: '2026-11-09', planApproved: { decided_at: 'x' }, drafts: 0, release: [], outlook: [], blockedOpen: 0, actions: [], verified: [] };
+  assert.equal(openDecisions({ ...base, frequency: { from: '2026-11-06', to: '2026-11-12', approved_over: 39, unapproved_over: 0 } }).length, 0, 'all covered by the approval: not re-asked');
+  const rows = openDecisions({ ...base, frequency: { from: '2026-11-16', to: '2026-11-22', approved_over: 4, unapproved_over: 12 } });
+  assert.deepEqual(rows.map((r) => [r.type, r.what, r.why]), [['frequency', '12 people get 3+ emails in 7 days (Mon 16 Nov – Sun 22 Nov) without an approved exception', 'Not covered by an approved exception (4 more are covered) · approve or move one']]);
+  const b = openDecisions({ ...base, blockedOpen: 1, blocked: { total: 3, decided: 2, open: 1 } });
+  assert.deepEqual(b.map((r) => [r.what, r.why]), [['Review 1 new blocked contact showing as subscribed again', '3 total · 2 decided (keep blocked) · 1 new']]);
+  assert.equal(openDecisions({ ...base, blockedOpen: 0, blocked: { total: 2, decided: 2, open: 0 } }).length, 0, 'the 2 kept blocked are never reopened');
+});
