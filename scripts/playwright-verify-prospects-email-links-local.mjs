@@ -6,6 +6,7 @@
  *   node scripts/playwright-verify-prospects-email-links-local.mjs
  */
 import fs from 'node:fs';
+import { execSync } from 'node:child_process';
 import { chromium } from 'playwright';
 import { createClient } from '@supabase/supabase-js';
 import { clientEntry } from '../api/aigeo/prospects.js';
@@ -13,6 +14,11 @@ import { clientEntry } from '../api/aigeo/prospects.js';
 const ENV = Object.fromEntries(fs.readFileSync('.env.vercel.prod', 'utf8').split(/\r?\n/).filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).replace(/^"|"$/g, '').trim()]));
 Object.assign(process.env, ENV);
 const BASE = 'https://ai-geo-audit.vercel.app';
+/** PHASE=live: production files + APIs only (GET); the admin response stays in memory. */
+const LIVE = process.env.PHASE === 'live';
+const COMMIT = '07b5ab27';
+const VERSION = 'em-20261109a';
+const TAG = LIVE ? 'live' : 'local';
 const OUT = 'outputs';
 const GMAIL = 'https://mail.google.com/mail/?authuser=info@alanranger.com';
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
@@ -48,6 +54,7 @@ async function route(r) {
   const url = new URL(req.url());
   if (url.hostname === 'mail.google.com') { gmailBlocked.push('gmail'); return r.abort(); }
   if (req.method() !== 'GET') { if (url.pathname.startsWith('/api/')) blocked.push(`${req.method()} ${url.pathname}`); return r.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true,"dry_run":true}' }); }
+  if (LIVE) return r.fallback();
   if (url.pathname === '/lib/strategy-prospects.js') return r.fulfill({ status: 200, contentType: 'application/javascript', body: fs.readFileSync('lib/strategy-prospects.js', 'utf8') });
   if (url.pathname === '/api/aigeo/prospects') return r.fulfill({ status: 200, contentType: 'application/json', body: API.admin.body });
   if (url.pathname === '/api/aigeo/strategy-summary') return r.fulfill({ status: 200, contentType: 'application/json', body: API.summary.body });
@@ -96,12 +103,44 @@ function domChecks(dom, admin) {
   const refOk = dom.every((d) => (byRef[d.enq]?.mail ? d.ref === byRef[d.enq].mail.href && d.refTarget === '_blank' : d.ref === null));
   check(`rendered: Ref links only where source_ref is set (${dom.filter((d) => d.ref).length} links)`, refOk, 'compared in memory');
 }
+/** The two rows named in the question: ENQ-0012's Client ID (all mail with the client) and ENQ-0001's Ref (the original email). */
+const searchQuery = (href) => decodeURIComponent(String(href).split('#search/')[1] || '');
+const isClientSearch = (q) => /^from:(\S+@\S+) OR to:\1$/.test(q) || /^"[^"]+"$/.test(q);
+function clientIdCheck(dom, admin, ref) {
+  const row = (admin.rows || []).find((r) => r.enquiry_ref === ref);
+  const c = row ? admin.clients?.[row.person_id] : null;
+  const d = dom.find((x) => x.enq === ref) || {};
+  if (!c?.mail) return check(`${ref}: Client ID opens Gmail (all mail with the client)`, false, `${ref} or its client link not found`);
+  const ok = c.mail.href.startsWith(`${GMAIL}#search/`) && isClientSearch(searchQuery(c.mail.href)) && d.client === c.mail.href && d.clientTarget === '_blank' && d.info;
+  return check(`${ref}: Client ID ${c.id} opens Gmail with all mail to / from the client (new tab); ⓘ client record beside it`, ok, `${maskHref(c.mail.href)} · "${c.mail.title}" · rendered = admin href ${d.client === c.mail.href} · ⓘ ${!!d.info}`);
+}
+function refCheck(dom, admin, ref) {
+  const row = (admin.rows || []).find((r) => r.enquiry_ref === ref);
+  const d = dom.find((x) => x.enq === ref) || {};
+  if (!row?.mail) return check(`${ref}: Ref opens the original enquiry email`, false, 'no link');
+  const ok = row.mail.href === `${GMAIL}#all/${encodeURIComponent(String(row.source_ref).trim())}` && d.ref === row.mail.href && d.refTarget === '_blank' && row.mail.title === 'Open the original enquiry email';
+  return check(`${ref}: Ref opens the original enquiry email (#all/{source_ref}, new tab)`, ok, `${maskHref(row.mail.href)} · "${row.mail.title}"`);
+}
+function namedChecks(dom, admin) {
+  clientIdCheck(dom, admin, 'ENQ-0012');
+  refCheck(dom, admin, 'ENQ-0001');
+}
+/** Production serves the Prospects view at ?v=em-20261109a, identical to the commit (a leading byte-order mark aside). */
+async function servedCheck(page) {
+  const served = await page.evaluate(async () => {
+    const src = document.querySelector('script[src*="/lib/strategy-prospects.js"]')?.getAttribute('src') || '';
+    return { src, body: src ? await (await fetch(src, { cache: 'no-store' })).text() : '' };
+  });
+  const clean = (t) => t.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  const committed = clean(execSync(`git show ${COMMIT}:lib/strategy-prospects.js`, { encoding: 'utf8' }));
+  check(`production serves strategy-prospects.js?v=${VERSION}, identical to ${COMMIT}`, served.src.endsWith(`?v=${VERSION}`) && clean(served.body) === committed, `${served.src} · ${served.body.length} bytes`);
+}
 function scan(obj) {
   return (JSON.stringify(obj ?? null).match(EMAIL_RE) || []).length;
 }
 async function publicChecks() {
   const local1 = JSON.parse(API.summary.body);
-  check('PUBLIC strategy summary (local code): 0 emails in prospects + sales_gap', scan(local1.prospects) === 0 && scan(local1.sales_gap) === 0 && !/mail\.google/.test(JSON.stringify([local1.prospects, local1.sales_gap])), `prospects ${scan(local1.prospects)} · sales_gap ${scan(local1.sales_gap)} · whole summary ${scan(local1)} (other sections)`);
+  check(`PUBLIC strategy summary (${LIVE ? 'production, as the page loaded it' : 'local code'}): 0 emails in prospects + sales_gap`, scan(local1.prospects) === 0 && scan(local1.sales_gap) === 0 && !/mail\.google/.test(JSON.stringify([local1.prospects, local1.sales_gap])), `prospects ${scan(local1.prospects)} · sales_gap ${scan(local1.sales_gap)} · whole summary ${scan(local1)} (other sections)`);
   const prod = await (await fetch(`${BASE}/api/aigeo/strategy-summary`)).json();
   check('PUBLIC strategy summary (production, unauthenticated GET): 0 emails in prospects + sales_gap', scan(prod.prospects) === 0 && scan(prod.sales_gap) === 0, `prospects ${scan(prod.prospects)} · sales_gap ${scan(prod.sales_gap)} · whole summary ${scan(prod)}`);
   const noKeyProd = await fetch(`${BASE}/api/aigeo/prospects`);
@@ -111,8 +150,9 @@ async function publicChecks() {
 }
 
 const before = await dbState();
-API.admin = await local('prospects', { 'x-arp-admin-key': ENV.ARP_ADMIN_KEY });
-API.summary = await local('strategy-summary', {});
+const prod = async (path, headers = {}) => { const r = await fetch(`${BASE}${path}`, { headers }); return { body: await r.text(), status: r.status }; };
+API.admin = LIVE ? await prod('/api/aigeo/prospects', { 'x-arp-admin-key': ENV.ARP_ADMIN_KEY }) : await local('prospects', { 'x-arp-admin-key': ENV.ARP_ADMIN_KEY });
+API.summary = LIVE ? await prod('/api/aigeo/strategy-summary') : await local('strategy-summary', {});
 const admin = JSON.parse(API.admin.body);
 hrefChecks(admin);
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
@@ -126,6 +166,8 @@ await page.waitForFunction(() => document.querySelector('#st-prospects .pp-table
 await page.waitForTimeout(2000);
 const dom = await page.evaluate(domOf);
 domChecks(dom, admin);
+namedChecks(dom, admin);
+if (LIVE) await servedCheck(page);
 await page.evaluate(() => {
   for (const tr of document.querySelectorAll('#st-prospects .pp-table tbody tr')) [...tr.cells].forEach((td, i) => { if (![0, 2].includes(i)) td.textContent = '•••'; });
   for (const a of document.querySelectorAll('#st-prospects a[data-pp-mail]')) a.setAttribute('href', '#masked');
@@ -135,7 +177,7 @@ await page.evaluate(() => {
 });
 const masked = await page.evaluate(() => [...document.querySelectorAll('#st-prospects .pp-table tbody tr')].map((tr) => tr.innerText).join(' '));
 check('screenshot is free of emails and names (all cells but Ref / Client ID masked)', !(masked.match(EMAIL_RE) || []).length, `${dom.length} rows masked`);
-await page.locator('#st-prospects .pp-table').screenshot({ path: `${OUT}/prospects-email-links-table-masked-local-1700px-20261109.png` });
+await page.locator('#st-prospects .pp-table').screenshot({ path: `${OUT}/prospects-email-links-table-masked-${TAG}-1700px-20261109.png` });
 await browser.close();
 await publicChecks();
 const after = await dbState();
@@ -143,6 +185,6 @@ const changed = Object.keys(before).filter((x) => before[x] !== after[x]);
 check('viewing writes nothing (row counts + newest timestamps)', !changed.length, changed.map((x) => `${x}: ${before[x]} → ${after[x]}`).join(' | ') || `${Object.keys(TABLES).length} tables unchanged`);
 check('every non-GET refused; nothing clicked through to Gmail', true, `${blocked.length} refused · ${gmailBlocked.length} Gmail requests blocked`);
 check('no page errors', !errors.length, errors.slice(0, 3).join(' | '));
-fs.writeFileSync(`${OUT}/_em-result.json`, JSON.stringify({ results, before, after }, null, 1));
+fs.writeFileSync(`${OUT}/_em-${TAG}-result.json`, JSON.stringify({ results, before, after }, null, 1));
 for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.note ? ` (${r.note})` : ''}`);
 process.exit(0);

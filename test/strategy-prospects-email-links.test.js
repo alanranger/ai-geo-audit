@@ -59,7 +59,7 @@ test('UI: Client ID opens Gmail (new tab), the client record is the ⓘ beside i
   assert.ok(html.includes(`<a href="${a}" target="_blank" rel="noopener noreferrer" title="${CLIENT_MAIL_TITLE}" data-pp-mail>C-111111</a> <a href="#" class="pp-info" data-pp-client="${P1}"`), 'client ID → Gmail; ⓘ → client record');
   assert.ok(html.includes(`title="${CLIENT_MAIL_TITLE} · no email on file (searches the client name)" data-pp-mail>C-222222</a>`), 'no email: quoted-name search, tooltip');
   assert.ok(html.includes(`<a href="${GMAIL.replace(/&/g, '&amp;')}#all/19a2b3c4d5e6f7a8" target="_blank" rel="noopener noreferrer" title="${ENQUIRY_MAIL_TITLE}" data-pp-mail>ENQ-9001</a>`), 'Ref → original enquiry email');
-  assert.match(html, /<td class="left">ENQ-9002<\/td>/, 'no source_ref: plain ref, no link');
+  assert.match(html, /<span class="pp-nw">ENQ-9002<\/span>/, 'no source_ref: plain ref, no link');
   assert.match(html, /aria-label="Client record">ⓘ<\/a>/);
 });
 

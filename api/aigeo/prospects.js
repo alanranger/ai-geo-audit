@@ -28,12 +28,21 @@
  *   - Gmail links (QUESTION-2026-11-09 (x)), GET only: clients[person_id].mail = all mail to / from the linked
  *     customer_person's email (or the quoted name: "no email on file"); rows[].mail = the original enquiry email
  *     (source_ref). The email is read server-side here and never appears in the public strategy summary.
+ *   - QUESTION-2026-11-09 (z / bb): an update may name the row by id OR enquiry_ref (an unknown enquiry_ref is refused);
+ *     the row is found (id / enquiry_ref, else source_ref + client) BEFORE validation and nothing is written until it
+ *     passes; committed work: allocated / delivered / invoiced (committed only); closed_lost needs lost_reason (a code:
+ *     not_interested / no_response / went_elsewhere / too_expensive / not_a_fit / duplicate / other — other needs
+ *     status_note); parked needs revisit_on. A refused change returns { error, field, reason } for the form.
+ *   - GET rows carry priority { band, score, tip } (new sales at open stages) and flags.parked_due.
  * The same rules for Claude's loads through Supabase SQL: public.prospect_upsert(p jsonb) (migrations/prospect_upsert_function_20261109.sql).
  */
 import { createClient } from '@supabase/supabase-js';
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_STAGE, MARKETS, OWNERS, PROVIDERS, REVENUE_TYPES, REVIEW, SOURCES, STAGES, TYPES, VALUE_BASES, clientMailLink, enquiryMailLink, pickClient, pickSale, prospectPersonRow, rowFlags, shortClientId } from '../../lib/strategy-prospects.mjs';
+import {
+  COMMITTED_STAGES, DEFAULT_STAGE, LOST_CODES, LOST_REASONS, MARKETS, OWNERS, PRIORITY_ASSUMPTIONS, PROVIDERS, REVENUE_TYPES, REVIEW, SOURCES, STAGES, TYPES, VALUE_BASES,
+  clientMailLink, enquiryMailLink, pickClient, pickSale, prioritiesOf, probsOf, prospectPersonRow, rowFlags, shortClientId
+} from '../../lib/strategy-prospects.mjs';
 import { REVALIDATE_FACTOR } from '../../lib/strategy-sales-gap.mjs';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -61,11 +70,11 @@ const oneOf = (list, name) => (v) => {
   return v;
 };
 const oneOfOrNull = (list, name) => (v) => (v == null || v === '' ? null : oneOf(list, name)(v));
-function date(v) {
+const dateOf = (name) => (v) => {
   if (v == null || v === '') return null;
-  if (!DATE_RE.test(String(v))) throw new Error('dates must be YYYY-MM-DD');
+  if (!DATE_RE.test(String(v))) throw new Error(`${name} must be YYYY-MM-DD`);
   return String(v);
-}
+};
 function cashMonth(v) {
   if (v == null || v === '') return null;
   const m = MONTH_RE.exec(String(v));
@@ -89,7 +98,7 @@ function uuid(v) {
   return String(v);
 }
 function received(v) {
-  const d = date(v);
+  const d = dateOf('enquiry_date')(v);
   if (d && d > new Date(Date.now() + 864e5).toISOString().slice(0, 10)) throw new Error('enquiry_date cannot be in the future');
   return d;
 }
@@ -107,10 +116,10 @@ export function eventRef(v) {
 }
 const FIELDS = {
   enquiry_date: received, client_or_org: text(200), person_id: uuid, type: oneOf(TYPES, 'type'), value_gbp: money, stage: oneOf(STAGES, 'stage'), cash_month: cashMonth,
-  next_action: text(300), next_action_date: date, owner: oneOf(OWNERS, 'owner'), last_touch_at: stamp, source: oneOfOrNull(SOURCES, 'source'),
-  lost_reason: text(300), notes: text(500), customer_market: oneOf(MARKETS, 'customer_market'), value_basis: oneOf(VALUE_BASES, 'value_basis'),
-  value_basis_note: text(500), review_status: oneOf(REVIEW, 'review_status'), source_ref: text(200),
-  revenue_type: oneOf(REVENUE_TYPES, 'revenue_type'), delivery_due: date, invoice_by: date, relates_to_event: eventRef
+  next_action: text(300), next_action_date: dateOf('next_action_date'), owner: oneOf(OWNERS, 'owner'), last_touch_at: stamp, source: oneOfOrNull(SOURCES, 'source'),
+  lost_reason: oneOfOrNull(LOST_CODES, 'lost_reason'), status_note: text(300), revisit_on: dateOf('revisit_on'), notes: text(500),
+  customer_market: oneOf(MARKETS, 'customer_market'), value_basis: oneOf(VALUE_BASES, 'value_basis'), value_basis_note: text(500), review_status: oneOf(REVIEW, 'review_status'),
+  source_ref: text(200), revenue_type: oneOf(REVENUE_TYPES, 'revenue_type'), delivery_due: dateOf('delivery_due'), invoice_by: dateOf('invoice_by'), relates_to_event: eventRef
 };
 /** Only the fields sent are validated and written. */
 export function enquiryPatch(e) {
@@ -125,7 +134,7 @@ export function idOf(v) {
   return String(v);
 }
 const same = (a, b) => (a == null && b == null) || String(a) === String(b) || (Number.isFinite(Number(a)) && Number(a) === Number(b) && a !== '' && b !== '');
-const DATE_COLS = new Set(['cash_month', 'next_action_date', 'delivery_due', 'invoice_by']);
+const DATE_COLS = new Set(['cash_month', 'next_action_date', 'delivery_due', 'invoice_by', 'revisit_on', 'enquiry_date']);
 export function changesOf(prev, patch) {
   const out = {};
   for (const [k, v] of Object.entries(patch)) {
@@ -150,13 +159,42 @@ function typeAndStage(prev, patch) {
   const type = patch.revenue_type || prev?.revenue_type || 'new_sale';
   return { type, stage: patch.stage || prev?.stage || DEFAULT_STAGE[type] };
 }
+/** Closed needs a reason code ("other" also a note); parked needs a revisit date (sent now or already on the row). */
+function endRules(stage, prev, patch) {
+  const pick = (k) => (patch[k] !== undefined ? patch[k] : prev?.[k] ?? null);
+  if (stage === 'closed_lost' && !pick('lost_reason')) throw new Error('closed_lost needs lost_reason (a reason code)');
+  if (stage === 'closed_lost' && pick('lost_reason') === 'other' && !pick('status_note')) throw new Error('lost_reason other needs status_note');
+  if (stage === 'parked' && !pick('revisit_on')) throw new Error('parked needs revisit_on (YYYY-MM-DD)');
+}
 export function stageRule(prev, patch, matched) {
   const { type, stage } = typeAndStage(prev, patch);
   requiredFields(prev, patch);
-  if (stage === 'allocated' && type !== 'committed_work') throw new Error('stage allocated (Allocated · delivery pending) is for revenue_type committed_work only');
+  if (COMMITTED_STAGES.includes(stage) && type !== 'committed_work') throw new Error(`stage ${stage} is for revenue_type committed_work only`);
   if (stage === 'booked_paid' && prev?.stage !== 'booked_paid' && !matched) throw new Error('booked_paid needs matched_sale { txn_date, amount } from the Booking Sheet');
-  if (stage === 'closed_lost' && !(patch.lost_reason || prev?.lost_reason)) throw new Error('closed_lost needs lost_reason');
+  endRules(stage, prev, patch);
   return stage;
+}
+/** A refused change → the form field it belongs to + a plain reason shown beside it (never a silent failure). */
+const EXPLAIN = [
+  [/^booked_paid needs/, 'stage', 'Booked / paid needs a matching Booking Sheet sale for this client: enter the sale date and £ under Booked / paid.'],
+  [/^matched_sale refused: that Booking Sheet sale belongs/, 'sale_date', 'That Booking Sheet sale belongs to a different client, so it cannot be matched to this enquiry.'],
+  [/^matched_sale/, 'sale_date', null],
+  [/^closed_lost needs/, 'lost_reason', 'Closing needs a reason.'],
+  [/^lost_reason other needs/, 'status_note', 'Reason "Other" needs a note.'],
+  [/^parked needs/, 'revisit_on', 'Parking needs a "Revisit on" date.'],
+  [/^stage \w+ is for revenue_type committed_work/, 'stage', 'That status is for committed work only.'],
+  [/^a new enquiry needs client_or_org/, 'client_or_org', 'Name / organisation and Type are required.'],
+  [/^a new enquiry needs enquiry_date/, 'enquiry_date', 'The received date is required.'],
+  [/value_basis/, 'value_basis', 'Choose a value basis (agreed / quoted / estimated / unknown) for this value.'],
+  [/^paid_evidence/, 'stage', null],
+  [/^([a-z_]+) (must|cannot|not found)/, null, null]
+];
+export function explainError(msg) {
+  for (const [re, field, reason] of EXPLAIN) {
+    const m = re.exec(msg);
+    if (m) return { field: field || m[1] || null, reason: reason || msg };
+  }
+  return { field: null, reason: msg };
 }
 
 /* ---------- reads / writes ---------- */
@@ -212,8 +250,11 @@ async function createProspectPerson(sb, name, email, now) {
   if (error) throw new Error(`client record: ${error.message}`);
   return data.person_id;
 }
-/** The enquiry's client ID: given (validated), kept, matched (email, then exact unique name) or a new prospect record. */
-async function resolveClient(sb, e, patch, prev, now) {
+/**
+ * The enquiry's client ID WITHOUT writing: given (validated), kept (null), matched (email, then exact unique name), or
+ * { create } = a new prospect record, made only after the change has passed validation.
+ */
+async function findClient(sb, e, patch, prev) {
   if (patch.person_id) {
     if (!(await one(sb.from('customer_person').select('person_id').eq('person_id', patch.person_id)))) throw new Error('person_id not found in customer_person');
     return { person_id: patch.person_id, method: 'given' };
@@ -223,7 +264,11 @@ async function resolveClient(sb, e, patch, prev, now) {
   const name = patch.client_or_org || prev?.client_or_org;
   const hit = pickClient({ ...(await candidates(sb, email, name)), name });
   if (hit.person_id) return { person_id: hit.person_id, method: hit.method };
-  return { person_id: await createProspectPerson(sb, name, email, now), method: hit.method === 'name_multiple' ? `created_prospect (name matched ${hit.candidates} contacts)` : 'created_prospect' };
+  return { create: { name, email }, method: hit.method === 'name_multiple' ? `created_prospect (name matched ${hit.candidates} contacts)` : 'created_prospect' };
+}
+async function clientFor(sb, found, now) {
+  if (!found?.create) return found;
+  return { person_id: await createProspectPerson(sb, found.create.name, found.create.email, now), method: found.method };
 }
 async function writeHistory(sb, row) {
   const { error } = await sb.from('prospect_enquiry_history').insert(row);
@@ -242,16 +287,39 @@ async function bySourceRef(sb, patch) {
   if (!patch.source_ref || !patch.person_id) return null;
   return one(sb.from('prospect_enquiry').select('*').eq('source_ref', patch.source_ref).eq('person_id', patch.person_id));
 }
+const REF_RE = /^[A-Za-z0-9-]{3,20}$/;
+export function refOf(v) {
+  if (v == null || v === '') return null;
+  if (!REF_RE.test(String(v))) throw new Error('enquiry_ref must look like ENQ-0001');
+  return String(v);
+}
+/** The row being edited: by id, else by enquiry_ref (as prospect_upsert); an unknown enquiry_ref is an error, never a create. */
+async function prevByKey(sb, id, ref) {
+  if (id) return one(sb.from('prospect_enquiry').select('*').eq('id', id));
+  if (!ref) return null;
+  const row = await one(sb.from('prospect_enquiry').select('*').eq('enquiry_ref', ref));
+  if (!row) throw new Error(`enquiry_ref ${ref} not found`);
+  return row;
+}
+async function saleFor(sb, b, patch, prev) {
+  if (b.paid_evidence) return { sale: providerEvidence(b.paid_evidence, patch.revenue_type || prev?.revenue_type) };
+  return matchSale(sb, b.matched_sale, patch.person_id || prev?.person_id);
+}
+/**
+ * Same order as prospect_upsert: find the row (id / enquiry_ref, else source_ref + client), validate against it, and only
+ * then write (a new prospect person, the enquiry, its history).
+ */
 async function upsertEnquiry(sb, b, now, by) {
   const e = b.enquiry || {};
   const id = idOf(e.id);
   const patch = enquiryPatch(e);
-  const byId = id ? await one(sb.from('prospect_enquiry').select('*').eq('id', id)) : null;
-  stageRule(byId, patch, b.matched_sale || b.paid_evidence);
-  const client = await resolveClient(sb, e, patch, byId, now);
+  const byKey = await prevByKey(sb, id, refOf(e.enquiry_ref));
+  const found = await findClient(sb, e, patch, byKey);
+  const prev = byKey || (found?.person_id ? await bySourceRef(sb, { ...patch, person_id: found.person_id }) : null);
+  stageRule(prev, patch, b.matched_sale || b.paid_evidence);
+  const client = await clientFor(sb, found, now);
   if (client) patch.person_id = client.person_id;
-  const prev = byId || (await bySourceRef(sb, patch));
-  const sale = b.paid_evidence ? { sale: providerEvidence(b.paid_evidence, patch.revenue_type || prev?.revenue_type) } : await matchSale(sb, b.matched_sale, patch.person_id || prev?.person_id);
+  const sale = await saleFor(sb, b, patch, prev);
   const ctx = { patch, sale, stage: stageRule(prev, patch, proofOf(sale, patch.revenue_type || prev?.revenue_type)), now, by, via: viaOf(b), client };
   return prev ? updateEnquiry(sb, prev, ctx) : createEnquiry(sb, id, ctx);
 }
@@ -294,8 +362,12 @@ async function getAll(sb) {
   ]);
   for (const r of [rows, config, history]) if (r.error) throw new Error(r.error.message);
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
-  const list = (rows.data || []).map((r) => ({ ...r, flags: rowFlags(r, today), mail: enquiryMailLink(r.source_ref) }));
-  return { rows: list, config: config.data || [], history: history.data || [], clients: await clientsOf(sb, list), revalidate_factor: REVALIDATE_FACTOR };
+  const pri = prioritiesOf(rows.data || [], probsOf(config.data), today);
+  const list = (rows.data || []).map((r) => ({ ...r, flags: rowFlags(r, today), mail: enquiryMailLink(r.source_ref), priority: pri[r.id] || null }));
+  return {
+    rows: list, config: config.data || [], history: history.data || [], clients: await clientsOf(sb, list), revalidate_factor: REVALIDATE_FACTOR,
+    priority_rules: PRIORITY_ASSUMPTIONS, lost_reasons: LOST_REASONS, today
+  };
 }
 
 export default async function handler(req, res) {
@@ -309,6 +381,7 @@ export default async function handler(req, res) {
     const by = setByOf(b);
     return send(res, 200, { ok: true, set_by: by, ...(await upsertEnquiry(client(), b, new Date().toISOString(), by)) });
   } catch (err) {
-    return send(res, 400, { ok: false, error: err?.message || String(err) });
+    const error = err?.message || String(err);
+    return send(res, 400, { ok: false, error, ...explainError(error) });
   }
 }
