@@ -4,6 +4,8 @@
  * every non-GET, and compares DB row counts + newest timestamps before / after.
  *   PHASE=before node scripts/playwright-verify-sales-gap-quarter-tile-local.mjs   (committed browser files: layout + screenshots of the old tile)
  *   PHASE=after  node scripts/playwright-verify-sales-gap-quarter-tile-local.mjs   (checks + diff against the before run)
+ *   PHASE=live-before node …   (production, only strategy-sales-gap.js swapped back to the parent commit: the production "before")
+ *   PHASE=live   node scripts/playwright-verify-sales-gap-quarter-tile-local.mjs   (deployed files + APIs only; same checks, served ?v= too)
  */
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
@@ -11,8 +13,13 @@ import { chromium } from 'playwright';
 import { createClient } from '@supabase/supabase-js';
 
 const ENV = Object.fromEntries(fs.readFileSync('.env.vercel.prod', 'utf8').split(/\r?\n/).filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).replace(/^"|"$/g, '').trim()]));
-Object.assign(process.env, { SUPABASE_URL: ENV.SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY: ENV.SUPABASE_SERVICE_ROLE_KEY, ARP_ADMIN_KEY: ENV.ARP_ADMIN_KEY });
-const PHASE = process.env.PHASE === 'after' ? 'after' : 'before';
+Object.assign(process.env, ENV);
+const PHASE = ['after', 'live', 'live-before'].includes(process.env.PHASE) ? process.env.PHASE : 'before';
+const LIVE = PHASE.startsWith('live');
+const CHECKS = PHASE === 'after' || PHASE === 'live';
+/** live-before: production with only the quarter tile's view swapped back to the parent commit's file (production "before"). */
+const PRE_COMMIT = '825946e3';
+const VERSION = 'qt2-20261109a';
 const BASE = 'https://ai-geo-audit.vercel.app';
 const OUT = 'outputs';
 const STAMP = '20261109';
@@ -53,6 +60,8 @@ async function routes(page) {
     const req = route.request();
     const url = new URL(req.url());
     if (req.method() !== 'GET') { if (url.pathname.startsWith('/api/')) blocked.push(`${req.method()} ${url.pathname}`); return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true,"dry_run":true}' }); }
+    if (PHASE === 'live-before' && url.pathname === '/lib/strategy-sales-gap.js') return route.fulfill({ status: 200, contentType: 'application/javascript', body: execSync(`git show ${PRE_COMMIT}:lib/strategy-sales-gap.js`, { encoding: 'utf8' }) });
+    if (LIVE) return route.fallback();
     const file = LOCAL_FILES.find((f) => url.pathname === `/lib/${f}`);
     if (file) return route.fulfill({ status: 200, contentType: 'application/javascript', body: PHASE === 'before' ? execSync(`git show HEAD:lib/${file}`, { encoding: 'utf8' }) : fs.readFileSync(`lib/${file}`, 'utf8') });
     if (url.pathname === '/api/aigeo/prospects') return route.fulfill({ status: 200, contentType: 'application/json', body: await localProspects() });
@@ -106,11 +115,11 @@ function nonDatedChecks(tile, r, sg, layout) {
   check(`Non-dated needed: Nov / Dec / Jan sum to the total (${k1(r.non_dated.total)}), each = its monthly tile`, monthsOk && row[row.length - 1] === k1(r.non_dated_needed) && Math.abs(r.non_dated.months.reduce((a, m) => a + m.gbp, 0) - r.non_dated.total) < 0.01, `${row.join(' ')} · monthly tiles ${sg.months.map((m) => `${m.label} ${gbpK(m.non_dated_needed)} (${Math.round(m.non_dated_needed)})`).join(' · ')}`);
   check('note line under non-dated', tile.note === 'From gift vouchers, Pick n Mix, 1-2-1s, mentoring, Academy, commissions, prints & royalties.', tile.note);
 }
-function movedChecks(layout, prior) {
-  const key = (b) => `${b.x},${b.y},${b.w},${b.h}|${b.text}`;
+function movedChecks(layout, prior, base) {
+  const key = (b) => `${b.x},${b.y},${b.w},${b.h}|${b.text.replace(/\b\d{1,2}:\d{2}\b/g, 'HH:MM')}`;
   const diff = (a, b) => a.filter((x) => { const y = b.find((z) => z.id === x.id); return !y || key(x) !== key(y); }).map((x) => x.id);
   const moved = [...diff(layout.blocks, prior.blocks), ...diff(layout.months, prior.months), ...diff(layout.outside, prior.outside)];
-  check('nothing else moved: every other block and the 3 monthly tiles have the same position, size and text as before', !moved.length && layout.blocks.length === prior.blocks.length, moved.join(', ') || `${layout.blocks.length} blocks + ${layout.months.length} month tiles + ${layout.outside.length} sales-gap lines identical · quarter tile ${prior.quarter.w}×${prior.quarter.h} → ${layout.quarter.w}×${layout.quarter.h}`);
+  check(`nothing else moved: every other block and the 3 monthly tiles have the same position, size and text as the ${base} capture`, !moved.length && layout.blocks.length === prior.blocks.length, moved.join(', ') || `${layout.blocks.length} blocks + ${layout.months.length} month tiles + ${layout.outside.length} sales-gap lines identical · quarter tile ${prior.quarter.w}×${prior.quarter.h} → ${layout.quarter.w}×${layout.quarter.h}`);
 }
 
 const before = await dbState();
@@ -124,13 +133,22 @@ await page.waitForFunction(() => !/Loading enquiries|Loading prospects/.test(doc
 await page.waitForTimeout(4000);
 const layout = await page.evaluate(layoutOf);
 await page.evaluate(() => [...document.querySelectorAll('body *')].filter((el) => getComputedStyle(el).position === 'fixed' && el.getBoundingClientRect().top > window.innerHeight / 2).forEach((el) => { el.style.visibility = 'hidden'; }));
-const shot = (name) => `${OUT}/sales-gap-quarter-tile-v2-${name}-${PHASE}-local-1700px-${STAMP}.png`;
+const TAGS = { before: 'before-local', after: 'after-local', live: 'live', 'live-before': 'before-live' };
+const shot = (name) => `${OUT}/sales-gap-quarter-tile-v2-${name}-${TAGS[PHASE]}-1700px-${STAMP}.png`;
+if (PHASE === 'live') {
+  const served = await page.evaluate(async () => {
+    const src = document.querySelector('script[src*="/lib/strategy-sales-gap.js"]')?.getAttribute('src') || '';
+    return { src, body: src ? await (await fetch(src, { cache: 'no-store' })).text() : '' };
+  });
+  check(`production serves strategy-sales-gap.js?v=${VERSION}, byte-identical to the committed file`, served.src.endsWith(`?v=${VERSION}`) && served.body.replace(/\r\n/g, '\n') === fs.readFileSync('lib/strategy-sales-gap.js', 'utf8').replace(/\r\n/g, '\n'), `${served.src} · ${served.body.length} bytes`);
+  summaryBody = await page.evaluate(() => JSON.stringify(window.stLastData ? window.stLastData() : null));
+}
 await page.locator('#st-sales-gap').screenshot({ path: shot('tiles') });
 await page.locator('#st-sales-gap .sg-q').screenshot({ path: shot('quarter') });
 await page.evaluate(() => window.scrollTo(0, 0));
 await page.screenshot({ path: shot('page'), fullPage: true });
 let tile = null;
-if (PHASE === 'after') {
+if (CHECKS) {
   tile = await page.evaluate(tileOf);
   await page.evaluate(() => { const d = document.querySelector('#st-sales-gap details.sg-qd'); if (d) d.open = true; });
   await page.waitForTimeout(300);
@@ -149,12 +167,13 @@ check('no page errors', !errors.length, errors.slice(0, 3).join(' | '));
 
 const snap = { layout, tile, summary: JSON.parse(summaryBody || '{}').sales_gap?.rolling || null };
 fs.writeFileSync(`${OUT}/_qt2-${PHASE}-layout.json`, JSON.stringify(snap, null, 1));
-if (PHASE === 'after') {
+if (CHECKS) {
   const sg = JSON.parse(summaryBody).sales_gap;
   faceChecks(tile, sg.rolling);
   datedChecks(tile, sg.rolling);
   nonDatedChecks(tile, sg.rolling, sg, layout);
-  movedChecks(layout, JSON.parse(fs.readFileSync(`${OUT}/_qt2-before-layout.json`, 'utf8')).layout);
+  const base = LIVE && fs.existsSync(`${OUT}/_qt2-live-before-layout.json`) ? 'live-before' : 'before';
+  movedChecks(layout, JSON.parse(fs.readFileSync(`${OUT}/_qt2-${base}-layout.json`, 'utf8')).layout, base);
   const ken = sg.months.flatMap((m) => [...m.prime.list, ...m.outside.list]).find((e) => /Kenilworth/.test(e.title) && e.date === '2027-03-22');
   check('Long Exposure - Kenilworth 22/03 is a one-day workshop in the split', ken?.type === 'day', JSON.stringify(ken));
   console.log('details:', tile.detailsText);

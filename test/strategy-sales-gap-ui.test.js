@@ -30,7 +30,7 @@ test('Strategy: quarter + 3 month tiles, Remedy plan (3 months + total), 4 quart
   assert.equal((h.tiles.match(/class="sg-card/g) || []).length, 4);
   assert.match(h.tiles, /November[\s\S]*December[\s\S]*January/);
   assert.match(h.tiles, /Non-dated needed \(likely\)/);
-  assert.match(h.tiles, /events &amp; working/);
+  assert.match(h.tiles, /Show the working[\s\S]*November: working ▾/, 'per-event working is under Rules (QUESTION (o))');
   assert.match(h.tiles, /Rules ▾/);
   assert.deepEqual((h.remedy.match(/<tr><td class="left"><b>(\w+)<\/b>/g) || []).map((x) => x.replace(/.*<b>|<\/b>/g, '')), ['Nov', 'Dec', 'Jan'], 'rolling 3 months only');
   assert.match(h.remedy, /sg-tot/);

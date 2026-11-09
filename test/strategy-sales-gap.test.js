@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSalesGap, categoryOf, eventLikely, fillRates, monthsFrom, quarterPipeline, stockIn } from '../lib/strategy-sales-gap.mjs';
-import { summarizeProspects } from '../lib/strategy-prospects.mjs';
+import { quarterFeedOf, summarizeProspects } from '../lib/strategy-prospects.mjs';
 
 const TODAY = '2026-11-09';
 const LEAD = {
@@ -158,13 +158,14 @@ test('quarter tile: prospects pipeline dated (cash month in the quarter) / undat
   const pr = summarizeProspects({ rows, config: [], history: [], today: TODAY, months: monthsFrom(TODAY, 3) });
   assert.equal(pr.pipeline.undated_weighted, 800 * 0.75, 'open with no cash month');
   const keys = ['2026-11', '2026-12', '2027-01'];
-  const q = quarterPipeline(pr.by_month, pr.pipeline, keys);
-  assert.equal(q.dated, 1000 * 0.4 + 500 * 0.2, 'Dec quote + the overdue Oct qualify (counts in the current month)');
+  const q = quarterPipeline(pr.by_month, quarterFeedOf(pr), keys);
+  assert.equal(q.dated, 1000 * 0.4, 'Dec quote only: the overdue Oct qualify is never moved into the current month (QUESTION-2026-11-09 (p))');
   assert.equal(q.undated, 600);
-  assert.equal(q.weighted, 400 + 100 + 600 + 800, 'all open weighted £');
+  assert.equal(q.weighted, 400 + 600 + 800, 'open weighted £ less the overdue £100 (its own line: pr.pipeline.overdue_gbp)');
+  assert.equal(pr.pipeline.overdue_gbp, 100);
   assert.equal(q.later, 800, 'the March cash month is outside the quarter');
-  const g = gap(ALL, { pipeline: pr.by_month, pipeline_open: pr.pipeline });
-  assert.deepEqual([g.rolling.pipeline.weighted, g.rolling.pipeline.dated, g.rolling.pipeline.undated], [1900, 500, 600]);
+  const g = gap(ALL, { pipeline: pr.by_month, pipeline_open: quarterFeedOf(pr) });
+  assert.deepEqual([g.rolling.pipeline.weighted, g.rolling.pipeline.dated, g.rolling.pipeline.undated], [1800, 400, 600]);
   const empty = summarizeProspects({ rows: [], config: [], history: [], today: TODAY, months: monthsFrom(TODAY, 3) });
   assert.deepEqual(quarterPipeline(empty.by_month, empty.pipeline, keys), { weighted: 0, dated: 0, undated: 0, later: 0, loaded: true }, '£0 until enquiries are loaded');
   assert.deepEqual(quarterPipeline(null, { error: 'boom' }, keys), { error: 'boom' }, 'a failed read is an error, never £0');

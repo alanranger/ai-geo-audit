@@ -26,17 +26,19 @@ const ROWS = [
   enq('g', '1-2-1', 'quote', 200, '2026-10-01')
 ];
 
-test('weighted £ = value × stage probability, in the cash month; booked / closed-lost leave the pipeline; a past cash month counts now', () => {
+test('weighted £ = value × stage probability, in the cash month; booked / closed-lost leave the pipeline; a past cash month is overdue, not now', () => {
   assert.equal(weightedOf(ROWS[0], P), 480);
   assert.equal(weightedOf(ROWS[4], P), 0, 'booked / paid is out of the pipeline');
   assert.equal(weightedOf(ROWS[5], P), 0, 'closed-lost is out of the pipeline');
   const m = pipelineByMonth(ROWS, P, '2026-11');
-  assert.deepEqual(Math.round(m['2026-11'].total), 450 + 80, 'Nov: mentoring scheduled 450 + the October 1-2-1 quote 80 (past cash month → now)');
+  assert.deepEqual(Math.round(m['2026-11'].total), 450, 'Nov: mentoring scheduled 450 only; the October 1-2-1 quote is overdue, never moved into Nov');
+  assert.equal(m['2026-10'], undefined, 'an overdue cash month is in no month');
   assert.deepEqual(Math.round(m['2026-12'].total), 480 + 340 + 60);
   assert.equal(m['2026-12'].cats[11], 480 + 340, 'corporate training + commission sell into Commissions (11)');
   assert.equal(m['2026-12'].cats[8], 60);
   const s = summarizeProspects({ rows: ROWS, config: CONFIG, history: [], today: TODAY, months: monthsFrom(TODAY, 3) });
-  assert.deepEqual(s.pipeline.by_month.map((x) => [x.label, Math.round(x.weighted)]), [['Nov', 530], ['Dec', 880], ['Jan', 0]]);
+  assert.deepEqual(s.pipeline.by_month.map((x) => [x.label, Math.round(x.weighted)]), [['Nov', 450], ['Dec', 880], ['Jan', 0]]);
+  assert.deepEqual([s.pipeline.overdue_count, Math.round(s.pipeline.overdue_gbp), Math.round(s.pipeline.total)], [1, 80, 450 + 880 + 80], 'overdue counted separately; total weighted = dated + undated + overdue');
   assert.equal(s.pipeline.stalled, 2, 'c (18 days) and d (39 days)');
   assert.equal(s.pipeline.stalled_alan, 1);
   assert.equal(s.tiles.find((t) => t.stage === 'booked_paid').count, 1);
@@ -68,7 +70,7 @@ test('booked / paid is never counted twice: out of the pipeline, its sale counte
   const s = summarizeProspects({ rows: ROWS, config: CONFIG, history: [], today: TODAY, months: monthsFrom(TODAY, 3) });
   const nov = gap(s.by_month).months[0];
   assert.equal(nov.sold, 300, 'the Booking Sheet sale only');
-  assert.equal(Math.round(nov.pipeline_weighted), 530, 'the booked £300 is not in the pipeline');
+  assert.equal(Math.round(nov.pipeline_weighted), 450, 'the booked £300 is not in the pipeline (nor the overdue October quote)');
 });
 
 test('stalled → Needs Alan only when Alan owns the next step (no names in the decision)', () => {
@@ -108,7 +110,8 @@ test('UI: four stage tiles + Pipeline, weighted; rows come from the admin API, n
   const s = { prospects: summarizeProspects({ rows: ROWS, config: CONFIG, history: [], today: TODAY, months: monthsFrom(TODAY, 3) }) };
   const html = ctx.stProspectsParts.sectionHtml(s);
   assert.equal((html.match(/class="pp-tile /g) || []).length, 5);
-  assert.match(html, /Pipeline, weighted[\s\S]*Nov £530 · Dec £880 · Jan £0[\s\S]*2 stalled/);
+  assert.match(html, /Pipeline, weighted[\s\S]*Nov £450 · Dec £880 · Jan £0[\s\S]*2 stalled/);
+  assert.match(html, /1 overdue cash expectation £80<\/span> \(cash month passed: revise; not in any month\)/);
   assert.match(html, /\+ Add enquiry/);
   assert.match(html, /Real conversion appears once 20 enquiries have closed/);
   assert.doesNotMatch(html, /TEST a/, 'no names from the summary');
