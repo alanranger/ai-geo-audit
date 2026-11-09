@@ -50,7 +50,7 @@ function browser() {
   return ctx.window;
 }
 
-test('Strategy tiles reuse the Marketing builders on the same objects: £10.7k to 31 Dec · £15k to 31 Jan, booked ahead £4.8k, returning £11.2k', () => {
+test('Strategy tiles reuse the Marketing builders: Repeat clients + Academy progression moved here; sales tiles retired', () => {
   const w = browser();
   const s = {
     insights: { rows: { money: [{ key: 'money-next-3', numbers: { required: 15028, inHand: 4765, potential: 7765, window_end: '2027-01-31', months: monthSplit([{ y: 2026, m: 11 }, { y: 2026, m: 12 }, { y: 2027, m: 1 }], [5505, 5191, 4332]) } }, { key: 'money-this-month', title: 'This month · November', numbers: { sales: 250, sales_target: 5755, of_target_pct: 4, gp: 200, gp_target: 4000 } }], mix: [{ key: 'mix-returning', headline: { value: '15%' }, comparison: '1 of 2', table: { rows: [] } }, { key: 'mix-pick-n-mix', numbers: { since_relaunch: 0, status_line: 'Relaunch Tue 10 Nov · 0 plans yet' } }] } },
@@ -59,12 +59,14 @@ test('Strategy tiles reuse the Marketing builders on the same objects: £10.7k t
     decisions: [beginnersDecision({ today: '2026-11-08', roadmap: ROADMAP, taught: 0, courses: COURSES, quarters: QUARTERS })]
   };
   const p = w.stLayoutParts;
-  assert.match(p.salesTile(s).head, /£10\.7k.*to Thu 31 Dec.*£15k.*to Sun 31 Jan/);
-  assert.match(p.salesTile(s).lines[0], /Nov £5\.5k left · Dec £5\.2k · Jan £4\.3k/);
-  assert.match(p.bookedTile(s).head, /£4\.8k/);
-  assert.match(p.returningTile(s).head, /£11\.2k/);
-  assert.equal(p.returningTile(s).head, w.mkOverviewTiles.tileRepeat(s).head, 'identical to Marketing tile 4');
+  assert.equal(p.salesTile, undefined, 'Sales still needed retired');
+  assert.equal(p.bookedTile, undefined, 'Booked ahead retired (a line in each month\'s detail)');
+  assert.match(p.repeatTile(s).head, /£11\.2k/);
+  assert.equal(p.repeatTile(s).head, w.mkOverviewTiles.tileRepeat(s).head, 'the same builder Marketing used');
+  assert.equal(p.repeatTile(s).title, 'Repeat clients');
+  assert.equal(p.academyTile(s).title, 'Academy progression');
   assert.match(p.plansTile(s).head, /0 .*of 3 by 31 Dec/);
+  assert.doesNotMatch(p.tilesHtml(s), /Sales still needed|This month ·|Booked ahead/);
   assert.match(p.decisionsHtml(s), /Decisions for Alan \(1\)[\s\S]*13 Jan \(1 booked\)[\s\S]*Move to Q2/);
 });
 

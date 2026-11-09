@@ -15,7 +15,7 @@ const BASE = 'https://ai-geo-audit.vercel.app';
 const TAG = LIVE ? 'live' : 'local';
 const OUT = 'outputs';
 const STAMP = process.env.STAMP || '20261108';
-const LOCAL_FILES = ['strategy-tab.js', 'strategy-layout.js', 'strategy-quarter-plan.js', 'marketing-overview-tiles.js', 'marketing-schedule-model.js', 'revenue-truth-controller.mjs'];
+const LOCAL_FILES = ['strategy-tab.js', 'strategy-layout.js', 'strategy-sales-gap.js', 'strategy-quarter-plan.js', 'marketing-overview-tiles.js', 'marketing-schedule-model.js', 'revenue-truth-controller.mjs'];
 const BLUR = '.mk-detail, #mk-cust-body, #mq-results td:first-child, #mk-review-table td:first-child { filter: blur(6px) !important; }';
 const sb = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const results = [];
@@ -55,7 +55,7 @@ async function routes(page) {
     if (url.pathname === '/api/aigeo/strategy-summary') return route.fulfill({ status: 200, contentType: 'application/json', body: await localSummary() });
     if (url.pathname === '/audit-dashboard.html') {
       const res = await route.fetch();
-      const html = (await res.text()).replace(/(<script src="\/lib\/strategy-tab\.js[^"]*"><\/script>)/, '$1\n  <script src="/lib/strategy-layout.js?v=local"></script>');
+      const html = (await res.text()).replace(/(<script src="\/lib\/strategy-tab\.js[^"]*"><\/script>)/, '$1\n  <script src="/lib/strategy-sales-gap.js?v=local"></script>\n  <script src="/lib/strategy-layout.js?v=local"></script>');
       return route.fulfill({ response: res, body: html, headers: { ...res.headers(), 'content-type': 'text/html; charset=utf-8' } });
     }
     return route.fallback();
@@ -83,7 +83,7 @@ async function strategy(browser) {
     return { height: Math.round(panel.getBoundingClientRect().height), doc: document.documentElement.scrollHeight, blocks, outside, why: document.getElementById('st-fold-why')?.open, targets: document.getElementById('st-fold-targets')?.open, ids: [...document.querySelectorAll('#st-fold-why #st-gp-chart, #st-fold-why #st-weights, #st-fold-why #st-insights, #st-fold-why #st-fold-tasks #st-action-list, #st-fold-why #st-fold-tasks #st-next4, #st-fold-targets #st-targets-host')].map((e) => e.id) };
   });
   check('visible page = tiles + Decisions + Quarter plan (+ Next delivery) + 2 closed folds', ['st-where', 'st-decisions', 'st-quarter-plan', 'st-next-delivery', 'st-fold-why', 'st-fold-targets'].every((id) => layout.blocks.includes(id)) && layout.why === false && layout.targets === false && !layout.outside.length, `visible blocks: ${layout.blocks.join(' > ')} · outside folds: ${layout.outside.join(', ') || 'none'}`);
-  check('page height < 4,000px with the folds closed', layout.height < 4000, `${layout.height}px (document ${layout.doc}px)`);
+  check('page height < 5,000px with the folds closed (sales gap, Remedy and quarter cards added)', layout.height < 5000, `${layout.height}px (document ${layout.doc}px)`);
   check('Why fold holds the chart, Top 3 weights, the analysis tiles and the task lists; Targets fold holds the Targets panel', ['st-gp-chart', 'st-weights', 'st-insights', 'st-action-list', 'st-next4', 'st-targets-host'].every((id) => layout.ids.includes(id)), layout.ids.join(', '));
   const qp = await page.evaluate(() => {
     const host = document.getElementById('st-quarter-plan');
@@ -137,6 +137,22 @@ async function strategy(browser) {
   check('no bare "Target not set" / "Needs review" on Strategy; near-term + Academy read "Target: Claude proposal due Wed 11 Nov"; gifts names GPT + date', !g4.bare && /Target: Claude proposal due Wed 11 Nov/.test(g4.near) && /Target: Claude proposal due Wed 11 Nov/.test(g4.academy) && /Needs review · GPT by \w{3} \d+ \w{3}/.test(g4.gifts), `bare ${g4.bare} · near: ${g4.near.slice(0, 120)} · academy: ${g4.academy.slice(0, 120)} · gifts: ${g4.gifts.slice(0, 90)}`);
   check('plan document link: never the homepage (removed: no strategy document is stored)', g4.plan.every((h) => !/^https:\/\/www\.alanranger\.com\/?$/.test(h)), g4.plan.length ? g4.plan.join(', ') : 'no plan document link');
   check('Q2 Academy cohort linked to academy_trial_history (next action labelled with the data source)', /data: academy_trial_history/.test(g4.q2), g4.q2);
+  const sg = await page.evaluate(() => {
+    const t = (id) => (document.getElementById(id)?.innerText || '').replace(/\s+/g, ' ');
+    const order = ['st-sales-gap', 'st-remedy', 'st-quarter-cards', 'st-where', 'st-decisions'].map((id) => Number(document.getElementById(id)?.style.order ?? -1));
+    return {
+      cards: document.querySelectorAll('#st-sales-gap .sg-card').length, months: [...document.querySelectorAll('#st-sales-gap [data-sg-month]')].map((c) => c.querySelector('.sg-h b')?.textContent),
+      remedyRows: [...document.querySelectorAll('#st-remedy tbody tr')].map((r) => r.cells[0]?.innerText.split('\n')[0]), qcards: document.querySelectorAll('#st-quarter-cards .sg-qc').length,
+      rec: t('st-quarter-cards').match(/Reconciles with the months[^✓✗]*[✓✗]/)?.[0] || '', where: t('st-where'), order, gapText: t('st-sales-gap').slice(0, 400)
+    };
+  });
+  check('Sales gap: quarter tile + Nov / Dec / Jan tiles; Remedy = Nov, Dec, Jan + Total; 4 quarter cards; Q1 reconciles', sg.cards === 4 && sg.months.join() === 'November,December,January' && sg.remedyRows.join() === 'Nov,Dec,Jan,Total' && sg.qcards === 4 && /✓$/.test(sg.rec), `${sg.cards} tiles (${sg.months.join(', ')}) · remedy rows ${sg.remedyRows.join(', ')} · ${sg.qcards} quarter cards · ${sg.rec}`);
+  check('Where we are: Sales still needed / This month / Booked ahead retired; Repeat clients + Academy progression moved here; sales gap first', !/Sales still needed|This month ·|Booked ahead ·/.test(sg.where) && /Repeat clients/.test(sg.where) && /Academy progression/.test(sg.where) && sg.order.every((o, i, a) => i === 0 || o > a[i - 1]), `${sg.where.slice(0, 160)} · order ${sg.order.join(',')}`);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  for (const id of ['st-sales-gap', 'st-remedy', 'st-quarter-cards']) await page.locator(`#${id}`).screenshot({ path: `${OUT}/sales-gap-${id.replace('st-', '')}-${TAG}-1700px-${STAMP}.png` });
+  await page.evaluate(() => { const d = document.querySelector('#st-sales-gap [data-sg-month] details'); if (d) d.open = true; });
+  await page.locator('#st-sales-gap').screenshot({ path: `${OUT}/sales-gap-tiles-working-open-${TAG}-1700px-${STAMP}.png` });
+  await page.evaluate(() => { const d = document.querySelector('#st-sales-gap [data-sg-month] details'); if (d) d.open = false; });
   const WORD = /(✅ (Sent|Published)|🕒 Scheduled|⚠ Needs approval|📄 In preparation|… Checking delivery|⏰ Late|✖ Failed|\? Verification unavailable|⊘ Cancelled|✓ Done|⏸ Deferred)/;
   const nextLines = await page.evaluate(() => [...document.querySelectorAll('#st-quarter-plan .qp-l')].map((l) => l.textContent.replace(/\s+/g, ' ').trim()).filter((t) => /^Next:/.test(t) && !/\(manual\)|\(data: |Next: —/.test(t)));
   check('every initiative next action shows the shared status word + icon', nextLines.length > 0 && nextLines.every((t) => WORD.test(t)), (nextLines.some((t) => !WORD.test(t)) ? nextLines.filter((t) => !WORD.test(t)) : nextLines).map((t) => t.replace(/ → Marketing$/, '')).join(' | '));
@@ -177,11 +193,13 @@ async function marketing(browser, closedKeys = []) {
   const tiles = (await page.locator('#mk-overview-tiles').evaluate((el) => el.textContent)).replace(/\s+/g, ' ');
   await page.waitForFunction(() => /^\d+$/.test(document.querySelector('.mkw-n')?.textContent.trim() || '') || /Decisions unavailable/.test(document.body.textContent), null, { timeout: 120000 }).catch(() => {});
   const waiting = await page.evaluate(() => (document.querySelector('.mkw-n')?.textContent || '').trim());
+  const ov = await page.evaluate(() => ({ titles: [...document.querySelectorAll('#mk-overview-tiles .mko-title')].map((t) => t.textContent.trim()), link: (document.querySelector('#mk-overview-tiles .mko-gaplink')?.textContent || '').replace(/\s+/g, ' ').trim() }));
+  await page.locator('#mk-overview-tiles').screenshot({ path: `${OUT}/sales-gap-marketing-overview-${TAG}-1700px-${STAMP}.png` }).catch(() => {});
   const secs = await page.evaluate(() => ({ waiting: (document.querySelector('#mk-waiting')?.textContent || '').trim().length, planned: !!document.querySelector('#mk-planned .mks-days'), results: (document.querySelector('#mk-results')?.textContent || '').trim().length, behind: document.querySelector('#mk-behind') ? (document.querySelector('#mk-behind').open ? 'open' : 'closed') : 'missing' }));
   check('Marketing still loads cleanly: Waiting on you / Planned / Results present, Behind-the-scenes fold closed', secs.waiting > 0 && secs.planned && secs.results > 0 && secs.behind === 'closed', JSON.stringify(secs));
   if (LIVE) await page.screenshot({ path: `${OUT}/strategy-clean-marketing-check-live-1700px-${STAMP}.png` });
   await page.close();
-  return { first, tiles, waiting };
+  return { first, tiles, waiting, ov };
 }
 
 const before = await dbState();
@@ -195,17 +213,17 @@ check('Strategy Needs Alan count = Marketing "Waiting on you" count', String(st.
 const pubKeys = st.s?.needs_alan?.published || [];
 const pubRows = Object.values(st.s?.quarter_plan?.initiatives || {}).flatMap((i) => (i.deliveries || []).filter((d) => pubKeys.includes(d.key)).map((d) => `${i.key}: ${d.key} ${d.status}${d.draft ? ' draft' : ''}${i.next?.key === d.key ? ' NEXT' : ''}`));
 check('published posts (shared state) are published on Strategy: not drafts, not a next action', pubKeys.length > 0 && pubRows.length > 0 && pubRows.every((r) => / published$/.test(r)) && !st.norfolk.length, `published ${pubKeys.join(', ')} → ${pubRows.join(' | ')} · Norfolk "Next:" lines: ${st.norfolk.length}`);
+const roll = st.s?.sales_gap?.rolling;
+const kfmt = (v) => `£${(Math.round(Math.abs(v) / 100) / 10).toLocaleString('en-GB')}k`;
+check('Marketing: no duplicate sales-gap tiles; one link "Sales gap by month → Strategy" with the same rolling figures', !mk.ov.titles.some((t) => /Sales still needed|Dated places|Non-dated sales needed|Repeat clients|Academy progression/.test(t)) && /Sales gap by month → Strategy/.test(mk.ov.link) && roll && mk.ov.link.includes(kfmt(roll.still_to_sell)) && mk.ov.link.includes(kfmt(roll.non_dated_needed)), `tiles: ${mk.ov.titles.join(' | ')} · ${mk.ov.link}`);
+const gapM = st.s?.sales_gap?.remedy?.rows || [];
+check('Remedy levers add up to each month\'s gap (live)', gapM.length === 3 && gapM.every((r) => Math.abs(r.lever1.gbp + r.lever2.gbp + r.lever3.gbp - r.gap) < 0.5), gapM.map((r) => `${r.label}: gap ${Math.round(r.gap)} = ${Math.round(r.lever1.gbp)} + ${Math.round(r.lever2.gbp)} + ${Math.round(r.lever3.gbp)}`).join(' · '));
 const q2a = st.s?.quarter_plan?.initiatives?.['q2-academy-mentoring-rps'];
 check('Q2 Academy cohort figures come from academy_trial_history', q2a?.measure?.data_source === 'academy_trial_history' && /trials started/.test(q2a.measure.lines[0]?.value || ''), (q2a?.measure?.lines || []).slice(0, 2).map((l) => `${l.label}: ${l.value} [${l.sub}]`).join(' | '));
 const nexts = Object.values(st.s?.quarter_plan?.initiatives || {}).flatMap((i) => [i.next, i.next?.then].filter((n) => n && n.status));
 check('no sent / published / done item is a next action; Next delivery line uses the same status vocabulary', nexts.length && nexts.every((n) => !['sent', 'published', 'done', 'cancelled'].includes(n.status.code)) && /(🕒 Scheduled|📄 In preparation|⚠ Needs approval|… Checking delivery|⏰ Late|\? Verification unavailable|⏸ Deferred)/.test(st.next.text), `${nexts.length} next items: ${[...new Set(nexts.map((n) => n.status.code))].join(', ')} · ${st.next.text} · board ${st.s?.delivery_status?.error || `${Object.keys(st.s?.delivery_status?.by_key || {}).length} keys, last checked ${st.s?.delivery_status?.last_checked}`}`);
-const n3 = st.s?.insights?.rows?.money?.find((t) => t.key === 'money-next-3')?.numbers;
 const ret = st.s?.roadmap_now?.returning_r12;
-const k = (v) => `£${(Math.round(Math.abs(v) / 100) / 10).toLocaleString('en-GB')}k`;
-const same = (label, v, stTxt, mkTxt) => check(`shared number identical on both tabs: ${label}`, v != null && stTxt.includes(k(v)) && mkTxt.includes(k(v)), `${label} = ${Math.round(v)} → "${k(v)}" on Strategy: ${stTxt.includes(k(v))}, on Marketing: ${mkTxt.includes(k(v))}`);
-same('sales still needed to 31 Jan', n3?.required, st.tiles, mk.tiles);
-same('booked ahead, next 3 months', n3?.inHand, st.tiles, mk.tiles);
-same('returning-client sales, rolling 12 months', ret, st.tiles, mk.tiles);
+check('returning-client sales (rolling 12 months) on Strategy\'s Repeat clients tile', ret != null && st.tiles.includes(kfmt(ret)), `${Math.round(ret)} → ${kfmt(ret)}`);
 const changed = Object.keys(before).filter((x) => before[x] !== after[x]);
 check(`viewing writes nothing (row counts + newest timestamps, ${Object.keys(TABLES).length} tables)`, !changed.length, changed.map((x) => `${x}: ${before[x]} → ${after[x]}`).join(' | ') || 'no change');
 check('every non-GET from the pages refused', true, `${blocked.length} refused: ${[...new Set(blocked)].join(', ')}`);
