@@ -21,11 +21,12 @@ const run = (txns = []) => buildSalesGap({ today: TODAY, txns, targets: Array(12
 
 test('(j) the four confirmed choices are editable assumptions, "set 9 Nov, review later" (no behaviour change)', () => {
   assert.equal(ON_SALE_DAYS, 400);
-  assert.deepEqual(ASSUMPTIONS.map((a) => a.key), ['on_sale_window', 'booking_window', 'lever2', 'targets_2027']);
+  assert.deepEqual(ASSUMPTIONS.map((a) => a.key), ['on_sale_window', 'booking_window', 'lever2', 'targets_2027', 'revalidate_factor'], 'QUESTION (v) adds the old-lead factor');
+  assert.match(ASSUMPTIONS[4].value, /weighted £ × 0\.25: old leads count at a quarter/);
   assert.ok(ASSUMPTIONS.every((a) => a.status === 'set 9 Nov, review later'));
   assert.match(ASSUMPTIONS[1].value, /2 × the type's 75th-percentile lead time \(day 278 \/ residential 208 \/ course 126/);
   assert.match(ASSUMPTIONS[2].value, /up to 2 new day workshops a month, on sale by month end − the day median lead time \(45 days/);
-  assert.equal(run().assumptions.length, 4);
+  assert.equal(run().assumptions.length, 5);
 });
 
 test('(k) prime buying window = the P25–P75 lead-time band: an event can be prime in more than one month', () => {

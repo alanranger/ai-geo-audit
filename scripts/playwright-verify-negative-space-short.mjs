@@ -2,7 +2,8 @@
  * The 8th Short (question 2026-11-09 (t) add-negative-space-short) at 1700px: the YouTube filter shows 8 Scheduled
  * Shorts incl. Thu 19 Nov 18:00; the negative-space record shows its woodland uses (associated with existing posts),
  * evidence label and UTM; nothing else changes (deployed board / page vs local board / page on the same data).
- *   node scripts/playwright-verify-negative-space-short.mjs
+ *   node scripts/playwright-verify-negative-space-short.mjs           local lib files + local board vs deployed
+ *   LOCAL=0 node scripts/playwright-verify-negative-space-short.mjs   deployed page only (after the deploy)
  * Viewing writes nothing: every non-GET is refused; DB counts + latest timestamps compared before / after.
  */
 import fs from 'node:fs';
@@ -14,6 +15,8 @@ const ENV = Object.fromEntries(fs.readFileSync('.env.vercel.prod', 'utf8').split
 for (const k of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'ARP_ADMIN_KEY']) process.env[k] = ENV[k];
 const BASE = 'https://ai-geo-audit.vercel.app';
 const OUT = path.resolve('outputs');
+const LOCAL = process.env.LOCAL !== '0';
+const MODE = LOCAL ? 'local' : 'live';
 const NS = 'video|short|negative-space-woodland';
 const sb = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const results = [];
@@ -88,13 +91,22 @@ const [live, local] = await Promise.all([liveBoard(), localBoard()]);
 const [fl, fo] = [fingerprint(live), fingerprint(local)];
 for (const k of Object.keys(fl)) check(`board ${k}: identical deployed vs local (${fl[k].length})`, JSON.stringify(fl[k]) === JSON.stringify(fo[k]), fl[k].length === fo[k].length ? '' : `${fl[k].length} → ${fo[k].length}`);
 
+const PRE_DEPLOY = { emails: 20, placements: 63, tasks: 33, other_content: 7 };
+if (!LOCAL) check('deployed board: same counts as before the deploy (emails 20 · placements 63 · tasks 33 · other Shorts 7)', Object.entries(PRE_DEPLOY).every(([k, n]) => fl[k].length === n), Object.keys(PRE_DEPLOY).map((k) => `${k} ${fl[k].length}`).join(' · '));
+
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
-const L = await openPage(browser, false);
-const liveIds = await listIds(L.page);
-await L.page.close();
-const { page, board } = await openPage(browser, true);
-const localIds = await listIds(page);
+const other = await openPage(browser, !LOCAL);
+const otherIds = await listIds(other.page);
+await other.page.close();
+const { page, board } = await openPage(browser, LOCAL);
+const mainIds = await listIds(page);
+const [liveIds, localIds] = LOCAL ? [otherIds, mainIds] : [mainIds, otherIds];
 check('schedule list (All, 4 weeks + YouTube filter): same rows deployed vs local', JSON.stringify(liveIds) === JSON.stringify(localIds), `all ${liveIds.all.length} → ${localIds.all.length} · youtube ${liveIds.youtube.length} → ${localIds.youtube.length}`);
+if (!LOCAL) {
+  const src = await page.evaluate(() => [...document.scripts].map((s) => s.src).find((s) => /marketing-schedule-list\.js/.test(s)) || '');
+  check('deployed page loads marketing-schedule-list.js?v=ns-20261109a', /\?v=ns-20261109a/.test(src), src.replace(/^https?:\/\/[^/]+/, ''));
+  check('deployed schedule: All (4 weeks) 30 rows, YouTube 8 rows (as before the deploy)', liveIds.all.length === 30 && liveIds.youtube.length === 8, `${liveIds.all.length} / ${liveIds.youtube.length}`);
+}
 check('board carries 8 Short content records', (board.content || []).filter((c) => c.format === 'short_video').length === 8, `${(board.content || []).length} content records`);
 
 const yt = await page.$$eval('#mk-schedule .mkl [data-mkl-item^="youtube|"]', (els) => els.map((e) => ({ day: e.closest('.mkl-day')?.querySelector('.mkl-d')?.innerText.replace(/\s+/g, ' '), t: e.innerText.replace(/\s+/g, ' ') })));
@@ -102,7 +114,7 @@ const allSch = yt.every((r) => /🕒\s*Scheduled/.test(r.t) && /6:00pm/.test(r.t
 const ns = yt.find((r) => /Negative Space/i.test(r.t));
 check('YouTube filter: 8 rows, all 🕒 Scheduled at 6:00pm (18:00) with the YouTube link', yt.length === 8 && allSch, yt.map((r) => r.day).join(' | '));
 check('YouTube filter: How Much Negative Space? on THU 19 NOV at 6:00pm', ns && /THU 19 NOV/.test(ns.day || '') && /6:00pm/.test(ns.t), ns ? `${ns.day} · ${ns.t.slice(0, 120)}` : 'not found');
-await page.locator('#mk-schedule').screenshot({ path: `${OUT}/shorts-negative-space-youtube-filter-local-1700px-20261109.png` });
+await page.locator('#mk-schedule').screenshot({ path: `${OUT}/shorts-negative-space-youtube-filter-${MODE}-1700px-20261109.png` });
 
 const opened = await page.evaluate((k) => window.mkOpenContent(k), NS);
 await page.waitForSelector('#mks-panel:not([hidden]) .mkl-content', { timeout: 10000 });
@@ -110,9 +122,14 @@ const rec = await text(page, '#mks-panel');
 check('window.mkOpenContent opens the negative-space content record', opened === true && /How Much Negative Space\?/.test(rec) && /Content record/.test(rec), rec.slice(0, 120));
 check('record: Short video / reel · Purpose Educate · 1:07 · YouTube Scheduled', /Short video \/ reel/.test(rec) && /Purpose Educate/.test(rec) && /Length 1:07/.test(rec) && /YouTube release 🕒 Scheduled/.test(rec), '');
 check('record: evidence label (production chat, not re-verified by GPT) + UTM', /evidence: production chat's native YouTube scheduling confirmation \(9 Nov 2026\); not separately re-verified by GPT/.test(rec) && /UTM utm_source=youtube&utm_medium=short&utm_campaign=negative-space-woodland/.test(rec), '');
-check('record: woodland uses: 20 Nov Story (From small details to winter landscapes), 4 Dec Story, 2 Jan winter, each "associated asset, no extra post"', /Uses \(5\)/.test(rec) && /From small details to winter landscapes Instagram Story · associated asset, no extra post/.test(rec) && /January is a good time to start the next step Instagram Story · associated asset/.test(rec) && /Make time for winter photography Facebook feed · Instagram feed · Instagram Story · associated asset/.test(rec) && (rec.match(/Associated with an existing post/g) || []).length === 3, (rec.match(/Squarespace email module[^]*/) || [''])[0].slice(0, 900));
-check('record: native video uses still "none planned"', /Native Facebook \/ Instagram \/ LinkedIn uses: none planned or approved yet/.test(rec), '');
-await page.screenshot({ path: `${OUT}/shorts-negative-space-content-record-local-1700px-20261109.png` });
+const nsRec = (board.content || []).find((c) => c.asset_key === NS) || { uses: [] };
+const nativeUses = nsRec.uses.filter((u) => ['facebook', 'instagram', 'linkedin'].includes(u.channel)).length;
+const associated = nsRec.uses.filter((u) => u.channel === 'social').length;
+const jan2 = nsRec.uses.some((u) => (u.step_key || u.ref) === 'gpt-8w-social-2027-01-02-fbig');
+check(`record: woodland uses as stored (Uses (${nsRec.uses.length}), ${associated} associated): 20 Nov Story "From small details to winter landscapes", 3 Dec email, 4 Dec Story, 2 Jan`, new RegExp(`Uses \\(${nsRec.uses.length}\\)`).test(rec) && /From small details to winter landscapes Instagram Story · associated asset, no extra post/.test(rec) && /Squarespace email module[^]*Thu 3 Dec/.test(rec) && /January is a good time to start the next step Instagram Story · associated asset/.test(rec) && jan2 && /Sat 2 Jan 18:30/.test(rec) && (rec.match(/Associated with an existing post/g) || []).length === associated, (rec.match(/Squarespace email module[^]*/) || [''])[0].slice(0, 900));
+const noneLine = /Native Facebook \/ Instagram \/ LinkedIn uses: none planned or approved yet/.test(rec);
+check(`record: native Facebook / Instagram / LinkedIn rows match the stored uses (${nativeUses})`, nativeUses ? !noneLine && (rec.match(/(Facebook|Instagram|LinkedIn) \(native\)/g) || []).length === nativeUses : noneLine, `${nativeUses} native uses stored`);
+await page.screenshot({ path: `${OUT}/shorts-negative-space-content-record-${MODE}-1700px-20261109.png` });
 await page.click('#mks-panel [data-mks-close]');
 
 await page.evaluate(() => window.mkOpenContent('video|short|check-whole-frame'));

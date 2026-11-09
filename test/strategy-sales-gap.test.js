@@ -167,7 +167,7 @@ test('quarter tile: prospects pipeline dated (cash month in the quarter) / undat
   const g = gap(ALL, { pipeline: pr.by_month, pipeline_open: quarterFeedOf(pr) });
   assert.deepEqual([g.rolling.pipeline.weighted, g.rolling.pipeline.dated, g.rolling.pipeline.undated], [1800, 400, 600]);
   const empty = summarizeProspects({ rows: [], config: [], history: [], today: TODAY, months: monthsFrom(TODAY, 3) });
-  assert.deepEqual(quarterPipeline(empty.by_month, empty.pipeline, keys), { weighted: 0, dated: 0, undated: 0, later: 0, loaded: true }, '£0 until enquiries are loaded');
+  assert.deepEqual(quarterPipeline(empty.by_month, empty.pipeline, keys), { weighted: 0, dated: 0, dated_event: 0, undated: 0, later: 0, loaded: true }, '£0 until enquiries are loaded');
   assert.deepEqual(quarterPipeline(null, { error: 'boom' }, keys), { error: 'boom' }, 'a failed read is an error, never £0');
 });
 

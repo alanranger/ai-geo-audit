@@ -52,7 +52,7 @@ test('Strategy quarter tile v2: dated events table + total, non-dated needed by 
   assert.match(q, /Courses[\s\S]*One-day workshops[\s\S]*Residential[\s\S]*sg-qtot[\s\S]*Total/);
   assert.match(q, /Non-dated needed[\s\S]*Nov[\s\S]*Dec[\s\S]*Jan[\s\S]*Total[\s\S]*Needed/);
   assert.match(q, /From gift vouchers, Pick n Mix, 1-2-1s, mentoring, Academy, commissions, prints &amp; royalties\./);
-  assert.match(q, /Prospects pipeline:<\/b> £0 weighted · dated £0 · undated £0/);
+  assert.match(q, /Prospects pipeline:<\/b> £0 weighted by month · dated-event enquiries £0 · undated £0/, 'QUESTION (v): weighted by month · dated-event enquiries · undated');
   assert.match(q, /<summary>details<\/summary>[\s\S]*Booked \/ capacity[\s\S]*Avg people per event[\s\S]*Normal non-dated \(same months last year\)[\s\S]*Still to find after normal and pipeline[\s\S]*data-sg-rules/);
   assert.doesNotMatch(q, /sg-v|Stock on sale now|Likely dated bookings \(fill rate\)/, 'old lines and the yellow verdict box are retired');
   assert.match(h, /id="sg-rules"/);

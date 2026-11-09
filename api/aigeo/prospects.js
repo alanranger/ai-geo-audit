@@ -23,12 +23,15 @@
  *     and is the default for it; a receivable defaults to "scheduled". A receivable is paid (booked_paid) only on a
  *     same-client Booking Sheet matched_sale or paid_evidence { provider: paypal | stripe | squarespace | bank, ref } —
  *     never on the buyer's word; committed work only on a Booking Sheet matched_sale (never automatically).
+ *   - relates_to_event (QUESTION-2026-11-09 (v)): "YYYY-MM-DD|/event-page-path" (or the full page URL after the |) for an
+ *     enquiry about a dated event; blank clears it. GET also returns revalidate_factor (old "revalidate" leads × 0.25).
  * The same rules for Claude's loads through Supabase SQL: public.prospect_upsert(p jsonb) (migrations/prospect_upsert_function_20261109.sql).
  */
 import { createClient } from '@supabase/supabase-js';
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_STAGE, MARKETS, OWNERS, PROVIDERS, REVENUE_TYPES, REVIEW, SOURCES, STAGES, TYPES, VALUE_BASES, pickClient, pickSale, prospectPersonRow, rowFlags, shortClientId } from '../../lib/strategy-prospects.mjs';
+import { REVALIDATE_FACTOR } from '../../lib/strategy-sales-gap.mjs';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH_RE = /^(\d{4}-\d{2})(-\d{2})?$/;
@@ -87,12 +90,24 @@ function received(v) {
   if (d && d > new Date(Date.now() + 864e5).toISOString().slice(0, 10)) throw new Error('enquiry_date cannot be in the future');
   return d;
 }
+/**
+ * relates_to_event: "YYYY-MM-DD|/page-path" (or the full page URL after the |) → the stored key "YYYY-MM-DD|/page-path"
+ * (host, query and trailing "/" dropped, lower case), the same as public.prospect_event_ref. Blank → null.
+ */
+export function eventRef(v) {
+  if (v == null || String(v).trim() === '') return null;
+  const s = String(v).trim();
+  const [d, ...rest] = s.split('|');
+  const path = rest.join('|').trim().toLowerCase().replace(/^https?:\/\/[^/]+/, '').replace(/[?#].*$/, '').replace(/\/+$/, '');
+  if (!DATE_RE.test(d) || !rest.length || !/^\/\S+$/.test(path)) throw new Error('relates_to_event must be "YYYY-MM-DD|/event-page-path" (or the full page URL after the |)');
+  return `${d}|${path}`;
+}
 const FIELDS = {
   enquiry_date: received, client_or_org: text(200), person_id: uuid, type: oneOf(TYPES, 'type'), value_gbp: money, stage: oneOf(STAGES, 'stage'), cash_month: cashMonth,
   next_action: text(300), next_action_date: date, owner: oneOf(OWNERS, 'owner'), last_touch_at: stamp, source: oneOfOrNull(SOURCES, 'source'),
   lost_reason: text(300), notes: text(500), customer_market: oneOf(MARKETS, 'customer_market'), value_basis: oneOf(VALUE_BASES, 'value_basis'),
   value_basis_note: text(500), review_status: oneOf(REVIEW, 'review_status'), source_ref: text(200),
-  revenue_type: oneOf(REVENUE_TYPES, 'revenue_type'), delivery_due: date, invoice_by: date
+  revenue_type: oneOf(REVENUE_TYPES, 'revenue_type'), delivery_due: date, invoice_by: date, relates_to_event: eventRef
 };
 /** Only the fields sent are validated and written. */
 export function enquiryPatch(e) {
@@ -270,7 +285,7 @@ async function getAll(sb) {
   for (const r of [rows, config, history]) if (r.error) throw new Error(r.error.message);
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
   const list = (rows.data || []).map((r) => ({ ...r, flags: rowFlags(r, today) }));
-  return { rows: list, config: config.data || [], history: history.data || [], clients: await clientsOf(sb, list) };
+  return { rows: list, config: config.data || [], history: history.data || [], clients: await clientsOf(sb, list), revalidate_factor: REVALIDATE_FACTOR };
 }
 
 export default async function handler(req, res) {
