@@ -22,7 +22,7 @@ const results = [];
 const check = (name, ok, note = '') => results.push({ name, ok: !!ok, note });
 const blocked = [];
 const errors = [];
-const TABLES = { strategy_campaign_steps: 'last_seen_at', strategy_campaign_ticks: 'updated_at', strategy_campaigns: 'updated_at', strategy_quarter_actions: 'updated_at', strategy_initiatives: 'updated_at', strategy_event_snapshots: 'created_at', sqs_send_meter: 'captured_at', marketing_segment_exports: 'created_at', marketing_event_facts: 'set_at', marketing_segment_evaluations: 'evaluated_at' };
+const TABLES = { strategy_campaign_steps: 'last_seen_at', strategy_campaign_ticks: 'updated_at', strategy_campaigns: 'updated_at', strategy_quarter_actions: 'updated_at', strategy_initiatives: 'updated_at', strategy_event_snapshots: 'created_at', sqs_send_meter: 'captured_at', marketing_segment_exports: 'created_at', marketing_event_facts: 'set_at', marketing_segment_evaluations: 'evaluated_at', business_targets: 'updated_at' };
 
 async function dbState() {
   const out = {};
@@ -105,8 +105,24 @@ async function strategy(browser) {
   const [bActual, bTarget] = String(tl.box || '').split('/').map((x) => x.trim());
   check('Pick n Mix initiative target line agrees with its KPI box (same roadmap target and actual)', tl.line && new RegExp(`^Target ${bTarget} plans · Actual ${bActual} · Gap ${Number(bTarget) - Number(bActual)} \\(by 31 Dec\\)`).test(tl.line), `box "${tl.box}" (${tl.boxSub}) · line "${tl.line}"`);
   fs.writeFileSync(`${OUT}/_correction3-${TAG}-target-lines.json`, JSON.stringify(tl.all, null, 1));
+  const pairs = await page.evaluate(() => {
+    const LABEL = { plans: /Pick n Mix plans/, beginners: /beginners/i, gbp: /Returning/ };
+    const boxTarget = (v) => (v.includes('/') ? v.split('/')[1].trim() : v.split(' by ')[0].trim());
+    return [...document.querySelectorAll('#st-quarter-plan .qp-card')].flatMap((c) => [...c.querySelectorAll('.qp-ini')].map((i) => {
+      const line = i.querySelector('.qp-l')?.textContent.trim() || '';
+      const m = /^Target (£[\d.,]+k?|\d+)( (plans|beginners))?/.exec(line);
+      if (!m || (!m[3] && !/^Target £[\d.]+k/.test(line))) return null;
+      const unit = m[3] || 'gbp';
+      const box = [...c.querySelectorAll('.qp-kpi')].find((k) => LABEL[unit].test(k.querySelector('.qp-kl')?.textContent || ''));
+      const bt = box ? boxTarget(box.querySelector('.qp-kv').textContent.trim()) : null;
+      return { ini: i.querySelector('.qp-it')?.textContent.trim(), line: m[1], box: bt, ok: bt === m[1] };
+    })).filter(Boolean);
+  });
+  check('every roadmap-KPI initiative line matches the KPI box on its own card', pairs.length >= 5 && pairs.every((p) => p.ok), pairs.map((p) => `${p.ini}: line ${p.line} / box ${p.box}`).join(' · '));
   const dec = (await page.locator('#st-decisions').innerText()).replace(/\s+/g, ' ');
-  check('beginners decision row shows real figures (next promoted course 13 Jan, 1 booked)', /beginners/i.test(dec) && /13 Jan/.test(dec) && /1 booked/.test(dec) && /Keep/.test(dec), dec.slice(0, 260));
+  check('Decisions for Alan: none (the beginners milestone is decided: moved to the January course)', /Decisions for Alan \(0\)/.test(dec) && /Nothing needs your decision/.test(dec) && !/non-JLR beginners/.test(dec), dec.slice(0, 200));
+  const boxes = await page.evaluate(() => [...document.querySelectorAll('#st-quarter-plan .qp-card')].slice(0, 2).map((c) => [...c.querySelectorAll('.qp-kpi')].map((k) => `${k.querySelector('.qp-kl')?.textContent.trim()}: ${k.querySelector('.qp-kv')?.textContent.trim()} (${k.querySelector('.qp-ks')?.textContent.trim()})`).find((t) => /beginners/i.test(t))));
+  check('Q1 KPI box "Non-JLR beginners: moved to Jan course"; Q2 box "8 by 27 Jan · 17 by Mar"', /^Non-JLR beginners: moved to Jan course/.test(boxes[0] || '') && /^Non-JLR beginners: 8 by 27 Jan · 17 by Mar 27/.test(boxes[1] || ''), boxes.join(' | '));
   const next = await page.locator('#st-next-delivery').evaluate((el) => ({ text: el.textContent.replace(/\s+/g, ' ').trim(), key: el.dataset.nextKey }));
   const tiles = (await page.locator('#st-where').innerText()).replace(/\s+/g, ' ');
   await page.evaluate(() => window.scrollTo(0, 0));
