@@ -16,7 +16,9 @@ const ENV = Object.fromEntries(fs.readFileSync('.env.vercel.prod', 'utf8').split
 Object.assign(process.env, { SUPABASE_URL: ENV.SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY: ENV.SUPABASE_SERVICE_ROLE_KEY });
 const BASE = 'https://ai-geo-audit.vercel.app';
 const OUT = 'outputs';
-const SHOT = (name) => `${OUT}/q-corrections-${name}-local-1700px-20261109.png`;
+/** LIVE=1: production files and APIs only (no local serving); non-GET still refused; queue counts from the live board (GET). */
+const LIVE = process.env.LIVE === '1';
+const SHOT = (name) => `${OUT}/q-corrections-${name}-${LIVE ? 'live' : 'local'}-1700px-20261109.png`;
 const RUNS = Number(process.env.RUNS || 2);
 /** BEFORE=1: timing only, with HEAD's versions of the same browser files (same local handlers) for a like-for-like before. */
 const BEFORE = process.env.BEFORE === '1';
@@ -69,6 +71,7 @@ async function routes(page) {
       if (url.pathname.startsWith('/api/')) refused.push(`${req.method()} ${url.pathname}`);
       return route.fulfill({ status: 403, contentType: 'application/json', body: '{"ok":false,"error":"read-only verification: non-GET refused"}' });
     }
+    if (LIVE) return route.fallback();
     const file = LOCAL_FILES.find((f) => url.pathname === `/lib/${f}`);
     if (file) return route.fulfill({ status: 200, contentType: 'application/javascript', body: sourceOf(file) });
     if (url.pathname === '/api/aigeo/marketing' && url.searchParams.get('action') === 'delivery-status') return route.fulfill({ status: 200, contentType: 'application/json', body: await localBoard() });
@@ -172,8 +175,12 @@ async function backfillCheck(page) {
 
 /* ---------- native queues vs the board (the ONE status source) ---------- */
 
+async function liveBoard() {
+  const r = await fetch(`${BASE}/api/aigeo/marketing?action=delivery-status`, { headers: { 'x-arp-admin-key': ENV.ARP_ADMIN_KEY } });
+  return r.json();
+}
 async function queueCounts() {
-  const b = await buildStatusBoard(ro);
+  const b = LIVE ? await liveBoard() : await buildStatusBoard(ro);
   const sch = (pl) => b.placements.filter((p) => p.placement === pl && p.status.code === 'scheduled').length;
   const yt = (b.content || []).filter((c) => c.status?.code === 'scheduled').length;
   const sq = b.emails.filter((e) => e.status?.code === 'scheduled').length;
@@ -193,7 +200,14 @@ async function strategyCheck(browser) {
   const lines = await o.page.evaluate(() => [...document.querySelectorAll('#st-quarter-plan .qp-l')].map((e) => e.textContent.trim()).filter((t) => /^Next:/.test(t)));
   const bad = lines.filter((l) => / draft: /.test(l) && /Scheduled|Published|waiting for Meta/.test(l));
   check('item 13: Quarter plan "Next" uses the actual delivery status (no "FB/IG draft" on scheduled content)', lines.length && !bad.length, `${lines.length} Next lines · ${lines.filter((l) => /FB\/IG/.test(l)).slice(0, 3).join(' | ')}${bad.length ? ` · BAD: ${bad.join(' | ')}` : ''}`);
-  await o.page.locator('#st-quarter-plan').scrollIntoViewIfNeeded().catch(() => null);
+  const q14 = await o.page.evaluate(() => {
+    const box = [...document.querySelectorAll('#st-quarter-plan .qp-card.is-current .qp-kpi')].find((k) => /Sales/.test(k.querySelector('.qp-kl')?.textContent || ''));
+    const page = document.querySelector('section[data-panel="strategy"]')?.innerText || '';
+    return { box: box ? box.innerText.replace(/\n+/g, ' | ') : '', q1: (page.match(/[^\n]*incl\. October shortfall[^\n]*/) || [''])[0].slice(0, 160) };
+  });
+  check('item 14 tail: Quarter plan sales box labelled "Nov + Dec" beside the Q1 card\'s "incl. October shortfall"', /Nov \+ Dec/.test(q14.box) && /incl\. October shortfall/.test(q14.q1), `Quarter plan box: "${q14.box}" · Q1 card: "${q14.q1}"`);
+  await o.page.evaluate(() => document.querySelector('#st-quarter-plan .qp-card.is-current')?.scrollIntoView({ block: 'start' }));
+  await o.page.waitForTimeout(400);
   await o.page.screenshot({ path: SHOT('quarter-plan') });
   await o.ctx.close();
 }
@@ -222,11 +236,11 @@ const queues = await queueCounts();
 await browser.close();
 
 const med = (k) => { const v = timing.map((r) => r[k]).sort((a, b) => a - b); return v[Math.floor(v.length / 2)]; };
-check('item 10: Marketing cold load (local code, live data) under 30 s, fully settled', med('full') < 30, `median: first platform status row ${med('statusRow')} s · first Waiting row ${med('waiting')} s · overview tiles ${med('tiles')} s · full List ${med('full')} s · runs ${JSON.stringify(timing)}`);
+check(`item 10: Marketing cold load (${LIVE ? 'production' : 'local code, live data'}) under 30 s, fully settled`, med('full') < 30, `median: first platform status row ${med('statusRow')} s · first Waiting row ${med('waiting')} s · overview tiles ${med('tiles')} s · full List ${med('full')} s · runs ${JSON.stringify(timing)}`);
 const tally = (list) => Object.entries(list.reduce((o, x) => ({ ...o, [x]: (o[x] || 0) + 1 }), {})).map(([k, v]) => `${k} ×${v}`).join(', ');
 check('read-only: every non-GET refused in the browser (never sent); every DB write by the local builders blocked', true, `refused: ${tally(refused) || 'none'} · blocked writes: ${tally(blockedWrites) || 'none'}`);
 check('no page errors', !pageErrors.length, pageErrors.slice(0, 5).join(' | ') || 'none');
 for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.note ? ` (${r.note})` : ''}`);
 console.log(`server: board ${JSON.stringify(serverMs.board)} ms · strategy summary ${JSON.stringify(serverMs.summary)} ms`);
 console.log(`scheduled email subjects: ${queues.subjects.join(' · ')}`);
-fs.writeFileSync(`${OUT}/_q-corrections-local.json`, JSON.stringify({ results, timing, serverMs, queues, refused, blockedWrites }, null, 1));
+fs.writeFileSync(`${OUT}/_q-corrections-${LIVE ? 'live' : 'local'}.json`, JSON.stringify({ results, timing, serverMs, queues, refused, blockedWrites }, null, 1));

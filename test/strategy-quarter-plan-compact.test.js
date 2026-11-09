@@ -48,3 +48,18 @@ test('initiative: exactly title + chip · Target / Actual / Gap · Next → Mark
   assert.match(work, /Target — · Actual — · Gap — <span class="qp-ref">· owner GPT \(targeting\)<\/span>/);
   assert.match(work, /Next: Review · <span[^>]*>Mon 16 Nov<\/span> <span class="qp-ref">\(manual\)<\/span>/);
 });
+
+test('item 14 tail: the Quarter plan sales box names the months it covers ("Nov + Dec"), apart from the Q1 card incl. October shortfall', () => {
+  const kpis = [{ key: 'sales', label: 'Sales still needed', value: '£10.7k', sub: 'to 31 Dec · Nov £5.5k left + Dec £5.2k' }];
+  const html = render({ ...PLAN, quarter_plan: { ...PLAN.quarter_plan, quarters: [{ ...PLAN.quarter_plan.quarters[0], kpis }] } });
+  assert.match(html, /<div class="qp-kl">Sales still needed · Nov \+ Dec<\/div><div class="qp-kv">£10\.7k<\/div>/);
+  const future = render({ ...PLAN, quarter_plan: { ...PLAN.quarter_plan, quarters: [{ ...PLAN.quarter_plan.quarters[0], kpis: [{ key: 'sales', label: 'Sales target Jan–Mar', value: '£20k', sub: 'to 31 Mar · Jan £6k + Feb £7k + Mar £7k' }] }] } });
+  assert.match(future, /<div class="qp-kl">Sales target Jan–Mar<\/div>/, 'only the current quarter\'s "still needed" box is relabelled');
+});
+
+test('item 13 (browser guard): "Next" never says "draft" when the status says scheduled or approved', () => {
+  const gifts = { ...GIFTS, next: { ...GIFTS.next, status: { code: 'scheduled', label: 'Scheduled on platform', icon: '🕒' }, status_line: '🕒 Scheduled on platform · Facebook Tue 17 Nov 6:30pm' } };
+  const html = render({ ...PLAN, quarter_plan: { ...PLAN.quarter_plan, initiatives: { ...PLAN.quarter_plan.initiatives, 'q1-gifts': gifts } } });
+  assert.match(html, /Next: FB\/IG: A photography gift without guessing the equipment · <span[^>]*>🕒 Scheduled on platform/);
+  assert.doesNotMatch(html, /FB\/IG draft: A photography gift/);
+});

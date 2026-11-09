@@ -100,6 +100,45 @@ test('monthly tile v2 face: table + total, non-dated, pipeline line, simple deta
   assert.match(w.stSalesGapHtml({ sales_gap: { ...g, months: g.months.map((m) => ({ ...m, pipeline_month: { error: 'x' } })) } }).tiles, /Prospects pipeline:<\/b> unavailable/);
 });
 
+test('(s) monthly "If all sold": ⓘ tooltip on the header (hover / tap) + the same text as the Total cell title; quarter tile unchanged', () => {
+  const g = gap(EVENTS);
+  const stock = `£${(Math.round(g.rolling.stock.gbp / 100) / 10).toFixed(1)}k`;
+  const TIP = `Full-price value of the unsold places on the events people normally book this month. The same event can be in its buying window in more than one month, so these figures overlap and don't add up to the quarter's ${stock} stock.`;
+  const w = browser();
+  const h = w.stSalesGapHtml({ sales_gap: g }).tiles;
+  const q = h.slice(h.indexOf('sg-card sg-q'), h.indexOf('data-sg-month'));
+  assert.doesNotMatch(q, /data-sg-tip|title="/, 'quarter tile: no tooltip (its If all sold is the true total)');
+  assert.equal((h.match(/data-sg-tip /g) || []).length, 3, 'one ⓘ per monthly tile');
+  for (const m of g.months) {
+    const tile = h.slice(h.indexOf(`data-sg-month="${m.key}"`), h.indexOf('</table>', h.indexOf(`data-sg-month="${m.key}"`)));
+    assert.ok(tile.includes(`<th>If all sold <span class="sg-tip" data-sg-tip tabindex="0" role="button" aria-label="What If all sold means" aria-expanded="false">ⓘ<span class="sg-tipb" role="tooltip">${TIP}</span></span></th>`), `${m.label}: header ⓘ with the exact text`);
+    assert.ok(tile.includes(`<tr class="sg-qtot"><td class="left">Total</td><td>${m.categories.total.events}</td><td>${m.categories.total.places}</td><td title="${TIP}">`), `${m.label}: Total "If all sold" cell title`);
+    assert.equal((tile.match(/title="/g) || []).length, 1, `${m.label}: only the Total cell carries the title`);
+  }
+  assert.match(h, /\.sg-tip:hover \.sg-tipb, \.sg-tip:focus-visible \.sg-tipb, \.sg-tip\.sg-open \.sg-tipb \{ display: block; \}/, 'hover, keyboard focus and tap (sg-open)');
+  const live = browser().stSalesGapHtml({ sales_gap: { ...g, rolling: { ...g.rolling, stock: { ...g.rolling.stock, gbp: 55028 } } } }).tiles;
+  assert.match(live, /don't add up to the quarter's £55\.0k stock\./, 'the quarter stock figure from the live model (£55.0k today)');
+});
+
+test('(s) tap toggles the tooltip open / closed; a click elsewhere closes it', () => {
+  const listeners = [];
+  const tip = { cls: new Set(), attrs: {}, classList: null, setAttribute(k, v) { this.attrs[k] = v; } };
+  tip.classList = { toggle: (c) => (tip.cls.has(c) ? (tip.cls.delete(c), false) : (tip.cls.add(c), true)), remove: (c) => tip.cls.delete(c) };
+  const ctx = { document: { addEventListener: (t, f) => listeners.push(f), getElementById: () => null, querySelectorAll: () => (tip.cls.has('sg-open') ? [tip] : []) }, console, Intl, Date, Math, Number, String, JSON, Promise };
+  ctx.window = ctx;
+  vm.runInNewContext(fs.readFileSync(new URL('../lib/strategy-sales-gap.js', import.meta.url), 'utf8'), ctx);
+  const click = (target) => listeners.forEach((f) => f({ target: { closest: (sel) => (sel === '[data-sg-tip]' ? target : null) }, preventDefault() {} }));
+  click(tip);
+  assert.ok(tip.cls.has('sg-open'));
+  assert.equal(tip.attrs['aria-expanded'], 'true');
+  click(tip);
+  assert.ok(!tip.cls.has('sg-open'), 'second tap closes');
+  click(tip);
+  click(null);
+  assert.ok(!tip.cls.has('sg-open'), 'a tap elsewhere closes');
+  assert.equal(tip.attrs['aria-expanded'], 'false');
+});
+
 test('monthly pipeline line reads pipeline_by_month; missing fields are £0; a failed read is an error', () => {
   assert.deepEqual(monthPipeline(undefined, null), { weighted: 0, dated: 0, undated: 0, overdue: 0 });
   assert.deepEqual(monthPipeline({ total: 530, cats: {} }, { total: 1410 }), { weighted: 530, dated: 0, undated: 0, overdue: 0 });
