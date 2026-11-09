@@ -3,7 +3,10 @@
  * (lib/marketing-schedule.js); nothing is written:
  *  - moments: fixed selling moments (public.marketing_selling_moments, active rows) for "Selling this week";
  *  - drafts: campaign records with a Squarespace draft (sqs_draft_id), with the proposed send time GPT stored in
- *    stage_history and the draft asset note (strategy_content_assets.used_in = send|<campaign_key>) as the brief.
+ *    stage_history and the draft asset note (strategy_content_assets.used_in = send|<campaign_key>) as the brief;
+ *  - promotions: Light & Logic edition promotion modules inside an email (content assets whose used_in links the
+ *    newsletter, the email's send|<campaign_key> and the edition row delivery|gpt-ll-newsletter-<day>). The module
+ *    rides on that email's own sends (budgeted once there); the newsletter itself never uses Squarespace credits.
  */
 import { createClient } from '@supabase/supabase-js';
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
@@ -31,6 +34,27 @@ async function loadDrafts(sb, propertyUrl) {
   });
 }
 
+export const NEWSLETTER_REF = 'newsletter|light-and-logic';
+const refOf = (list, prefix) => (list || []).find((u) => String(u).startsWith(prefix))?.slice(prefix.length) || null;
+/** assets → [{ asset_key, campaign_key, edition_step_key, edition_day, stage, planned_send_on, status, note }]. */
+export function promotionsOf(assets, campaigns) {
+  const camp = new Map((campaigns || []).map((c) => [c.campaign_key, c]));
+  return (assets || []).filter((a) => (a.used_in || []).includes(NEWSLETTER_REF)).map((a) => {
+    const campaignKey = refOf(a.used_in, 'send|');
+    const edition = refOf(a.used_in, 'delivery|');
+    const c = camp.get(campaignKey) || {};
+    return { asset_key: a.asset_key, title: a.title, status: a.status, note: a.note || null, campaign_key: campaignKey, edition_step_key: edition, edition_day: (String(edition || '').match(/\d{4}-\d{2}-\d{2}$/) || [null])[0], stage: c.stage || null, planned_send_on: c.planned_send_on || null };
+  }).filter((p) => p.campaign_key && p.edition_step_key);
+}
+async function loadPromotions(sb, propertyUrl) {
+  const { data, error } = await sb.from('strategy_content_assets').select('asset_key, title, status, used_in, note').eq('property_url', propertyUrl).contains('used_in', [NEWSLETTER_REF]).limit(100);
+  if (error) throw new Error(error.message);
+  const keys = [...new Set((data || []).map((a) => refOf(a.used_in, 'send|')).filter(Boolean))];
+  const camps = keys.length ? await sb.from('strategy_campaigns').select('campaign_key, stage, planned_send_on').eq('property_url', propertyUrl).in('campaign_key', keys) : { data: [] };
+  if (camps.error) throw new Error(camps.error.message);
+  return promotionsOf(data, camps.data);
+}
+
 async function loadMoments(sb, propertyUrl) {
   const { data, error } = await sb.from('marketing_selling_moments').select('moment_key, label, starts_on, ends_on, kind, priority, note')
     .eq('property_url', propertyUrl).eq('active', true).order('starts_on').limit(500);
@@ -47,9 +71,9 @@ export default async function handler(req, res) {
   try {
     const sb = createClient(url, key, { auth: { persistSession: false } });
     const propertyUrl = String(req.query.propertyUrl || PROP);
-    const [moments, drafts, gbp] = await Promise.all([loadMoments(sb, propertyUrl), loadDrafts(sb, propertyUrl), sb.from('gbp_performance_monthly').select('fetched_at').order('fetched_at', { ascending: false }).limit(1).maybeSingle()]);
+    const [moments, drafts, gbp, promotions] = await Promise.all([loadMoments(sb, propertyUrl), loadDrafts(sb, propertyUrl), sb.from('gbp_performance_monthly').select('fetched_at').order('fetched_at', { ascending: false }).limit(1).maybeSingle(), loadPromotions(sb, propertyUrl)]);
     res.setHeader('Cache-Control', 'no-store');
-    return send(res, 200, { ok: true, moments, drafts, gbp_stats_fetched_at: gbp?.data?.fetched_at || null });
+    return send(res, 200, { ok: true, moments, drafts, promotions, gbp_stats_fetched_at: gbp?.data?.fetched_at || null });
   } catch (e) {
     return send(res, 500, { ok: false, error: e?.message || String(e) });
   }
