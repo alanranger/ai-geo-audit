@@ -52,11 +52,11 @@ test('Strategy quarter tile v2: dated events table + total, non-dated needed by 
   assert.match(q, /Courses[\s\S]*One-day workshops[\s\S]*Residential[\s\S]*sg-qtot[\s\S]*Total/);
   assert.match(q, /Non-dated needed[\s\S]*Nov[\s\S]*Dec[\s\S]*Jan[\s\S]*Total[\s\S]*Needed/);
   assert.match(q, /From gift vouchers, Pick n Mix, 1-2-1s, mentoring, Academy, commissions, prints &amp; royalties\./);
-  assert.match(q, /Prospects pipeline:<\/b> £0 weighted by month · dated-event enquiries £0 · undated £0/, 'QUESTION (v): weighted by month · dated-event enquiries · undated');
+  assert.match(q, /data-sg-agreed="quarter"><div class="sg-agh"><b>Agreed &amp; prospects this quarter<\/b>/, 'QUESTION (dd): agreed & prospects box replaces the one-line pipeline box');
   assert.match(q, /<summary>details<\/summary>[\s\S]*Booked \/ capacity[\s\S]*Avg people per event[\s\S]*Normal non-dated \(same months last year\)[\s\S]*Still to find after normal and pipeline[\s\S]*data-sg-rules/);
   assert.doesNotMatch(q, /sg-v|Stock on sale now|Likely dated bookings \(fill rate\)/, 'old lines and the yellow verdict box are retired');
   assert.match(h, /id="sg-rules"/);
-  assert.match(w.stSalesGapHtml({ sales_gap: { ...g, rolling: { ...g.rolling, pipeline: { error: 'x' } } } }).tiles, /Prospects pipeline:<\/b> unavailable/);
+  assert.match(w.stSalesGapHtml({ sales_gap: g }).tiles, /data-sg-agreed="quarter">[\s\S]*admin key needed to list enquiries/, 'no admin key: no enquiry list (labels come only from the admin API)');
 });
 
 test('Marketing: no duplicate sales-gap tiles; one link line with the same rolling figures; Repeat / Academy moved', () => {

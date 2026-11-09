@@ -89,7 +89,7 @@ test('monthly tile v2 face: table + total, non-dated, pipeline line, simple deta
   assert.match(nov, /Events people book this month <span class="sg-u">\(prime buying window\)[\s\S]*Category[\s\S]*Events[\s\S]*Places[\s\S]*If all sold[\s\S]*Fill rate[\s\S]*Likely £/);
   assert.match(nov, /Courses[\s\S]*One-day workshops[\s\S]*Residential[\s\S]*sg-qtot[\s\S]*Total/);
   assert.match(nov, /From gift vouchers, Pick n Mix, 1-2-1s, mentoring, Academy, commissions, prints &amp; royalties\./);
-  assert.match(nov, /Prospects pipeline:<\/b> £0 weighted, cash due this month/);
+  assert.match(nov, /data-sg-agreed="2026-11"><div class="sg-agh"><b>Agreed &amp; prospects due this month<\/b>/, 'QUESTION (dd) replaces the pipeline line');
   assert.match(nov, /<summary>details<\/summary>[\s\S]*Events to push this month[\s\S]*Booked ahead for this month's events[\s\S]*Normal non-dated sales, same month last year[\s\S]*Still to find after normal and pipeline/);
   assert.doesNotMatch(nov, /sg-v|sg-from|damping|outside the prime window|events &amp; working/, 'verdict box, "from … +N more" and the working are off the tile');
   const dec = h.slice(h.indexOf('data-sg-month="2026-12"'), h.indexOf('data-sg-month="2027-01"'));
@@ -97,7 +97,7 @@ test('monthly tile v2 face: table + total, non-dated, pipeline line, simple deta
   const rules = h.slice(h.indexOf('id="sg-rules"'));
   assert.match(rules, /Show the working[\s\S]*November: working[\s\S]*damping[\s\S]*On-sale stock outside the prime window/);
   assert.ok(g.months.every((m) => m.working.length && m.outside && m.working[0].split), 'the working stays in the strategy-summary API');
-  assert.match(w.stSalesGapHtml({ sales_gap: { ...g, months: g.months.map((m) => ({ ...m, pipeline_month: { error: 'x' } })) } }).tiles, /Prospects pipeline:<\/b> unavailable/);
+  assert.match(h, /data-sg-agreed="2026-11">[\s\S]*admin key needed to list enquiries/, 'no admin key: no enquiry list');
 });
 
 test('(s) monthly "If all sold": ⓘ tooltip on the header (hover / tap) + the same text as the Total cell title; quarter tile unchanged', () => {
@@ -107,13 +107,13 @@ test('(s) monthly "If all sold": ⓘ tooltip on the header (hover / tap) + the s
   const w = browser();
   const h = w.stSalesGapHtml({ sales_gap: g }).tiles;
   const q = h.slice(h.indexOf('sg-card sg-q'), h.indexOf('data-sg-month'));
-  assert.doesNotMatch(q, /data-sg-tip|title="/, 'quarter tile: no tooltip (its If all sold is the true total)');
+  assert.doesNotMatch(q, /data-sg-tip|<td title="/, 'quarter tile: no "If all sold" tooltip (its If all sold is the true total)');
   assert.equal((h.match(/data-sg-tip /g) || []).length, 3, 'one ⓘ per monthly tile');
   for (const m of g.months) {
     const tile = h.slice(h.indexOf(`data-sg-month="${m.key}"`), h.indexOf('</table>', h.indexOf(`data-sg-month="${m.key}"`)));
     assert.ok(tile.includes(`<th>If all sold <span class="sg-tip" data-sg-tip tabindex="0" role="button" aria-label="What If all sold means" aria-expanded="false">ⓘ<span class="sg-tipb" role="tooltip">${TIP}</span></span></th>`), `${m.label}: header ⓘ with the exact text`);
     assert.ok(tile.includes(`<tr class="sg-qtot"><td class="left">Total</td><td>${m.categories.total.events}</td><td>${m.categories.total.places}</td><td title="${TIP}">`), `${m.label}: Total "If all sold" cell title`);
-    assert.equal((tile.match(/title="/g) || []).length, 1, `${m.label}: only the Total cell carries the title`);
+    assert.equal((tile.match(/<td title="/g) || []).length, 1, `${m.label}: only the Total cell carries the title`);
   }
   assert.match(h, /\.sg-tip:hover \.sg-tipb, \.sg-tip:focus-visible \.sg-tipb, \.sg-tip\.sg-open \.sg-tipb \{ display: block; \}/, 'hover, keyboard focus and tap (sg-open)');
   const live = browser().stSalesGapHtml({ sales_gap: { ...g, rolling: { ...g.rolling, stock: { ...g.rolling.stock, gbp: 55028 } } } }).tiles;
