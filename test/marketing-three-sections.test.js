@@ -9,7 +9,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { emailRows, emailStatusOf, placementRows, postRows, postStatusOf, shortWhat, titleOf, youtubeId } from '../lib/marketing/results.mjs';
-import { alanActions, decisionIndex, isPublished, openDecisions, outlookDue, releaseBlockers, releaseSplit } from '../lib/marketing/decision-state.mjs';
+import { alanActions, contentDecision, decisionIndex, isPublished, openDecisions, outlookDue, releaseBlockers, releaseSplit } from '../lib/marketing/decision-state.mjs';
+import { contentView } from '../lib/marketing/delivery-content.mjs';
 import { bookingsFor, eventFromKey, eventsBySubject, linkedEvents, onePerPage } from '../lib/marketing/results-bookings.mjs';
 import { campaignSheets } from '../lib/strategy-campaigns.mjs';
 
@@ -261,4 +262,34 @@ test('Waiting on you: "⚠ Needs approval" only where the status board marks the
   const board = { placements: [{ step_key: 'r', status: { code: 'needs_approval', label: 'Needs approval', icon: '⚠', tone: 'amber' } }, { step_key: 'q', status: { code: 'in_preparation', label: 'In preparation', icon: '📄', tone: 'grey' } }], tasks: [], emails: [] };
   const { rows } = win.mkWaitingRows(dec, { items: [] }, board);
   assert.deepEqual(rows.map((r) => r.chip), ['[⚠ Needs approval]', '', ''], 'chip only when the board agrees; decisions without a delivery get none');
+});
+
+/* ---------- YouTube Shorts (content records) in the shared decision state ---------- */
+
+const short = (key, state) => ({ asset_key: `video|short|${key}`, format: 'short_video', title: `Short ${key}`, url: `https://youtube.com/shorts/${key.padEnd(11, 'x').slice(0, 11)}`, uses: [{ use_key: 'youtube', channel: 'youtube', planned_at: '2026-11-08T12:00:00Z' }], provider_state: { read_at: '2026-11-09T11:00:00Z', ...state } });
+
+test('YouTube Shorts: only a real restriction (rejection / failed upload / region block) becomes one Waiting row; today none', () => {
+  const NOW = Date.parse('2026-11-09T12:00:00Z');
+  const today = contentView([short('pub1', { privacy: 'public', public_at: '2026-11-08T12:00:00Z' }), short('age1', { privacy: 'public', age_restricted: true }), short('priv1', { privacy: 'private' })], new Map(), { now: NOW }).content;
+  const none = openDecisions({ today: '2026-11-09', planApproved: { decided_at: 'x' }, drafts: 0, release: [], outlook: [], blockedOpen: 0, actions: [], verified: [], content: today.filter((c) => c.needs_alan) });
+  assert.equal(none.length, 0, 'public, age-limited or still private Shorts never ask Alan');
+  const blocked = contentView([short('blk1', { privacy: 'public', region_blocked: ['DE', 'FR', 'US'] }), short('rej1', { privacy: 'private', rejection_reason: 'copyright' })], new Map(), { now: NOW }).content.filter((c) => c.needs_alan);
+  const rows = openDecisions({ today: '2026-11-09', planApproved: { decided_at: 'x' }, drafts: 0, release: [], outlook: [], blockedOpen: 0, actions: [], verified: [], content: blocked });
+  assert.deepEqual(rows.map((r) => [r.type, r.what, r.why, r.channel]), [
+    ['content_restriction', 'YouTube Short restricted: Short blk1', 'blocked in 3 countries', 'youtube'],
+    ['content_restriction', 'YouTube Short restricted: Short rej1', 'rejected by YouTube (copyright)', 'youtube']
+  ]);
+  assert.equal(contentDecision(blocked[0]).url, blocked[0].url);
+});
+
+test('Waiting: a restricted Short row has one "Open" button (per-video view hook, else the YouTube link)', () => {
+  const win = browser(['marketing-waiting.js'], { mkScheduleModel: { build: () => ({ items: [], needs: [] }) }, mkDeliveryItems: () => [] });
+  const dec = { open: [{ type: 'content_restriction', key: 'content|video|short|blk1', asset_key: 'video|short|blk1', url: 'https://youtube.com/shorts/blk1xxxxxxx', due: '2026-11-08', what: 'YouTube Short restricted: Short blk1', channel: 'youtube', why: 'blocked in 3 countries' }], count: 1 };
+  const board = { content: [{ asset_key: 'video|short|blk1', status: { code: 'needs_attention', label: 'Needs attention', icon: '⚠', tone: 'amber' } }] };
+  const { rows } = win.mkWaitingRows(dec, { items: [] }, board);
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].btn, /data-mkw-video="video\|short\|blk1"/);
+  assert.match(rows[0].btn, /data-mkw-url="https:\/\/youtube\.com\/shorts\/blk1xxxxxxx"/);
+  assert.match(rows[0].btn, />Open</);
+  assert.match(rows[0].chip, /Needs attention/);
 });
