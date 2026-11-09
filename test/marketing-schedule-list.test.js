@@ -174,3 +174,23 @@ test('Google Business weekly review: a GPT task in Tasks & reminders only; Due /
   assert.ok(!L.listHtml(m, opts(), e).includes('Google Business'), 'not with publications');
   assert.match(L.tasksHtml(m, opts(), e), /Weekly Google Business review · owner GPT · next: Review latest posts and reviews · <span class="mkl-st mini mkl-prep"[^>]*><i>📋<\/i>Due/);
 });
+
+test('An Outlook note Alan deferred reads "Deferred by Alan · date" (neutral), never In preparation / Late / Needs approval; the schedule title is used', async () => {
+  const { taskStatus } = await import('../lib/marketing/delivery-status.mjs');
+  const step = { key: 'step|2026-11-09|Outlook personal notes|2026-11-09', channel: 'Outlook personal notes', title: 'older stored title', day: '2026-11-09', done: false };
+  const deferred = new Map([[step.key, { by: 'Alan', at: '2026-11-09T09:15:00Z', reason: 'Alan does it himself' }]]);
+  for (const today of ['2026-11-09', '2026-11-12']) {
+    const s = taskStatus(step, { today, open: new Set([`outlook|${step.key}`]), deferred });
+    assert.deepEqual([s.code, s.label, s.tone], ['deferred', 'Deferred by Alan · Mon 9 Nov', 'neutral']);
+  }
+  assert.equal(taskStatus(step, { today: '2026-11-09', open: new Set() }).code, 'in_preparation', 'not deferred → unchanged');
+  assert.equal(taskStatus({ ...step, done: true }, { today: '2026-11-09', deferred }).code, 'done', 'ticked done still wins');
+  const { win } = load();
+  const L = win.mkScheduleList;
+  const note = { id: 'outlook|o', row: 'outlook', key: 'o', step_key: step.key, title: 'Last places Hay Woods walk Fri 4 Dec', short: 'Hay Woods', day: '2026-11-09', state: 'prep', raw: { status: 'prep' } };
+  const e = { board: { tasks: [{ step_key: step.key, title: step.title, type: 'reminder', status: taskStatus(step, { today: '2026-11-09', deferred }) }] } };
+  e.status = (x) => L.statusOf(x, e);
+  const html = L.tasksHtml(model([note]), opts(), e);
+  assert.match(html, /Last places Hay Woods walk Fri 4 Dec · personal note · Alan is doing this himself · <span class="mkl-st mini mkl-chk"[^>]*><i>⏸<\/i>Deferred by Alan · Mon 9 Nov/);
+  assert.ok(!html.includes('In preparation') && !html.includes('older stored title'));
+});

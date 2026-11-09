@@ -47,6 +47,7 @@ import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { ingest } from '../../lib/marketing/collector-ingest.mjs';
 import { ingestDrafts, ingestScheduled } from '../../lib/marketing/delivery-schedule.mjs';
 import { buildStatusBoard, metaCheck, refreshProgress, refreshStatus, watchDue } from '../../lib/marketing/delivery-status-board.mjs';
+import { readShortsStatus } from '../../lib/marketing/delivery-content.mjs';
 
 /** Complete Squarespace reads posted by the PC collector (read-only on Squarespace). */
 const COLLECTOR_READS = { scheduled: ingestScheduled, drafts: ingestDrafts };
@@ -196,6 +197,7 @@ async function collectorState(sb) {
 const POSTS = {
   'status-refresh': (sb) => refreshStatus(sb),
   'status-meta-check': (sb) => metaCheck(sb),
+  'status-youtube-check': (sb) => readShortsStatus(sb),
   sync: (sb, b) => runStep(sb, b.step),
   'segment-preview': preview,
   'segment-save': saveSegment,

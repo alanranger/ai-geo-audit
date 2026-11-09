@@ -357,6 +357,7 @@ async function statusWatch() {
     console.log(`status watch: ${due.squarespace.reason}`);
     await scheduleWatch().catch((e) => console.error(`status watch: ${e.message}`));
   }
+  if (due.youtube?.due) await api('POST', { action: 'status-youtube-check' }).then((r) => console.log(`youtube check: ${r.ok ? `${r.videos} videos` : r.error}`)).catch((e) => console.error(`youtube check: ${e.message}`));
   if (due.meta?.due) await api('POST', { action: 'status-meta-check' }).then((r) => console.log(`meta check: ${JSON.stringify(r.results || r.skipped || r)}`)).catch((e) => console.error(`meta check: ${e.message}`));
 }
 
