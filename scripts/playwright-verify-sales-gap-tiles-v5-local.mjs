@@ -21,7 +21,7 @@ const COMMIT = '35fbc654';
 const VERSION = 'cov-20261109a';
 const TAG = LIVE ? 'live' : 'local';
 const VIEW = LIVE
-  ? { before: execSync(`git show ${COMMIT}^:lib/strategy-sales-gap.js`, { encoding: 'utf8' }), after: null }
+  ? { before: execSync(`git show ${COMMIT}~1:lib/strategy-sales-gap.js`, { encoding: 'utf8' }), after: process.env.PIN ? execSync(`git show ${COMMIT}:lib/strategy-sales-gap.js`, { encoding: 'utf8' }) : null }
   : { before: execSync('git show HEAD:lib/strategy-sales-gap.js', { encoding: 'utf8' }), after: fs.readFileSync('lib/strategy-sales-gap.js', 'utf8') };
 /* prospect_enquiry_history is left out: the prospects agent is cleaning test history rows while this runs (a GET-only run can't delete). */
 /* prospect_enquiry is checked separately: GPT / Claude update enquiries through prospect_upsert while this runs. */
@@ -192,7 +192,7 @@ const a = await render(browser, VIEW.before);
 const lb = await a.page.evaluate(layoutOf);
 await a.ctx.close();
 const b = await render(browser, VIEW.after);
-if (LIVE) await servedCheck(b.page);
+if (LIVE && !process.env.PIN) await servedCheck(b.page);
 await b.page.waitForFunction(() => !/Loading enquiries/.test(document.querySelector('[data-sg-agreed]')?.textContent || ''), null, { timeout: 30000 }).catch(() => {});
 const la = await b.page.evaluate(layoutOf);
 const tiles = await b.page.evaluate(tilesOf);

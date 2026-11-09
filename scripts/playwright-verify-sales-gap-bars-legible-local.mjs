@@ -11,7 +11,13 @@ import { chromium } from 'playwright';
 const ENV = Object.fromEntries(fs.readFileSync('.env.vercel.prod', 'utf8').split(/\r?\n/).filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).replace(/^"|"$/g, '').trim()]));
 const BASE = 'https://ai-geo-audit.vercel.app';
 const OUT = 'outputs';
-const VIEW = { before: execSync('git show HEAD:lib/strategy-sales-gap.js', { encoding: 'utf8' }), after: fs.readFileSync('lib/strategy-sales-gap.js', 'utf8') };
+/** PHASE=live: production files + APIs (GET); "before" = the same page with only the parent commit's view. */
+const LIVE = process.env.PHASE === 'live';
+const COMMIT = 'dffc1945';
+const VERSION = 'lg-20261109a';
+const VIEW = LIVE
+  ? { before: execSync(`git show ${COMMIT}~1:lib/strategy-sales-gap.js`, { encoding: 'utf8' }), after: null }
+  : { before: execSync('git show HEAD:lib/strategy-sales-gap.js', { encoding: 'utf8' }), after: fs.readFileSync('lib/strategy-sales-gap.js', 'utf8') };
 const CACHED = ['/api/aigeo/strategy-summary', '/api/aigeo/prospects'];
 const API = {};
 const results = [];
@@ -23,7 +29,7 @@ const makeRoute = (view) => async (r) => {
   const req = r.request();
   const url = new URL(req.url());
   if (req.method() !== 'GET') { if (url.pathname.startsWith('/api/')) blocked.push(`${req.method()} ${url.pathname}`); return r.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true,"dry_run":true}' }); }
-  if (url.pathname === '/lib/strategy-sales-gap.js') return r.fulfill({ status: 200, contentType: 'application/javascript', body: view });
+  if (view && url.pathname === '/lib/strategy-sales-gap.js') return r.fulfill({ status: 200, contentType: 'application/javascript', body: view });
   if (!CACHED.includes(url.pathname)) return r.fallback();
   if (!API[url.pathname]) API[url.pathname] = await (await r.fetch()).text();
   return r.fulfill({ status: 200, contentType: 'application/json', body: API[url.pathname] });
@@ -107,17 +113,29 @@ function movedChecks(before, after) {
   check(`nothing else moved: every other block has the same x, width, height and text; blocks below shift by the grid delta (${dy >= 0 ? '+' : ''}${dy}px, ±1px sub-pixel rounding)`, !moved.length && after.cover === before.cover && after.tables === before.tables, moved.slice(0, 6).map(([id, d]) => `${id}: ${d}`).join(' | ') || `${after.blocks.length} blocks · realistic cover table + category tables identical`);
 }
 
+/** Production serves the view at ?v=lg-20261109a, identical to the commit (a leading byte-order mark aside). */
+async function servedCheck(page) {
+  const served = await page.evaluate(async () => {
+    const src = document.querySelector('script[src*="/lib/strategy-sales-gap.js"]')?.getAttribute('src') || '';
+    return { src, body: src ? await (await fetch(src, { cache: 'no-store' })).text() : '' };
+  });
+  const clean = (t) => t.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  const committed = clean(execSync(`git show ${COMMIT}:lib/strategy-sales-gap.js`, { encoding: 'utf8' }));
+  check(`production serves strategy-sales-gap.js?v=${VERSION}, identical to ${COMMIT}`, served.src.endsWith(`?v=${VERSION}`) && clean(served.body) === committed, `${served.src} · ${served.body.length} bytes`);
+}
+
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const a = await render(browser, VIEW.before);
 const lb = await a.page.evaluate(layoutOf);
 await a.ctx.close();
 const b = await render(browser, VIEW.after);
+if (LIVE) await servedCheck(b.page);
 await b.page.waitForFunction(() => !/Loading enquiries/.test(document.querySelector('[data-sg-agreed]')?.textContent || ''), null, { timeout: 30000 }).catch(() => {});
 await b.page.waitForTimeout(500);
 const la = await b.page.evaluate(layoutOf);
 const st = await b.page.evaluate(stylesOf);
 await b.page.evaluate(() => { document.querySelectorAll('[data-sg-label]').forEach((el) => { el.textContent = '••••••'; }); });
-await b.page.locator('#st-sales-gap .sg-grid').screenshot({ path: `${OUT}/sales-gap-bars-legible-local-1700px-20261109.png` });
+await b.page.locator('#st-sales-gap .sg-grid').screenshot({ path: `${OUT}/sales-gap-bars-legible-${LIVE ? 'live' : 'local'}-1700px-20261109.png` });
 await b.ctx.close();
 await browser.close();
 const s = JSON.parse(API['/api/aigeo/strategy-summary']);
@@ -126,6 +144,6 @@ gapChecks(st, s.sales_gap.cover);
 movedChecks(lb, la);
 check('every non-GET refused', true, `${blocked.length} refused: ${[...new Set(blocked)].join(', ') || 'none attempted'}`);
 check('no page errors', !errors.length, errors.slice(0, 3).join(' | '));
-fs.writeFileSync(`${OUT}/_ee-result.json`, JSON.stringify({ results }, null, 1));
+fs.writeFileSync(`${OUT}/_ee-${LIVE ? 'live' : 'local'}-result.json`, JSON.stringify({ results }, null, 1));
 for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.note ? ` (${r.note})` : ''}`);
 process.exit(0);
