@@ -268,7 +268,7 @@ test('LinkedIn manual entry writes one row (source manual) and nothing else; the
   assert.deepEqual([repo.t.social_account_daily[0].source, repo.t.social_account_daily[0].period_days, repo.t.social_account_daily[0].channel], ['manual', 7, 'linkedin']);
   const t = tile((await h.call('GET', { action: 'summary' })).json, 'linkedin');
   assert.equal(t.state, 'manual');
-  assert.match(t.source.text, /^manual · last entered 2026-11-08$/);
+  assert.match(t.source.text, /^Entered by admin form · last checked 2026-11-08$/);
   assert.equal(t.headline.value, 3050);
   const later = makeHandler({ repo: () => repo, env: ENV, fetchImpl: null, now: () => NOW + 11 * DAY, gbpStatus: async () => null, runLog: { start: async () => null, finish: async () => {} } });
   const res = fakeRes();
@@ -395,9 +395,40 @@ test('GPT LinkedIn entry: one week row + its post rows, idempotent by week and p
   assert.deepEqual([repo.t.social_account_daily.length, repo.t.social_posts.length, repo.t.social_post_snapshots.length], [1, 1, 1], 'updated, never duplicated');
   assert.deepEqual([repo.t.social_account_daily[0].followers, repo.t.social_posts[0].impressions], [3055, 990]);
   const t = tile((await h.call('GET', { action: 'summary' })).json, 'linkedin');
-  assert.match(t.source.text, /^GPT · entered 2026-11-08$/);
+  assert.match(t.source.text, /^Entered by GPT · last checked 2026-11-08$/);
   assert.equal(linkedinPostId('https://www.linkedin.com/feed/update/urn:li:share:7525230995168509952?utm=x'), 'li:7525230995168509952');
   assert.equal((await h.call('POST', {}, GPT_WEEK, {})).status, 401, 'admin key required');
+});
+
+test('LinkedIn tile labels exactly what the figures are; Light & Logic newsletter is separate and only when supplied', async () => {
+  const repo = memRepo();
+  const h = harness(repo);
+  const waiting = tile((await h.call('GET', { action: 'summary' })).json, 'linkedin');
+  assert.match(waiting.needs, /nothing for Alan to enter/);
+  assert.equal(waiting.source.text, 'Entered by GPT · not checked yet');
+  assert.equal(waiting.newsletter.available, false);
+  await h.call('POST', {}, GPT_WEEK);
+  let t = tile((await h.call('GET', { action: 'summary' })).json, 'linkedin');
+  assert.equal(t.headline.unit, 'profile followers');
+  assert.deepEqual(t.rows.map((r) => r.label), ['Post impressions (7 days)', 'Post reactions · comments · reposts (7 days)', 'Post engagement rate (7 days)', 'Posts (7 days)', 'Website visits (GA4, 28 days)']);
+  assert.deepEqual([t.rows[0].value, t.rows[1].text, t.rows[2].value, t.rows[3].value], [1400, '30 · 4 · 1', 2.5, 1]);
+  assert.equal(t.rows[0].delta.not_comparable, true, 'no entry for the week before');
+  assert.equal(t.newsletter.available, false, 'no newsletter figures supplied → not available');
+  const nl = { subscribers: 480, issue_views: 1210, issue_date: '2026-11-08', issue_url: 'https://www.linkedin.com/pulse/light-logic-issue-1' };
+  const r = await h.call('POST', {}, { ...GPT_WEEK, newsletter: nl });
+  assert.equal(r.json.ok, true);
+  const row = repo.t.social_account_daily[0];
+  assert.deepEqual([row.newsletter_subscribers, row.newsletter_issue_views, row.followers, row.impressions], [480, 1210, 3050, 1400], 'own columns, profile / post figures untouched');
+  await h.call('POST', {}, GPT_WEEK);
+  assert.equal(repo.t.social_account_daily[0].newsletter_subscribers, 480, 'an entry without newsletter keeps the stored newsletter figures');
+  assert.equal(repo.t.social_account_daily.length, 1);
+  t = tile((await h.call('GET', { action: 'summary' })).json, 'linkedin');
+  assert.deepEqual([t.newsletter.available, t.newsletter.subscribers, t.newsletter.issue_views, t.newsletter.issue_url], [true, 480, 1210, nl.issue_url]);
+  for (const [bad, re] of [[{ subscribers: -1 }, /newsletter subscribers must be a whole number/], [{ issue_views: '9x' }, /newsletter issue views must be a whole number/], [{ issue_url: 'https://example.com/x' }, /linkedin\.com/], [{ issue_date: '2027-01-01' }, /future/], ['480', /must be an object/]]) {
+    const res = await h.call('POST', {}, { ...GPT_WEEK, newsletter: bad });
+    assert.equal(res.status, 400);
+    assert.match(res.json.error, re);
+  }
 });
 
 test('GPT LinkedIn entry: invalid bodies are refused and write nothing', async () => {
@@ -452,6 +483,35 @@ test('evidenced posts: joined by permalink (IG shortcode, LinkedIn activity), Fa
   assert.deepEqual([...replaced].sort(), ['facebook|1715715080112405', 'instagram|18108'], 'matched posts are not listed twice');
   const tagged = evidencedRows({ ticks, steps, tags: [{ ref_key: 'step|2026-11-02|LinkedIn|2026-11-04', purpose_primary: 'educate' }], posts });
   assert.deepEqual([tagged.rows.find((r) => r.channel === 'linkedin').purpose, tagged.rows.find((r) => r.channel === 'linkedin').purpose_source], ['educate', 'set']);
+});
+
+test('evidenced posts: the last 7 days are read (8 Nov still shows on 9 Nov), each post once, newest first', async () => {
+  const igUrl = 'https://www.instagram.com/alanrangerphotography/p/DffMdBLkVlZ/';
+  const tick = (key, at, text, history = []) => ({ tick_key: key, status: 'done', set_by: 'GPT', set_at: at, reason: text, history: [{ at, action: 'done', evidence: text }, ...history] });
+  const ticks = [
+    tick('step|2026-11-02|Facebook + Instagram|2026-11-06|ig', '2026-11-08T16:35:09Z', `Norfolk published on Instagram ${igUrl}`, [{ at: '2026-11-08T16:53:04Z', action: 'story_published', evidence: 'Your story has been published.' }]),
+    tick('step|2026-11-02|Facebook + Instagram|2026-11-06|1|ig', '2026-11-08T17:10:00Z', `Same Instagram post re-checked ${igUrl}`),
+    tick('step|2026-11-02|Facebook + Instagram|2026-11-06|fb', '2026-11-08T16:35:09Z', 'Norfolk published on Facebook.'),
+    tick('step|2026-10-26|Facebook + Instagram|2026-10-30|ig', '2026-11-01T09:00:00Z', 'Older than 7 days: https://www.instagram.com/p/OLDCODE1/')
+  ];
+  const posts = [
+    { channel: 'instagram', post_id: 'ig1', posted_at: '2026-11-08T16:33:11Z', title: 'A few days with your camera', permalink: 'https://www.instagram.com/p/DffMdBLkVlZ/', reach: 41, source: 'api' },
+    { channel: 'facebook', post_id: 'fb1', posted_at: '2026-11-08T16:34:33Z', title: 'A few days with your camera', permalink: 'https://www.facebook.com/x/posts/1', reach: 22, source: 'api' },
+    { channel: 'instagram', post_id: 'igold', posted_at: '2026-10-30T10:00:00Z', title: 'Old post', permalink: 'https://www.instagram.com/p/OLDCODE1/', reach: 99, source: 'api' }
+  ];
+  const repo = memRepo({ tables: { social_posts: posts }, ticks, steps: [{ step_key: 'step|2026-11-02|Facebook + Instagram|2026-11-06', channel: 'Facebook + Instagram', step: 'Post: "Last 2 places" for Norfolk', featured: [] }] });
+  const nineNov = makeHandler({ repo: () => repo, env: ENV, fetchImpl: null, now: () => Date.parse('2026-11-09T10:00:00Z'), gbpStatus: async () => null, runLog: { start: async () => null, finish: async () => {} } });
+  const res = fakeRes();
+  await nineNov({ method: 'GET', query: { action: 'summary' }, headers: { 'x-arp-admin-key': ADMIN } }, res);
+  const list = JSON.parse(res.body).posts;
+  const evid = list.filter((p) => p.evidence);
+  assert.deepEqual(evid.map((p) => `${p.channel}:${p.placement}:${p.post_id}`).sort(), ['facebook:feed:fb1', 'instagram:feed:ig1', 'instagram:story:evidence:step|2026-11-02|Facebook + Instagram|2026-11-06|ig:story'].sort(), '8 Nov placements still listed on 9 Nov; the 1 Nov tick is outside the 7 days');
+  assert.equal(list.filter((p) => p.post_id === 'ig1').length, 1, 'the Instagram post evidenced by two ticks is listed once');
+  assert.match(list.find((p) => p.post_id === 'ig1').evidence, /re-checked/, 'latest evidence wins');
+  assert.equal(list.find((p) => p.post_id === 'igold').evidence, undefined, 'older post shown as collected, without evidence');
+  const times = list.map((p) => p.posted_at);
+  assert.deepEqual(times, [...times].sort().reverse(), 'newest first');
+  assert.deepEqual(repo.writes, [], 'viewing writes nothing');
 });
 
 test('equal-age comparison for Facebook / Instagram / LinkedIn uses the daily post snapshots', () => {

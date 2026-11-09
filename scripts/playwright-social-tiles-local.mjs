@@ -89,8 +89,10 @@ const tileText = (page, key) => page.locator(`[data-mksoc-tile="${key}"]`).inner
 async function verify(page, exp) {
   const order = await page.$$eval('#mk-social [data-mksoc-tile]', (els) => els.map((e) => e.dataset.mksocTile));
   check('5 tiles in order', order.join(',') === 'facebook,instagram,linkedin,youtube,gbp', order.join(','));
-  const placed = await page.evaluate(() => { const a = document.getElementById('mk-overview-tiles'); return a?.nextElementSibling?.id === 'mk-social' && document.getElementById('mk-social').nextElementSibling?.id === 'mk-schedule'; });
-  check('row sits directly under the Overview tiles, above the schedule', placed);
+  const layout = await page.evaluate(() => [...document.getElementById('mk-social').parentElement.children].map((e) => e.id).filter(Boolean));
+  const at = layout.indexOf('mk-social');
+  const placed = layout[at - 1] === 'mk-overview-tiles' && ['mk-waiting', 'mk-schedule'].includes(layout[at + 1]);
+  check('row sits directly under the Overview tiles, above Waiting on you / the three sections', placed, layout.join(' → '));
   const yt = await tileText(page, 'youtube');
   for (const [k, v] of Object.entries(exp.yt)) check(`YouTube ${k} = SQL (${v})`, yt.includes(v), yt.replace(/\s+/g, ' ').slice(0, 160));
   const g = await tileText(page, 'gbp');
@@ -119,7 +121,7 @@ async function verify(page, exp) {
 }
 
 async function linkedinDryRun(page) {
-  await page.click('[data-mksoc-tile="linkedin"] [data-mksoc="linkedin"]');
+  await page.click('#mk-social-rules [data-mksoc="linkedin"]');
   await page.fill('[data-li="followers"]', '3050');
   await page.fill('[data-li="impressions_7d"]', '1400');
   await page.screenshot({ path: `${OUT}/social-linkedin-entry-form-${TAG}-1700px-20261108.png` });
@@ -158,12 +160,16 @@ if (LIVE) {
 }
 await page.locator('#mk-social').screenshot({ path: `${OUT}/social-channels-${TAG}-1700px-20261108.png` });
 await page.locator('#mk-social .mksoc-g').screenshot({ path: `${OUT}/social-channels-tiles-${TAG}-1700px-20261108.png` });
+await page.evaluate(() => { const d = document.getElementById('mksoc-posts-fold'); if (d) d.open = true; });
 await page.locator('#mksoc-posts').screenshot({ path: `${OUT}/social-recent-posts-evidence-${TAG}-1700px-20261108.png` });
+await page.locator('[data-mksoc-tile="linkedin"]').screenshot({ path: `${OUT}/social-linkedin-tile-labels-${TAG}-1700px-20261109.png` });
+const liText = (await page.locator('[data-mksoc-tile="linkedin"]').innerText()).replace(/\s+/g, ' ');
+check('LinkedIn tile: waiting for GPT, ownership line, Light & Logic "not available", no "Enter this week" prompt', /Waiting for GPT/.test(liText) && /Entered by GPT · /.test(liText) && /Light & Logic newsletter/.test(liText) && /not available/.test(liText) && !/Enter this week/.test(liText) && /Website visits \(GA4, 28 days\)/.test(liText), liText.slice(0, 400));
 await verify(page, exp);
 if (LIVE) check('Connect button disabled while the Meta env vars are missing', await page.$eval('[data-mksoc-tile="facebook"] [data-mksoc="connect"]', (b) => b.disabled) && /META_APP_ID, META_APP_SECRET, SOCIAL_TOKEN_KEY/.test(await tileText(page, 'facebook')));
 const c1 = await counts();
 check('viewing writes nothing (row counts unchanged, no POST)', JSON.stringify(c0) === JSON.stringify(c1) && writes.length === 0, `${JSON.stringify(c0)} → ${JSON.stringify(c1)}`);
-await page.click('#mk-fold-rules > summary');
+await page.evaluate(() => { for (let e = document.getElementById('mk-fold-rules'); e; e = e.parentElement) if (e.tagName === 'DETAILS') e.open = true; });
 await page.waitForSelector('#mk-social-rules h3');
 await page.locator('#mk-social-rules').screenshot({ path: `${OUT}/social-connections-rules-${TAG}-1700px-20261108.png` });
 await linkedinDryRun(page);
