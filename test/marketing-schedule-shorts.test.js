@@ -150,6 +150,6 @@ test('Tasks & reminders: empty "·" segments are dropped (never "· ·" before t
   const env = { board: { tasks: [] } };
   env.status = (x) => L.statusOf(x, env);
   const html = L.tasksHtml(m, opts('all'), env);
-  assert.match(html, /Google Business update: £150 off, book by Sat 14 Nov 23:59 · <span class="mkl-st mini/);
+  assert.match(html, /Google Business update: £150 off, book by Sat 14 Nov 23:59 · optional · owner GPT: drafts and posts it \(Alan only for a commercial approval\) · <span class="mkl-st mini/);
   assert.ok(!/·\s*·/.test(html));
 });

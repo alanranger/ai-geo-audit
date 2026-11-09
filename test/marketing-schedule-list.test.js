@@ -102,7 +102,7 @@ test('channel filter: List + grids; the range and cycle persist when the filter 
   const li = L.listHtml(model(all), opts('linkedin'), env(L));
   assert.match(li, /Light &amp; Logic newsletter \(LinkedIn\)/);
   assert.match(li, /LinkedIn · Light &amp; Logic newsletter · GPT prepares, Alan approves/);
-  assert.match(li, /edition being prepared by GPT · not scheduled on LinkedIn/);
+  assert.match(li, /edition not prepared · not scheduled on LinkedIn/, 'no implied GPT production commitment (Light & Logic on hold, 9 Nov)');
   assert.ok(!li.includes('targeted emails') && !li.includes('What focus bracketing'), 'LinkedIn only');
   assert.equal(all.filter((x) => L.matchChannel(x, 'facebook')).length, 1, 'Facebook / Instagram filters show the shared FB + IG post');
 });
@@ -146,7 +146,7 @@ test('M\'s board status wins in List and grids (emails, placements, tasks); the 
   assert.equal(e.status(THU[0]).label, 'Checking delivery');
   assert.equal(e.status(THU[0]).server, true);
   const p = e.status(post);
-  assert.deepEqual([p.code, p.label, p.blocker], ['published', 'Published (FB feed)', 'IG feed: Checking delivery'], 'one placement never stands in for another');
+  assert.deepEqual([p.code, p.label, p.blocker], ['published', 'Published (FB feed)', 'FB feed published · IG feed checking'], 'one placement never stands in for another');
   const html = L.listHtml(model([THU[0], post]), opts(), e);
   assert.match(html, /…<\/i>Checking delivery/);
   assert.match(html, /Published \(FB feed\)/);

@@ -46,7 +46,7 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { ingest } from '../../lib/marketing/collector-ingest.mjs';
 import { ingestDrafts, ingestScheduled } from '../../lib/marketing/delivery-schedule.mjs';
-import { buildStatusBoard, metaCheck, recordRefreshOutcome, refreshProgress, refreshStatus, watchDue } from '../../lib/marketing/delivery-status-board.mjs';
+import { buildStatusBoard, closeIdleRefresh, metaCheck, recordRefreshOutcome, refreshProgress, refreshStatus, watchDue } from '../../lib/marketing/delivery-status-board.mjs';
 import { readShortsStatus } from '../../lib/marketing/delivery-content.mjs';
 
 /** Complete Squarespace reads posted by the PC collector (read-only on Squarespace). */
@@ -164,7 +164,10 @@ const GETS = {
     const inputs = await deliveryInputs(sb);
     return { frequency: frequencyView(inputs.frequency, new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' })) };
   },
-  'collect-next': (sb) => nextRequests(sb),
+  'collect-next': async (sb) => {
+    const r = await nextRequests(sb);
+    return { ...r, refresh: await closeIdleRefresh(sb, r).catch(() => null) };
+  },
   'collect-queue': (sb) => listRequests(sb),
   'delivery-status': (sb) => buildStatusBoard(sb),
   'watch-due': (sb) => watchDue(sb),
