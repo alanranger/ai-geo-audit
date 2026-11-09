@@ -166,17 +166,23 @@ async function readDrafts(page, runId) {
   }
 }
 
-async function collect(page, runId, backfill, maxMinutes) {
-  const meter = await page.evaluate(readMeter);
-  await post('meter', { ...meter, run_id: runId });
-  const scheduled = await readScheduled(page);
+/** Squarespace's Sent list + report totals for new campaigns and those sent in the last `days` (read-only). */
+async function postSent(page, days) {
   const sent = await page.evaluate(listSent);
   const state = DRY ? [] : (await api('GET', null, '?action=collector-state')).campaigns;
   const known = new Set(state.map((s) => s.email_id));
   const summaries = new Map();
-  const refresh = sent.filter((c) => !known.has(c.email_id) || Date.parse(c.sent_on) >= Date.now() - RECENT_DAYS * 86400000);
+  const refresh = sent.filter((c) => !known.has(c.email_id) || Date.parse(c.sent_on) >= Date.now() - days * 86400000);
   for (const c of refresh) summaries.set(c.email_id, { ...c, ...(await page.evaluate(readSummary, c.email_id)) });
   for (let i = 0; i < refresh.length; i += 25) await post('campaigns', { campaigns: refresh.slice(i, i + 25).map((c) => summaries.get(c.email_id)) });
+  return { sent, state, summaries, refresh };
+}
+
+async function collect(page, runId, backfill, maxMinutes) {
+  const meter = await page.evaluate(readMeter);
+  await post('meter', { ...meter, run_id: runId });
+  const scheduled = await readScheduled(page);
+  const { sent, state, summaries, refresh } = await postSent(page, RECENT_DAYS);
   const targets = pickEventTargets(sent, state, backfill);
   const t0 = Date.now();
   let done = 0;
@@ -311,31 +317,47 @@ async function signedInSite() {
 /** Approved clean-up manifest (Squarespace opt-out, batches of 25, each person re-checked by the dashboard first). */
 const cleanupJob = () => cleanupExecJob({ api, open: signedInSite, pageFns: { optOut, consentStatus, subscribedTotal }, dry: DRY });
 
-/** Send meter + Scheduled tab only (read-only): `--scheduled`, and hourly from the job runner. */
+/**
+ * Status check (read-only): send meter, Scheduled + Drafts, and the Sent list with report totals for the last 3 days,
+ * so a send is confirmed by Squarespace itself (never by the clock). `--scheduled`, and the status watch below.
+ */
 async function scheduleWatch() {
   const site = await signedInSite();
   try {
     await post('meter', await site.page.evaluate(readMeter));
     await readScheduled(site.page);
+    await postSent(site.page, 3).catch((e) => console.error(`sent read: ${e.message}`));
   } finally {
     await site.ctx.close();
   }
 }
 
-const WATCH_FILE = path.join(process.env.LOCALAPPDATA || os.homedir(), 'AlanRanger', 'sqs-schedule-watch.json');
-const WATCH_MINUTES = 60;
 /**
- * At most once an hour (stamp file on this PC, written whatever the outcome so an expired login isn't retried every
- * 5 min); never in the 05:00 hour, so it can't hold the profile when the nightly collector starts at 05:40.
+ * Status watch (every run of the 5-minute task): the dashboard decides (GET watch-due, read-only) — Squarespace every
+ * 15 minutes 07:00–22:00 UK plus ~10 minutes after each release, never in the 05:00 hour (nightly run); Meta ~10 minutes
+ * after a Facebook / Instagram release (the existing social collector, run on the server). A failed attempt is not
+ * retried for 15 minutes, so an expired login doesn't open Chrome every 5 minutes.
  */
-async function hourlyScheduleWatch() {
+const WATCH_FILE = path.join(process.env.LOCALAPPDATA || os.homedir(), 'AlanRanger', 'sqs-schedule-watch.json');
+/** Only while the dashboard can't answer watch-due (e.g. not deployed yet): the old hourly read, never in the 05:00 hour. */
+async function hourlyFallback() {
   const last = fs.existsSync(WATCH_FILE) ? Date.parse(JSON.parse(fs.readFileSync(WATCH_FILE, 'utf8')).at || 0) : 0;
-  if (Date.now() - last < WATCH_MINUTES * 60000) return;
   const hour = Number(new Date().toLocaleString('en-GB', { hour: '2-digit', hour12: false, timeZone: 'Europe/London' }));
-  if (hour === 5) return;
+  if (Date.now() - last < 60 * 60000 || hour === 5) return;
   fs.mkdirSync(path.dirname(WATCH_FILE), { recursive: true });
   fs.writeFileSync(WATCH_FILE, JSON.stringify({ at: new Date().toISOString() }));
   await scheduleWatch();
+}
+
+async function statusWatch() {
+  if (DRY) return;
+  const due = await api('GET', null, '?action=watch-due').catch(() => null);
+  if (!due) return hourlyFallback();
+  if (due.squarespace?.due) {
+    console.log(`status watch: ${due.squarespace.reason}`);
+    await scheduleWatch().catch((e) => console.error(`status watch: ${e.message}`));
+  }
+  if (due.meta?.due) await api('POST', { action: 'status-meta-check' }).then((r) => console.log(`meta check: ${JSON.stringify(r.results || r.skipped || r)}`)).catch((e) => console.error(`meta check: ${e.message}`));
 }
 
 /** Scheduled every few minutes: opens the browser only for a queued job, a waiting repair, or the hourly schedule read. */
@@ -346,7 +368,7 @@ async function jobs() {
   await cleanupJob().catch((e) => console.error(`clean-up: ${e.message}`));
   await collectQueueJob({ api, root: ROOT }).catch((e) => console.error(`collect queue: ${e.message}`));
   await listLoadJobs();
-  await hourlyScheduleWatch().catch((e) => console.error(`schedule watch: ${e.message}`));
+  await statusWatch().catch((e) => console.error(`status watch: ${e.message}`));
 }
 
 async function listLoadJobs() {

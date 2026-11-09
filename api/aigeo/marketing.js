@@ -29,6 +29,10 @@
  *        never sets schedule evidence, refuses a snapshot already reserved by another campaign
  * POST { action: 'collector', kind_of: meter|campaigns|events|run|scheduled, data }   scheduled = one COMPLETE read of
  *      Squarespace's Scheduled tab (lib/marketing/delivery-schedule.mjs); a failed / partial read is never posted
+ * GET  ?action=delivery-status        the ONE delivery status board (lib/marketing/delivery-status-board.mjs; read-only)
+ * GET  ?action=watch-due  ·  POST status-meta-check   (PC 5-minute task: Squarespace every 15 min 07–22 UK + after releases)
+ * POST { action: 'status-refresh' }    "Refresh status": a real check (collect queue + Meta posts); never sends / publishes
+ * GET  ?action=status-refresh-progress   that check's state + last checked (read-only)
  * POST { action: 'schedule-link', email_id, campaign_key | external: true, kind?: 'draft' }   link a Squarespace schedule
  *      (review queue) or an unmatched Squarespace draft; collector kind_of 'drafts' = one complete Drafts read
  * POST { action: 'collect-request', email_id?, campaign_key? }   collect a sent campaign now (+15 min / 24 h / 72 h)
@@ -42,6 +46,7 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { ingest } from '../../lib/marketing/collector-ingest.mjs';
 import { ingestDrafts, ingestScheduled } from '../../lib/marketing/delivery-schedule.mjs';
+import { buildStatusBoard, metaCheck, refreshProgress, refreshStatus, watchDue } from '../../lib/marketing/delivery-status-board.mjs';
 
 /** Complete Squarespace reads posted by the PC collector (read-only on Squarespace). */
 const COLLECTOR_READS = { scheduled: ingestScheduled, drafts: ingestDrafts };
@@ -160,6 +165,9 @@ const GETS = {
   },
   'collect-next': (sb) => nextRequests(sb),
   'collect-queue': (sb) => listRequests(sb),
+  'delivery-status': (sb) => buildStatusBoard(sb),
+  'watch-due': (sb) => watchDue(sb),
+  'status-refresh-progress': (sb) => refreshProgress(sb),
   'suppression-review': (sb) => reviewList(sb),
   'list-load-next': (sb) => nextLoad(sb),
   'cleanup-list': (sb) => listManifests(sb),
@@ -186,6 +194,8 @@ async function collectorState(sb) {
 }
 
 const POSTS = {
+  'status-refresh': (sb) => refreshStatus(sb),
+  'status-meta-check': (sb) => metaCheck(sb),
   sync: (sb, b) => runStep(sb, b.step),
   'segment-preview': preview,
   'segment-save': saveSegment,
