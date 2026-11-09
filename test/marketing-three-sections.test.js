@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Marketing tab three sections (QUESTION-2026-11-08 waiting / planned / results):
  *  - Results: one row per post (FB / IG / Story of the same step grouped), emails only with provider evidence, and
  *    unknown figures stay unknown ("tomorrow" / "collecting" / "Mon entry" / "—"), never 0;
@@ -8,7 +8,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { emailRows, postRows, shortWhat, titleOf, youtubeId } from '../lib/marketing/results.mjs';
+import { emailRows, placementRows, postRows, shortWhat, titleOf, youtubeId } from '../lib/marketing/results.mjs';
+import { alanActions, decisionIndex, isPublished, openDecisions, outlookDue, releaseBlockers, releaseSplit } from '../lib/marketing/decision-state.mjs';
 import { bookingsFor, eventFromKey, eventsBySubject, linkedEvents, onePerPage } from '../lib/marketing/results-bookings.mjs';
 import { campaignSheets } from '../lib/strategy-campaigns.mjs';
 
@@ -45,7 +46,23 @@ test('results: FB + IG + Story of one step are ONE row; LinkedIn of another step
   assert.equal(li.channels[0].reach, null, 'LinkedIn before GPT\'s entry: unknown, not 0');
 });
 
-test('results: emails only with provider evidence; uncollected opens are null + "tomorrow", collected 0 stays 0', () => {
+test('results: one row per actual send, keyed by provider id (draft id, or same time + size); plan title kept as detail', () => {
+  const recs = [
+    { campaign_key: 'theme|norfolk-workshops-8nov', title: 'Norfolk, Macro and something to watch', stage: 'sent', scheduled_for: '2026-11-08T17:00:00Z', actual_sends: 311, schedule_evidence: 'operator_verified', sqs_draft_id: 'p1' },
+    { campaign_key: 'theme|creative-next-step-8nov', title: 'Your next photography step', stage: 'sent', scheduled_for: '2026-11-08T17:00:00Z', actual_sends: 231, schedule_evidence: 'operator_verified' }
+  ];
+  const sqs = [
+    { email_id: 'p1', subject: 'Norfolk, 20–22 November — last 2 places, £150 off', sent_at: '2026-11-08T17:00:13Z', delivered: 311, opened: 113, clicked: 9, events_collected_at: '2026-11-09T06:00:00Z' },
+    { email_id: 'p2', subject: 'A fresh photography idea — Macro', sent_at: '2026-11-08T17:00:13Z', delivered: 231, opened: 72, clicked: 3 }
+  ];
+  const rows = emailRows(recs, sqs, NOW);
+  assert.equal(rows.length, 2, 'two sends, two rows (no stale plan rows)');
+  const n = rows.find((r) => r.sent_to === 311);
+  assert.deepEqual([n.provider_id, n.what, n.plan, n.opens_state, n.opens_at], ['p1', 'Norfolk, 20–22 November — last 2…', 'Norfolk, Macro and something to watch', 'collected', '2026-11-09T06:00:00Z']);
+  assert.equal(rows.find((r) => r.sent_to === 231).provider_id, 'p2', 'matched by the same send time and recipient count');
+});
+
+test('results: emails only with provider evidence; uncollected opens are null + "collecting", collected 0 stays 0', () => {
   const recs = [
     { campaign_key: 'theme|norfolk-workshops-8nov', title: 'Norfolk, Macro and something to watch', stage: 'sent', sent_on: '2026-11-08', scheduled_for: '2026-11-08T17:00:00Z', actual_sends: 311, schedule_evidence: 'operator_verified' },
     { campaign_key: 'event|lr30', title: 'Lightroom', stage: 'measured', sent_on: '2026-11-08', sqs_email_id: 'e1', actual_sends: 39 },
@@ -60,7 +77,7 @@ test('results: emails only with provider evidence; uncollected opens are null + 
   const norfolk = rows.find((r) => r.campaign_key === 'theme|norfolk-workshops-8nov');
   assert.equal(norfolk.sent_to, 311);
   assert.equal(norfolk.opened, null);
-  assert.equal(norfolk.opens_state, 'tomorrow');
+  assert.equal(norfolk.opens_state, 'collecting');
   assert.equal(norfolk.sent_at, '2026-11-08T17:00:00Z', 'provider send time 17:00');
   const lr = rows.find((r) => r.campaign_key === 'event|lr30');
   assert.deepEqual([lr.sent_to, lr.opened, lr.clicked, lr.opens_state], [39, 7, 0, 'collected']);
@@ -73,11 +90,12 @@ test('results: shortWhat keeps at most six words', () => {
   assert.equal(shortWhat('Lightroom course starts Thu'), 'Lightroom course starts Thu');
 });
 
-test('results cells: unknown is never 0 (tomorrow / collecting / Mon entry / —)', () => {
+test('results cells: unknown is never 0 (collecting / Mon entry / —); sent rows never say "tomorrow"', () => {
   const C = browser(['marketing-results.js']).mkResultsCells;
-  const email = { kind: 'email', sent_to: 311, opened: null, clicked: null, opens_state: 'tomorrow', channels: [{ ch: 'email' }] };
-  assert.equal(strip(C.openedCell(email)), 'tomorrow');
-  assert.equal(strip(C.clickedCell(email)), 'tomorrow');
+  const email = { kind: 'email', sent_to: 311, opened: null, clicked: null, opens_state: 'collecting', channels: [{ ch: 'email' }] };
+  assert.equal(strip(C.openedCell(email)), 'collecting');
+  assert.equal(strip(C.clickedCell(email)), 'collecting');
+  assert.match(strip(C.openedCell({ kind: 'email', sent_to: 311, opened: 113, opens_state: 'collected', opens_at: '2026-11-09T06:00:00Z' })), /^113 \(36%\)collected 9 Nov$/);
   assert.equal(strip(C.reactCell(email)), '—');
   const lr = { kind: 'email', sent_to: 39, opened: 7, clicked: 0, opens_state: 'collected', channels: [{ ch: 'email' }] };
   assert.equal(strip(C.openedCell(lr)), '7 (18%)');
@@ -134,72 +152,72 @@ test('Results titles: never a URL (linked video title, else first text line)', (
   assert.ok(!/https?:/.test(rows[0].what) && !/https?:/.test(rows[0].title));
 });
 
-/* ---------- waiting on you: Alan-only ---------- */
+/* ---------- shared decision state (decisions close everywhere) ---------- */
 
-function waitingWith(items, needs, queue) {
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
-  const win = browser(['marketing-waiting.js'], {
-    mkScheduleModel: { build: () => ({ items: items(today), needs }) },
-    mkDeliveryItems: () => [],
-    mkNeedsAlanQueue: () => queue,
-    SocialStandard: { captionOf: () => { throw new Error('the production brief must not be read'); } },
-    mkSocialReviewState: (k) => ({ 'li-ready': { public_caption: true, ready: true, blockers: [] }, gpt: { public_caption: true, ready: false, blockers: ['rendered image'] } }[k] || null)
-  });
-  return { rows: win.mkWaitingRows({}, { campaign: { weeks: [{ steps: [{ key: 'li-ready', brief: 'DRAFT\n\ncaption' }, { key: 'li-nocap', brief: '' }] }] } }).rows, today };
-}
-const plus = (iso, k) => new Date(Date.parse(`${iso}T12:00:00Z`) + k * 864e5).toISOString().slice(0, 10);
+const TODAY = '2026-11-09';
+const placement = (step, extra = {}) => ({ step_key: step, placement: 'linkedin_feed', stage: 'prepare', planned_at: '2026-11-10T08:30:00Z', public_caption: 'Three days on the coast.', link_url: 'https://www.alanranger.com/x', assets: { linkedin: { storage_path: 'a.png' } }, ...extra });
 
-test('waiting on you: only Alan\'s own actions; GPT drafts as one approve row; superseded / cancelled never listed', () => {
-  const items = (t) => [
-    { id: 'linkedin|li-ready', row: 'linkedin', step_key: 'li-ready', state: 'pl', day: plus(t, 1), short: 'Norfolk: offer ends Saturday', draft: true },
-    { id: 'linkedin|li-nocap', row: 'linkedin', step_key: 'li-nocap', state: 'pl', day: t, short: 'No caption yet (GPT writes it)', draft: true },
-    { id: 'fbig|gpt', row: 'fbig', step_key: 'gpt', state: 'pl', day: plus(t, 1), short: 'Focus bracketing', draft: true },
-    { id: 'email|gpt', row: 'email', record_key: 'theme|gpt-8w', state: 'pl', day: plus(t, 5), short: 'Gift email', draft: true },
-    { id: 'email|old', row: 'email', record_key: 'email|2026-11-02', state: 'resolved', day: t, short: 'Superseded weekly', draft: false },
-    { id: 'outlook|future', row: 'outlook', state: 'pl', day: plus(t, 4), short: 'Later note', draft: false },
-    { id: 'fbig|late', row: 'fbig', state: 'late', day: plus(t, -2), short: 'GPT post late', draft: false }
+test('decision state: release approval only when caption + rendered asset + link are ready; else GPT production queue; published never asked', () => {
+  const steps = new Map([['ready', { title: 'Norfolk: offer ends Saturday' }], ['macro', { title: 'What focus bracketing actually helps with' }], ['pub', { title: 'Norfolk coastal workshop' }]]);
+  const pls = [
+    placement('ready'),
+    placement('macro', { placement: 'facebook_feed', assets: {} }),
+    placement('pub', { planned_at: '2026-11-09T08:30:00Z', stage: 'live_check', provider_id: 'urn:li:activity:1', provider_url: 'https://www.linkedin.com/feed/update/urn:li:activity:1/' }),
+    placement('later', { planned_at: '2026-11-20T08:30:00Z' })
   ];
-  const queue = {
-    decisions: [{ text: 'Review 2 blocked contacts showing as subscribed again', go: 'review' }, { text: 'Choose the audience for the weekly email, Sun 1 Nov', go: 'campaign' }],
-    actions: [{ action_key: 'a-alan', label: 'Approve the gift copy', due_week_start: '2026-10-26' }]
-  };
-  const needs = [
-    { text: '3 late (FB/IG 3): do it or skip it.', ids: ['fbig|late'] }, { text: '1 marked scheduled with no platform evidence: confirm in Squarespace.', ids: ['email|x'] },
-    { text: '1 unmatched platform draft in Squarespace (“Academy return — review…”): link it to its campaign.', ids: [], go: 'mkd-drafts' },
-    { text: '1 Squarespace schedule not matched to a campaign: link it.', ids: ['email|y'], link: true }
-  ];
-  const { rows } = waitingWith(items, needs, queue);
-  const text = rows.map((r) => `${r.what} | ${r.why} | ${strip(r.btn)}`).join('\n');
-  assert.match(text, /Approve caption & artwork: Norfolk: offer ends Saturday \| Caption & artwork ready · GPT posts after you approve \| Review/);
-  assert.match(text, /Approve caption & artwork: Focus bracketing \| Caption ready · missing: rendered image \| Review/, 'blockers from the stored-caption state');
-  assert.ok(!/post it|Copy caption/.test(text), 'never a "post it" task: GPT publishes');
-  const li = rows.find((r) => /Norfolk: offer ends/.test(r.what));
-  assert.match(li.btn, /data-mkw-review="li-ready"/, 'Review calls the review-first hook');
-  assert.match(text, /Approve GPT's \d-week plan \(1 email · 1 post\) \| Drafts ready · nothing goes out until you approve \| Review/, 'GPT drafts: one approve row (uncaptioned LinkedIn draft); posts listed for approval are not counted in it');
-  assert.ok(!/No caption yet/.test(text), 'a post without GPT\'s stored caption is GPT\'s job, not listed');
-  assert.ok(!/Gift email|GPT post late/.test(text), 'GPT-owned items never listed one by one');
-  assert.ok(!/Superseded|late \(FB\/IG/.test(text), 'superseded items and the generic late line never listed');
-  assert.ok(!/Later note/.test(text), 'future items stay in Planned');
-  assert.ok(!/Choose the audience for the weekly email, Sun 1 Nov/.test(text), 'audience decision for a week with no live weekly email (superseded) is dropped');
-  assert.match(text, /Review 2 blocked contacts/);
-  assert.match(text, /Approve the gift copy \| Late · quarter action/);
-  assert.match(text, /no platform evidence/);
-  assert.ok(!/unmatched platform draft|not matched to a campaign/.test(text), 'linking drafts / schedules is plumbing (GPT / Claude), not in Waiting on you');
-  assert.ok(rows.every((r) => !/\b(email|event|theme|step)\|/.test(r.what)), 'no raw keys');
+  const r = releaseSplit(pls, steps, TODAY);
+  assert.deepEqual(r.ready.map((x) => x.step_key), ['ready']);
+  assert.deepEqual(r.production.map((x) => [x.step_key, x.blockers.join()]), [['macro', 'rendered asset']], 'Macro without its rendered asset goes to GPT, not to Alan');
+  assert.ok(isPublished(pls[2]));
+  assert.deepEqual(releaseBlockers(placement('x', { public_caption: 'Use the AR-social-v1 LinkedIn feed master. App plan only.' })), ['internal text in the caption']);
 });
 
-test('waiting on you: tile 7 hook keeps GPT / Claude-owned quarter actions out', () => {
-  const win = browser(['marketing-overview-tiles.js']);
-  const s = {
-    actions: [
-      { id: 'a1', action_key: 'a-alan', label: 'Alan task', due_week_start: '2026-11-09', is_ticked: false },
-      { id: 'a2', action_key: 'a-gpt', label: 'GPT task', due_week_start: '2026-11-09', is_ticked: false },
-      { id: 'a3', action_key: 'a-claude', label: 'Claude task', due_week_start: '2026-11-09', is_ticked: false },
-      { id: 'a4', action_key: 'a-wait', label: 'Waiting task', due_week_start: '2026-11-09', is_ticked: false, status: 'waiting' }
-    ],
-    quarter_plan: { action_owner: { 'a-alan': 'Alan', 'a-gpt': 'GPT', 'a-claude': 'Claude' } },
-    campaign: { campaigns: [], step_status: {} }
-  };
-  const q = win.mkNeedsAlanQueue({ tiles: {}, identity: {} }, s);
-  assert.deepEqual(q.actions.map((a) => a.label), ['Alan task']);
+test('decision state: recorded decisions close (plan approved, kept blocked, deferred note); owners other than Alan never listed', () => {
+  const idx = decisionIndex([
+    { kind: 'plan_approved', ref_key: 'gpt-8w-2026-11', decided_at: '2026-11-09T09:02:39Z', decided_by: 'Alan (GPT chat)' },
+    { kind: 'keep_blocked', ref_key: 'h1' }, { kind: 'keep_blocked', ref_key: 'h2' },
+    { kind: 'deferred', ref_key: 'step|2026-11-09|Outlook personal notes|2026-11-09' }
+  ]);
+  const steps = new Map([['step|2026-11-09|Outlook personal notes|2026-11-09', { key: 'step|2026-11-09|Outlook personal notes|2026-11-09', channel: 'Outlook personal notes', day: TODAY, title: 'Hay Woods', done: false }],
+    ['step|2026-11-10|Outlook personal notes|2026-11-10', { key: 'step|2026-11-10|Outlook personal notes|2026-11-10', channel: 'Outlook personal notes', day: '2026-11-10', title: 'Lake District note', done: false }]]);
+  const actions = alanActions([
+    { action_key: 'a-alan', label: 'Alan task', due_week_start: '2026-11-09', is_ticked: false },
+    { action_key: 'a-gpt', label: 'GPT task', due_week_start: '2026-11-09', is_ticked: false },
+    { action_key: 'a-wait', label: 'Waiting task', due_week_start: '2026-11-09', is_ticked: false, status: 'waiting' }
+  ], [{ ref_type: 'action', ref_key: 'a-alan', initiative_key: 'i1' }, { ref_type: 'action', ref_key: 'a-gpt', initiative_key: 'i2' }], new Map([['i1', { owner: 'Alan' }], ['i2', { owner: 'GPT' }]]), TODAY);
+  const open = openDecisions({ today: TODAY, planApproved: idx.planApproved, drafts: 36, release: [], outlook: outlookDue(steps, TODAY, idx.deferred), blockedOpen: 0, actions, verified: [] });
+  const text = open.map((o) => `${o.type}: ${o.what}`).join('\n');
+  assert.ok(!/plan/.test(open.map((o) => o.type).join()), 'overall plan approved: never asked again');
+  assert.ok(!/Hay Woods/.test(text), 'deferred note is gone');
+  assert.match(text, /outlook_note: Lake District note/);
+  assert.match(text, /quarter_action: Alan task/);
+  assert.ok(!/GPT task|Waiting task/.test(text));
+  assert.ok(!/blocked/.test(text), 'kept-blocked contacts: no review row');
+  assert.equal(openDecisions({ today: TODAY, planApproved: null, drafts: 3, release: [], outlook: [], blockedOpen: 2, actions: [], verified: [] }).length, 2, 'without the records: plan + blocked are open');
 });
+
+test('Waiting on you renders exactly the shared open list (same count as Strategy); buttons reuse existing paths', () => {
+  const win = browser(['marketing-waiting.js'], { mkScheduleModel: { build: () => ({ items: [{ id: 'linkedin|r', step_key: 'r', state: 'pl', day: '2026-11-10', short: 'Norfolk: offer ends' }], needs: [] }) }, mkDeliveryItems: () => [] });
+  const dec = { open: [
+    { type: 'release_approval', step_key: 'r', due: '2026-11-10', what: 'Approve caption & artwork: Norfolk: offer ends Saturday', channel: 'linkedin', why: 'Caption, artwork and link ready · GPT posts after you approve' },
+    { type: 'quarter_action', due: '2026-11-02', late: true, what: 'Alan task', channel: 'none', why: 'Late · quarter action' }
+  ], count: 2 };
+  const { rows, moved } = win.mkWaitingRows(dec, { items: [{ id: 'linkedin|r', step_key: 'r', state: 'pl', short: 'Norfolk: offer ends' }] });
+  assert.equal(rows.length, dec.count);
+  assert.match(rows[0].btn, /data-mkw-review="r"/);
+  assert.match(rows[0].btn, />Review</);
+  assert.match(rows[1].due, /late/);
+  assert.deepEqual([...moved], ['linkedin|r'], 'listed item hidden from the schedule cards');
+});
+
+test('Results: a placement GPT recorded as published is a post row (joined to its collected post by permalink)', () => {
+  const evidenced = { rows: [], replaced: new Set() };
+  const pl = [{ step_key: 'gpt-event-2026-11-09-norfolk-li', placement: 'linkedin_feed', provider_id: 'urn:li:activity:7525483905408335872', provider_url: 'https://www.linkedin.com/feed/update/urn:li:activity:7525483905408335872/', actual_at: '2026-11-09T09:06:19Z', public_caption: 'Three days on the North Norfolk coast…' }];
+  const out = placementRows(pl, [], evidenced, [{ step_key: 'gpt-event-2026-11-09-norfolk-li', step: 'Norfolk coastal workshop · 20–22 November' }]);
+  assert.equal(out.length, 1);
+  assert.deepEqual([out[0].channel, out[0].placement, out[0].step_title, out[0].posted_at], ['linkedin', 'feed', 'Norfolk coastal workshop · 20–22 November', '2026-11-09T09:06:19Z']);
+  const collected = [{ channel: 'linkedin', post_id: 'li1', permalink: 'https://www.linkedin.com/feed/update/urn:li:activity:7525483905408335872', posted_at: '2026-11-09T09:06:00Z', title: 'x', reach: 120 }];
+  const joined = placementRows(pl, collected, { rows: [], replaced: new Set() }, []);
+  assert.equal(joined[0].reach, 120, 'collected figures used when the permalink matches');
+});
+

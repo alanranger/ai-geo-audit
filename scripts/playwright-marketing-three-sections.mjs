@@ -21,10 +21,11 @@ const results = [];
 const check = (name, ok, note = '') => results.push({ name, ok: !!ok, note });
 const blocked = [];
 const errors = [];
+const loading = [];
 
 async function dbState() {
   const out = {};
-  for (const t of ['strategy_campaigns', 'strategy_campaign_ticks', 'quarter_plan', 'social_posts', 'sqs_email_events']) {
+  for (const t of ['strategy_campaigns', 'strategy_campaign_ticks', 'quarter_plan', 'social_posts', 'sqs_email_events', 'marketing_decisions', 'marketing_social_placements', 'marketing_suppression']) {
     const { count } = await sb.from(t).select('*', { count: 'exact', head: true });
     out[t] = count;
   }
@@ -44,6 +45,9 @@ async function localRoutes(page) {
   }
   const body = JSON.stringify(await localResults());
   await page.route('**/api/aigeo/marketing-results*', (route) => route.fulfill({ status: 200, contentType: 'application/json', body }));
+  const { buildDecisionState } = await import('../lib/marketing/decision-state.mjs');
+  const dec = JSON.stringify({ ok: true, ...(await buildDecisionState(sb)) });
+  await page.route('**/api/aigeo/marketing-decisions*', (route) => setTimeout(() => route.fulfill({ status: 200, contentType: 'application/json', body: dec }), 4000));
 }
 
 async function openTab(browser) {
@@ -57,6 +61,12 @@ async function openTab(browser) {
   });
   if (MODE === 'after') await localRoutes(page);
   await page.goto(`${BASE}/audit-dashboard.html#marketing`, { waitUntil: 'domcontentloaded' });
+  if (MODE !== 'before') {
+    const skel = await page.waitForSelector('#mk-waiting .mkw-skel', { timeout: 120000 }).then(() => true, () => false);
+    const bar = await page.$('#mkw-planned-extra .mkw-loadbar');
+    loading.push({ skel, bar: !!bar });
+    await page.locator('#mk-waiting').screenshot({ path: `${OUT}/c2-loading-${MODE}-1700px-20261109.png` }).catch(() => {});
+  }
   await page.waitForSelector('#mk-schedule .mks-grid, #mk-schedule .mks-weeks', { timeout: 150000 });
   await page.waitForFunction(() => !/Loading the week plan/.test(document.querySelector('#mk-schedule')?.textContent || 'Loading the week plan'), null, { timeout: 150000 });
   await page.waitForTimeout(9000);
@@ -84,7 +94,7 @@ async function afterChecks(page) {
   await page.waitForSelector('#mk-results tbody tr[data-mkr-row]', { timeout: 60000 }).catch(() => {});
   const res = await page.$$eval('#mk-results tbody tr[data-mkr-row]', (rows) => rows.map((r) => r.innerText.replace(/\s+/g, ' ')));
   const has = (re) => res.some((r) => re.test(r));
-  check('Results: LR30 39 sent, 7 opened', has(/Sun 8 Nov.*\b39\b.*\b7\b/), res.find((r) => /\b39\b/.test(r)) || '');
+  check('Results: LR30 39 sent, opens collected (7 at first read, more since)', has(/Sun 8 Nov 09:55.*\b39\b \d+ \(\d+%\)/), res.find((r) => /\b39\b/.test(r)) || '');
   check('Results: Norfolk 311 at 17:00', has(/17:00.*311/), res.find((r) => /311/.test(r)) || '');
   check('Results: Creative 231 at 17:00', has(/17:00.*231/), res.find((r) => /231/.test(r)) || '');
   check('Results: FB / IG / Story post rows', has(/FB/) && has(/IG/) && has(/Story/));
@@ -111,7 +121,7 @@ async function correctionChecks(page, res, wait) {
   const bk = (c) => `${c[7]} / ${c[8]}`;
   check('C1.1: LR30 row 0 / £0', bk(row(/09:55.*\b39\b/)) === '0 / £0', bk(row(/09:55.*\b39\b/)));
   check('C1.1: Norfolk and Creative rows computed (not "—")', /^\d+ \/ £[\d,]+$/.test(bk(row(/17:00.*311/))) && /^\d+ \/ £[\d,]+$/.test(bk(row(/17:00.*231/))), `Norfolk ${bk(row(/17:00.*311/))} · Creative ${bk(row(/17:00.*231/))}`);
-  await page.click('#mk-results tbody tr[data-mkr-row]:nth-child(2)');
+  await page.locator('#mk-results tbody tr[data-mkr-row]', { hasText: '311' }).first().click();
   const detail = await page.$eval('#mk-results .mkr-detail', (e) => e.innerText.replace(/\s+/g, ' ')).catch(() => '');
   check('C1.1: detail lists the promoted events and the basis', /After the send/.test(detail) && /matched by subject|campaign record/.test(detail), (detail.match(/After the send.{0,200}/) || [''])[0]);
   await page.click('#mk-results tbody tr[data-mkr-row]:nth-child(1)').catch(() => {});
@@ -120,7 +130,17 @@ async function correctionChecks(page, res, wait) {
   check('C1.2: Recent posts across channels inside a closed fold (not visible)', fold && !fold.open && !outside, JSON.stringify(fold));
   const whats = cells.map((c) => c[1]);
   check('C1.3: no URL as a Results title', !whats.some((w) => /https?:|www\.|youtu\.?be/.test(w)), whats.find((w) => /Style|YouTube/.test(w)) || '');
-  check('C1.4: Waiting on you = 4 rows, no platform-link plumbing', wait.length === 4 && !wait.some((r) => /unmatched platform draft|not matched to a campaign/.test(r)), wait.map((r) => r.slice(0, 60)).join(' || '));
+  check('C1.4: no platform-link plumbing in Waiting on you', !wait.some((r) => /unmatched platform draft|not matched to a campaign/.test(r)), wait.map((r) => r.slice(0, 60)).join(' || '));
+  check('C2.1: Waiting has none of: plan, blocked contacts, Norfolk LI post, Hay Woods, Macro caption', !wait.some((r) => /GPT's .*plan|blocked contacts|Norfolk coastal workshop|Hay Woods|focus bracketing|Macro/i.test(r)), wait.join(' || ') || '(empty: "Nothing is waiting on you")');
+  const li = cells.filter((c) => /LinkedIn/.test(c[2]) && /Norfolk coastal workshop/.test(c[1]));
+  check('C2.2: Results shows the 9 Nov Norfolk LinkedIn post as published', li.length === 1 && /Mon 9 Nov/.test(li[0][0]), li.map((c) => c.slice(0, 4).join(' | ')).join(' || '));
+  const n311 = cells.filter((c) => /Email/.test(c[2]) && /^311$/.test(c[3])).length;
+  const n231 = cells.filter((c) => /Email/.test(c[2]) && /^231$/.test(c[3])).length;
+  check('C2.2: exactly one row each for Norfolk 311 and creative 231', n311 === 1 && n231 === 1, `311 × ${n311} · 231 × ${n231}`);
+  check('C2.2: sent rows never say "tomorrow"', !cells.some((c) => /tomorrow/.test(c.join(' '))), cells.filter((c) => /Email/.test(c[2])).map((c) => c[4]).join(' · '));
+  check('C2.6: while loading, Waiting shows "Loading…" with a skeleton (never an empty final table)', loading[0]?.skel, JSON.stringify(loading[0] || {}));
+  const prod = await page.evaluate(() => document.querySelector('#mkw-production')?.textContent || '');
+  check('C2.3: Macro post (asset missing) on GPT\'s production queue, Behind the scenes', /focus bracketing/i.test(prod) && /rendered asset/.test(prod), prod.replace(/\s+/g, ' ').slice(0, 160));
   const where = MODE === 'live' ? 'live' : 'local';
   await page.locator('#mk-results').screenshot({ path: `${OUT}/correction1-results-${where}-1700px-20261108.png` });
   await page.locator('#mk-waiting').screenshot({ path: `${OUT}/correction1-waiting-${where}-1700px-20261108.png` });
