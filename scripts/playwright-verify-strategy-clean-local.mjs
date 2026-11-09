@@ -14,7 +14,7 @@ const LIVE = process.env.LIVE === '1';
 const BASE = 'https://ai-geo-audit.vercel.app';
 const TAG = LIVE ? 'live' : 'local';
 const OUT = 'outputs';
-const STAMP = '20261108';
+const STAMP = process.env.STAMP || '20261108';
 const LOCAL_FILES = ['strategy-tab.js', 'strategy-layout.js', 'strategy-quarter-plan.js', 'marketing-overview-tiles.js', 'marketing-schedule-model.js', 'revenue-truth-controller.mjs'];
 const BLUR = '.mk-detail, #mk-cust-body, #mq-results td:first-child, #mk-review-table td:first-child { filter: blur(6px) !important; }';
 const sb = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
@@ -22,7 +22,7 @@ const results = [];
 const check = (name, ok, note = '') => results.push({ name, ok: !!ok, note });
 const blocked = [];
 const errors = [];
-const TABLES = { strategy_campaign_steps: 'last_seen_at', strategy_campaign_ticks: 'updated_at', strategy_campaigns: 'updated_at', strategy_quarter_actions: 'updated_at', strategy_initiatives: 'updated_at', strategy_event_snapshots: 'created_at', sqs_send_meter: 'captured_at', marketing_segment_exports: 'created_at', marketing_event_facts: 'set_at', marketing_segment_evaluations: 'evaluated_at', business_targets: 'updated_at' };
+const TABLES = { strategy_campaign_steps: 'last_seen_at', strategy_campaign_ticks: 'updated_at', strategy_campaigns: 'updated_at', strategy_quarter_actions: 'updated_at', strategy_initiatives: 'updated_at', strategy_event_snapshots: 'created_at', sqs_send_meter: 'captured_at', marketing_segment_exports: 'created_at', marketing_event_facts: 'set_at', marketing_segment_evaluations: 'evaluated_at', business_targets: 'updated_at', strategy_initiative_links: 'set_at', marketing_decisions: 'decided_at', marketing_social_placements: 'updated_at' };
 
 async function dbState() {
   const out = {};
@@ -120,9 +120,13 @@ async function strategy(browser) {
   });
   check('every roadmap-KPI initiative line matches the KPI box on its own card', pairs.length >= 5 && pairs.every((p) => p.ok), pairs.map((p) => `${p.ini}: line ${p.line} / box ${p.box}`).join(' · '));
   const dec = (await page.locator('#st-decisions').innerText()).replace(/\s+/g, ' ');
-  check('Decisions for Alan: none (the beginners milestone is decided: moved to the January course)', /Decisions for Alan \(0\)/.test(dec) && /Nothing needs your decision/.test(dec) && !/non-JLR beginners/.test(dec), dec.slice(0, 200));
+  const needs = Number((/Needs Alan \((\d+)\)/.exec(dec) || [])[1] ?? NaN);
+  check('Strategy headline is "Needs Alan (n)" from the shared decision state; no target decision (beginners decided)', Number.isFinite(needs) && !/Target decisions/.test(dec.replace(/title="[^"]*"/g, '')) && !/non-JLR beginners/.test(dec), dec.slice(0, 200));
+  const norfolk = await page.evaluate(() => [...document.querySelectorAll('#st-quarter-plan .qp-l')].map((l) => l.textContent.replace(/\s+/g, ' ').trim()).filter((t) => /Norfolk coastal/.test(t) && /^Next:/.test(t)));
   const boxes = await page.evaluate(() => [...document.querySelectorAll('#st-quarter-plan .qp-card')].slice(0, 2).map((c) => [...c.querySelectorAll('.qp-kpi')].map((k) => `${k.querySelector('.qp-kl')?.textContent.trim()}: ${k.querySelector('.qp-kv')?.textContent.trim()} (${k.querySelector('.qp-ks')?.textContent.trim()})`).find((t) => /beginners/i.test(t))));
   check('Q1 KPI box "Non-JLR beginners: moved to Jan course"; Q2 box "8 by 27 Jan · 17 by Mar"', /^Non-JLR beginners: moved to Jan course/.test(boxes[0] || '') && /^Non-JLR beginners: 8 by 27 Jan · 17 by Mar 27/.test(boxes[1] || ''), boxes.join(' | '));
+  const academy = await page.evaluate(() => [...document.querySelectorAll('#st-quarter-plan .qp-card.is-current .qp-ini')].filter((i) => /Academy/.test(i.querySelector('.qp-it')?.textContent || '')).map((i) => [...i.querySelectorAll('.qp-l')].map((l) => l.textContent.replace(/\s+/g, ' ').trim()).join(' | '))[0] || '');
+  if (process.env.EXPECT_ACADEMY_NEXT) check(`Academy initiative next action reads ${process.env.EXPECT_ACADEMY_NEXT}; "Target not set" kept`, academy.includes(`Next: Email: Your next step with the Photography Academy · ${process.env.EXPECT_ACADEMY_NEXT}`), academy);
   const next = await page.locator('#st-next-delivery').evaluate((el) => ({ text: el.textContent.replace(/\s+/g, ' ').trim(), key: el.dataset.nextKey }));
   const tiles = (await page.locator('#st-where').innerText()).replace(/\s+/g, ' ');
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -140,7 +144,7 @@ async function strategy(browser) {
   await page.screenshot({ path: `${OUT}/strategy-clean-AFTER-${TAG}-folds-open-1700px-${STAMP}.png`, fullPage: true });
   const s = JSON.parse(await page.evaluate(() => JSON.stringify(window.stLastData ? window.stLastData() : null)));
   await page.close();
-  return { next, tiles, s, openH, layout };
+  return { next, tiles, s, openH, layout, needs, norfolk };
 }
 
 async function marketing(browser) {
@@ -157,11 +161,13 @@ async function marketing(browser) {
     return cards[0] || null;
   });
   const tiles = (await page.locator('#mk-overview-tiles').evaluate((el) => el.textContent)).replace(/\s+/g, ' ');
+  await page.waitForFunction(() => /^\d+$/.test(document.querySelector('.mkw-n')?.textContent.trim() || '') || /Decisions unavailable/.test(document.body.textContent), null, { timeout: 120000 }).catch(() => {});
+  const waiting = await page.evaluate(() => (document.querySelector('.mkw-n')?.textContent || '').trim());
   const secs = await page.evaluate(() => ({ waiting: (document.querySelector('#mk-waiting')?.textContent || '').trim().length, planned: !!document.querySelector('#mk-planned .mks-days'), results: (document.querySelector('#mk-results')?.textContent || '').trim().length, behind: document.querySelector('#mk-behind') ? (document.querySelector('#mk-behind').open ? 'open' : 'closed') : 'missing' }));
   check('Marketing still loads cleanly: Waiting on you / Planned / Results present, Behind-the-scenes fold closed', secs.waiting > 0 && secs.planned && secs.results > 0 && secs.behind === 'closed', JSON.stringify(secs));
   if (LIVE) await page.screenshot({ path: `${OUT}/strategy-clean-marketing-check-live-1700px-${STAMP}.png` });
   await page.close();
-  return { first, tiles };
+  return { first, tiles, waiting };
 }
 
 const before = await dbState();
@@ -171,6 +177,10 @@ const mk = await marketing(browser);
 await browser.close();
 const after = await dbState();
 check('Next delivery matches Marketing Planned\'s first item', mk.first && st.next.key === mk.first.id, `Strategy: ${st.next.text} [${st.next.key}] · Marketing first card: ${mk.first?.title} [${mk.first?.id}]`);
+check('Strategy Needs Alan count = Marketing "Waiting on you" count', String(st.needs) === mk.waiting && st.s?.needs_alan?.count === st.needs, `Strategy Needs Alan ${st.needs} (server needs_alan.count ${st.s?.needs_alan?.count}, target decisions ${st.s?.needs_alan?.targets}) · Marketing Waiting ${mk.waiting}`);
+const pubKeys = st.s?.needs_alan?.published || [];
+const pubRows = Object.values(st.s?.quarter_plan?.initiatives || {}).flatMap((i) => (i.deliveries || []).filter((d) => pubKeys.includes(d.key)).map((d) => `${i.key}: ${d.key} ${d.status}${d.draft ? ' draft' : ''}${i.next?.key === d.key ? ' NEXT' : ''}`));
+check('published posts (shared state) are published on Strategy: not drafts, not a next action', pubKeys.length > 0 && pubRows.length > 0 && pubRows.every((r) => / published$/.test(r)) && !st.norfolk.length, `published ${pubKeys.join(', ')} → ${pubRows.join(' | ')} · Norfolk "Next:" lines: ${st.norfolk.length}`);
 const n3 = st.s?.insights?.rows?.money?.find((t) => t.key === 'money-next-3')?.numbers;
 const ret = st.s?.roadmap_now?.returning_r12;
 const k = (v) => `£${(Math.round(Math.abs(v) / 100) / 10).toLocaleString('en-GB')}k`;
@@ -179,7 +189,7 @@ same('sales still needed to 31 Jan', n3?.required, st.tiles, mk.tiles);
 same('booked ahead, next 3 months', n3?.inHand, st.tiles, mk.tiles);
 same('returning-client sales, rolling 12 months', ret, st.tiles, mk.tiles);
 const changed = Object.keys(before).filter((x) => before[x] !== after[x]);
-check('viewing writes nothing (row counts + newest timestamps, 10 tables)', !changed.length, changed.map((x) => `${x}: ${before[x]} → ${after[x]}`).join(' | ') || 'no change');
+check(`viewing writes nothing (row counts + newest timestamps, ${Object.keys(TABLES).length} tables)`, !changed.length, changed.map((x) => `${x}: ${before[x]} → ${after[x]}`).join(' | ') || 'no change');
 check('every non-GET from the pages refused', true, `${blocked.length} refused: ${[...new Set(blocked)].join(', ')}`);
 check('no page errors', !errors.length, errors.slice(0, 3).join(' | '));
 fs.writeFileSync(`${OUT}/_strategy-clean-${TAG}-result.json`, JSON.stringify({ results, height_closed: st.layout.height, height_open: st.openH, decisions: st.s?.decisions, next: st.next, marketing_first: mk.first, before, after }, null, 1));
