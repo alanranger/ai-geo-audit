@@ -10,8 +10,12 @@
 // depleted. Matches the behaviour in serp-rank-test.js.
 
 import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
+import { resolveSerpItems } from '../../lib/keyword-ranking/serp-redirect-owner.js';
+import { extractCitationsFromDfsResult, toLegacyShape } from '../../lib/ai-citation-extract.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
+
+const ALAN_ROOT = 'alanranger.com';
 
 const DFS_FATAL_STATUS_CODES_AI = new Set([40100, 40101, 40200, 40300, 40400]);
 
@@ -35,67 +39,12 @@ function buildEmptyAiRow(keyword, errorMessage, errorCode) {
   };
 }
 
+// Same matching as the organic SERP: references arrive as google.com/goto links (9 Nov 2026),
+// so resolve them to the real site (by `source` name) before counting ours.
 function extractCitationsFromTask(task) {
-  const result = task && task.result && task.result[0];
-  const items = (result && result.items) || [];
-
-  const aiOverview = items.find((item) => item.type === "ai_overview");
-
-  let rawRefs = [];
-  if (aiOverview && Array.isArray(aiOverview.references)) {
-    rawRefs = aiOverview.references;
-  }
-
-  // Fallback: also look for links inside ai_overview items
-  if ((!rawRefs || rawRefs.length === 0) && aiOverview && Array.isArray(aiOverview.items)) {
-    for (const el of aiOverview.items) {
-      if (!el.links) continue;
-      for (const link of el.links) {
-        rawRefs.push({
-          source: link.title || null,
-          domain: link.domain || null,
-          url: link.url || null,
-          title: link.title || null,
-          text: null,
-        });
-      }
-    }
-  }
-
-  const byUrl = {};
-  for (const ref of rawRefs) {
-    if (!ref || !ref.url) continue;
-    const url = ref.url;
-    let domain = ref.domain;
-    if (!domain) {
-      try {
-        domain = new URL(url).hostname;
-      } catch {
-        domain = null;
-      }
-    }
-    if (!byUrl[url]) {
-      byUrl[url] = {
-        source: ref.source || null,
-        title: ref.title || null,
-        url,
-        domain,
-      };
-    }
-  }
-
-  const citations = Object.values(byUrl);
-  const alanCitations = citations.filter((c) =>
-    c.domain ? c.domain.includes("alanranger.com") : c.url.includes("alanranger.com")
-  );
-
-  return {
-    has_ai_overview: !!aiOverview,
-    total_citations: citations.length,
-    alanranger_citations_count: alanCitations.length,
-    alanranger_citations: alanCitations,
-    sample_citations: citations.slice(0, 10),
-  };
+  const result = task?.result?.[0];
+  const items = resolveSerpItems(result?.items || [], ALAN_ROOT);
+  return toLegacyShape(extractCitationsFromDfsResult({ ...result, items }, ALAN_ROOT));
 }
 
 async function fetchAiModeForKeyword(keyword, auth, locationName = "United Kingdom") {

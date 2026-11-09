@@ -12,6 +12,8 @@
  * - sample_citations: first 10 citations for inspection
  */
 
+import { extractAiModeCitationsFromTask } from '../../lib/keyword-ranking/fetch-ai-mode-local.js';
+
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -75,73 +77,8 @@ export default async function handler(req, res) {
       return;
     }
 
-    // ---- Extract AI Mode citations from ai_overview.references ----
     const task = data.tasks && data.tasks[0];
-    const result = task && task.result && task.result[0];
-    const items = (result && result.items) || [];
-
-    // Find the ai_overview item
-    const aiOverview = items.find((item) => item.type === "ai_overview");
-
-    let rawRefs = [];
-    if (aiOverview && Array.isArray(aiOverview.references)) {
-      rawRefs = aiOverview.references;
-    }
-
-    // Fallback: also look through ai_overview elements for links, just in case
-    if ((!rawRefs || rawRefs.length === 0) && aiOverview && Array.isArray(aiOverview.items)) {
-      for (const el of aiOverview.items) {
-        if (!el.links) continue;
-        for (const link of el.links) {
-          rawRefs.push({
-            source: link.title || null,
-            domain: link.domain || null,
-            url: link.url || null,
-            title: link.title || null,
-            text: null,
-          });
-        }
-      }
-    }
-
-    // Normalise + dedupe by URL
-    const byUrl = {};
-    for (const ref of rawRefs) {
-      if (!ref || !ref.url) continue;
-      const url = ref.url;
-      const domain =
-        ref.domain ||
-        (() => {
-          try {
-            return new URL(url).hostname;
-          } catch {
-            return null;
-          }
-        })();
-
-      if (!byUrl[url]) {
-        byUrl[url] = {
-          source: ref.source || null,
-          title: ref.title || null,
-          url,
-          domain,
-        };
-      }
-    }
-
-    const citations = Object.values(byUrl);
-    const alanCitations = citations.filter((c) =>
-      c.domain ? c.domain.includes("alanranger.com") : c.url.includes("alanranger.com")
-    );
-
-    res.status(200).json({
-      query: keyword,
-      has_ai_overview: !!aiOverview,
-      total_citations: citations.length,
-      alanranger_citations_count: alanCitations.length,
-      alanranger_citations: alanCitations,
-      sample_citations: citations.slice(0, 10),
-    });
+    res.status(200).json({ query: keyword, ...extractAiModeCitationsFromTask(task) });
   } catch (err) {
     console.error("DataForSEO error", err);
     res.status(500).json({ error: "Unexpected server error" });

@@ -18,11 +18,10 @@
  *   lib/ai-citation-extract.js for shape)
  */
 
-import { extractCitationsFromDfsResult } from '../../lib/ai-citation-extract.js';
 import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
 import { getBusinessDevice } from '../../lib/keyword-ranking/business-location.js';
-import { resolveSerpRedirects } from '../../lib/keyword-ranking/serp-redirect-owner.js';
-import { loadRedirectLookups, applyRedirectLookups } from '../../lib/keyword-ranking/redirect-lookups.js';
+import { loadRedirectLookups } from '../../lib/keyword-ranking/redirect-lookups.js';
+import { parseSerpResult } from '../../lib/keyword-ranking/parse-serp-result.js';
 import { batchEstimateUsd, dfsApprovalGate, unscheduledContext } from '../../lib/keyword-ranking/dfs-approval-gate.js';
 import {
   preflightLocalCapture,
@@ -41,12 +40,10 @@ import {
   buildConfirmationFeatures,
 } from '../../lib/keyword-ranking/rank-confirmation.js';
 import { fetchRankBaselines } from '../../lib/keyword-ranking/load-rank-baselines.js';
-import { extractSerpSurfaces } from '../../lib/keyword-ranking/serp-surface-extract.js';
 import { resolveKeywordClass } from '../../lib/keyword-ranking/tracking-class.js';
 // Grid PARKED (Alan 2026-07-16): do not import fetchLocalGridSerp into production refresh.
 import { computeKeywordSurfaceScore } from '../../lib/audit/surfaceScores.js';
 import { computeKeywordTopOfPageScore } from '../../lib/audit/topOfPage.js';
-import { buildSerpSurfaceStack } from '../../lib/keyword-ranking/serp-surface-stack.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -502,7 +499,8 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
     const task = data.tasks?.[0];
     const result = task?.result?.[0];
     // Google redirect links (url google.com/goto?url=…) resolved to the real site before any ownership decision.
-    const items = applyRedirectLookups(resolveSerpRedirects(result?.items ?? [], targetRoot), targetRoot, await loadRedirectLookups(targetRoot));
+    const parsed = parseSerpResult(result, targetRoot, await loadRedirectLookups(targetRoot));
+    const items = parsed.items;
     const taskStatus = task?.status_code;
     // 200xx = Ok. 40106 = partial crawl — still usable when items[] is present
     // (depth-50 AIO-expand often 40106/40101; recovery retry drops expand).
@@ -520,39 +518,20 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
       return buildEmptySerpResult(keyword, depth, msg, task?.status_code ?? data.status_code ?? null, locationName);
     }
 
-    // Filter organic items - exact match on type
-    const ourOrganic = items.filter((item) => {
-      if (item.type !== "organic") return false;
-      const d = normalizeDomain(item.domain || item.url);
-      return d && d.endsWith(targetRoot);
-    });
-
-    // Find best rank
-    let bestRankGroup = null;
-    let bestRankAbsolute = null;
-    let bestUrl = null;
-    let bestTitle = null;
-
-    for (const item of ourOrganic) {
-      if (bestRankGroup === null || item.rank_group < bestRankGroup) {
-        bestRankGroup = item.rank_group;
-        bestRankAbsolute = item.rank_absolute;
-        bestUrl = item.url;
-        bestTitle = item.title;
-      }
-    }
+    // Our best organic result, surfaces (pack, KP, FS/PAA), AIO citations and stack — parse-only, no extra DFS.
+    const {
+      best_rank_group: bestRankGroup,
+      best_rank_absolute: bestRankAbsolute,
+      best_url: bestUrl,
+      best_title: bestTitle,
+      surfaces,
+      ai_overview_citations: aiOverviewCitations,
+      serp_surface_stack: serpSurfaceStack,
+    } = parsed;
 
     // Derive SERP features from result.item_types
     const itemTypes = result?.item_types || [];
-
-    // Phase 1 surfaces: pack position, KP, FS/PAA ownership (parse-only, no extra DFS)
-    const surfaces = extractSerpSurfaces(items, targetRoot);
     const classInfo = resolveKeywordClass(keyword);
-
-    // Phase 1: extract Google AI Overview citations from the same response.
-    const aiOverviewCitations = extractCitationsFromDfsResult({ ...result, items });
-
-    const serpSurfaceStack = buildSerpSurfaceStack(items, targetRoot);
 
     // Pack presence: DFS item_types often omits local_pack even when items[] has it.
     // Trust items extract + stack; item_types is additive only.
