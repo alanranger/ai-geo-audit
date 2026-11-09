@@ -22,7 +22,14 @@ const results = [];
 const check = (name, ok, note = '') => results.push({ name, ok: !!ok, note });
 const blocked = [];
 const errors = [];
-const VIEW = { before: Object.fromEntries(FILES.map((f) => [f, execSync(`git show HEAD:lib/${f}`, { encoding: 'utf8' })])), after: Object.fromEntries(FILES.map((f) => [f, fs.readFileSync(`lib/${f}`, 'utf8')])) };
+/** PHASE=live: production files + APIs (GET); "before" = the same page with only the two views from the parent commit. */
+const LIVE = process.env.PHASE === 'live';
+const PRE = '14019d66';
+const COMMIT = '207e02b1';
+const VERSION = 'rc-20261109a';
+const TAG = LIVE ? 'live' : 'local';
+const gitFiles = (rev) => Object.fromEntries(FILES.map((f) => [f, execSync(`git show ${rev}:lib/${f}`, { encoding: 'utf8' })]));
+const VIEW = LIVE ? { before: gitFiles(PRE), after: null } : { before: gitFiles('HEAD'), after: Object.fromEntries(FILES.map((f) => [f, fs.readFileSync(`lib/${f}`, 'utf8')])) };
 
 async function dbState() {
   const out = {};
@@ -50,9 +57,10 @@ const makeRoute = (view) => async (r) => {
   const url = new URL(req.url());
   if (req.method() !== 'GET') { if (url.pathname.startsWith('/api/')) blocked.push(`${req.method()} ${url.pathname}`); return r.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true,"dry_run":true}' }); }
   const f = FILES.find((x) => url.pathname === `/lib/${x}`);
-  if (f) return r.fulfill({ status: 200, contentType: 'application/javascript', body: view[f] });
-  if (['/api/aigeo/strategy-summary', '/api/aigeo/prospects'].includes(url.pathname)) return r.fulfill({ status: 200, contentType: 'application/json', body: await apiBody(url.pathname) });
-  return r.fallback();
+  if (f && view) return r.fulfill({ status: 200, contentType: 'application/javascript', body: view[f] });
+  if (!['/api/aigeo/strategy-summary', '/api/aigeo/prospects'].includes(url.pathname)) return r.fallback();
+  if (LIVE && !API[url.pathname]) API[url.pathname] = await (await r.fetch()).text();
+  return r.fulfill({ status: 200, contentType: 'application/json', body: await apiBody(url.pathname) });
 };
 function layoutOf() {
   const panel = document.querySelector('section[data-panel="strategy"]');
@@ -151,30 +159,46 @@ function maskedDiff(x, y) {
   return out.join(' ');
 }
 function movedChecks(before, after) {
-  const SAME = (a, b) => a && b && a.x === b.x && a.w === b.w && a.text.replace(/\b\d{1,2}:\d{2}\b/g, 'HH:MM') === b.text.replace(/\b\d{1,2}:\d{2}\b/g, 'HH:MM');
+  /** Remedy: the new "− dated-event enquiries £y" / "· dated-event £y" wording (shown only when above £0) is this change. */
+  const remedyNorm = (t) => t.replace(/ − dated-event enquiries £[\d,.]+k?/g, '').replace(/ · dated-event £[\d,.]+k?/g, '');
+  const SAME = (a, b) => a && b && a.x === b.x && a.w === b.w && remedyNorm(a.text).replace(/\b\d{1,2}:\d{2}\b/g, 'HH:MM') === remedyNorm(b.text).replace(/\b\d{1,2}:\d{2}\b/g, 'HH:MM');
   const changed = after.blocks.filter((b) => !['st-sales-gap', 'st-prospects'].includes(b.id) && !SAME(b, before.blocks.find((x) => x.id === b.id))).map((b) => b.id);
   check('nothing else moved: every other Strategy block keeps its text, x and width (y shifts only by the new table)', !changed.length && after.blocks.length === before.blocks.length, changed.join(', ') || `${after.blocks.length - 2} blocks identical`);
   const strip = (t) => t.replace(/Prospects pipeline: [^]*?(?= details)/, 'PIPE');
   check('sales-gap tiles unchanged apart from the pipeline lines (quarter + 3 months); grid size unchanged; legend unchanged', strip(after.quarter) === strip(before.quarter) && after.months.every((m, i) => strip(m) === strip(before.months[i])) && after.grid.w === before.grid.w && after.grid.h === before.grid.h && after.legend === before.legend, `grid ${before.grid.w}×${before.grid.h} → ${after.grid.w}×${after.grid.h}`);
   const pb = before.blocks.find((x) => x.id === 'st-prospects').text;
   const pa = after.blocks.find((x) => x.id === 'st-prospects').text;
-  const norm = (t) => t.replace(/ · dated-event enquiries £[\d,]+/, '').replace(/ \(old leads count at a quarter\)/, '').replace(/ × 0\.25/g, '');
+  const norm = (t) => t.replace(/ · dated-event enquiries £[\d,]+/, '').replace(/ \(old leads count at a quarter\)/, '').replace(/ × 0\.25/g, '').replace(/ dated event \d{1,2} [A-Z][a-z]{2} · \/\S+/g, '');
   const q = quarterOnly(norm(pb), norm(pa));
   check('Prospects section: only the new wording (dated-event line, "old leads count at a quarter", × 0.25 tags) and the revalidate rows\' weighted £ (now × 0.25) changed', q.ok, `text ${hash(pb)} → ${hash(pa)} (compared in memory; no enquiry text saved) · ${q.n} weighted cells × 0.25: ${maskedDiff(norm(pb), norm(pa))}`);
+}
+
+/** Production serves both views at ?v=rc-20261109a, byte-identical to the commit. */
+async function servedCheck(page) {
+  for (const f of FILES) {
+    const served = await page.evaluate(async (name) => {
+      const src = document.querySelector(`script[src*="/lib/${name}"]`)?.getAttribute('src') || '';
+      return { src, body: src ? await (await fetch(src, { cache: 'no-store' })).text() : '' };
+    }, f);
+    const clean = (t) => t.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+    const committed = clean(execSync(`git show ${COMMIT}:lib/${f}`, { encoding: 'utf8' }));
+    check(`production serves ${f}?v=${VERSION}, identical to ${COMMIT} (a leading byte-order mark, already in the file, is dropped by fetch)`, served.src.endsWith(`?v=${VERSION}`) && clean(served.body) === committed, `${served.src} · ${served.body.length} bytes`);
+  }
 }
 
 const before = await dbState();
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const a = await render(browser, VIEW.before);
 const lb = await a.page.evaluate(layoutOf);
-await a.page.locator('#st-sales-gap').screenshot({ path: `${OUT}/sales-gap-realistic-cover-tiles-before-local-1700px-20261109.png` });
+await a.page.locator('#st-sales-gap').screenshot({ path: `${OUT}/sales-gap-realistic-cover-tiles-before-${TAG}-1700px-20261109.png` });
 await a.ctx.close();
 const b = await render(browser, VIEW.after);
+if (LIVE) await servedCheck(b.page);
 const la = await b.page.evaluate(layoutOf);
 const table = await b.page.evaluate(coverOf);
-await b.page.locator('#st-sales-gap').screenshot({ path: `${OUT}/sales-gap-realistic-cover-tiles-after-local-1700px-20261109.png` });
-await b.page.locator('#sg-cover').screenshot({ path: `${OUT}/sales-gap-realistic-cover-table-local-1700px-20261109.png` });
-await b.page.locator('#st-remedy').screenshot({ path: `${OUT}/sales-gap-realistic-cover-remedy-local-1700px-20261109.png` });
+await b.page.locator('#st-sales-gap').screenshot({ path: `${OUT}/sales-gap-realistic-cover-tiles-${LIVE ? '' : 'after-'}${TAG}-1700px-20261109.png` });
+await b.page.locator('#sg-cover').screenshot({ path: `${OUT}/sales-gap-realistic-cover-table-${TAG}-1700px-20261109.png` });
+await b.page.locator('#st-remedy').screenshot({ path: `${OUT}/sales-gap-realistic-cover-remedy-${TAG}-1700px-20261109.png` });
 await b.page.evaluate(() => { const r = document.getElementById('sg-rules'); if (r) r.open = true; });
 const rulesText = await b.page.evaluate(() => document.getElementById('sg-rules')?.innerText.replace(/\s+/g, ' ') || '');
 await b.ctx.close();
@@ -193,6 +217,6 @@ const changed = Object.keys(before).filter((x) => before[x] !== after[x]);
 check('viewing writes nothing (row counts + newest timestamps)', !changed.length, changed.map((x) => `${x}: ${before[x]} → ${after[x]}`).join(' | ') || `${Object.keys(TABLES).length} tables unchanged`);
 check('every non-GET refused', true, `${blocked.length} refused: ${[...new Set(blocked)].join(', ') || 'none attempted'}`);
 check('no page errors', !errors.length, errors.slice(0, 3).join(' | '));
-fs.writeFileSync(`${OUT}/_rc-result.json`, JSON.stringify({ results, cover: s.sales_gap.cover, before, after }, null, 1));
+fs.writeFileSync(`${OUT}/_rc-${TAG}-result.json`, JSON.stringify({ results, cover: s.sales_gap.cover, before, after }, null, 1));
 for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.note ? ` (${r.note})` : ''}`);
 process.exit(0);

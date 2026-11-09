@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { REVALIDATE_FACTOR, buildSalesGap, eventLikely, monthsFrom } from '../lib/strategy-sales-gap.mjs';
-import { COVER_PARTS, eventHeadroom } from '../lib/strategy-sales-gap-cover.mjs';
+import { COVER_PARTS, datedEnquiries, eventHeadroom } from '../lib/strategy-sales-gap-cover.mjs';
 import { pipelineByMonth, probsOf, quarterFeedOf, summarizeProspects, weightedOf } from '../lib/strategy-prospects.mjs';
 import { eventRef } from '../api/aigeo/prospects.js';
 
@@ -95,6 +95,24 @@ test('dated-event enquiries: under Dated events (not the non-dated pipeline), ca
   near(g.months[0].still_to_find, Math.max(0, g.months[0].non_dated_needed - g.months[0].normal_adjusted - g.months[0].pipeline_weighted - g.months[0].committed_gbp - headroom), 'Remedy still to find takes the dated-event enquiries off');
   near(g.rolling.pipeline.dated_event, headroom + 100, 'quarter tile: dated-event enquiries in the rolling months');
 });
+test('dated-event key may name the PRODUCT page: matched to the event on sale that date (shared cap), never double-capped', () => {
+  const evs = [{ key: 'macro', date: '2026-11-28', title: 'Abstract and Macro Photography Workshop Warwickshire - Nov', url: MACRO_URL, left: 4, likely: 1, price: 75 },
+    { key: 'walk', date: '2026-12-12', title: 'Woodland Photography Walk', url: 'https://www.alanranger.com/x/woodland', left: 6, likely: 0, price: 30 },
+    { key: 'lake', date: '2026-12-12', title: 'Lake District Photography Workshop', url: 'https://www.alanranger.com/x/lake', left: 2, likely: 0, price: 1075 }];
+  const rows = [
+    { event_key: '2026-11-28|/photo-workshops-uk/abstract-and-macro-photography-workshops', month: '2026-11', weighted: 150 },
+    { event_key: MACRO_KEY, month: '2026-11', weighted: 150 },
+    { event_key: '2026-12-12|/photo-workshops-uk/woodland-photography-walks', month: '2026-12', weighted: 40 },
+    { event_key: '2026-12-12|/photo-workshops-uk/something-else', month: '2026-12', weighted: 10 }
+  ];
+  const d = datedEnquiries(evs, rows);
+  near(d.by_event.macro, (4 - 1) * 75, 'product-page and event-page enquiries share the Macro cap (£225), not £225 each');
+  near(d.by_month['2026-11'], 225, 'Nov counted');
+  near(d.capped_gbp, 300 - 225, 'excess capped');
+  near(d.by_event.walk, 40, 'two events that date: the one whose title matches the slug words');
+  assert.equal(d.unmatched_count, 1, 'an ambiguous slug on a two-event date is not guessed');
+});
+
 test('undated potential is shown and never counted', () => {
   const g = gap();
   const P = probsOf(CONFIG);

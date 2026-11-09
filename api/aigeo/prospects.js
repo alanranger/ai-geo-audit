@@ -25,12 +25,15 @@
  *     never on the buyer's word; committed work only on a Booking Sheet matched_sale (never automatically).
  *   - relates_to_event (QUESTION-2026-11-09 (v)): "YYYY-MM-DD|/event-page-path" (or the full page URL after the |) for an
  *     enquiry about a dated event; blank clears it. GET also returns revalidate_factor (old "revalidate" leads × 0.25).
+ *   - Gmail links (QUESTION-2026-11-09 (x)), GET only: clients[person_id].mail = all mail to / from the linked
+ *     customer_person's email (or the quoted name: "no email on file"); rows[].mail = the original enquiry email
+ *     (source_ref). The email is read server-side here and never appears in the public strategy summary.
  * The same rules for Claude's loads through Supabase SQL: public.prospect_upsert(p jsonb) (migrations/prospect_upsert_function_20261109.sql).
  */
 import { createClient } from '@supabase/supabase-js';
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_STAGE, MARKETS, OWNERS, PROVIDERS, REVENUE_TYPES, REVIEW, SOURCES, STAGES, TYPES, VALUE_BASES, pickClient, pickSale, prospectPersonRow, rowFlags, shortClientId } from '../../lib/strategy-prospects.mjs';
+import { DEFAULT_STAGE, MARKETS, OWNERS, PROVIDERS, REVENUE_TYPES, REVIEW, SOURCES, STAGES, TYPES, VALUE_BASES, clientMailLink, enquiryMailLink, pickClient, pickSale, prospectPersonRow, rowFlags, shortClientId } from '../../lib/strategy-prospects.mjs';
 import { REVALIDATE_FACTOR } from '../../lib/strategy-sales-gap.mjs';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -269,12 +272,19 @@ async function createEnquiry(sb, id, { patch, sale, stage, now, by, via, client 
   await writeHistory(sb, { enquiry_id: data.id, at: now, by, via, from_stage: null, to_stage: stage, changes, matched_sale: sale.sale || null });
   return { id: data.id, enquiry_ref: data.enquiry_ref, created: true, stage, client: { id: shortClientId(row.person_id), method: client?.method || null }, ...reviewOut(sale) };
 }
-/** Client ID column: short id + record type for each enquiry's person (admin GET only). */
+/**
+ * Client ID column: short id + record type + the Gmail link for each enquiry's person (admin GET only). The email is
+ * read here, server-side, from the linked customer_person and only leaves inside the link of this admin response.
+ */
+export function clientEntry(p, fallbackName) {
+  return { id: shortClientId(p.person_id), name: p.display_name, record_type: p.record_type || 'person', mail: clientMailLink(p.email, p.display_name || fallbackName) };
+}
 async function clientsOf(sb, rows) {
   const ids = [...new Set(rows.map((r) => r.person_id).filter(Boolean))];
   if (!ids.length) return {};
-  const { data } = await sb.from('customer_person').select('person_id, display_name, record_type:facts->>record_type').in('person_id', ids);
-  return Object.fromEntries((data || []).map((p) => [p.person_id, { id: shortClientId(p.person_id), name: p.display_name, record_type: p.record_type || 'person' }]));
+  const { data } = await sb.from('customer_person').select('person_id, display_name, email, record_type:facts->>record_type').in('person_id', ids);
+  const nameOf = (id) => rows.find((r) => r.person_id === id)?.client_or_org;
+  return Object.fromEntries((data || []).map((p) => [p.person_id, clientEntry(p, nameOf(p.person_id))]));
 }
 async function getAll(sb) {
   const [rows, config, history] = await Promise.all([
@@ -284,7 +294,7 @@ async function getAll(sb) {
   ]);
   for (const r of [rows, config, history]) if (r.error) throw new Error(r.error.message);
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
-  const list = (rows.data || []).map((r) => ({ ...r, flags: rowFlags(r, today) }));
+  const list = (rows.data || []).map((r) => ({ ...r, flags: rowFlags(r, today), mail: enquiryMailLink(r.source_ref) }));
   return { rows: list, config: config.data || [], history: history.data || [], clients: await clientsOf(sb, list), revalidate_factor: REVALIDATE_FACTOR };
 }
 
