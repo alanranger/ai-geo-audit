@@ -7,6 +7,7 @@
  *   node scripts/playwright-verify-channel-tile-local.mjs      (PHASE=live: production after deploy)
  */
 import fs from 'node:fs';
+import { execSync } from 'node:child_process';
 import { chromium } from 'playwright';
 import { createClient } from '@supabase/supabase-js';
 
@@ -41,11 +42,19 @@ async function localSummary() {
   return body;
 }
 const withTag = (html) => html.replace('<script src="/lib/marketing-overview-tiles.js', `<script src="/lib/marketing-channels-tile.js?v=${V}"></script>\n<script src="/lib/marketing-overview-tiles.js`);
+/** PHASE=live "before": the deployed page without the new tag and with the parent commit's overview tiles (old order). */
+const COMMIT = '5102955a';
+async function liveBefore(r, url) {
+  if (url.pathname === '/audit-dashboard.html') { const res = await r.fetch(); return r.fulfill({ response: res, body: (await res.text()).replace(/<script src="\/lib\/marketing-channels-tile\.js[^"]*"><\/script>\s*/, '') }); }
+  if (url.pathname === '/lib/marketing-overview-tiles.js') return r.fulfill({ status: 200, contentType: 'application/javascript', body: execSync(`git show ${COMMIT}~1:lib/marketing-overview-tiles.js`, { encoding: 'utf8' }) });
+  return r.fallback();
+}
 function makeRoute(after) {
   return async (r) => {
     const req = r.request();
     const url = new URL(req.url());
     if (req.method() !== 'GET') { refused.push(`${req.method()} ${url.pathname}`); return r.fulfill({ status: 403, contentType: 'application/json', body: '{"ok":false,"error":"refused by the read-only check"}' }); }
+    if (LIVE && !after) return liveBefore(r, url);
     if (!after || LIVE) return r.fallback();
     if (url.pathname === '/audit-dashboard.html') { const res = await r.fetch(); return r.fulfill({ response: res, body: withTag(await res.text()) }); }
     if (FILES.includes(url.pathname)) return r.fulfill({ status: 200, contentType: 'application/javascript', body: fs.readFileSync(`.${url.pathname}`, 'utf8') });
@@ -146,6 +155,12 @@ const b = await render(browser, true);
 if (LIVE) {
   const tags = await b.page.evaluate((f) => f.map((x) => document.querySelector(`script[src^="${x}"]`)?.getAttribute('src')), FILES);
   check(`production serves the ?v=${V} tags`, tags.every((s) => String(s).endsWith(`?v=${V}`)), tags.join(' '));
+  const clean = (t) => t.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  const served = await b.page.evaluate(async (list) => Promise.all(list.map(async (s) => (await fetch(s, { cache: 'no-store' })).text())), tags);
+  const same = tags.map((s, i) => clean(served[i]) === clean(execSync(`git show ${COMMIT}:${s.split('?')[0].slice(1)}`, { encoding: 'utf8' })));
+  check(`both served files are identical to ${COMMIT}`, same.every(Boolean), tags.map((s, i) => `${s.split('?')[0]} ${same[i] ? 'same' : 'DIFFERS'}`).join(' · '));
+  const items = await b.page.evaluate(async () => (await (await fetch('/api/aigeo/strategy-summary')).json()).quarter_plan?.purpose_mix?.items?.length ?? null);
+  check(`production strategy summary returns purpose_mix.items (${items})`, items > 0);
 }
 const la = await b.page.evaluate(layoutOf);
 const c = await b.page.evaluate(channelOf);

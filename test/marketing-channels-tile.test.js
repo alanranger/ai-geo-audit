@@ -76,7 +76,8 @@ test('reconciliation: the channel rows are the content mix\'s own deliveries (sc
   const row = (k) => m.rows.find((r) => r.key === k);
   assert.deepEqual([row('email').sched, row('email').drafts], [2, 2]);
   assert.deepEqual([row('fbig').sched, row('fbig').waiting, row('fbig').drafts], [1, 2, 1]);
-  assert.deepEqual([row('linkedin').sched, row('linkedin').planned], [1, 2]);
+  assert.deepEqual([row('linkedin').sched, row('linkedin').planned], [1, 1], 'the generated 11 Nov step is covered by GPT\'s 11 Nov post (not counted); 18 Nov has no GPT post');
+  assert.deepEqual(row('linkedin').covered.map((c) => c.key), ['step|li-11-11']);
 });
 
 test('platform lines under Facebook + Instagram come from the board placements of those posts only (not added again)', () => {
@@ -97,7 +98,7 @@ test('Next = the next booked item still to come: an email sent earlier today is 
 test('gap flags: LinkedIn planned steps with no post; Google Business nothing after 13 Nov; an inner 14+ day stretch', () => {
   const m = plain(load().mkChannels.build({ quarter_plan: plan() }, board, TODAY));
   const li = m.rows.find((r) => r.key === 'linkedin');
-  assert.equal(li.flags[0].text, '2 planned steps with no post yet');
+  assert.equal(li.flags[0].text, '1 planned step with no post yet');
   assert.match(li.flags[0].tip, /nothing created on the platform yet/);
   const gb = load().mkChannels.build({ quarter_plan: plan(), campaign: { weeks: [{ steps: [step('step|gbp|2026-11-20|/x', '2026-11-13', 'Google Business', 'GBP', { gbp: 'exception', optional: true, state: { status: 'done' } })] }] } }, board, TODAY).gbp;
   assert.deepEqual(plain([gb.sched, gb.next, gb.flags.map((f) => f.text)]), [1, '2026-11-13', ['nothing after Fri 13 Nov']]);
