@@ -1,9 +1,9 @@
 /**
- * Marketing "Next 12 weeks: by channel" tile + tile order (QUESTION-2026-11-10 channel-tile-and-tile-order, parts 1–2):
- * the channel rows are the content mix's own deliveries (sched + waiting + planned-with-no-post = content-mix
- * deliveries, drafts = its drafts); platform placements, Google Business exception posts and Shorts are shown apart;
- * amber gap flags for planned steps with no post and 14+ days with nothing booked; row 1 = content mix · by channel ·
- * Email capacity · Eligible audience, then Needs Alan and Data & alignment health.
+ * Marketing "Next 12 weeks: by channel" tile + tile order (QUESTION-2026-11-10 channel-tile-and-tile-order, parts 1–2;
+ * channel-tile-separate-rows-fix, Alan 20:14): seven top-level rows in Alan's order, each counting its own posts / sends
+ * in today + 84 days (social rows = that platform's placements of content-mix steps; superseded and GPT-covered steps
+ * never counted); amber gap flags per channel; reconciliation with the content mix in the title hover only; row 1 =
+ * content mix · by channel · Email capacity · Eligible audience, then the row-2 tiles.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,7 +26,7 @@ function plan() {
         step('step|gbp|check', '2026-11-10', 'Google Business', 'GBP check', { gbp: 'check' })
       ] },
       { week: '2026-11-16', steps: [step('gpt-fbig-11-20', '2026-11-20', 'Facebook + Instagram', 'Post: Friday', { manual: true }), step('step|li-11-18', '2026-11-18', 'LinkedIn', 'LinkedIn post (generated)')] },
-      { week: '2026-11-23', steps: [step('gpt-fbig-11-27', '2026-11-27', 'Facebook + Instagram', 'Post: draft', { manual: true })] },
+      { week: '2026-11-23', steps: [step('gpt-fbig-11-27', '2026-11-27', 'Facebook + Instagram', 'Post: draft', { manual: true }), step('gpt-fbig-11-25-old', '2026-11-25', 'Facebook + Instagram', 'Post: replaced', { manual: true, state: { status: 'superseded' } })] },
       { week: '2026-11-30', steps: [] }
     ],
     carried: { future: [step('gpt-fbig-12-18', '2026-12-18', 'Facebook + Instagram', 'Post: December', { manual: true, week: '2026-12-14' })], late: [], older: [] },
@@ -47,6 +47,12 @@ const board = {
     { step_key: 'gpt-fbig-11-12', placement: 'instagram_story', planned_at: '2026-11-12T18:30:00Z', status: st('story_ready') },
     { step_key: 'gpt-fbig-11-20', placement: 'facebook_feed', planned_at: '2026-11-20T18:30:00Z', status: st('waiting_window'), approved: true },
     { step_key: 'gpt-fbig-11-20', placement: 'instagram_feed', planned_at: '2026-11-20T18:30:00Z', status: st('waiting_window'), approved: true },
+    { step_key: 'gpt-fbig-12-18', placement: 'facebook_feed', planned_at: '2026-12-18T18:30:00Z', status: st('waiting_window'), approved: true },
+    { step_key: 'gpt-fbig-12-18', placement: 'instagram_feed', planned_at: '2026-12-18T18:30:00Z', status: st('waiting_window'), approved: true },
+    { step_key: 'gpt-fbig-12-18', placement: 'instagram_story', planned_at: '2027-03-01T18:30:00Z', status: st('story_ready') },
+    { step_key: 'gpt-li-11-11', placement: 'linkedin_feed', planned_at: '2026-11-11T08:30:00Z', status: st('scheduled'), approved: true },
+    { step_key: 'step|li-11-11', placement: 'linkedin_feed', planned_at: '2026-11-11T08:30:00Z', status: st('scheduled') },
+    { step_key: 'gpt-fbig-11-25-old', placement: 'facebook_feed', planned_at: '2026-11-25T18:30:00Z', status: st('scheduled') },
     { step_key: 'other-not-in-mix', placement: 'facebook_feed', planned_at: '2026-11-21T18:30:00Z', status: st('scheduled') }
   ],
   content: [
@@ -64,28 +70,54 @@ function load() {
 }
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
-test('reconciliation: the channel rows are the content mix\'s own deliveries (sched + waiting + planned = deliveries; drafts = drafts)', () => {
-  const s = { quarter_plan: plan() };
-  const mix = s.quarter_plan.purpose_mix;
-  assert.equal(mix.items.length, mix.deliveries + mix.draft.deliveries, 'purpose_mix.items = every counted delivery');
-  const m = plain(load().mkChannels.build(s, board, TODAY));
-  const t = m.totals;
-  assert.equal(t.sched + t.waiting + t.planned, mix.deliveries);
-  assert.equal(t.waiting, mix.waiting.deliveries);
-  assert.equal(t.drafts, mix.draft.deliveries);
-  const row = (k) => m.rows.find((r) => r.key === k);
-  assert.deepEqual([row('email').sched, row('email').drafts], [2, 2]);
-  assert.deepEqual([row('fbig').sched, row('fbig').waiting, row('fbig').drafts], [1, 2, 1]);
-  assert.deepEqual([row('linkedin').sched, row('linkedin').planned], [1, 1], 'the generated 11 Nov step is covered by GPT\'s 11 Nov post (not counted); 18 Nov has no GPT post');
-  assert.deepEqual(row('linkedin').covered.map((c) => c.key), ['step|li-11-11']);
+const ORDER = [['email', 'Squarespace email'], ['facebook', 'Facebook'], ['instagram', 'Instagram'], ['instagram_story', 'Instagram Stories'], ['linkedin', 'LinkedIn'], ['gbp', 'Google Business'], ['youtube', 'YouTube Shorts']];
+const gbpStep = step('step|gbp|2026-11-20|/x', '2026-11-13', 'Google Business', 'GBP', { gbp: 'exception', optional: true, state: { status: 'done' } });
+const withGbp = () => ({ quarter_plan: plan(), campaign: { weeks: [{ steps: [gbpStep] }] } });
+const counts = (r) => [r.sched, r.waiting, r.drafts];
+
+/** Independent of the tile: that platform's placements of content-mix steps in today + 84 days, plus the channel's unplaced steps. */
+function expectedPlacements(mix, place, re) {
+  const steps = new Map(mix.items.map((x) => [x.key, x]));
+  const inWin = (d) => d >= mix.window.from && d <= mix.window.to;
+  const pls = board.placements.filter((p) => p.placement === place && steps.has(p.step_key) && inWin(p.planned_at.slice(0, 10)));
+  const code = (p) => p.status.code;
+  const unplaced = re ? mix.items.filter((x) => re.test(x.channel) && !pls.some((p) => p.step_key === x.key)) : [];
+  return {
+    c: [pls.filter((p) => code(p) === 'scheduled').length, pls.filter((p) => code(p) === 'waiting_window').length, pls.filter((p) => !['scheduled', 'waiting_window'].includes(code(p))).length + unplaced.filter((x) => x.draft).length],
+    planned: unplaced.filter((x) => !x.draft).length
+  };
+}
+
+test('seven top-level rows in Alan\'s order, first "Squarespace email"; headline 7 channels; no combined / indented rows', () => {
+  const m = plain(load().mkChannels.build(withGbp(), board, TODAY));
+  assert.deepEqual(m.rows.map((r) => [r.key, r.label]), ORDER);
+  assert.ok(m.rows.every((r) => !r.sub && !r.missing));
+  const html = load().mkChannelsTileHtml(withGbp(), board, TODAY);
+  const rows = [...html.matchAll(/<tr class="([^"]*)" data-mkch-go="([^"]+)" data-mkch-row="([^"]+)"[^>]*><td class="left"><span class="mkch-name">([^<]+)</g)];
+  assert.deepEqual(rows.map((x) => [x[3], x[4]]), ORDER, 'rendered in the same order');
+  assert.ok(rows.every((x) => x[1] === 'mkch-r'), 'all rows at the same level');
+  assert.match(html, /<div class="mko-head">7 <span class="mko-unit">channels · next post and gaps<\/span><\/div>/);
+  assert.doesNotMatch(html, /└|mkch-sub|Facebook \+ Instagram<|data-mkch-row="fbig"/, 'no combined parent row, no indented sub-rows');
 });
 
-test('platform lines under Facebook + Instagram come from the board placements of those posts only (not added again)', () => {
-  const m = plain(load().mkChannels.build({ quarter_plan: plan() }, board, TODAY));
-  const sub = Object.fromEntries(m.subs.map((r) => [r.key, [r.sched, r.waiting, r.drafts]]));
-  assert.deepEqual(sub, { facebook_feed: [1, 1, 0], instagram_feed: [1, 1, 0], instagram_story: [0, 0, 1] }, 'a placement of a post outside the content mix is not counted');
-  assert.equal(m.shorts.sched, 2, 'Shorts in the window from the content records; an earlier release is outside');
-  assert.equal(m.shorts.next, '2026-11-17');
+test('each row counts its own channel\'s posts in today + 84 days (placements, not campaign steps); dedupe per channel', () => {
+  const s = withGbp();
+  const mix = s.quarter_plan.purpose_mix;
+  const m = plain(load().mkChannels.build(s, board, TODAY));
+  const row = (k) => m.rows.find((r) => r.key === k);
+  for (const [k, place, re] of [['facebook', 'facebook_feed', /Facebook/], ['instagram', 'instagram_feed', /Instagram/], ['instagram_story', 'instagram_story', null], ['linkedin', 'linkedin_feed', /LinkedIn/]]) {
+    const e = expectedPlacements(mix, place, re);
+    assert.deepEqual([counts(row(k)), row(k).planned], [e.c, e.planned], `${k} = its own placements`);
+  }
+  assert.deepEqual(counts(row('facebook')), [1, 2, 1], 'FB: 12 Nov booked, 20 Nov + 18 Dec waiting, 27 Nov draft step (no placement yet); superseded 25 Nov and a post outside the content mix not counted');
+  assert.deepEqual(counts(row('instagram')), [1, 2, 1]);
+  assert.deepEqual(counts(row('instagram_story')), [0, 0, 1], 'the 1 Mar Story is outside today + 84 days');
+  assert.deepEqual([...counts(row('linkedin')), row('linkedin').planned], [1, 0, 0, 1], 'generated 11 Nov step covered by GPT\'s 11 Nov post: its placement is not counted again; 18 Nov planned, no post yet');
+  assert.deepEqual(row('linkedin').covered.map((c) => c.key), ['step|li-11-11']);
+  assert.deepEqual(counts(row('email')), [2, 0, 2], 'Squarespace email = the content mix\'s sends');
+  assert.deepEqual(counts(row('gbp')), [1, 0, 0]);
+  assert.deepEqual([counts(row('youtube')), row('youtube').next], [[2, 0, 0], '2026-11-17'], 'Shorts in the window from the content records; an earlier release is outside');
+  assert.ok(mix.superseded.some((x) => x.key === 'gpt-fbig-11-25-old'), 'fixture: the replaced step is superseded');
 });
 
 test('Next = the next booked item still to come: an email sent earlier today is not "next"', () => {
@@ -95,17 +127,18 @@ test('Next = the next booked item still to come: an email sent earlier today is 
   assert.equal(C.build(s, board, '2026-11-11', Date.parse('2026-11-11T20:00:00Z')).rows.find((r) => r.key === 'email').next, '2026-11-19', 'the 11 Nov 19:30 send has gone out');
 });
 
-test('gap flags: LinkedIn planned steps with no post; Google Business nothing after 13 Nov; an inner 14+ day stretch', () => {
-  const m = plain(load().mkChannels.build({ quarter_plan: plan() }, board, TODAY));
-  const li = m.rows.find((r) => r.key === 'linkedin');
-  assert.equal(li.flags[0].text, '1 planned step with no post yet');
-  assert.match(li.flags[0].tip, /nothing created on the platform yet/);
-  const gb = load().mkChannels.build({ quarter_plan: plan(), campaign: { weeks: [{ steps: [step('step|gbp|2026-11-20|/x', '2026-11-13', 'Google Business', 'GBP', { gbp: 'exception', optional: true, state: { status: 'done' } })] }] } }, board, TODAY).gbp;
-  assert.deepEqual(plain([gb.sched, gb.next, gb.flags.map((f) => f.text)]), [1, '2026-11-13', ['nothing after Fri 13 Nov']]);
+test('gap flags per channel: LinkedIn planned steps with no post; Google Business nothing after 13 Nov; an inner 14+ day stretch', () => {
+  const m = plain(load().mkChannels.build(withGbp(), board, TODAY));
+  const flags = (k) => m.rows.find((r) => r.key === k).flags.map((f) => f.text);
+  assert.deepEqual(flags('linkedin'), ['1 planned step with no post yet', 'nothing after Wed 11 Nov']);
+  assert.match(m.rows.find((r) => r.key === 'linkedin').flags[0].tip, /nothing created on this platform yet/);
+  const gb = m.rows.find((r) => r.key === 'gbp');
+  assert.deepEqual([gb.sched, gb.next, flags('gbp')], [1, '2026-11-13', ['nothing after Fri 13 Nov']]);
   assert.match(gb.flags[0].tip, /No booked or approved-waiting item for 35 days \(Fri 13 Nov → Fri 18 Dec\)/);
-  const fb = m.rows.find((r) => r.key === 'fbig');
-  assert.deepEqual(fb.flags.map((f) => f.text), ['nothing Fri 20 Nov → Fri 18 Dec'], 'the 27 Nov draft does not cover the stretch');
-  assert.equal(m.rows.find((r) => r.key === 'email').flags.length, 1, 'email: nothing booked after 19 Nov (drafts only) → flagged');
+  assert.deepEqual(flags('facebook'), ['nothing Fri 20 Nov → Fri 18 Dec'], 'the 27 Nov draft does not cover the stretch');
+  assert.deepEqual(flags('instagram'), ['nothing Fri 20 Nov → Fri 18 Dec']);
+  assert.deepEqual(flags('instagram_story'), ['nothing scheduled yet']);
+  assert.deepEqual(flags('email'), ['nothing after Thu 19 Nov'], 'drafts only after 19 Nov');
 });
 
 test('gapOf: an inner 14-day stretch, a tail, nothing booked at all', () => {
@@ -116,26 +149,34 @@ test('gapOf: an inner 14-day stretch, a tail, nothing booked at all', () => {
   assert.deepEqual(plain(C.gapOf(row([]), '2026-11-10', '2026-12-05')), { from: '2026-11-10', to: '2026-12-05', tail: true, none: true });
 });
 
-test('tile HTML: title + tip, columns, reconciliation line ✓, row clicks, Shorts "—" with a hover when the board is unavailable', () => {
+test('tile HTML: columns, reconciliation in the title hover only (no on-face line), covered steps in the row hover only, row clicks, "—" when the board is unavailable', () => {
   const win = load();
-  const s = { quarter_plan: plan() };
+  const s = withGbp();
   const html = win.mkChannelsTileHtml(s, board, TODAY);
-  assert.match(html, /<div class="mko-title" title="Sched = booked in the platform[^"]*Waiting = approved, waiting for the platform&#39;s scheduling window|<div class="mko-title" title="Sched = booked in the platform[^"]*Waiting = approved, waiting for the platform's scheduling window/);
-  assert.match(html, />Next 12 weeks: by channel</);
+  const title = html.match(/<div class="mko-title" title="([^"]*)">Next 12 weeks: by channel</)?.[1] || '';
+  assert.match(title, /Sched = booked in the platform.*Waiting = approved, waiting for the platform's scheduling window.*Drafts = still being prepared/);
+  assert.match(title, /the content mix counts campaign deliveries \(\d+ \+ \d+ drafts\); this tile counts posts per channel/);
+  assert.match(title, /leave out 1 superseded step and 1 generated step already covered by a GPT post/);
   assert.match(html, /<th><span class="s">Sched<\/span><\/th><th><span class="w">Waiting<\/span><\/th><th><span class="d">Drafts<\/span><\/th><th>Next<\/th>/);
-  assert.match(html, /data-mkch-rec="ok"/);
-  for (const [row, go] of [['email', 'email'], ['fbig', 'facebook'], ['linkedin', 'linkedin'], ['gbp', 'google'], ['youtube', 'youtube'], ['instagram_story', 'instagram']]) assert.match(html, new RegExp(`data-mkch-go="${go}" data-mkch-row="${row}"`));
+  const face = html.replace(/ title="[^"]*"/g, '');
+  assert.doesNotMatch(face, /= content mix|data-mkch-rec|covered by GPT post|mkch-cov/, 'no reconciliation line or grey covered note on the face');
+  assert.match(html, /data-mkch-row="linkedin" title="Open the schedule: LinkedIn\n1 generated step not counted again \(GPT&#39;s own LinkedIn post that day covers them\)|data-mkch-row="linkedin" title="Open the schedule: LinkedIn\n1 generated step not counted again \(GPT's own LinkedIn post that day covers them\)/);
+  assert.match(html, /data-mkch-row="email" title="Open the schedule: Squarespace email"/);
+  for (const [row, go] of [['email', 'email'], ['facebook', 'facebook'], ['instagram', 'instagram'], ['instagram_story', 'instagram'], ['linkedin', 'linkedin'], ['gbp', 'google'], ['youtube', 'youtube']]) assert.match(html, new RegExp(`data-mkch-go="${go}" data-mkch-row="${row}"`));
   const none = win.mkChannelsTileHtml(s, { error: 'HTTP 500' }, TODAY);
-  assert.match(none, /data-mkch-row="youtube" title="The Shorts schedule \(content records with YouTube status\) could not be read: HTTP 500"><td class="left">YouTube Shorts<\/td><td>—<\/td><td>—<\/td><td>—<\/td>/);
+  for (const [k, label] of ORDER.filter(([k]) => !['email', 'gbp'].includes(k))) assert.match(none, new RegExp(`data-mkch-row="${k}" title="The delivery-status board \\(placements and Shorts\\) could not be read: HTTP 500"><td class="left"><span class="mkch-name">${label}</span></td><td>—</td><td>—</td><td>—</td>`));
+  assert.equal([...none.matchAll(/data-mkch-row=/g)].length, 7, 'still seven rows');
 });
 
-test('tile order: content mix · by channel · Email capacity · Eligible audience, then Needs Alan · Data & alignment health; decision alert only when one waits', () => {
+test('tile order (tidy 10 Nov 20:11): content mix · by channel · Email capacity · Eligible audience, then Data & alignment health · Needs Alan; fixed columns; decision alert only when one waits', () => {
   const win = load();
   const s = { quarter_plan: plan(), campaign: { campaigns: [], step_status: {} }, actions: [] };
   const d = { meter: { state: 'never_read' }, identity: {}, runs: {}, tiles: { cleanup: { frozen: [] } }, engagement: {} };
   const html = win.mkOverviewTiles.gridHtml({ d, s, health: { state: 'loading' }, board: undefined });
   const titles = [...html.matchAll(/<div class="mko-title"[^>]*>([^<]+)</g)].map((x) => x[1].trim());
-  assert.deepEqual(titles, ['Next 12 weeks: content mix', 'Next 12 weeks: by channel', 'Email capacity', 'Eligible audience', 'Needs Alan', 'Data &amp; alignment health']);
+  assert.deepEqual(titles, ['Next 12 weeks: content mix', 'Next 12 weeks: by channel', 'Email capacity', 'Eligible audience', 'Data &amp; alignment health', 'Needs Alan']);
+  assert.match(html, /@container mko \(min-width: 65rem\) \{\s*\.mko \.mko-grid\.c5 \{ grid-template-columns: repeat\(5, minmax\(0, 1fr\)\); \}/, 'wide: 5 fixed columns (no 6th column pulling Needs Alan up)');
+  assert.match(html, /@container mko \(min-width: 47rem\) \{\s*\.mko \.mko-grid\.c5 \{ grid-template-columns: repeat\(3, minmax\(0, 1fr\)\); \}/, 'medium: 3 columns, same order');
   assert.doesNotMatch(html, /<p class="mko-alert"/, 'no decision waiting: no alert');
   const waiting = win.mkOverviewTiles.gridHtml({ d, s: { ...s, campaign: { campaigns: [{ campaign_key: 'x', title: 'Gift email', stage: 'verified' }], step_status: {} } }, health: { state: 'loading' } });
   assert.match(waiting, /<p class="mko-alert"><a href="#" data-mko-go="campaign">⚠ 1 decision waiting for Alan → Needs Alan \(tile 7\)<\/a><\/p>/);
