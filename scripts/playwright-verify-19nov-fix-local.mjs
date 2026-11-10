@@ -9,6 +9,7 @@
  *   node scripts/playwright-verify-19nov-fix-local.mjs        (PHASE=live: production after deploy, no simulation)
  */
 import fs from 'node:fs';
+import { execSync } from 'node:child_process';
 import { chromium } from 'playwright';
 import { createClient } from '@supabase/supabase-js';
 
@@ -18,6 +19,7 @@ const BASE = 'https://ai-geo-audit.vercel.app';
 const LIVE = process.env.PHASE === 'live';
 const TAG = LIVE ? 'live' : 'local';
 const V = 'gone-20261110a';
+const COMMIT = '75a403f2';
 const KEY = 'theme|gpt-8w-2026-11-19';
 const ID = '6af0811d60d4554034f4b5bb';
 const FILES = ['/lib/marketing-sqs-cycles.js', '/lib/marketing-overview-tiles.js', '/lib/marketing-schedule-list.js', '/lib/marketing-schedule-model.js', '/lib/marketing-delivery.js'];
@@ -149,6 +151,18 @@ for (const mode of LIVE ? ['after'] : ['before', 'after', 'simulated']) {
   if (LIVE) {
     const tags = await r.page.evaluate((files) => files.map((f) => document.querySelector(`script[src^="${f}"]`)?.getAttribute('src')), FILES);
     check(`production serves the ?v=${V} tags`, tags.every((s) => String(s).endsWith(`?v=${V}`)), tags.join(' '));
+    const clean = (t) => t.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+    const served = await r.page.evaluate(async (list) => Promise.all(list.map(async (s) => (await fetch(s, { cache: 'no-store' })).text())), tags);
+    const same = tags.map((s, i) => clean(served[i]) === clean(execSync(`git show ${COMMIT}:${s.split('?')[0].slice(1)}`, { encoding: 'utf8' })));
+    check(`the five served files are identical to ${COMMIT}`, same.every(Boolean), tags.map((s, i) => `${s.split('?')[0]} ${same[i] ? 'same' : 'DIFFERS'}`).join(' · '));
+    const api = await r.page.evaluate(async (k) => {
+      const h = { 'x-arp-admin-key': k };
+      const d = await (await fetch('/api/aigeo/marketing?action=overview', { headers: h })).json();
+      const x = await (await fetch('/api/aigeo/marketing-schedule-extras?propertyUrl=https%3A%2F%2Fwww.alanranger.com', { headers: h })).json();
+      const dl = (d.meter?.deliveries || []).find((y) => y.key === 'theme|gpt-8w-2026-11-19');
+      return { has_field: Array.isArray(d.meter?.capacity?.not_in_scheduled), gone: d.meter?.capacity?.not_in_scheduled?.length, dl: dl && { bucket: dl.bucket, sent: !!dl.sent, status: dl.status?.code }, promos: (x.promotions || []).map((p) => `${p.campaign_key} confirmed=${p.confirmed}`) };
+    }, ENV.ARP_ADMIN_KEY);
+    check(`production server code: 19 Nov ${JSON.stringify(api.dl)}; capacity.not_in_scheduled = ${api.gone}; modules ${api.promos.join(' · ')}`, api.has_field && api.dl?.bucket === 'committed' && !api.dl.sent && api.dl.status === 'scheduled' && api.promos.some((p) => /2026-11-19 confirmed=false/.test(p)));
   }
   out[mode] = await r.page.evaluate(snap, KEY);
   await shots(r.page, mode === 'simulated' ? 'simulated-1723' : mode);
@@ -156,9 +170,15 @@ for (const mode of LIVE ? ['after'] : ['before', 'after', 'simulated']) {
 }
 await browser.close();
 if (LIVE) {
-  check('live: 19 Nov card without the Light & Logic label', !/Light & Logic/.test(out.after.card));
-  const a19 = ROW(out.after, 1, KEY);
-  check(`live: 19 Nov in Next cycle as SCHED 561 (${a19 ? `${a19.tag} ${a19.n}` : 'absent'})`, a19?.tag === 'SCHED' && a19.n === '561');
+  const a = out.after;
+  check(`live: 19 Nov card without the Light & Logic label (${a.card.slice(0, 120)})`, !/Light & Logic/.test(a.card));
+  const a19 = ROW(a, 1, KEY);
+  check(`live: 19 Nov in Next cycle as SCHED 561 (${a19 ? `${a19.date} ${a19.tag} ${a19.n}` : 'absent'})`, a19?.tag === 'SCHED' && a19.n === '561' && !a19.alert);
+  const eleven = a.cycles[0].filter((r) => /12nov/.test(r.key));
+  check(`live: the four 11 Nov emails dated 11 Nov (${eleven.map((r) => `${r.date} ${r.n}`).join(' · ')})`, eleven.length === 4 && eleven.every((r) => r.date === '11 Nov'));
+  const noSeg = ['theme|gpt-8w-academy-2026-12-01', 'theme|gpt-8w-pnm-2026-12-14'].map((k) => ROW(a, 1, k) || ROW(a, 2, k));
+  check(`live: drafts with no segment flagged (${noSeg.map((r) => (r ? `${r.date} ${r.n} ${r.alert}` : 'absent')).join(' · ')})`, noSeg.every((r) => r?.alert === 'audience not chosen'));
+  check(`live: no "Not in Squarespace Scheduled" warning today (all scheduled emails listed) · capacity "${(/Next cycle[^]*?reserved\)/.exec(a.cap) || [''])[0]}"`, !/Not in Squarespace Scheduled/.test(a.cap) && !/r-red/.test(a.cap_rag) && !/r-red/.test(a.cycles_rag));
 } else checks(out.before, out.after, out.simulated);
 const after = await dbState();
 const changed = Object.keys(before).filter((k) => before[k] !== after[k]);

@@ -78,6 +78,15 @@ test('a linked email id (sqs_email_id) is not a send while Squarespace lists it 
   assert.equal(after.sent.note, 'linked, not collected yet', 'left Scheduled after its time: sent, pending the Sent list');
 });
 
+test('26 Nov 18:21 case: operator-verified schedule + linked id, no Scheduled read yet → scheduled (committed), not sent', () => {
+  const rec = { ...REC, campaign_key: 'theme|gpt-8w-2026-11-26', title: '26 Nov', scheduled_for: '2026-11-26T19:30:00Z', schedule_evidence: 'operator_verified', schedule_evidence_at: '2026-11-10T18:21:42Z', sqs_email_id: 'id-26', sqs_draft_id: 'id-26', export_id: 'x-19' };
+  const at = new Date('2026-11-10T18:25:00Z');
+  const d = meterView({ ...LATEST, captured_at: '2026-11-10T18:13:48Z' }, [rec], [], at, { exports: [EXP], schedules: [], runs: RUNS }).deliveries[0];
+  assert.deepEqual([d.sent, d.bucket, d.side, d.amount, d.status.code], [null, 'committed', 'next', 561, 'scheduled'], 'was "linked, not collected yet" → released, counted nowhere');
+  const past = meterView({ ...LATEST, captured_at: '2026-11-26T20:30:00Z' }, [rec], [], new Date('2026-11-26T20:30:00Z'), { exports: [EXP], schedules: [], runs: RUNS }).deliveries[0];
+  assert.equal(past.sent.note, 'linked, not collected yet', 'after its time: a linked id is the send, pending the Sent list');
+});
+
 function browser(files) {
   const store = {};
   const win = { localStorage: { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); } } };
