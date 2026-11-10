@@ -134,7 +134,7 @@ async function strategy(browser) {
   check('Strategy headline is "Needs Alan (n)" from the shared decision state; no target decision (beginners decided)', Number.isFinite(needs) && !/Target decisions/.test(dec.replace(/title="[^"]*"/g, '')) && !/non-JLR beginners/.test(dec), dec.slice(0, 200));
   const norfolk = await page.evaluate(() => [...document.querySelectorAll('#st-quarter-plan .qp-l')].map((l) => l.textContent.replace(/\s+/g, ' ').trim()).filter((t) => /Norfolk coastal/.test(t) && /^Next:/.test(t)));
   const boxes = await page.evaluate(() => [...document.querySelectorAll('#st-quarter-plan .qp-card')].slice(0, 2).map((c) => [...c.querySelectorAll('.qp-kpi')].map((k) => `${k.querySelector('.qp-kl')?.textContent.trim()}: ${k.querySelector('.qp-kv')?.textContent.trim()} (${k.querySelector('.qp-ks')?.textContent.trim()})`).find((t) => /beginners/i.test(t))));
-  check('Q1 KPI box "Non-JLR beginners: moved to Jan course"; Q2 box "8 by 27 Jan · 17 by Mar"', /^Non-JLR beginners: moved to Jan course/.test(boxes[0] || '') && /^Non-JLR beginners: 8 by 27 Jan · 17 by Mar 27/.test(boxes[1] || ''), boxes.join(' | '));
+  check('Q1 KPI box "Non-JLR beginners: moved to Jan course"; Q2 box "4 by 27 Jan · 17 by Mar"', /^Non-JLR beginners: moved to Jan course/.test(boxes[0] || '') && /^Non-JLR beginners: 4 by 27 Jan · 17 by Mar 27/.test(boxes[1] || ''), boxes.join(' | '));
   const academy = await page.evaluate(() => [...document.querySelectorAll('#st-quarter-plan .qp-card.is-current .qp-ini')].filter((i) => /Academy/.test(i.querySelector('.qp-it')?.textContent || '')).map((i) => [...i.querySelectorAll('.qp-l')].map((l) => l.textContent.replace(/\s+/g, ' ').trim()).join(' | '))[0] || '');
   if (process.env.EXPECT_ACADEMY_NEXT) check(`Academy initiative next action reads ${process.env.EXPECT_ACADEMY_NEXT}; "Target not set" kept`, academy.includes('Next: Email: Your next step with the Photography Academy · ') && academy.includes(process.env.EXPECT_ACADEMY_NEXT), academy);
   const g4 = await page.evaluate(() => {
@@ -176,6 +176,13 @@ async function strategy(browser) {
   check('(k) monthly tiles: "In prime buying window this month" (no "Dated places sellable", no monthly best case); quarter "Stock on sale now"; overlap footnote; as-of line; likely names its events', kk.prime.every(Boolean) && !kk.oldLine && kk.stockNow && kk.foot && kk.asOf && kk.from.filter(Boolean).length >= 2, `prime ${kk.prime.join(' | ')} · stock now ${kk.stockNow} · ${kk.asOf} · from: ${kk.from.join(' | ')}`);
   check('(j) Rules carry the 4 editable assumptions "set 9 Nov, review later"; Prospects table: Ref, Received, Client ID, Days open', kk.rules && ['Ref', 'Received', 'Client ID', 'Days open'].every((h) => kk.heads.includes(h)), kk.heads.join(' | '));
   await page.evaluate(() => window.scrollTo(0, 0));
+  if (process.env.CLICK_CLIENT === '1') {
+    await page.locator('#st-prospects [data-pp-client]').first().click().catch(() => {});
+    await page.waitForFunction(() => /Purchases:|unavailable/.test(document.querySelector('#st-prospects [data-pp-clientbox]')?.textContent || ''), null, { timeout: 30000 }).catch(() => {});
+    const box = await page.evaluate(() => (document.querySelector('#st-prospects [data-pp-clientbox]')?.innerText || '').replace(/\s+/g, ' '));
+    const row = await page.evaluate(() => (document.querySelector('#st-prospects .pp-table tbody tr')?.innerText || '').replace(/\s+/g, ' '));
+    check('test enquiry row: ENQ ref, received date, clickable client ID, days open; client panel opens', /ENQ-\d{4}/.test(row) && /C-[0-9A-F]{6}/.test(row) && /Purchases:/.test(box), `row: ${row.slice(0, 220)} · panel: ${box.slice(0, 220)}`);
+  }
   for (const id of ['st-prospects']) await page.locator(`#${id}`).screenshot({ path: `${OUT}/prospects-${TAG}-1700px-${STAMP}.png` }).catch(() => {});
   for (const id of ['st-sales-gap', 'st-remedy', 'st-quarter-cards']) await page.locator(`#${id}`).screenshot({ path: `${OUT}/sales-gap-${id.replace('st-', '')}-${TAG}-1700px-${STAMP}.png` });
   await page.evaluate(() => { const d = document.querySelector('#st-sales-gap [data-sg-month] details'); if (d) d.open = true; });
