@@ -8,6 +8,7 @@
  * PHASE=live (after deploy): production files + APIs; "before" = the deployed page with the new tag stripped.
  */
 import fs from 'node:fs';
+import { execSync } from 'node:child_process';
 import { chromium } from 'playwright';
 import { createClient } from '@supabase/supabase-js';
 
@@ -17,6 +18,7 @@ const BASE = 'https://ai-geo-audit.vercel.app';
 const LIVE = process.env.PHASE === 'live';
 const TAG = LIVE ? 'live' : 'local';
 const V = 'cyc-20261110a';
+const COMMIT = '80587a56';
 const LOCAL_FILES = ['/lib/marketing-sqs-cycles.js', '/lib/marketing-overview-tiles.js', '/lib/marketing-schedule.js'];
 const TABLES = { strategy_campaigns: 'updated_at', sqs_scheduled_emails: 'collected_at', marketing_segment_exports: 'created_at', marketing_segments: 'created_at' };
 const sb = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
@@ -164,6 +166,12 @@ const d = await b.page.evaluate(async (k) => (await fetch('/api/aigeo/marketing?
 if (LIVE) {
   const tags = await b.page.evaluate(() => [...document.querySelectorAll('script[src*="marketing-sqs-cycles"],script[src*="marketing-overview-tiles"],script[src*="marketing-schedule.js"]')].map((s) => s.getAttribute('src')));
   check(`production serves the ?v=${V} tags`, tags.length === 3 && tags.every((s) => s.endsWith(`?v=${V}`)), tags.join(' '));
+  const clean = (x) => x.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  for (const src of tags) {
+    const body = await b.page.evaluate(async (u) => (await fetch(u, { cache: 'no-store' })).text(), src);
+    const path = src.split('?')[0].slice(1);
+    check(`${src} is identical to ${COMMIT}:${path}`, clean(body) === clean(execSync(`git show ${COMMIT}:${path}`, { encoding: 'utf8' })), `${body.length} bytes`);
+  }
 }
 await b.page.locator('#mk-sqs-cycles').screenshot({ path: `outputs/sqs-cycles-tile-${TAG}-1700px-20261110.png` });
 await b.page.locator('#mk-overview-tiles .mko-grid').screenshot({ path: `outputs/sqs-cycles-tile-overview-${TAG}-1700px-20261110.png` });
