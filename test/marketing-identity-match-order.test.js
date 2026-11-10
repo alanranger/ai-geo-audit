@@ -28,7 +28,8 @@ function source(over = {}) {
       profile('p1', 'ann@example.com', 'Ann', 'Lee'), profile('p2', 'sam@example.com', 'Sam', 'Shaw', { accepts_marketing: false }),
       profile('p3', 'kim@example.com', 'Kim', 'Day'), profile('p4', 'kim.day@example.com', 'Kim', 'Day'),
       profile('po', 'owner@example.com', 'Alan', 'Ranger'), profile('pt', 'test@example.com', 'Alan', 'Ranger'),
-      profile('p5', 'ex@example.com', 'Ex', 'Client'), profile('p6', 'res@example.com', 'Rhea', 'Stone'), profile('p7', 'chris@example.com', 'Christopher', 'Bell')
+      profile('p5', 'ex@example.com', 'Ex', 'Client'), profile('p6', 'res@example.com', 'Rhea', 'Stone'), profile('p7', 'chris@example.com', 'Christopher', 'Bell'),
+      profile('p8', 'chrissie@example.com', 'Chrissie', 'Bell')
     ],
     orders: [order('o1', 3001, 'sam@example.com', { attendee_email: 'sam@example.com', attendee_first_name: 'Sam', attendee_last_name: 'Shaw' }), order('o2', 3002, 'ann@example.com')],
     lines: [],
@@ -126,7 +127,8 @@ test('unresolved names go to the review queue (several candidates / fuzzy / buye
   assert.equal(linkOf(st, 'bs_workshop', 'w3').confirmed, false);
   assert.deepEqual([facts.get('name:pure photo').record_type, facts.get('name:pure photo').identity_pending], ['organisation', null]);
   assert.equal(facts.get('name:nobody known').identity_pending, null);
-  assert.equal(resolveName(nameDirectory({ profiles: [profile('a', 'jo@example.com', 'Jo', 'Smith')] }, {}), 'Jo').kind, 'partial');
+  assert.equal(resolveName(nameDirectory({ profiles: [profile('a', 'jo@example.com', 'Jo', 'Smith'), profile('b', 'jo2@example.com', 'Jo', 'Brown')] }, {}), 'Jo').kind, 'partial');
+  assert.equal(resolveName(nameDirectory({ profiles: [profile('a', 'jo@example.com', 'Jo', 'Smith')] }, { rules: false }), 'Jo').kind, 'partial', '9 Nov behaviour (rules off)');
 });
 
 test('the review link counts the queue: panel number = Customers query = undecided in the recent "no email held" query', () => {
