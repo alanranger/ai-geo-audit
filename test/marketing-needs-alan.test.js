@@ -20,7 +20,7 @@ test('tile 6: two bars (approved solid, drafts hatched), zero segments hidden bu
   const pm = { window: { from: '2026-11-02', to: '2026-11-29' }, deliveries: 20, by_primary: { sell: 15, educate: 2, inspire: 3, nurture: 0 }, set_by_hand: 1, by_rule: 19, draft: { deliveries: 12, by_primary: { sell: 7, educate: 3, inspire: 1, nurture: 1 } }, modules: { total: 21, by_purpose: { sell: 19, educate: 2 } } };
   const T = tiles();
   const html = T.tileHtml(T.tileMix({ quarter_plan: { purpose_mix: pm } }));
-  assert.match(html, /20 <span class="mko-unit">deliveries · next 4 weeks<\/span>/);
+  assert.match(html, /20 <span class="mko-unit">deliveries · next 12 weeks<\/span>/);
   assert.match(html, /\+12 drafts/);
   assert.equal((html.match(/class="mko-seg p-nurture"/g) || []).length, 0, 'approved Nurture 0: no segment');
   assert.equal((html.match(/class="mko-seg p-nurture hatch"/g) || []).length, 1, 'draft Nurture 1: hatched segment');

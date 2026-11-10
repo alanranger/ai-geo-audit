@@ -127,7 +127,7 @@ test('an edit (stored link) moves the campaign once, with no duplicate rows', ()
 });
 
 test('purpose mix: deliveries counted once, modules separately; stored tag beats the channel rule', () => {
-  const p = assemblePlan(fixture());
+  const p = assemblePlan(fixture({ today: '2026-11-05' }));
   const m = p.purpose_mix;
   assert.equal(m.deliveries, 4);
   assert.equal(Object.values(m.by_primary).reduce((a, b) => a + b, 0), 4);
@@ -146,7 +146,7 @@ test('purpose mix: GPT drafts counted on their own line from their stored tags; 
     { campaign_key: 'event|2026-11-20|/norfolk', kind: 'event', title: 'Cancelled Norfolk row', stage: 'cancelled', planned_send_on: '2026-11-08' }
   );
   f.links.push({ ref_type: 'campaign', ref_key: 'theme|gpt-8w-2026-11-19', initiative_key: 'q1-near', role: 'primary', purpose_primary: 'educate' });
-  const p = assemblePlan(f);
+  const p = assemblePlan({ ...f, today: '2026-11-05' });
   const m = p.purpose_mix;
   assert.deepEqual(m.by_primary, { sell: 3, educate: 1, inspire: 0, nurture: 0 }, 'scheduled / approved line unchanged');
   assert.deepEqual([m.draft.deliveries, m.draft.by_primary.educate, m.draft.set_by_hand], [1, 1, 1]);
