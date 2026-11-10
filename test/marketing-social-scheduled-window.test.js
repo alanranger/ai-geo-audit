@@ -35,11 +35,39 @@ test('operator-verified provider scheduling (queue read-back, no ID) = Scheduled
   assert.equal(placementStatus(META_FB, { now: NOW }).when, 'Facebook Tue 10 Nov 6:30pm');
 });
 
-test('plain planned / approved rows never show Scheduled: no queue evidence, no queue URL, or not on the platform', () => {
+test('plain planned / approved rows never show Scheduled: no queue evidence, or not on the platform', () => {
   assert.equal(operatorScheduled(queued({ evidence: [] })), false);
-  assert.equal(operatorScheduled(queued({ provider_url: null })), false);
   assert.notEqual(placementStatus(queued({ platform_state: 'app_draft', stage: 'preview_review' }), { now: NOW }).code, 'scheduled');
   assert.notEqual(placementStatus(queued({ evidence: [{ by: 'GPT', text: 'artwork approved' }] }), { now: NOW }).code, 'scheduled');
+});
+
+/* GPT's 10 Nov record for the 8 Dec feed posts: operator on the row (set_by), no queue URL, entry with state + planned_at. */
+const DEC8 = (over = {}) => windowed({
+  step_key: 'gpt-8w-social-2026-12-08-fbig', placement: 'facebook_feed', stage: 'scheduled', platform_state: 'scheduled', planned_at: '2026-12-08T18:30:00Z', set_by: 'GPT',
+  assets: { editorial: { ...APPROVED, provider_schedule_eligible_at: '2026-11-09T18:30:00.000Z', scheduling_status: 'Ready: outside Meta 29-day scheduling window' }, main: { storage_path: 'd.png' } },
+  evidence: [{ at: '2026-11-10T17:58:08Z', note: 'Independent separate Facebook and Instagram rows verified after success dialog. No provider ID exposed.', state: 'scheduled', source: 'native Meta Scheduled posts queue', planned_at: '2026-12-08T18:30:00Z' }], ...over
+});
+
+test('8 Dec: the placement record wins over the Meta-window rule (operator on the row, no queue URL)', () => {
+  const now = Date.parse('2026-11-10T18:30:00Z');
+  for (const placement of ['facebook_feed', 'instagram_feed']) {
+    const s = placementStatus(DEC8({ placement }), { now });
+    assert.deepEqual([s.code, s.label, s.when], ['scheduled', 'Scheduled on platform', `${placement === 'facebook_feed' ? 'Facebook' : 'Instagram'} Tue 8 Dec 6:30pm`]);
+    assert.equal(s.evidence, 'verified by GPT in the native queue (no ID available)');
+    assert.equal(s.link, null, 'no queue URL invented');
+  }
+  const done = windowTasks([DEC8(), DEC8({ placement: 'instagram_feed' })]);
+  assert.equal(done[0].status.code, 'done', 'the 9 Nov window task closes');
+});
+
+test('marked scheduled without a matching native-queue read-back: never Scheduled, never "waiting for the window"', () => {
+  const now = Date.parse('2026-11-10T18:30:00Z');
+  const cases = [DEC8({ evidence: [] }), DEC8({ set_by: null }), DEC8({ evidence: [{ ...DEC8().evidence[0], planned_at: '2026-12-09T18:30:00Z' }] }), DEC8({ evidence: [{ ...DEC8().evidence[0], state: 'draft' }] })];
+  for (const p of cases) {
+    const s = placementStatus(p, { now });
+    assert.equal(s.code, 'in_preparation');
+    assert.equal(s.blocker, 'marked scheduled; no native-queue read-back recorded');
+  }
 });
 
 test('a queue URL is not publication: scheduled ≠ published in the status AND the decision state; Norfolk stays Published', () => {
