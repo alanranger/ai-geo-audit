@@ -129,7 +129,7 @@ test('Light & Logic module: confirmed only while no Squarespace edit of the emai
   assert.deepEqual([p.confirmed, p.provider_edited_at, p.recorded_at], [false, '2026-11-10T17:05:42Z', '2026-11-09T13:51:52Z']);
 });
 
-test('email card: the stale module is not shown while the edition is on hold; amber "re-check" when not held; removed never shown', () => {
+test('email card: a stale module never shows its L&L label (amber "re-check" without the name; none while a hold exists); removed never shown', () => {
   const win = browser(['../lib/marketing-schedule-model.js', '../lib/marketing-schedule-list.js']);
   const L = win.mkScheduleList;
   const item = { id: `email|${KEY}`, row: 'email', key: KEY, record_key: KEY, title: 'Small details', short: 'Small details', day: '2026-11-19', time: '19:30', people: 561, state: 'sch', draft: false, raw: { planned_at: '2026-11-19T19:30:00Z' } };
@@ -140,7 +140,10 @@ test('email card: the stale module is not shown while the edition is on hold; am
   const stale = promotionsOf([MODULE], CAMP, new Map([[ID, '2026-11-10T17:05:42Z']]));
   assert.match(html(fresh, held), /📰 Light &amp; Logic Nov edition module · on hold \(Alan\)/, 'still confirmed: unchanged label');
   assert.doesNotMatch(html(stale, held), /Light &amp; Logic/, '19 Nov today: edited after the record and the edition is on hold → no label');
-  assert.match(html(stale, []), /⚠ Light &amp; Logic module: re-check \(email edited since it was recorded\)/);
+  const notHeld = html(stale, []);
+  assert.match(notHeld, /⚠ Module to re-check · email edited since it was recorded/, 'Light & Logic not on hold (10 Nov): the amber re-check state shows');
+  assert.doesNotMatch(notHeld.replace(/title="[^"]*"/g, ''), /Light &amp; Logic/, '19 Nov card: no L&L label text (only the hover explains the re-check)');
+  assert.match(html(fresh, []), /📰 Light &amp; Logic Nov edition module</, 'a confirmed module (as 17 Dec today) still shows its label');
   assert.doesNotMatch(html(promotionsOf([{ ...MODULE, status: 'removed' }], CAMP), []), /Light &amp; Logic/);
 });
 

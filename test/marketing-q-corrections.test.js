@@ -28,7 +28,8 @@ const st = (code, label, icon, extra = {}) => ({ code, label, icon, tone: 'blue'
 const SCHED = (when) => st('scheduled', 'Scheduled on platform', '🕒', { when, evidence: 'verified by GPT in the native queue (no ID available)' });
 const STORY = st('story_ready', 'Story ready to publish', '📱', { tone: 'grey' });
 const pl = (placement, status, extra = {}) => ({ step_key: 'gpt-8w-social-2026-11-10-fbig', placement, planned_at: '2026-11-10T18:30:00Z', approved: placement !== 'instagram_story', status, ...extra });
-const HOLD = { match: HOLDS[0].match.source, by: 'Alan', at: '2026-11-09', reason: HOLDS[0].reason, dependency: HOLDS[0].dependency };
+/** An explicit hold (the mechanism is generic; HOLDS is empty since Alan's 10 Nov clarification). */
+const HOLD = { match: '^gpt-ll-newsletter-', by: 'Alan', at: '2026-11-09', reason: 'deferred until the backlog is cleared', dependency: 'Light & Logic edition and its promotion module in that month\'s email (paused, not removed)' };
 
 test('item 2: a combined FB / IG / Story row names every placement; mixed → "Partly scheduled", never all done', () => {
   const { win } = loadSchedule();
@@ -57,11 +58,13 @@ test('item 1: grid cards follow the board (scheduled fill, no "draft" badge or "
   assert.match(after, /Scheduled on platform/);
 });
 
-test('item 3: Light & Logic is "On hold (Alan)": dependency kept visible, no GPT production date, no implied promotion', () => {
-  const s = onHoldStatus('gpt-ll-newsletter-2026-11-15');
-  assert.deepEqual([s.code, s.label, s.blocker], ['on_hold', 'On hold (Alan)', 'deferred until the backlog is cleared']);
-  assert.match(s.evidence, /planned dependency kept/);
+test('10 Nov: no hold is hard-coded (Light & Logic is planned, content to prepare)', () => {
+  assert.deepEqual(HOLDS, []);
+  assert.equal(onHoldStatus('gpt-ll-newsletter-2026-11-15'), null);
   assert.equal(onHoldStatus('gpt-8w-social-2026-11-10-fbig'), null);
+});
+
+test('hold mechanism (when the board lists one): "On hold (Alan)", dependency kept visible, no implied promotion', () => {
   const { win } = loadSchedule();
   const L = win.mkScheduleList;
   const ll = { id: 'linkedin|gpt-ll-newsletter-2026-11-15|linkedin', row: 'linkedin', key: 'gpt-ll-newsletter-2026-11-15|linkedin', step_key: 'gpt-ll-newsletter-2026-11-15', title: 'Light & Logic newsletter (LinkedIn) · November edition', short: 'L&L', day: '2026-11-15', state: 'pl', draft: true, raw: {} };
@@ -79,10 +82,12 @@ test('item 3: Light & Logic is "On hold (Alan)": dependency kept visible, no GPT
   assert.equal(published.status(ll).code, 'published', 'a confirmed publication is never hidden by a hold');
 });
 
-test('item 3 / 13 (server): a held delivery carries "On hold" and is never the next action', () => {
-  const list = attachStatus([{ key: 'gpt-ll-newsletter-2026-11-15', day: '2026-11-15', channel: 'LinkedIn', title: 'Light & Logic', status: 'pending', draft: true }], {});
-  assert.equal(list[0].delivery_status.code, 'on_hold');
-  assert.equal(nextActionOf({}, list, '2026-11-09'), null);
+test('Light & Logic (server, 10 Nov): no hold attached; GPT\'s PLANNED record reads "Planned — content to prepare" and can be the next action', () => {
+  const list = attachStatus([{ key: 'gpt-ll-newsletter-2026-11-15', day: '2026-11-15', channel: 'LinkedIn', title: 'Light & Logic', status: 'pending', draft: true, brief: 'PLANNED — content to prepare with Alan. Monthly edition on the 15th.' }], {});
+  assert.equal(list[0].delivery_status, undefined, 'nothing from a hold');
+  const nx = nextActionOf({}, list, '2026-11-09');
+  assert.equal(nx.status.label, 'Planned — content to prepare');
+  assert.match(nx.status_line, /📄 Planned — content to prepare · Sun 15 Nov|📄 Planned — content to prepare · Planned Sun 15 Nov/);
 });
 
 test('item 4: the List shows the real Squarespace subject under the friendly campaign name (only when it differs)', () => {
