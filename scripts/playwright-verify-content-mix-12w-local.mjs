@@ -7,6 +7,7 @@
  *   node scripts/playwright-verify-content-mix-12w-local.mjs      (PHASE=live: production files + APIs, after deploy)
  */
 import fs from 'node:fs';
+import { execSync } from 'node:child_process';
 import { chromium } from 'playwright';
 import { createClient } from '@supabase/supabase-js';
 
@@ -16,6 +17,8 @@ const BASE = 'https://ai-geo-audit.vercel.app';
 const LIVE = process.env.PHASE === 'live';
 const TAG = LIVE ? 'live' : 'local';
 const V = 'cm12-20261110a';
+/** PHASE=live "before": the deployed page with the parent commit's tile script (same live data, old tile wording). */
+const COMMIT = '455f0676';
 const TABLES = { strategy_campaigns: 'updated_at', strategy_campaign_steps: 'last_seen_at', strategy_initiative_links: 'created_at' };
 const sb = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const results = [];
@@ -46,6 +49,7 @@ function makeRoute(after) {
     const req = r.request();
     const url = new URL(req.url());
     if (req.method() !== 'GET') { refused.push(`${req.method()} ${url.pathname}`); return r.fulfill({ status: 403, contentType: 'application/json', body: '{"ok":false,"error":"refused by the read-only check"}' }); }
+    if (LIVE && !after && url.pathname === '/lib/marketing-overview-tiles.js') return r.fulfill({ status: 200, contentType: 'application/javascript', body: execSync(`git show ${COMMIT}~1:lib/marketing-overview-tiles.js`, { encoding: 'utf8' }) });
     if (!after || LIVE) return r.fallback();
     if (url.pathname === '/lib/marketing-overview-tiles.js') return r.fulfill({ status: 200, contentType: 'application/javascript', body: fs.readFileSync('lib/marketing-overview-tiles.js', 'utf8') });
     if (url.pathname === '/api/aigeo/strategy-summary') return r.fulfill({ status: 200, contentType: 'application/json', body: API.summary });
@@ -161,7 +165,7 @@ const s = JSON.parse(shown);
 const exp = await expected(s, today);
 tileChecks(t, s, exp, today);
 sameChecks(lb, la);
-check(`before (production, 4-week view): "${tBefore.title}" ${tBefore.head} + ${tBefore.chip} drafts → after: ${t.head} + ${t.chip} drafts`, true);
+check(`before (${LIVE ? `parent of ${COMMIT}'s tile script on today's data` : 'production, 4-week view'}): "${tBefore.title}" ${tBefore.head} + ${tBefore.chip} drafts → after: ${t.head} + ${t.chip} drafts`, true);
 const after = await dbState();
 const changed = Object.keys(before).filter((k) => before[k] !== after[k]);
 check('viewing writes nothing (row counts + newest timestamps)', !changed.length, changed.map((k) => `${k}: ${before[k]} → ${after[k]}`).join(' | ') || `${Object.keys(TABLES).length} tables unchanged`);

@@ -10,6 +10,11 @@ import fs from 'node:fs';
 import { chromium } from 'playwright';
 
 const PART = (process.argv.find((a) => a.startsWith('--part=')) || '--part=sync').slice(7);
+/** --live: the deployed code as served (no local files); every write except the approved runs is still refused. */
+const LIVE = process.argv.includes('--live');
+const SHOT = LIVE ? 'live' : 'local';
+const hold = { on: false, route: null };
+const held = [];
 const ENV = Object.fromEntries(fs.readFileSync('.env.vercel.prod', 'utf8').split(/\r?\n/).filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).replace(/^"|"$/g, '').trim()]));
 const BASE = 'https://ai-geo-audit.vercel.app';
 const ALLOWED = new Set(['sync', 'collect-request']);
@@ -27,18 +32,21 @@ const page = await browser.newPage({ viewport: { width: 1700, height: 1150 } });
 page.on('pageerror', (e) => errors.push(e.message));
 await page.addInitScript((k) => sessionStorage.setItem('arp_admin_key', k), ENV.ARP_ADMIN_KEY);
 const local = (file) => (r) => r.fulfill({ status: 200, contentType: 'application/javascript', body: fs.readFileSync(file, 'utf8') });
-await page.route('**/lib/marketing-tab.js*', local('lib/marketing-tab.js'));
-await page.route('**/lib/marketing-sync-run.js*', local('lib/marketing-sync-run.js'));
-await page.route('**/audit-dashboard.html*', async (route) => {
-  const res = await route.fetch();
-  const html = (await res.text()).replace(/(<script src="\/lib\/marketing-tab\.js\?v=[^"]*"><\/script>)/, '$1\n  <script src="/lib/marketing-sync-run.js?v=sync-20261110a"></script>');
-  return route.fulfill({ response: res, body: html, headers: { ...res.headers(), 'content-type': 'text/html; charset=utf-8' } });
-});
+if (!LIVE) {
+  await page.route('**/lib/marketing-tab.js*', local('lib/marketing-tab.js'));
+  await page.route('**/lib/marketing-sync-run.js*', local('lib/marketing-sync-run.js'));
+  await page.route('**/audit-dashboard.html*', async (route) => {
+    const res = await route.fetch();
+    const html = (await res.text()).replace(/(<script src="\/lib\/marketing-tab\.js\?v=[^"]*"><\/script>)/, '$1\n  <script src="/lib/marketing-sync-run.js?v=sync-20261110a"></script>');
+    return route.fulfill({ response: res, body: html, headers: { ...res.headers(), 'content-type': 'text/html; charset=utf-8' } });
+  });
+}
 await page.route('**/api/**', async (route) => {
   const req = route.request();
   if (req.method() === 'GET') return route.fallback();
   const url = new URL(req.url());
   const action = JSON.parse(req.postData() || '{}').action;
+  if (hold.on && action === 'sync') { hold.route = route; held.push(action); return undefined; }
   if (url.pathname === '/api/aigeo/marketing' && (ALLOWED.has(action) || READ_POSTS.has(action))) { passed.push(action); return route.fallback(); }
   blocked.push(`${req.method()} ${url.pathname} ${action || ''}`);
   return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true,"dry_run":true}' });
@@ -108,7 +116,7 @@ async function runAndCheck(label, clickSel, totalSteps, kindLast, timeoutMs, sho
   await page.click(clickSel);
   await page.waitForSelector('#mk-run-modal [data-mksr-step]', { timeout: 30000 });
   await page.waitForTimeout(1500);
-  await page.screenshot({ path: `${shotBase}-progress-local-1700px-20261110.png` });
+  await page.screenshot({ path: `${shotBase}-progress-${SHOT}-1700px-20261110.png` });
   await page.waitForSelector('#mk-run-modal [data-mksr-result]', { timeout: timeoutMs });
   await page.waitForSelector('#mk-run-modal [data-mksr-reload="done"], #mk-run-modal [data-mksr-reload="failed"]', { timeout: 150000 });
   const s = await seen();
@@ -121,7 +129,7 @@ async function runAndCheck(label, clickSel, totalSteps, kindLast, timeoutMs, sho
   const lines = box.split('\n').filter((l) => /^[✓✗] /.test(l));
   check(`${label}: result window ✅ Success with one line per step, the duration and OK`, ok === 'ok' && /✅ Success/.test(box) && lines.length === totalSteps && /Took \d/.test(box) && /\bOK\b/.test(box), box);
   check(`${label}: tiles reloaded (new tiles element, reload line done)`, await page.evaluate(() => !document.querySelector('#mk-overview-tiles[data-mksr-old]') && !!document.querySelector('#mk-overview-tiles > :not(.rt-loading)')) && /reloaded/.test(box), box.split('\n').find((l) => /reload/i.test(l)));
-  await page.locator('#mk-run-modal .box').screenshot({ path: `${shotBase}-result-local-1700px-20261110.png` });
+  await page.locator('#mk-run-modal .box').screenshot({ path: `${shotBase}-result-${SHOT}-1700px-20261110.png` });
   await page.click('#mk-run-modal [data-mksr-ok]');
   check(`${label}: OK closes the window`, !(await page.$('#mk-run-modal')), '');
   const lastAfter = await page.textContent(`[data-mksr-last="${kindLast}"]`);
@@ -132,6 +140,38 @@ async function runAndCheck(label, clickSel, totalSteps, kindLast, timeoutMs, sho
   return { secs: Math.round((Date.now() - t0) / 1000), lines };
 }
 
+/**
+ * Live: the original "Sync now" opens the same window with the same tip, but its first sync call is held and then
+ * aborted in the browser, so nothing runs on the server (the window then shows its ❌ path for that step).
+ */
+async function originalHeld() {
+  await page.evaluate(() => { document.getElementById('mk-behind').open = true; });
+  await page.waitForSelector('#mk-sources [data-mk="sync"]', { timeout: 60000 });
+  await page.locator('#mk-sources').scrollIntoViewIfNeeded();
+  await page.hover('#mk-sources [data-mk="sync"]');
+  const tip = await page.getAttribute('#mk-sources [data-mk="sync"]', 'title');
+  check('Original "Sync now": same hover tip as Sync customers', tip === TIPS.sync, tip);
+  hold.on = true;
+  await page.click('#mk-sources [data-mk="sync"]');
+  await page.waitForSelector('#mk-run-modal [data-mksr-step="1"][data-mksr-total="4"]', { timeout: 30000 });
+  await page.waitForTimeout(1500);
+  const box = await page.locator('#mk-run-modal .box').innerText();
+  check('Original "Sync now": opens the same window (Sync customers…, step 1 of 4, alive)', /^Sync customers…/.test(box) && /step 1 of 4: Squarespace profiles/.test(box) && /alive/.test(box), box);
+  await page.screenshot({ path: `outputs/sync-buttons-original-sync-now-window-${SHOT}-1700px-20261110.png` });
+  for (let i = 0; i < 20 && !hold.route; i += 1) await page.waitForTimeout(250);
+  await hold.route?.abort('failed');
+  hold.on = false;
+  await page.waitForSelector('#mk-run-modal [data-mksr-result]', { timeout: 30000 });
+  const res = await page.locator('#mk-run-modal .box').innerText();
+  check('Original "Sync now": stopped before any server call (held, aborted); the window shows ❌ step 1', /❌ Failed at step 1 of 4/.test(res) && held.length === 1, res.split('\n').slice(0, 2).join(' · '));
+  await page.waitForSelector('#mk-run-modal [data-mksr-reload="done"], #mk-run-modal [data-mksr-reload="failed"]', { timeout: 150000 });
+  await page.click('#mk-run-modal [data-mksr-ok]');
+}
+
+if (LIVE) {
+  const vers = await page.$$eval('script[src*="/lib/marketing-tab.js"], script[src*="/lib/marketing-sync-run.js"]', (s) => s.map((x) => x.getAttribute('src')));
+  check('Deployed page loads marketing-tab.js and marketing-sync-run.js at ?v=sync-20261110a', vers.length === 2 && vers.every((v) => v.endsWith('?v=sync-20261110a')), vers.join(' · '));
+}
 const TIPS = await page.evaluate(() => window.mkSyncRun.TIPS);
 const heads = await page.$$eval('#mk-head-actions [data-mksr]', (bs) => bs.map((b) => ({ t: b.textContent, cls: b.className, font: getComputedStyle(b).fontSize, bg: getComputedStyle(b).backgroundColor, h: Math.round(b.getBoundingClientRect().height), top: Math.round(b.getBoundingClientRect().top) })));
 const title = await page.$eval('section[data-panel="marketing"] .card--section-header h2', (h) => Math.round(h.getBoundingClientRect().top));
@@ -140,9 +180,10 @@ const lastLines = await page.$$eval('[data-mksr-last]', (e) => e.map((x) => x.te
 check('Header: "Last run" under each button', lastLines.length === 2 && lastLines.every((t) => /^Last run|^Running since/.test(t)), lastLines.join(' | '));
 
 if (PART === 'sync') {
-  await hoverTip('[data-mksr="sync"]', TIPS.sync, 'outputs/sync-buttons-header-tip-sync-local-1700px-20261110.png');
-  await hoverTip('[data-mksr="collect"]', TIPS.collect, 'outputs/sync-buttons-header-tip-collect-local-1700px-20261110.png');
+  await hoverTip('[data-mksr="sync"]', TIPS.sync, `outputs/sync-buttons-header-tip-sync-${SHOT}-1700px-20261110.png`);
+  await hoverTip('[data-mksr="collect"]', TIPS.collect, `outputs/sync-buttons-header-tip-collect-${SHOT}-1700px-20261110.png`);
   const a = await runAndCheck('Header Sync customers', '[data-mksr="sync"]', 4, 'sync', 240000, 'outputs/sync-buttons-header-sync');
+  if (LIVE) await originalHeld();
   const openBehind = async () => {
     await page.evaluate(() => { document.getElementById('mk-behind').open = true; });
     await page.waitForSelector('#mk-sources [data-mk="sync"]', { timeout: 60000 });
@@ -151,7 +192,7 @@ if (PART === 'sync') {
     check('Original Sources & sync health "Sync now": same hover tip', origTip === TIPS.sync, origTip);
     await page.hover('#mk-sources [data-mk="sync"]');
   };
-  const b = await runAndCheck('Original Sync now', '#mk-sources [data-mk="sync"]', 4, 'sync', 240000, 'outputs/sync-buttons-original-sync-now', openBehind);
+  const b = LIVE ? { secs: 0 } : await runAndCheck('Original Sync now', '#mk-sources [data-mk="sync"]', 4, 'sync', 240000, 'outputs/sync-buttons-original-sync-now', openBehind);
   await page.evaluate(() => { document.getElementById('mk-behind').open = true; document.getElementById('mk-fold-rules').open = true; });
   await page.waitForTimeout(6000);
   const social = await page.$$eval('[data-mksoc="collect"]', (bs) => bs.map((x) => x.textContent));
@@ -172,7 +213,7 @@ if (PART === 'sync') {
 }
 check('Only sync / collect-request (+ read POSTs) reached production; every other write was refused here', passed.every((a) => ALLOWED.has(a) || READ_POSTS.has(a)), `passed: ${[...new Set(passed)].join(', ')} · refused: ${[...new Set(blocked)].join(' | ') || 'none'}`);
 check('No page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-fs.writeFileSync(`outputs/sync-buttons-${PART}-local-results-20261110.json`, JSON.stringify({ part: PART, at: new Date().toISOString(), results, blocked, passed: [...new Set(passed)], errors }, null, 2));
+fs.writeFileSync(`outputs/sync-buttons-${PART}-${SHOT}-results-20261110.json`, JSON.stringify({ part: PART, at: new Date().toISOString(), results, blocked, passed: [...new Set(passed)], errors }, null, 2));
 await browser.close();
 console.log(`${results.filter((r) => r.ok).length}/${results.length} ok`);
 process.exit(results.every((r) => r.ok) ? 0 : 1);
