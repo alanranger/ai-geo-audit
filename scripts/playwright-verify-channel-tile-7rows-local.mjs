@@ -7,18 +7,24 @@
  * email / Google Business / Shorts = their sources; numbers on the channel-name line (bounding boxes); nothing else on
  * the tab changed. Writes the tile screenshot and a side-by-side with the approved mock-up.
  *   node scripts/playwright-verify-channel-tile-7rows-local.mjs
+ *   PHASE=live: production as deployed ("before" = production with the parent commit's tile file; tag + file checked)
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 import { chromium } from 'playwright';
 import { createClient } from '@supabase/supabase-js';
 
 const ENV = Object.fromEntries(fs.readFileSync('.env.vercel.prod', 'utf8').split(/\r?\n/).filter((l) => /^[A-Z0-9_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).replace(/^"|"$/g, '').trim()]));
 const BASE = 'https://ai-geo-audit.vercel.app';
 const FILE = '/lib/marketing-channels-tile.js';
+const LIVE = process.env.PHASE === 'live';
+const TAG = LIVE ? 'live' : 'local';
+const COMMIT = '3b2dd20d';
+const V = 'ch7-20261110a';
 const MOCK = 'C:/Users/alan/Google Drive/Claude shared resources/Claude Questions for Cursor/channels-tile-v1.html';
-const OUT = 'outputs/channel-tile-7rows-local-1700px-20261110.png';
-const SIDE = 'outputs/channel-tile-7rows-vs-mock-1700px-20261110.png';
+const OUT = `outputs/channel-tile-7rows-${TAG}-1700px-20261110.png`;
+const SIDE = `outputs/channel-tile-7rows-${LIVE ? 'live-' : ''}vs-mock-1700px-20261110.png`;
 const ORDER = ['Squarespace email', 'Facebook', 'Instagram', 'Instagram Stories', 'LinkedIn', 'Google Business', 'YouTube Shorts'];
 const SOCIAL = { Facebook: ['facebook_feed', /Facebook/], Instagram: ['instagram_feed', /Instagram/], 'Instagram Stories': ['instagram_story', null], LinkedIn: ['linkedin_feed', /LinkedIn/] };
 const TABLES = { strategy_campaigns: 'updated_at', marketing_social_placements: 'set_at', strategy_campaign_ticks: 'set_at', sqs_scheduled_emails: 'collected_at' };
@@ -43,8 +49,9 @@ function makeRoute(after) {
     const req = r.request();
     const url = new URL(req.url());
     if (req.method() !== 'GET') { refused.push(`${req.method()} ${url.pathname}`); return r.fulfill({ status: 403, contentType: 'application/json', body: '{"ok":false,"error":"refused by the read-only check"}' }); }
-    if (after && url.pathname === FILE) return r.fulfill({ status: 200, contentType: 'application/javascript', body: fs.readFileSync(`.${FILE}`, 'utf8') });
-    return r.fallback();
+    if (url.pathname !== FILE || after === LIVE) return r.fallback();
+    const body = LIVE ? execSync(`git show ${COMMIT}~1:lib/marketing-channels-tile.js`, { encoding: 'utf8' }) : fs.readFileSync(`.${FILE}`, 'utf8');
+    return r.fulfill({ status: 200, contentType: 'application/javascript', body });
   };
 }
 async function render(browser, after) {
@@ -163,6 +170,14 @@ function unchangedChecks(lb, la) {
   check(`nothing else on the tab changed: ${la.sections.length} sections keep x, width and text, shifting by the tile area's height change only (${shift}px)`, !off.length, off.map((s) => s.id).join(', '));
 }
 
+/** Production serves the ?v= tag and exactly the committed file. */
+async function liveChecks(page) {
+  const tag = await page.evaluate((f) => document.querySelector(`script[src^="${f}"]`)?.getAttribute('src'), FILE);
+  check(`production serves ${tag}`, tag === `${FILE}?v=${V}`);
+  const clean = (t) => t.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  const served = await page.evaluate(async (s) => (await fetch(s, { cache: 'no-store' })).text(), tag);
+  check(`served file identical to ${COMMIT}:lib/marketing-channels-tile.js`, clean(served) === clean(execSync(`git show ${COMMIT}:lib/marketing-channels-tile.js`, { encoding: 'utf8' })));
+}
 async function sideBySide(browser) {
   const ctx = await browser.newContext({ viewport: { width: 1700, height: 900 } });
   const page = await ctx.newPage();
@@ -170,24 +185,25 @@ async function sideBySide(browser) {
   const mockPng = 'outputs/_channels-tile-v1-mock.png';
   await page.locator('.t.new').screenshot({ path: mockPng });
   const img = (p) => `data:image/png;base64,${fs.readFileSync(p).toString('base64')}`;
-  await page.setContent(`<body style="margin:0;background:#0b0e14;color:#d6dbe4;font:13px Segoe UI,Arial"><div style="display:flex;gap:24px;padding:16px;align-items:flex-start"><div><div style="margin-bottom:6px">APPROVED MOCK-UP channels-tile-v1 (figures indicative, 10 Nov 19:00)</div><img src="${img(mockPng)}"></div><div><div style="margin-bottom:6px">LOCAL BUILD on live data, 1700px (${new Date().toISOString().slice(0, 16)}Z)</div><img src="${img(OUT)}"></div></div></body>`);
+  await page.setContent(`<body style="margin:0;background:#0b0e14;color:#d6dbe4;font:13px Segoe UI,Arial"><div style="display:flex;gap:24px;padding:16px;align-items:flex-start"><div><div style="margin-bottom:6px">APPROVED MOCK-UP channels-tile-v1 (figures indicative, 10 Nov 19:00)</div><img src="${img(mockPng)}"></div><div><div style="margin-bottom:6px">${LIVE ? `PRODUCTION ${COMMIT}` : 'LOCAL BUILD on live data'}, 1700px (${new Date().toISOString().slice(0, 16)}Z)</div><img src="${img(OUT)}"></div></div></body>`);
   await page.screenshot({ path: SIDE, fullPage: true });
   await ctx.close();
 }
 
 const before = await dbState();
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
-log('before: production as served');
+log(LIVE ? `before: production with ${COMMIT}~1's tile file` : 'before: production as served');
 const a = await render(browser, false);
 const lb = await a.page.evaluate(layoutOf);
 await a.ctx.close();
-log('after: local tile file');
+log(LIVE ? 'after: production as deployed' : 'after: local tile file');
 const b = await render(browser, true);
+if (LIVE) await liveChecks(b.page);
 const la = await b.page.evaluate(layoutOf);
 const c = await b.page.evaluate(channelOf);
 const src = await b.page.evaluate(async () => ({ summary: await (await fetch('/api/aigeo/strategy-summary')).json(), board: await window.mkLoadDeliveryStatus(false) }));
 await b.page.locator('#mk-channels').screenshot({ path: OUT });
-await b.page.locator('#mk-overview-tiles .mko-grid').screenshot({ path: 'outputs/channel-tile-7rows-overview-local-1700px-20261110.png' });
+await b.page.locator('#mk-overview-tiles .mko-grid').screenshot({ path: `outputs/channel-tile-7rows-overview-${TAG}-1700px-20261110.png` });
 await b.ctx.close();
 log('checks');
 const mix = src.summary.quarter_plan.purpose_mix;
@@ -203,7 +219,7 @@ const changed = Object.keys(before).filter((k) => before[k] !== after[k]);
 check('viewing writes nothing (row counts + newest timestamps)', !changed.length, changed.map((k) => `${k}: ${before[k]} → ${after[k]}`).join(' | ') || `${Object.keys(TABLES).length} tables unchanged`);
 check('every non-GET refused', true, `${refused.length} refused: ${[...new Set(refused)].join(', ') || 'none attempted'}`);
 check('no page errors', !errors.length, errors.slice(0, 3).join(' | '));
-fs.writeFileSync('outputs/_channel-tile-7rows-local-result.json', JSON.stringify({ results, channel: c, expected: exp, window: mix.window, mix: { deliveries: mix.deliveries, drafts: mix.draft?.deliveries, covered: mix.covered?.length, superseded: mix.superseded?.length }, before: lb, after: la }, null, 1));
+fs.writeFileSync(`outputs/_channel-tile-7rows-${TAG}-result.json`, JSON.stringify({ results, channel: c, expected: exp, window: mix.window, mix: { deliveries: mix.deliveries, drafts: mix.draft?.deliveries, covered: mix.covered?.length, superseded: mix.superseded?.length }, before: lb, after: la }, null, 1));
 for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.note ? ` (${r.note})` : ''}`);
 console.log(results.every((r) => r.ok) ? 'ALL PASS' : `${results.filter((r) => !r.ok).length} FAILED`);
 console.log(path.resolve(OUT), path.resolve(SIDE));
