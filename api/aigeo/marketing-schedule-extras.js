@@ -36,23 +36,40 @@ async function loadDrafts(sb, propertyUrl) {
 
 export const NEWSLETTER_REF = 'newsletter|light-and-logic';
 const refOf = (list, prefix) => (list || []).find((u) => String(u).startsWith(prefix))?.slice(prefix.length) || null;
-/** assets → [{ asset_key, campaign_key, edition_step_key, edition_day, stage, planned_send_on, status, note }]. */
-export function promotionsOf(assets, campaigns) {
+/**
+ * The module record is evidence only until the email is edited in Squarespace after it was recorded (the collector reads
+ * the draft's modified time, not its content): then `confirmed: false` and the views stop presenting it as in the email.
+ */
+function confirmedAt(recordedAt, editedAt) {
+  if (!editedAt || !recordedAt) return true;
+  return Date.parse(editedAt) <= Date.parse(recordedAt);
+}
+/** assets → [{ asset_key, campaign_key, edition_step_key, edition_day, stage, planned_send_on, status, note, recorded_at, provider_edited_at, confirmed }]. */
+export function promotionsOf(assets, campaigns, edits = new Map()) {
   const camp = new Map((campaigns || []).map((c) => [c.campaign_key, c]));
   return (assets || []).filter((a) => (a.used_in || []).includes(NEWSLETTER_REF)).map((a) => {
     const campaignKey = refOf(a.used_in, 'send|');
     const edition = refOf(a.used_in, 'delivery|');
     const c = camp.get(campaignKey) || {};
-    return { asset_key: a.asset_key, title: a.title, status: a.status, note: a.note || null, campaign_key: campaignKey, edition_step_key: edition, edition_day: (String(edition || '').match(/\d{4}-\d{2}-\d{2}$/) || [null])[0], stage: c.stage || null, planned_send_on: c.planned_send_on || null };
+    const editedAt = edits.get(c.sqs_draft_id) || null;
+    return { asset_key: a.asset_key, title: a.title, status: a.status, note: a.note || null, campaign_key: campaignKey, edition_step_key: edition, edition_day: (String(edition || '').match(/\d{4}-\d{2}-\d{2}$/) || [null])[0], stage: c.stage || null, planned_send_on: c.planned_send_on || null, recorded_at: a.set_at || null, provider_edited_at: editedAt, confirmed: confirmedAt(a.set_at, editedAt) };
   }).filter((p) => p.campaign_key && p.edition_step_key);
 }
+/** email id → the latest Squarespace edit time the collector read (Drafts list modified time; kept once scheduled). */
+async function providerEdits(sb, camps) {
+  const ids = (camps || []).map((c) => c.sqs_draft_id).filter(Boolean);
+  if (!ids.length) return new Map();
+  const { data, error } = await sb.from('sqs_draft_emails').select('email_id, modified_on').in('email_id', ids);
+  if (error) throw new Error(error.message);
+  return new Map((data || []).filter((r) => r.modified_on).map((r) => [r.email_id, r.modified_on]));
+}
 async function loadPromotions(sb, propertyUrl) {
-  const { data, error } = await sb.from('strategy_content_assets').select('asset_key, title, status, used_in, note').eq('property_url', propertyUrl).contains('used_in', [NEWSLETTER_REF]).limit(100);
+  const { data, error } = await sb.from('strategy_content_assets').select('asset_key, title, status, used_in, note, set_at').eq('property_url', propertyUrl).contains('used_in', [NEWSLETTER_REF]).limit(100);
   if (error) throw new Error(error.message);
   const keys = [...new Set((data || []).map((a) => refOf(a.used_in, 'send|')).filter(Boolean))];
-  const camps = keys.length ? await sb.from('strategy_campaigns').select('campaign_key, stage, planned_send_on').eq('property_url', propertyUrl).in('campaign_key', keys) : { data: [] };
+  const camps = keys.length ? await sb.from('strategy_campaigns').select('campaign_key, stage, planned_send_on, sqs_draft_id').eq('property_url', propertyUrl).in('campaign_key', keys) : { data: [] };
   if (camps.error) throw new Error(camps.error.message);
-  return promotionsOf(data, camps.data);
+  return promotionsOf(data, camps.data, await providerEdits(sb, camps.data));
 }
 
 async function loadMoments(sb, propertyUrl) {

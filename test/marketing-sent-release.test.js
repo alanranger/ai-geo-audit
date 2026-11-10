@@ -46,8 +46,8 @@ test('B2: a record still "scheduled" whose schedule left Squarespace after its s
   assert.equal(v.warnings.filter((w) => /no platform evidence|no longer lists/.test(w.text)).length, 0);
   assert.equal(view([rec], [GONE], meter('2026-11-08T17:40:00Z')).deliveries[0].release, 'released');
   const unscheduled = view([rec], [{ ...GONE, gone_at: '2026-11-08T16:30:00Z' }], meter('2026-11-08T18:12:00Z'));
-  assert.deepEqual([unscheduled.deliveries[0].release, unscheduled.deliveries[0].bucket], [null, 'committed'], 'unscheduled before its time: kept, warned');
-  assert.ok(unscheduled.warnings.some((w) => /no longer lists/.test(w.text)));
+  assert.deepEqual([unscheduled.deliveries[0].release, unscheduled.deliveries[0].bucket], [null, 'draft'], 'unscheduled before its time: a draft, not reserved (Alan, 10 Nov), and warned');
+  assert.ok(unscheduled.warnings.some((w) => w.level === 'red' && /Not in Squarespace Scheduled — check/.test(w.text)));
 });
 
 function fakeSb(tables) {
