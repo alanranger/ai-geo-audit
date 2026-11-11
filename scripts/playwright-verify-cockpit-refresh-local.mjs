@@ -13,7 +13,7 @@ import { createClient } from '@supabase/supabase-js';
 const ENV = Object.fromEntries(fs.readFileSync('.env.vercel.prod', 'utf8').split(/\r?\n/).filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).replace(/^"|"$/g, '').trim()]));
 const LIVE = process.env.LIVE === '1';
 const BASE = 'https://ai-geo-audit.vercel.app';
-const TAG = LIVE ? 'live-deployed' : 'local';
+const TAG = process.env.TAG || (LIVE ? 'live-deployed' : 'local');
 const OUT = 'outputs';
 const STAMP = '20261111';
 const LOCAL_LIB = ['revenue-truth-controller.mjs', 'booking-upload-refresh.mjs'];
