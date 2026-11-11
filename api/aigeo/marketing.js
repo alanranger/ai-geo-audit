@@ -46,7 +46,7 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { ingest } from '../../lib/marketing/collector-ingest.mjs';
 import { ingestDrafts, ingestScheduled } from '../../lib/marketing/delivery-schedule.mjs';
-import { buildStatusBoard, closeIdleRefresh, metaCheck, recordRefreshOutcome, refreshProgress, refreshStatus, watchDue } from '../../lib/marketing/delivery-status-board.mjs';
+import { buildStatusBoard, closeIdleRefresh, metaCheck, recordRefreshOutcome, refreshProgress, refreshStatus, sweepStaleRuns, watchDue } from '../../lib/marketing/delivery-status-board.mjs';
 import { readShortsStatus } from '../../lib/marketing/delivery-content.mjs';
 
 /** Complete Squarespace reads posted by the PC collector (read-only on Squarespace). */
@@ -99,6 +99,7 @@ async function cronSync(sb) {
   for (const step of Object.keys(STEPS)) {
     try { out[step] = await runStep(sb, step); } catch (err) { out[step] = { error: String(err?.message || err) }; }
   }
+  out.sweep = await sweepStaleRuns(sb).catch((err) => ({ error: String(err?.message || err) }));
   return out;
 }
 
@@ -166,7 +167,8 @@ const GETS = {
   },
   'collect-next': async (sb) => {
     const r = await nextRequests(sb);
-    return { ...r, refresh: await closeIdleRefresh(sb, r).catch(() => null) };
+    const refresh = await closeIdleRefresh(sb, r).catch(() => null);
+    return { ...r, refresh, sweep: await sweepStaleRuns(sb).catch(() => null) };
   },
   'collect-queue': (sb) => listRequests(sb),
   'delivery-status': (sb) => buildStatusBoard(sb),

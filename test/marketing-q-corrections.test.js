@@ -160,7 +160,7 @@ test('item 7: "648 client recipients + 5 business copies = 653 credits", compute
 function fakeSb(run, request) {
   const updates = [];
   const q = (table) => {
-    const chain = { select: () => chain, eq: () => chain, order: () => chain, limit: () => chain, update: (row) => { updates.push({ table, row }); return { eq: async () => ({ error: null }) }; } };
+    const chain = { select: () => chain, eq: () => chain, in: () => chain, gte: () => chain, order: () => chain, limit: () => chain, update: (row) => { updates.push({ table, row }); return { eq: async () => ({ error: null }) }; } };
     chain.maybeSingle = async () => ({ data: table === 'marketing_collector_runs' ? run : request });
     return chain;
   };
