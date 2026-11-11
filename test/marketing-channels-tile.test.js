@@ -154,7 +154,8 @@ test('tile HTML: columns, reconciliation in the title hover only (no on-face lin
   const s = withGbp();
   const html = win.mkChannelsTileHtml(s, board, TODAY);
   const title = html.match(/<div class="mko-title" title="([^"]*)">Next 12 weeks: by channel</)?.[1] || '';
-  assert.match(title, /Sched = booked in the platform.*Waiting = approved, waiting for the platform's scheduling window.*Drafts = still being prepared/);
+  assert.match(title, /Sched = booked in the platform.*Waiting = content approved, waiting for the platform's scheduling window.*Drafts = draft \/ in preparation: not yet scheduled on the platform \(editorial approval and audience approval are tracked separately\)/);
+  assert.doesNotMatch(title, /not approved/);
   assert.match(title, /the content mix counts campaign deliveries \(\d+ \+ \d+ drafts\); this tile counts posts per channel/);
   assert.match(title, /leave out 1 superseded step and 1 generated step already covered by a GPT post/);
   assert.match(html, /<th><span class="s">Sched<\/span><\/th><th><span class="w">Waiting<\/span><\/th><th><span class="d">Drafts<\/span><\/th><th>Next<\/th>/);

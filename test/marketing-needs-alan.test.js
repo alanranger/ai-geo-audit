@@ -25,7 +25,8 @@ test('tile 6: two bars (approved solid, drafts hatched), zero segments hidden bu
   assert.equal((html.match(/class="mko-seg p-nurture"/g) || []).length, 0, 'approved Nurture 0: no segment');
   assert.equal((html.match(/class="mko-seg p-nurture hatch"/g) || []).length, 1, 'draft Nurture 1: hatched segment');
   assert.match(html, /title="Scheduled \/ approved: Sell 15 · Educate 2 · Inspire 3 · Nurture 0"/);
-  assert.match(html, /Drafts \(not approved\): Sell 7/);
+  assert.match(html, /Draft \/ in preparation \(not yet scheduled on the platform; editorial approval and audience approval are tracked separately\): Sell 7/);
+  assert.doesNotMatch(html, /not approved/, 'a draft is not "not approved" (GPT, 11 Nov)');
   assert.match(html, /<details class="mko-det"><summary>details<\/summary>/);
 });
 

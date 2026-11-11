@@ -130,7 +130,7 @@ test('item 5 (tile): the content-mix tile splits "Approved · waiting for platfo
   const html = T.tileHtml(T.tileMix({ quarter_plan: { purpose_mix: pm } }));
   assert.match(html, /Approved · waiting for platform window: 3/);
   assert.match(html, /Scheduled \/ approved: Sell 6 · Educate 2 · Inspire 1 · Nurture 0/, 'waiting split out of the scheduled bar');
-  assert.match(html, /Drafts \(not approved\): Sell 2/);
+  assert.match(html, /Draft \/ in preparation \([^)]*\): Sell 2/);
 });
 
 test('item 6: Google optional-post briefs are owned by GPT; Alan only for a genuine commercial approval', () => {
