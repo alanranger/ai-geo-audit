@@ -157,7 +157,8 @@ test('tile HTML: 3 columns, row click keys, days left, totals hover breakdown, t
   assert.match(html, /Used so far 3,217 \+ scheduled<\/span><b>525<\/b>/);
   assert.match(html, /Left after these<\/span><span>1,258<\/span>/);
   assert.match(html, /0 scheduled · 5 drafts<\/span><b>2,175<\/b>/);
-  assert.match(html, /Left if all go<\/span><span>2,825<\/span>/);
+  assert.match(html, /<span>Free for new campaigns \(budgets not set\)<\/span><span>5,000<\/span>/, '11 Nov: the highlighted line is Free for new campaigns (no budgets in this fixture)');
+  assert.match(html, /Left if all go<\/span><b>2,825<\/b>/, 'the drafts still come off it in the line below');
   assert.match(html, /title="8-week plan · engaged subscribers · REVIEW: 4 emails · 2,164 sends\nPlan estimate \(no segment chosen\): 1 email · 11 sends"/);
   assert.match(html, /SCHED = in Squarespace&#39;s Scheduled tab|SCHED = in Squarespace's Scheduled tab/);
   assert.match(html, /DRAFT = a planned campaign record, not reserved/);
