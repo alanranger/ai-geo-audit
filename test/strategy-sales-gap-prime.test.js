@@ -23,7 +23,10 @@ test('(j) the four confirmed choices are editable assumptions, "set 9 Nov, revie
   assert.equal(ON_SALE_DAYS, 400);
   assert.deepEqual(ASSUMPTIONS.map((a) => a.key), ['on_sale_window', 'booking_window', 'lever2', 'targets_2027', 'revalidate_factor'], 'QUESTION (v) adds the old-lead factor');
   assert.match(ASSUMPTIONS[4].value, /weighted £ × 0\.25: old leads count at a quarter/);
-  assert.ok(ASSUMPTIONS.every((a) => a.status === 'set 9 Nov, review later'));
+  assert.ok(ASSUMPTIONS.filter((a) => a.key !== 'targets_2027').every((a) => a.status === 'set 9 Nov, review later'));
+  const t27 = ASSUMPTIONS.find((a) => a.key === 'targets_2027');
+  assert.equal(t27.status, 'set 12 Nov', 'QUESTION 2026-11-12: 2027 months use the "Sales 2027" tab (Alan 15:27)');
+  assert.match(t27.value, /own year's targets/);
   assert.match(ASSUMPTIONS[1].value, /2 × the type's 75th-percentile lead time \(day 278 \/ residential 208 \/ course 126/);
   assert.match(ASSUMPTIONS[2].value, /up to 2 new day workshops a month, on sale by month end − the day median lead time \(45 days/);
   assert.equal(run().assumptions.length, 5);
