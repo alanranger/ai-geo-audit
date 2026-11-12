@@ -96,6 +96,22 @@ test('by-channel tile: added posts count as Sched; Facebook shows "3 Facebook po
   assert.match(html, /3 Facebook posts blocked — Meta link allowance, resets Tue 1 Dec/);
 });
 
+test('no duplicate rows: the early List (board items for the same posts) + the added path = exactly one row per post, labelled added', () => {
+  const win = browser(['../lib/marketing-schedule-model.js']);
+  const earlyItem = (p) => {
+    const ch = p.placement === 'linkedin_feed' ? 'linkedin' : 'facebook';
+    return { channel: ch, key: `${p.step_key}|${ch}`, title: p.title, step: p.title, planned: p.planned_at.slice(0, 10), planned_at: p.planned_at, status: 'prep', done_at: null };
+  };
+  const seen = new Map();
+  for (const p of BOARD.placements.filter((x) => x.unplanned)) seen.set(`${p.step_key}|${p.placement === 'linkedin_feed'}`, earlyItem(p));
+  const m = win.mkScheduleModel.build({ items: [...seen.values()], placements: BOARD.placements, today: '2026-11-12' });
+  const rows = m.items.filter((x) => String(x.step_key || '').startsWith('alan-121-'));
+  const keys = rows.map((x) => `${x.row}|${x.step_key}`);
+  assert.equal(new Set(keys).size, keys.length, `duplicate rows: ${keys.join(', ')}`);
+  assert.equal(rows.length, 4);
+  assert.ok(rows.every((x) => x.added), 'every 1-2-1 row keeps "added (no campaign step)"');
+});
+
 test('schedule: one "added (no campaign step)" row per step key; the List row reads Partly scheduled with the blocked reason', () => {
   const win = browser(['../lib/marketing-schedule-model.js', '../lib/marketing-schedule-list.js']);
   const m = win.mkScheduleModel.build({ items: [], placements: BOARD.placements, today: '2026-11-12' });
