@@ -18,6 +18,10 @@ const BASE = 'https://ai-geo-audit.vercel.app';
 const PROP = 'https://www.alanranger.com';
 const OUT = 'outputs';
 const STAMP = '20261112';
+/** LIVE=1: production after the deploy, checked against the figures the local run recorded (prod-before → local). */
+const LIVE = process.env.LIVE === '1';
+const TAG = LIVE ? 'live' : 'local';
+const BASELINE = LIVE ? JSON.parse(fs.readFileSync(`${OUT}/_sales-2027-local-result.json`, 'utf8')) : null;
 const LOCAL_LIB = ['monthly-chart.js', 'revenue-truth-controller.mjs'];
 const TABLES = { booking_sheet_sales_targets: 'imported_at', booking_sheet_category_gp: 'imported_at', booking_sheet_transactions: 'imported_at', booking_sheet_monthly_category: 'imported_at', business_targets: 'updated_at', strategy_event_snapshots: 'created_at', strategy_campaign_steps: 'last_seen_at', strategy_quarter_actions: 'updated_at', revenue_truth_payload_cache: 'computed_at' };
 const Q = {
@@ -110,6 +114,34 @@ check('DB: 2027 weighting K3:V3 = the question\'s values', r27 && Q.weights.ever
 check('DB: 2027 monthly targets = the question\'s values (to the £)', r27 && Q.monthly.every((v, i) => Math.round(Number(r27.monthly_target[i])) === v), (r27?.monthly_target || []).join(', '));
 check('DB: 2027 working days + annual £61,860', r27 && Q.days.every((v, i) => Number(r27.working_days[i]) === v) && Math.round(Number(r27.annual_target)) === 61860, `${(r27?.working_days || []).join(', ')} · annual ${r27?.annual_target}`);
 
+async function liveChecks() {
+  const s = await summary(false);
+  const m = monthsByKey(s);
+  const q = quarterByKey(s);
+  const months = BASELINE.months.map((b) => ({ k: b.k, before: b.prod, expected: b.local, live: m[b.k]?.target }));
+  const quarters = BASELINE.quarters.map((b) => ({ k: b.k, label: b.label, end: b.end, before: b.prod, expected: b.local, live: q[b.k]?.target }));
+  const fmt = (rows) => rows.map((r) => `${r.label || r.k} before ${r.before} → live ${r.live} (local run ${r.expected})`).join(' · ');
+  check('LIVE: Jan 2027 = £5,727 (was £4,332)', m['2027-01']?.target === 5727, fmt(months.filter((r) => r.k === '2027-01')));
+  check('LIVE: Q2 Jan–Mar 2027 = £16,260 (was £10,130)', quarters.some((r) => /Jan–Mar 2027/.test(r.label) && r.live === 16260), fmt(quarters.filter((r) => /2027/.test(r.label))));
+  check('LIVE: every 2026 month and quarter unchanged (Nov £5,755, Dec £5,191, Q1 £17,941)', months.filter((r) => r.k.startsWith('2026')).every((r) => r.live === r.before) && quarters.filter((r) => r.end < '2027-01-01').every((r) => r.live === r.before), fmt([...months.filter((r) => r.k.startsWith('2026')), ...quarters.filter((r) => r.end < '2027-01-01')]));
+  check('LIVE: every month and quarter = the local run', [...months, ...quarters].every((r) => r.live === r.expected), fmt(quarters));
+  const n3 = String(insight(s.insights, 'money-next-3')?.comparison || '');
+  check('LIVE: Next 3 months tile mixes the years (Dec £5.2k from 2026, Jan £5.7k from 2027)', /Dec £5\.2k · Jan £5\.7k/.test(n3), n3);
+  const gift = s.service_mix?.targets?.gift_vouchers;
+  check('LIVE: service mix gift-voucher Booking Sheet figure from the 2026 row (£83, not 2027\'s £150)', gift?.booking_sheet_monthly === 83, `£${gift?.booking_sheet_monthly}/month · monthly target £${gift?.monthly}`);
+  check('LIVE: headline trailing target (Aug–Oct 2026) unchanged at £5,258', s.headline?.rev_needed_t3 === 5258, String(s.headline?.rev_needed_t3));
+  const asm = s.sales_gap?.assumptions?.find((a) => a.key === 'targets_2027');
+  check('LIVE: Rules say 2027 months use their own year (set 12 Nov)', asm && /own year's targets/.test(asm.value) && asm.status === 'set 12 Nov', `${asm?.value} [${asm?.status}]`);
+  const browser = await chromium.launch({ headless: true, channel: 'chrome' });
+  const shots = await shoot(browser, 'live');
+  await browser.close();
+  check('LIVE: Strategy tab shows the Q2 Jan–Mar card at £16.3k and January at £5.7k', /Q2 · Jan–Mar 2027[^Q]*£16\.3k/.test(shots['st-quarter-cards']) && /January £5\.7k/.test(shots['st-sales-gap']), `${(shots['st-quarter-cards'].match(/Q2 · Jan–Mar 2027.{0,60}/) || [''])[0]} · ${(shots['st-sales-gap'].match(/January.{0,30}/) || [''])[0]}`);
+  return { months, quarters };
+}
+
+let extra = {};
+if (LIVE) extra = await liveChecks();
+else {
 const [prod, local] = [await summary(false), await summary(true)];
 const pm = monthsByKey(prod);
 const lm = monthsByKey(local);
@@ -140,6 +172,8 @@ const shotsProd = await shoot(browser, 'prod-before');
 const shotsLocal = await shoot(browser, 'local');
 await browser.close();
 check('Strategy tab renders the local figures (Q2 Jan–Mar card)', shotsLocal['st-quarter-cards'] !== shotsProd['st-quarter-cards'], shotsLocal['st-quarter-cards'].slice(0, 300));
+extra = { months: keys.map((k) => ({ k, prod: pm[k]?.target, local: lm[k].target })), quarters: qrows };
+}
 
 const rowsAfter = await salesRows();
 const dbAfter = await dbState();
@@ -147,9 +181,10 @@ const h26 = [rowsBefore, rowsAfter].map((rs) => hash(rs.find((r) => r.year === 2
 const h27 = [rowsBefore, rowsAfter].map((rs) => hash(rs.find((r) => r.year === 2027)));
 check('2026 row byte-identical before / after (sha256 of the whole row)', h26[0] === h26[1], `${h26[0]} → ${h26[1]}`);
 check('2027 row byte-identical before / after', h27[0] === h27[1], `${h27[0]} → ${h27[1]}`);
+if (LIVE) check('LIVE: both rows still hash as in the local run (2026 0d6a58a4…, 2027 d5b53eb5…)', h26[1] === BASELINE.row_hashes['2026'][1] && h27[1] === BASELINE.row_hashes['2027'][1], `2026 ${BASELINE.row_hashes['2026'][1]} → ${h26[1]} · 2027 ${BASELINE.row_hashes['2027'][1]} → ${h27[1]}`);
 const changed = Object.keys(dbBefore).filter((k) => dbBefore[k] !== dbAfter[k]);
 check(`writes nothing (row counts + newest timestamps, ${Object.keys(TABLES).length} tables)`, !changed.length, changed.map((k) => `${k}: ${dbBefore[k]} → ${dbAfter[k]}`).join(' | ') || 'no change');
 check('every non-GET from the pages refused', true, `${blocked.length} refused: ${[...new Set(blocked)].join(', ') || 'none'}`);
 check('no page errors', !errors.length, errors.slice(0, 3).join(' | '));
-fs.writeFileSync(`${OUT}/_sales-2027-local-result.json`, JSON.stringify({ results, months: keys.map((k) => ({ k, prod: pm[k]?.target, local: lm[k].target })), quarters: qrows, row_hashes: { 2026: h26, 2027: h27 }, db_before: dbBefore, db_after: dbAfter }, null, 1));
+fs.writeFileSync(`${OUT}/_sales-2027-${TAG}-result.json`, JSON.stringify({ results, ...extra, row_hashes: { 2026: h26, 2027: h27 }, db_before: dbBefore, db_after: dbAfter }, null, 1));
 for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.note ? ` (${r.note})` : ''}`);
