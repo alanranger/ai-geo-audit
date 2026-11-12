@@ -14,6 +14,7 @@
  * POST { action: 'list-load-request', export_id }              queue "Load into Squarespace list" (run on Alan's PC)
  * GET  ?action=list-load-next  ·  POST list-load-precheck / -postcheck / -fixed / -progress / -finish   (PC job runner)
  * POST { action: 'presend-check', export_id }                   consent + suppression for everyone loaded → PASS / FAIL
+ *      (a later Squarespace opt-out already left out of Squarespace's own recipient count → PASS with a note)
  * GET  ?action=run&run_id=                                      progress of a queued / running job
  * GET  ?action=query-fields | groups | group-versions&segment_id=   query builder catalogue, saved groups
  * POST { action: 'query-run', query, sort, dir, page, columns, show }   filtered customer table (server-side paging)
