@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { assemblePlan } from '../lib/strategy-initiatives.mjs';
-import { buildServiceMix, productIndex, resolveLink, rowOfCategory, rowOfNumber, tagOf, targetsOf, thresholdsOf, giftTargetOf, pathOf, SERVICE_ROWS } from '../lib/marketing/service-mix.mjs';
+import { buildServiceMix, productIndex, resolveLink, rowOfCategory, rowOfNumber, tagOf, targetsOf, allTargetsOf, seasonalTargetOf, thresholdsOf, giftTargetOf, pathOf, SERVICE_ROWS } from '../lib/marketing/service-mix.mjs';
 
 const TODAY = '2026-11-10';
 const SITE = 'https://www.alanranger.com';
@@ -81,9 +81,13 @@ function masterOf(cats) {
 const CATS = { 1: 600, 2: 1700, 3: 850, 6: 80, 7: 800, 10: 100, 11: 500, 12: 250 };
 function summary(extra = {}) {
   const { campaign, qp } = plan();
-  const service_mix = buildServiceMix({ mix: qp.purpose_mix, board, campaign, master: masterOf(CATS), refs: refs(), campaignTargets: extra.campaignTargets || null });
+  const campaignTargets = { ...(extra.campaignTargets || {}), service_mix: { ...(extra.campaignTargets?.service_mix || {}), seasonal_targets: [GIFT_SEASON] } };
+  const service_mix = buildServiceMix({ mix: qp.purpose_mix, board, campaign, master: masterOf(CATS), refs: refs(), campaignTargets, categoryTargets: SHEET, today: extra.today || TODAY });
   return { quarter_plan: qp, campaign, service_mix };
 }
+/** The stored seasonal gift target (migration marketing_service_mix_gift_seasonal_20261112) and the Booking Sheet category targets. */
+const GIFT_SEASON = { row: 'gift_vouchers', from: '2026-11-01', to: '2026-12-31', amount: 1100, set_by: 'Alan via Claude 12 Nov' };
+const SHEET = { 1: 600, 2: 1700, 3: 850, 8: 83, 10: 100, 11: 500, 12: 250 };
 function load() {
   const win = { calls: [] };
   const ctx = vm.createContext({ window: win, document: { getElementById: () => null, querySelector: () => null }, Intl, Date, Number, String, Map, Set, JSON, Math, Promise, Array, Object, RegExp, console, setTimeout });
@@ -147,10 +151,10 @@ test('tile model: the by-channel tile\'s items (Sched + Waiting; drafts apart; s
   assert.deepEqual([row('none').n, row('gift_vouchers').n, row('gift_vouchers').drafts.length], [4, 1, 2], 'YouTube-only post (FB + IG), the untagged email and the Short; gift draft FB + IG in the hover only');
   assert.ok(!m.rows.some((r) => r.items.some((i) => i.ref === 'send|theme|sent')), 'sent emails never counted');
   const targeted = m.rows.filter((r) => r.target_pct != null);
-  assert.equal(targeted.length, 6);
+  assert.equal(targeted.length, 8, 'six cockpit tiers (Hire split into Hire + Prints) + Gift vouchers');
   assert.equal(targeted.reduce((t, r) => t + r.target_pct, 0), 100);
   assert.ok(Math.abs(targeted.reduce((t, r) => t + r.target_share, 0) - 1) < 1e-9);
-  assert.deepEqual(Object.fromEntries(m.rows.map((r) => [r.key, r.flag])), { workshops_residential: 'over', workshops_nonres: 'under', courses: 'ok', gift_vouchers: null, pnm_academy: 'over', services: 'gap', hire: 'gap', prints: 'gap', none: null });
+  assert.deepEqual(Object.fromEntries(m.rows.map((r) => [r.key, r.flag])), { workshops_residential: 'over', workshops_nonres: 'under', courses: 'ok', gift_vouchers: 'ok', pnm_academy: 'over', services: 'gap', hire: 'gap', prints: 'gap', none: null });
   assert.deepEqual([win.mkServiceMix.pctOf([1, 1, 1]), win.mkServiceMix.pctOf([0, 0])].map(plain), [[34, 33, 33], [0, 0]]);
 });
 
@@ -159,7 +163,7 @@ test('stored thresholds change the flags (no hand-maintained lists)', () => {
   assert.deepEqual([m.rows.find((r) => r.key === 'workshops_nonres').flag, m.rows.find((r) => r.key === 'workshops_residential').flag], ['ok', 'ok']);
 });
 
-test('tile HTML: A rows = B row totals; amber 0 cells; gift "—*" with the Nov–Dec target; hovers list items, drafts and the reason; no tags → Not service-specific', () => {
+test('tile HTML: A rows = B row totals; amber 0 cells; gift footnote from the stored targets; hovers list items, drafts and the reason; no tags → Other / not service-specific', () => {
   const win = load();
   const html = win.mkServiceMixTilesHtml(summary(), board, TODAY);
   const a = Object.fromEntries([...html.matchAll(/data-mksv-row="([a-z_]+)" title="[^"]*"><td[^>]*>.*?<\/td><td class="left">.*?<\/td><td class="[^"]*">(\d+)<\/td>/g)].map((x) => [x[1], Number(x[2])]));
@@ -167,9 +171,9 @@ test('tile HTML: A rows = B row totals; amber 0 cells; gift "—*" with the Nov�
   for (const x of html.matchAll(/data-mksv-cell="([a-z_]+):([a-z_]+)" title="[^"]*">(\d+)</g)) b[x[1]] = (b[x[1]] || 0) + Number(x[3]);
   assert.equal(Object.keys(a).length, 9);
   for (const k of Object.keys(b)) assert.equal(b[k], a[k], `${k}: tile A items = tile B row total`);
-  assert.deepEqual(Object.keys(b), SERVICE_ROWS.filter((r) => r.key !== 'none').map((r) => r.key), 'tile B: the eight tiers');
+  assert.deepEqual(Object.keys(b), SERVICE_ROWS.map((r) => r.key), 'tile B: the eight tiers + Other / not service-specific');
   assert.match(html, /<td class="z" data-mksv-open="cell:services:email"/);
-  assert.match(html, /<td class="mksv-m" title="Gift vouchers are not in the monthly tier targets: they carry the separate £2\.1k Sun 1 Nov → Thu 31 Dec target \(&quot;Gifts &amp; Christmas revenue&quot;\)\.">—\*<\/td>/);
+  assert.match(html, /Gift vouchers: Booking Sheet £83\/month; Nov–Dec seasonal £550\/month \(vouchers only\)\./);
   const tipOf = (k) => html.match(new RegExp(`data-mksv-row="${k}" title="([^"]*)"`))[1];
   assert.match(tipOf('gift_vouchers'), /Drafts \(not counted\): 2/);
   assert.match(tipOf('workshops_residential'), /also: Courses \(secondary, not counted\)/);
@@ -243,7 +247,7 @@ test('item 3: under-promoted is inclusive at the stored ratio (9% vs 18% = 0.50�
   assert.equal(S.flagOf({ key: 'x', n: 0, promo_pct: 0, target_pct: 18 }, th), 'gap');
   assert.equal(S.compareLine({ promo_pct: 9, target_pct: 18 }, th), '\n9% of promotion vs 18% of target = 0.50× · under-promoted at ≤ 0.5×, well covered above 1.5×, in line between (stored setting)');
   const html = load().mkServiceMixTilesHtml(summary(), board, TODAY);
-  assert.match(html, /data-mksv-row="workshops_nonres" title="Workshops \(Non-Res\): 1 item[^"]*\n13% of promotion vs 35% of target = 0\.37× · under-promoted at ≤ 0\.5×/);
+  assert.match(html, /data-mksv-row="workshops_nonres" title="Workshops \(Non-Res\): 1 item[^"]*\n13% of promotion vs 31% of target = 0\.42× · under-promoted at ≤ 0\.5×/);
   assert.match(html, /under-promoted = % of promotion at or below 0\.5× the % of target \(half or less\)/);
 });
 
@@ -262,4 +266,64 @@ test('item 4: Hire / Commercial social posts carry a business subtype (stored su
   assert.equal(tagOf(camp, r).subtype, undefined, 'emails: no subtype (social only)');
   const S = load().mkServiceMix;
   assert.equal(S.subtypesOf({ items: [{ tag: { subtype: 'property' } }, { tag: { subtype: 'property' } }, { tag: { subtype: 'product' } }, { tag: {} }] }), 'property 2 · product 1');
+});
+
+/* ---------- 12 Nov: gift / prints targets; Other row + totals; course emails from the campaign's recorded target ---------- */
+
+test('targets: % of target over all rows sums to 100; Hire + Prints = the cockpit Hire / Commercial; Gift £550 in Nov–Dec (stored seasonal), £83 on a January date; each row names its source', () => {
+  const ct = { service_mix: { seasonal_targets: [GIFT_SEASON] } };
+  const nov = allTargetsOf({ master: masterOf(CATS), categoryTargets: SHEET, campaignTargets: ct, today: '2026-11-12' });
+  const cockpit = targetsOf(masterOf(CATS));
+  assert.equal(nov.hire.monthly + nov.prints.monthly, cockpit.hire.monthly, 'nothing counted twice');
+  assert.deepEqual([nov.prints.monthly, nov.prints.categories, nov.hire.categories], [100, [10], [11]]);
+  assert.deepEqual([nov.gift_vouchers.monthly, nov.gift_vouchers.seasonal, nov.gift_vouchers.booking_sheet_monthly], [550, true, 83]);
+  assert.match(nov.gift_vouchers.source, /seasonal target 2026-11-01 → 2026-12-31: £1100 vouchers ÷ 2 months \(business_targets\.campaign_targets\.service_mix, Alan via Claude 12 Nov/);
+  assert.match(nov.courses.source, /Survival Cockpit tier target/);
+  const jan = allTargetsOf({ master: masterOf(CATS), categoryTargets: SHEET, campaignTargets: ct, today: '2027-01-15' });
+  assert.deepEqual([jan.gift_vouchers.monthly, jan.gift_vouchers.seasonal, jan.gift_vouchers.season], [83, false, null], 'reverts to the Booking Sheet target from 1 Jan');
+  assert.match(jan.gift_vouchers.source, /Booking Sheet category target "8\. Gift Vouchers Inc"/);
+  assert.equal(seasonalTargetOf(ct, 'gift_vouchers', '2026-10-31'), null);
+  const m = plain(load().mkServiceMix.build(summary(), board, TODAY));
+  const tg = m.rows.filter((r) => r.target_pct != null);
+  assert.deepEqual(tg.map((r) => r.key), ['workshops_residential', 'workshops_nonres', 'courses', 'gift_vouchers', 'pnm_academy', 'services', 'hire', 'prints']);
+  assert.equal(tg.reduce((s, r) => s + r.target_pct, 0), 100);
+  assert.deepEqual([m.rows.find((r) => r.key === 'prints').flag, m.rows.find((r) => r.key === 'gift_vouchers').flag], ['gap', 'ok'], 'flags apply to Gift and Prints too');
+  const janM = plain(load().mkServiceMix.build(summary({ today: '2027-01-15' }), board, TODAY));
+  assert.equal(janM.rows.find((r) => r.key === 'gift_vouchers').target.monthly, 83);
+});
+
+test('grid: Other / not service-specific row in both tiles; Total column and row; each channel total = that channel\'s Sched + Waiting on the by-channel tile (✓); grand total = the by-channel total', () => {
+  const win = load();
+  const s = summary();
+  const html = win.mkServiceMixTilesHtml(s, board, TODAY);
+  const ch = plain(win.mkChannels.build(s, board, TODAY));
+  for (const r of ch.rows) {
+    const col = Number(html.match(new RegExp(`data-mksv-coltotal="${r.key}">(\\d+)<br>`))?.[1]);
+    assert.equal(col, r.sched + r.waiting, `${r.key} column`);
+  }
+  const grand = ch.rows.reduce((t, r) => t + r.sched + r.waiting, 0);
+  assert.equal(Number(html.match(/data-mksv-grand="(\d+)"/)[1]), grand);
+  assert.equal(Number(html.match(/data-mksv-total="(\d+)"/)[1]), grand, 'tile 6c Total row');
+  assert.equal((html.match(/data-mksv-check="off"/g) || []).length, 0, 'no ⚠');
+  assert.equal((html.match(/data-mksv-check="ok"/g) || []).length, 7 + 1 + 1, '✓ per channel, the grand total, tile 6c total');
+  assert.match(html, /id="mk-service-b"[\s\S]*data-mksv-row="none"><td class="left mksv-m">Other \/ not service-specific<\/td>/);
+  assert.match(html, /data-mksv-rowtotal="workshops_residential">4</);
+  assert.doesNotMatch(html, /not service-specific \(tile A\)/, 'no footnote-only items');
+});
+
+test('course emails: the campaign\'s recorded target (stage history) tiers emails with no link — the four January "local learning" emails → Courses; explicit categories still win', () => {
+  const r = refs();
+  const camp = (key, target, extra = {}) => r.campaigns.set(key, { campaign_key: key, stage_history: [{ at: '2026-11-11T09:07:55Z', by: 'GPT', target }, { at: '2026-11-11T10:29:52Z', by: 'GPT', action: 'scheduled' }], ...extra });
+  camp('theme|gpt-winter-2027-01-07-local_learning', 'T5-Beginners');
+  for (const d of ['14', '21', '28']) camp(`theme|gpt-winter-2027-01-${d}-local_learning`, 'March beginners — capacity target to reconcile');
+  camp('theme|gpt-8w-2026-12-30', undefined);
+  camp('theme|cats-target', 'T5-Beginners', { categories: [3] });
+  const tag = (key, title) => tagOf({ key: `send|${key}`, campaign_key: key, channel: 'Squarespace email (targeted)', title, own_links: [], links: [] }, r);
+  const jan = ['07', '14', '21', '28'].map((d) => tag(`theme|gpt-winter-2027-01-${d}-local_learning`, 'A January email'));
+  assert.deepEqual(jan.map((x) => x.row), ['courses', 'courses', 'courses', 'courses'], 'Courses ≥ 4 emails');
+  assert.match(jan[0].via, /campaign target \(strategy_campaigns\.stage_history\) "T5-Beginners" names Any course \/ masterclass/);
+  assert.match(jan[1].via, /"March beginners — capacity target to reconcile" names Any course \/ masterclass/);
+  assert.equal(tag('theme|gpt-8w-2026-12-30', 'One photography goal for the year ahead').row, 'none', 'no product: stays Other');
+  const cats = tag('theme|cats-target', 'x');
+  assert.deepEqual([cats.row, cats.secondary.map((x) => x.row)], ['workshops_residential', ['courses']], 'stored categories first; the target becomes secondary');
 });
