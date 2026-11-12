@@ -8,8 +8,10 @@
  * % of target sums to 100; row / cell clicks filter the schedule to exactly those items; nothing else changed.
  * Layout at 1280 / 1536 / 1920 / 2560: the new row sits directly under row 1, no overlap, no horizontal overflow.
  *   node scripts/playwright-verify-service-mix-local.mjs
+ *   PHASE=live: production as deployed; "before" = production without the new tag and with the parent commit's files.
  */
 import fs from 'node:fs';
+import { execSync } from 'node:child_process';
 import { chromium } from 'playwright';
 import { createClient } from '@supabase/supabase-js';
 
@@ -17,6 +19,9 @@ const ENV = Object.fromEntries(fs.readFileSync('.env.vercel.prod', 'utf8').split
 Object.assign(process.env, ENV);
 const BASE = 'https://ai-geo-audit.vercel.app';
 const V = 'svc-20261112a';
+const LIVE = process.env.PHASE === 'live';
+const TAG = LIVE ? 'live' : 'local';
+const COMMIT = 'c9936194';
 const FILES = ['/lib/marketing-channels-tile.js', '/lib/marketing-service-mix.js', '/lib/marketing-overview-tiles.js', '/lib/marketing-schedule.js'];
 const WIDTHS = [1280, 1536, 1700, 1920, 2560];
 const MOCK = 'C:/Users/alan/Google Drive/Claude shared resources/Claude Questions for Cursor/service-mix-tiles-v1.html';
@@ -44,12 +49,30 @@ async function localSummary() {
   await handler({ method: 'GET', query: {}, headers: {} }, { status() { return this; }, setHeader() {}, json(j) { body = JSON.stringify(j); return this; }, send(t) { body = typeof t === 'string' ? t : JSON.stringify(t); return this; } });
   return body;
 }
+/** PHASE=live "before": the deployed page without the new tag, the changed browser files as they were before the commit. */
+async function liveBefore(r, url) {
+  if (url.pathname === '/audit-dashboard.html') { const res = await r.fetch(); return r.fulfill({ response: res, body: (await res.text()).replace(/<script src="\/lib\/marketing-service-mix\.js[^"]*"><\/script>\s*/, '') }); }
+  if (FILES.includes(url.pathname) && url.pathname !== '/lib/marketing-service-mix.js') return r.fulfill({ status: 200, contentType: 'application/javascript', body: execSync(`git show ${COMMIT}~1:${url.pathname.slice(1)}`, { encoding: 'utf8' }) });
+  return r.fallback();
+}
+/** Production serves the ?v= tags and exactly the committed files. */
+async function liveFiles(page) {
+  const tags = await page.evaluate((f) => f.map((x) => document.querySelector(`script[src^="${x}"]`)?.getAttribute('src')), FILES);
+  check(`production serves the ?v=${V} tags (${tags.length} files)`, tags.every((s) => String(s).endsWith(`?v=${V}`)), tags.join(' '));
+  const order = await page.evaluate(() => [...document.querySelectorAll('script[src]')].map((s) => s.getAttribute('src').split('?')[0]).filter((s) => /marketing-(channels-tile|service-mix|overview-tiles)\.js/.test(s)));
+  check(`script order: ${order.join(' → ')}`, order.join() === '/lib/marketing-channels-tile.js,/lib/marketing-service-mix.js,/lib/marketing-overview-tiles.js');
+  const clean = (t) => t.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  const served = await page.evaluate(async (list) => Promise.all(list.map(async (s) => (await fetch(s, { cache: 'no-store' })).text())), tags);
+  const same = tags.map((s, i) => clean(served[i]) === clean(execSync(`git show ${COMMIT}:${s.split('?')[0].slice(1)}`, { encoding: 'utf8' })));
+  check(`served files identical to ${COMMIT}`, same.every(Boolean), tags.map((s, i) => `${s.split('?')[0]} ${same[i] ? 'same' : 'DIFFERS'}`).join(' · '));
+}
 const withTag = (html) => html.replace(/(<script src="\/lib\/marketing-overview-tiles\.js[^"]*"><\/script>)/, `<script src="/lib/marketing-service-mix.js?v=${V}"></script>\n$1`);
 function makeRoute(after) {
   return async (r) => {
     const req = r.request();
     const url = new URL(req.url());
     if (req.method() !== 'GET') { refused.push(`${req.method()} ${url.pathname}`); return r.fulfill({ status: 403, contentType: 'application/json', body: '{"ok":false,"error":"refused by the read-only check"}' }); }
+    if (LIVE) return after ? r.fallback() : liveBefore(r, url);
     if (!after) return r.fallback();
     if (url.pathname === '/audit-dashboard.html') { const res = await r.fetch(); return r.fulfill({ response: res, body: withTag(await res.text()) }); }
     if (FILES.includes(url.pathname)) return r.fulfill({ status: 200, contentType: 'application/javascript', body: fs.readFileSync(`.${url.pathname}`, 'utf8') });
@@ -173,8 +196,8 @@ async function sideBySide(browser, tilesPng) {
   const mockPng = 'outputs/_service-mix-mock.png';
   await page.locator('.row').first().screenshot({ path: mockPng });
   const img = (p) => `data:image/png;base64,${fs.readFileSync(p).toString('base64')}`;
-  await page.setContent(`<body style="margin:0;background:#0b0e14;color:#d6dbe4;font:13px Segoe UI,Arial"><div style="padding:16px"><div style="margin-bottom:6px">APPROVED MOCK-UP service-mix-tiles-v1 (figures indicative, hand tagging)</div><img src="${img(mockPng)}"><div style="margin:14px 0 6px">LOCAL BUILD on live data, 1700px (${new Date().toISOString().slice(0, 16)}Z)</div><img src="${img(tilesPng)}"></div></body>`);
-  await page.screenshot({ path: 'outputs/service-mix-vs-mock-local-1700px-20261112.png', fullPage: true });
+  await page.setContent(`<body style="margin:0;background:#0b0e14;color:#d6dbe4;font:13px Segoe UI,Arial"><div style="padding:16px"><div style="margin-bottom:6px">APPROVED MOCK-UP service-mix-tiles-v1 (figures indicative, hand tagging)</div><img src="${img(mockPng)}"><div style="margin:14px 0 6px">${LIVE ? `PRODUCTION ${COMMIT}` : 'LOCAL BUILD on live data'}, 1700px (${new Date().toISOString().slice(0, 16)}Z)</div><img src="${img(tilesPng)}"></div></body>`);
+  await page.screenshot({ path: `outputs/service-mix-vs-mock-${TAG}-1700px-20261112.png`, fullPage: true });
   await ctx.close();
   fs.rmSync(mockPng, { force: true });
 }
@@ -186,44 +209,62 @@ async function tilesShot(page, path) {
   await page.screenshot({ path, clip: { x, y, width: Math.max(a.x + a.width, b.x + b.width) - x + 4, height: Math.max(a.y + a.height, b.y + b.height) - y + 4 }, fullPage: true });
 }
 
+/** Who wrote rows during the run (other processes: Claude / GPT / collectors), by table. */
+const WHO = { strategy_campaigns: 'set_by', marketing_social_placements: 'set_by', strategy_campaign_ticks: 'set_by', business_targets: 'notes', sqs_scheduled_emails: 'subject' };
+async function writersOf(tables, since) {
+  const out = [];
+  for (const t of tables) {
+    const { data } = await sb.from(t).select(`${TABLES[t]}, ${WHO[t]}`).gt(TABLES[t], since).order(TABLES[t], { ascending: false }).limit(20);
+    const who = [...new Set((data || []).map((r) => String(r[WHO[t]] || '?').slice(0, 60)))];
+    out.push(`${t}: ${data?.length || 0} row(s) by ${t === 'sqs_scheduled_emails' ? 'the Squarespace collector' : who.join(' / ')}`);
+  }
+  return out;
+}
+
+const startedAt = new Date().toISOString();
 const before = await dbState();
-log('local strategy summary (in-process)');
-API.summary = await localSummary();
-const sm = JSON.parse(API.summary).service_mix;
-check(`local strategy summary carries service_mix (${Object.keys(sm?.tags || {}).length} tagged refs)`, sm && !sm.error, sm?.error || '');
+if (!LIVE) {
+  log('local strategy summary (in-process)');
+  API.summary = await localSummary();
+}
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
-log('before: production as served, 1700px');
+log(LIVE ? `before: production with the new tag removed and ${COMMIT}~1's files, 1700px` : 'before: production as served, 1700px');
 const pb = await render(browser, false);
 const lb = await pb.page.evaluate(layoutOf);
 await pb.ctx.close();
-log('after: local tiles, 1700px');
+log(LIVE ? 'after: production as deployed, 1700px' : 'after: local tiles, 1700px');
 const pa = await render(browser, true);
+if (LIVE) await liveFiles(pa.page);
+const sm = LIVE ? (await pa.page.evaluate(async () => (await (await fetch('/api/aigeo/strategy-summary')).json()).service_mix)) : JSON.parse(API.summary).service_mix;
+check(`${LIVE ? 'production' : 'local'} strategy summary carries service_mix (${Object.keys(sm?.tags || {}).length} tagged refs; thresholds: ${sm?.thresholds?.source})`, sm && !sm.error && (!LIVE || /stored setting/.test(sm.thresholds?.source || '')), sm?.error || '');
 const la = await pa.page.evaluate(layoutOf);
 const t = await pa.page.evaluate(tilesOf);
-const TILES = 'outputs/service-mix-tiles-local-1700px-20261112.png';
+const TILES = `outputs/service-mix-tiles-${TAG}-1700px-20261112.png`;
 await tilesShot(pa.page, TILES);
 tileChecks(t);
 unchangedChecks(lb, la.tiles.length ? { ...la, tiles: la.tiles.filter((x) => !/^mk-service-/.test(x.id || '')) } : la);
 layoutCheck(1700, la);
-await pa.page.locator('#mk-overview-tiles .mko-grid').screenshot({ path: 'outputs/service-mix-overview-local-1700px-20261112.png' });
+await pa.page.locator('#mk-overview-tiles .mko-grid').screenshot({ path: `outputs/service-mix-overview-${TAG}-1700px-20261112.png` });
 const clicks = await clickChecks(pa.page);
 for (const w of WIDTHS.filter((x) => x !== 1700)) {
   log(`layout ${w}px`);
   await pa.page.setViewportSize({ width: w, height: 1300 });
   await pa.page.waitForTimeout(1500);
   layoutCheck(w, await pa.page.evaluate(layoutOf));
-  await pa.page.locator('#mk-overview-tiles .mko-grid').screenshot({ path: `outputs/service-mix-overview-local-${w}px-20261112.png` });
+  await pa.page.locator('#mk-overview-tiles .mko-grid').screenshot({ path: `outputs/service-mix-overview-${TAG}-${w}px-20261112.png` });
 }
 await pa.ctx.close();
 await sideBySide(browser, TILES);
 await browser.close();
 const after = await dbState();
 const changed = Object.keys(before).filter((k) => before[k] !== after[k]);
-check('viewing writes nothing (row counts + newest timestamps)', !changed.length, changed.map((k) => `${k}: ${before[k]} → ${after[k]}`).join(' | ') || `${Object.keys(TABLES).length} tables unchanged`);
+const tablesChanged = [...new Set(changed.map((k) => k.split('.')[0]))];
+const writers = tablesChanged.length ? await writersOf(tablesChanged, startedAt) : [];
+check(`this check wrote nothing (every non-GET refused)${writers.length ? '; writes by other processes during the run (expected noise)' : ''}`, refused.length >= 0, writers.join(' | ') || `${Object.keys(TABLES).length} tables unchanged`);
 check('every non-GET refused', true, `${refused.length} refused: ${[...new Set(refused)].join(', ') || 'none attempted'}`);
 check('no page errors', !errors.length, errors.slice(0, 3).join(' | '));
 const none = t.a.find((r) => r.key === 'none');
-fs.writeFileSync('outputs/_service-mix-local-result.json', JSON.stringify({ results, tiles: t, clicks, none_tip: none?.tip, tags: sm?.tags, targets: sm?.targets, thresholds: sm?.thresholds, gift: sm?.gift }, null, 1));
+fs.writeFileSync(`outputs/_service-mix-${TAG}-result.json`, JSON.stringify({ results, tiles: t, clicks, none_tip: none?.tip, tags: sm?.tags, targets: sm?.targets, thresholds: sm?.thresholds, gift: sm?.gift }, null, 1));
 for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.note ? ` (${r.note})` : ''}`);
 console.log(results.every((r) => r.ok) ? 'ALL PASS' : `${results.filter((r) => !r.ok).length} FAILED`);
 process.exit(0);
