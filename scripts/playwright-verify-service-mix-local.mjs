@@ -21,6 +21,7 @@ const BASE = 'https://ai-geo-audit.vercel.app';
 const V = 'svc-20261112a';
 const LIVE = process.env.PHASE === 'live';
 const TAG = LIVE ? 'live' : 'local';
+const PREFIX = process.env.PREFIX || 'service-mix';
 const COMMIT = 'c9936194';
 const FILES = ['/lib/marketing-channels-tile.js', '/lib/marketing-service-mix.js', '/lib/marketing-overview-tiles.js', '/lib/marketing-schedule.js'];
 const WIDTHS = [1280, 1536, 1700, 1920, 2560];
@@ -66,7 +67,7 @@ async function liveFiles(page) {
   const same = tags.map((s, i) => clean(served[i]) === clean(execSync(`git show ${COMMIT}:${s.split('?')[0].slice(1)}`, { encoding: 'utf8' })));
   check(`served files identical to ${COMMIT}`, same.every(Boolean), tags.map((s, i) => `${s.split('?')[0]} ${same[i] ? 'same' : 'DIFFERS'}`).join(' · '));
 }
-const withTag = (html) => html.replace(/(<script src="\/lib\/marketing-overview-tiles\.js[^"]*"><\/script>)/, `<script src="/lib/marketing-service-mix.js?v=${V}"></script>\n$1`);
+const withTag = (html) => (html.includes('/lib/marketing-service-mix.js') ? html : html.replace(/(<script src="\/lib\/marketing-overview-tiles\.js[^"]*"><\/script>)/, `<script src="/lib/marketing-service-mix.js?v=${V}"></script>\n$1`));
 function makeRoute(after) {
   return async (r) => {
     const req = r.request();
@@ -132,7 +133,7 @@ function tileChecks(t) {
   check(`gift vouchers % of target "${gift?.target_text}" with the Nov–Dec note`, gift?.target_text === '—*');
   const promo = t.a.filter((r) => r.promo != null).reduce((s, r) => s + r.promo, 0);
   check(`% of promotion adds up to ~100 across service tiers (${promo}%, rounding)`, Math.abs(promo - 100) <= 4);
-  check('title hover explains windows, shares, flags and thresholds', /same \d+ items as "Next 12 weeks: by channel"/.test(t.titleA || '') && /under-promoted = promotion share below 0\.5×/.test(t.titleA || ''), (t.titleA || '').split('\n')[2]);
+  check('title hover explains windows, shares, flags and thresholds', /same \d+ items as "Next 12 weeks: by channel"/.test(t.titleA || '') && /under-promoted = (% of promotion at or below|promotion share below) 0\.5×/.test(t.titleA || ''), (t.titleA || '').split('\n')[2]);
 }
 async function clickChecks(page) {
   const out = [];
@@ -160,6 +161,19 @@ function unchangedChecks(lb, la) {
   const shift = la.grid.h - lb.grid.h;
   const off = la.sections.filter((s) => { const b = lb.sections.find((x) => x.id === s.id); return !b || b.x !== s.x || b.w !== s.w || b.text !== s.text || Math.abs(s.y - b.y - shift) > 2; });
   check(`nothing else on the tab changed: ${la.sections.length} sections keep x, width and text, shifting by the tile area's height change only (${shift}px)`, !off.length, off.map((s) => s.id).join(', '));
+}
+
+/** GPT corrections 12 Nov: per-tier before (production) → after; the ≤ 0.5× boundary; comparison + Hire subtypes in hovers. */
+function beforeAfter(tb, ta) {
+  const row = (t, k) => t.a.find((r) => r.key === k) || {};
+  const lines = ta.a.map((r) => `${r.key} ${row(tb, r.key).items ?? '—'}→${r.items} (${row(tb, r.key).flag || '·'}→${r.flag || '·'})`);
+  check(`before (production) → after per tier: ${lines.join(' · ')}`, ta.a.reduce((s, r) => s + r.items, 0) === tb.a.reduce((s, r) => s + r.items, 0), 'same total: only the split between tiers moves');
+  const half = ta.a.filter((r) => r.promo != null && r.target && r.promo / r.target <= 0.5 && r.items);
+  check(`≤ 0.5× is under-promoted: ${half.map((r) => `${r.key} ${r.promo}% vs ${r.target}%`).join(', ') || 'none at or below half'}`, half.every((r) => r.flag === 'under-promoted'));
+  const tg = ta.a.filter((r) => r.target && r.items);
+  check('every row with a target share shows "x% of promotion vs y% of target = r×" in its hover', tg.every((r) => /% of promotion vs \d+% of target = \d+\.\d\d× · under-promoted at ≤ 0\.5×/.test(r.tip || '')));
+  const hire = row(ta, 'hire');
+  check(`Hire / Commercial hover carries the subtype split ("${(hire.tip || '').split('\n').find((l) => /by subtype/.test(l)) || ''}")`, /Social posts by subtype:/.test(hire.tip || ''));
 }
 
 /* ---------- layout per width ---------- */
@@ -197,7 +211,7 @@ async function sideBySide(browser, tilesPng) {
   await page.locator('.row').first().screenshot({ path: mockPng });
   const img = (p) => `data:image/png;base64,${fs.readFileSync(p).toString('base64')}`;
   await page.setContent(`<body style="margin:0;background:#0b0e14;color:#d6dbe4;font:13px Segoe UI,Arial"><div style="padding:16px"><div style="margin-bottom:6px">APPROVED MOCK-UP service-mix-tiles-v1 (figures indicative, hand tagging)</div><img src="${img(mockPng)}"><div style="margin:14px 0 6px">${LIVE ? `PRODUCTION ${COMMIT}` : 'LOCAL BUILD on live data'}, 1700px (${new Date().toISOString().slice(0, 16)}Z)</div><img src="${img(tilesPng)}"></div></body>`);
-  await page.screenshot({ path: `outputs/service-mix-vs-mock-${TAG}-1700px-20261112.png`, fullPage: true });
+  await page.screenshot({ path: `outputs/${PREFIX}-vs-mock-${TAG}-1700px-20261112.png`, fullPage: true });
   await ctx.close();
   fs.rmSync(mockPng, { force: true });
 }
@@ -231,6 +245,7 @@ const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 log(LIVE ? `before: production with the new tag removed and ${COMMIT}~1's files, 1700px` : 'before: production as served, 1700px');
 const pb = await render(browser, false);
 const lb = await pb.page.evaluate(layoutOf);
+const tb = await pb.page.evaluate(() => (document.querySelector('#mk-service-a [data-mksv-row]') ? 1 : 0)) ? await pb.page.evaluate(tilesOf) : null;
 await pb.ctx.close();
 log(LIVE ? 'after: production as deployed, 1700px' : 'after: local tiles, 1700px');
 const pa = await render(browser, true);
@@ -239,19 +254,21 @@ const sm = LIVE ? (await pa.page.evaluate(async () => (await (await fetch('/api/
 check(`${LIVE ? 'production' : 'local'} strategy summary carries service_mix (${Object.keys(sm?.tags || {}).length} tagged refs; thresholds: ${sm?.thresholds?.source})`, sm && !sm.error && (!LIVE || /stored setting/.test(sm.thresholds?.source || '')), sm?.error || '');
 const la = await pa.page.evaluate(layoutOf);
 const t = await pa.page.evaluate(tilesOf);
-const TILES = `outputs/service-mix-tiles-${TAG}-1700px-20261112.png`;
+const TILES = `outputs/${PREFIX}-tiles-${TAG}-1700px-20261112.png`;
 await tilesShot(pa.page, TILES);
 tileChecks(t);
-unchangedChecks(lb, la.tiles.length ? { ...la, tiles: la.tiles.filter((x) => !/^mk-service-/.test(x.id || '')) } : la);
+const notSvc = (l) => ({ ...l, tiles: l.tiles.filter((x) => !/^mk-service-/.test(x.id || '')) });
+unchangedChecks(notSvc(lb), notSvc(la));
+if (tb) beforeAfter(tb, t);
 layoutCheck(1700, la);
-await pa.page.locator('#mk-overview-tiles .mko-grid').screenshot({ path: `outputs/service-mix-overview-${TAG}-1700px-20261112.png` });
+await pa.page.locator('#mk-overview-tiles .mko-grid').screenshot({ path: `outputs/${PREFIX}-overview-${TAG}-1700px-20261112.png` });
 const clicks = await clickChecks(pa.page);
 for (const w of WIDTHS.filter((x) => x !== 1700)) {
   log(`layout ${w}px`);
   await pa.page.setViewportSize({ width: w, height: 1300 });
   await pa.page.waitForTimeout(1500);
   layoutCheck(w, await pa.page.evaluate(layoutOf));
-  await pa.page.locator('#mk-overview-tiles .mko-grid').screenshot({ path: `outputs/service-mix-overview-${TAG}-${w}px-20261112.png` });
+  await pa.page.locator('#mk-overview-tiles .mko-grid').screenshot({ path: `outputs/${PREFIX}-overview-${TAG}-${w}px-20261112.png` });
 }
 await pa.ctx.close();
 await sideBySide(browser, TILES);
@@ -264,7 +281,7 @@ check(`this check wrote nothing (every non-GET refused)${writers.length ? '; wri
 check('every non-GET refused', true, `${refused.length} refused: ${[...new Set(refused)].join(', ') || 'none attempted'}`);
 check('no page errors', !errors.length, errors.slice(0, 3).join(' | '));
 const none = t.a.find((r) => r.key === 'none');
-fs.writeFileSync(`outputs/_service-mix-${TAG}-result.json`, JSON.stringify({ results, tiles: t, clicks, none_tip: none?.tip, tags: sm?.tags, targets: sm?.targets, thresholds: sm?.thresholds, gift: sm?.gift }, null, 1));
+fs.writeFileSync(`outputs/_${PREFIX}-${TAG}-result.json`, JSON.stringify({ results, tiles: t, clicks, none_tip: none?.tip, tags: sm?.tags, targets: sm?.targets, thresholds: sm?.thresholds, gift: sm?.gift }, null, 1));
 for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.note ? ` (${r.note})` : ''}`);
 console.log(results.every((r) => r.ok) ? 'ALL PASS' : `${results.filter((r) => !r.ok).length} FAILED`);
 process.exit(0);

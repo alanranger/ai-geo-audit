@@ -205,3 +205,61 @@ test('placement: the row under row 1 (6c wide, 6d), existing tiles unchanged and
   assert.match(loading, /id="mk-service-a"><div class="mko-num">6c<\/div><div class="mko-title">Next 12 weeks: what we're promoting, by service<\/div><div class="mko-head"><span class="mko-loading">Loading…<\/span>/);
   assert.match(win.mkServiceMixTilesHtml({ service_mix: { error: 'boom' } }, board, TODAY), /<span class="mko-loading">boom<\/span>/);
 });
+
+/* ---------- GPT corrections 12 Nov (items 2–4) ---------- */
+
+const email = (key, title, extra = {}) => ({ key: `send|${key}`, campaign_key: key, channel: 'Squarespace email (targeted)', title, own_links: [], links: [], ...extra });
+const refsWith = (extra = {}) => {
+  const r = refs();
+  r.initiatives.set('pnm', { initiative_key: 'pnm', title: 'Pick n Mix plans & repeat clients', target: null });
+  r.initiatives.set('prog', { initiative_key: 'prog', title: 'Learning & client relationships (ongoing)', target: null });
+  for (const [k, v] of Object.entries(extra)) r[k] = v;
+  return r;
+};
+
+test('item 2: an email with no link / categories / event is tiered from its campaign key, then its title, then its initiative name; explicit signals still win; social never uses words', () => {
+  const r = refsWith();
+  const t = (it) => tagOf(it, r);
+  const res = t(email('theme|gpt-winter-2026-11-26-residential', 'Make time for the Suffolk coast this winter'));
+  assert.equal(res.row, 'workshops_residential');
+  assert.match(res.via, /campaign key "gpt winter 2026 11 26 residential" names Residential workshop/);
+  assert.equal(t(email('theme|x-1', 'A spring photography break on Dartmoor')).row, 'workshops_residential', 'title names a residential location');
+  assert.equal(t(email('theme|gpt-8w-academy-2026-12-01', 'Where would you like to take your Academy learning next?')).row, 'pnm_academy');
+  const pnm = t(email('theme|x-2', 'Plan your photography year', { initiative_key: 'pnm' }));
+  assert.deepEqual([pnm.row, pnm.via], ['pnm_academy', 'initiative "Pick n Mix plans & repeat clients" names Pick n Mix plan']);
+  assert.equal(t(email('theme|cats', 'A spring photography break on Dartmoor')).row, 'courses', 'stored campaign categories [1] come first');
+  assert.deepEqual(t(email('theme|cats', 'A spring photography break on Dartmoor')).secondary.map((x) => x.row), ['workshops_residential'], 'the words become a secondary module');
+  const none = t(email('theme|gpt-winter-2027-01-14-local_learning', 'A useful way to review your photographs', { initiative_key: 'prog' }));
+  assert.equal(none.row, 'none');
+  assert.match(none.via, /neither its campaign key, title nor initiative names a service/);
+  assert.equal(t({ key: 'gpt-fb-z', channel: 'Facebook + Instagram', title: 'Grasmere, Lake District', own_links: [], links: [] }).row, 'none', 'social posts are not tiered from words');
+});
+
+test('item 3: under-promoted is inclusive at the stored ratio (9% vs 18% = 0.50× → under); well covered only above 1.5×; the hover shows the comparison', () => {
+  const S = load().mkServiceMix;
+  const th = { under: 0.5, over: 1.5, source: 'stored setting' };
+  const f = (p, t) => S.flagOf({ key: 'x', n: 3, promo_pct: p, target_pct: t }, th);
+  assert.deepEqual([f(9, 18), f(10, 18), f(27, 18), f(28, 18), f(0, 18)], ['under', 'ok', 'ok', 'over', 'under']);
+  assert.equal(S.flagOf({ key: 'x', n: 0, promo_pct: 0, target_pct: 18 }, th), 'gap');
+  assert.equal(S.compareLine({ promo_pct: 9, target_pct: 18 }, th), '\n9% of promotion vs 18% of target = 0.50× · under-promoted at ≤ 0.5×, well covered above 1.5×, in line between (stored setting)');
+  const html = load().mkServiceMixTilesHtml(summary(), board, TODAY);
+  assert.match(html, /data-mksv-row="workshops_nonres" title="Workshops \(Non-Res\): 1 item[^"]*\n13% of promotion vs 35% of target = 0\.37× · under-promoted at ≤ 0\.5×/);
+  assert.match(html, /under-promoted = % of promotion at or below 0\.5× the % of target \(half or less\)/);
+});
+
+test('item 4: Hire / Commercial social posts carry a business subtype (stored subtype, else links, else title); emails do not; the Hire row shows the split', () => {
+  const r = refsWith({ subtypes: new Map([['gpt-hire-3', 'Portrait']]) });
+  r.hub.set('/property-photographer-coventry', new Set(['hire']));
+  r.hub.set('/professional-commercial-photographer-coventry', new Set(['hire']));
+  const post = (key, link, title) => ({ key, channel: 'LinkedIn', title, own_links: link ? [`${SITE}${link}`] : [], links: [] });
+  const a = tagOf(post('gpt-hire-1', '/property-photographer-coventry', 'Homes that sell'), r);
+  assert.deepEqual([a.row, a.subtype], ['hire', 'property']);
+  assert.match(a.subtype_via, /link "\/property-photographer-coventry"/);
+  assert.equal(tagOf(post('gpt-hire-2', '/professional-commercial-photographer-coventry', 'New range'), r).subtype, 'product');
+  assert.deepEqual([tagOf(post('gpt-hire-3', '/professional-commercial-photographer-coventry', 'Team day'), r).subtype], ['portrait'], 'the stored editorial subtype wins');
+  assert.equal(tagOf({ key: 'gpt-hire-4', channel: 'Facebook + Instagram', title: 'Behind the scenes', own_links: [], links: [], service_tier: 'Hire / Commercial', added: true }, r).subtype, 'unspecified');
+  const camp = { ...email('theme|hire', 'Commercial photography'), own_links: [`${SITE}/property-photographer-coventry`] };
+  assert.equal(tagOf(camp, r).subtype, undefined, 'emails: no subtype (social only)');
+  const S = load().mkServiceMix;
+  assert.equal(S.subtypesOf({ items: [{ tag: { subtype: 'property' } }, { tag: { subtype: 'property' } }, { tag: { subtype: 'product' } }, { tag: {} }] }), 'property 2 · product 1');
+});
