@@ -9,6 +9,7 @@
  *   node scripts/playwright-verify-service-mix-v3-local.mjs     (PHASE=live: production as deployed)
  */
 import fs from 'node:fs';
+import { execSync } from 'node:child_process';
 import { chromium } from 'playwright';
 import { createClient } from '@supabase/supabase-js';
 import { loadTargetsMaster } from '../lib/targets-master.mjs';
@@ -20,6 +21,14 @@ const BASE = 'https://ai-geo-audit.vercel.app';
 const LIVE = process.env.PHASE === 'live';
 const TAG = LIVE ? 'live' : 'local';
 const FILE = '/lib/marketing-service-mix.js';
+const COMMIT = 'd2997883';
+/** PHASE=live: production serves ?v=svc3-20261112a, identical to the commit. */
+async function liveFile(page) {
+  const src = await page.evaluate((f) => document.querySelector(`script[src^="${f}"]`)?.getAttribute('src'), FILE);
+  const served = await page.evaluate(async (s) => (await fetch(s, { cache: 'no-store' })).text(), src);
+  const same = served.replace(/\r\n/g, '\n') === execSync(`git show ${COMMIT}:${FILE.slice(1)}`, { encoding: 'utf8' }).replace(/\r\n/g, '\n');
+  check(`production serves ${src}, identical to ${COMMIT}`, src === `${FILE}?v=svc3-20261112a` && same);
+}
 const MOCK = 'C:/Users/alan/Google Drive/Claude shared resources/Claude Questions for Cursor/service-mix-tiles-v1.html';
 const OUT = (k) => `outputs/service-mix-v3-${k}-${TAG}-1700px-20261112.png`;
 const sb = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
@@ -41,6 +50,7 @@ function makeRoute(after) {
     const req = r.request();
     const url = new URL(req.url());
     if (req.method() !== 'GET') { refused.push(`${req.method()} ${url.pathname}`); return r.fulfill({ status: 403, contentType: 'application/json', body: '{"ok":false,"error":"refused by the read-only check"}' }); }
+    if (LIVE && !after && url.pathname === FILE) return r.fulfill({ status: 200, contentType: 'application/javascript', body: execSync(`git show ${COMMIT}~1:${FILE.slice(1)}`, { encoding: 'utf8' }) });
     if (!after || LIVE) return r.fallback();
     if (url.pathname === FILE) return r.fulfill({ status: 200, contentType: 'application/javascript', body: fs.readFileSync(`.${FILE}`, 'utf8') });
     if (url.pathname === '/api/aigeo/strategy-summary') return r.fulfill({ status: 200, contentType: 'application/json', body: API.summary });
@@ -144,6 +154,7 @@ const lb = await pb.page.evaluate(layoutOf);
 await pb.ctx.close();
 log(LIVE ? 'after: production' : 'after: local service-mix file + local summary');
 const pa = await render(browser, true);
+if (LIVE) await liveFile(pa.page);
 const sm = LIVE ? await pa.page.evaluate(async () => (await (await fetch('/api/aigeo/strategy-summary')).json()).service_mix) : JSON.parse(API.summary).service_mix;
 const t = await pa.page.evaluate(tilesOf);
 const la = await pa.page.evaluate(layoutOf);

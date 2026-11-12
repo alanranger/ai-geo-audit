@@ -7,12 +7,18 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
+/** The fixtures' "now" (model today Mon 9 Nov): the 12 Nov sends are still to come, whatever the real clock says. */
+const NOW = Date.parse('2026-11-09T12:00:00Z');
+class FixedDate extends Date {
+  constructor(...a) { super(...(a.length ? a : [NOW])); }
+  static now() { return NOW; }
+}
 function load(storeInit = {}) {
   const store = { ...storeInit };
   const listeners = [];
   const win = { localStorage: { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); } } };
   const document = { getElementById: () => null, addEventListener: (t, fn) => listeners.push([t, fn]), createElement: () => ({}), head: { appendChild: () => {}, insertAdjacentHTML: () => {} } };
-  const ctx = vm.createContext({ window: win, document, localStorage: win.localStorage, Intl, Date, Number, String, Map, Set, JSON, Math, Promise, Array, Object, console, encodeURIComponent, setTimeout, MutationObserver: class { observe() {} } });
+  const ctx = vm.createContext({ window: win, document, localStorage: win.localStorage, Intl, Date: FixedDate, Number, String, Map, Set, JSON, Math, Promise, Array, Object, console, encodeURIComponent, setTimeout, MutationObserver: class { observe() {} } });
   for (const f of ['../lib/marketing-schedule-model.js', '../lib/marketing-schedule-list.js', '../lib/marketing-schedule.js']) vm.runInContext(fs.readFileSync(new URL(f, import.meta.url), 'utf8'), ctx);
   return { win, store, listeners };
 }
