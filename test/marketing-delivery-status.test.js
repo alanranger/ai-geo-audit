@@ -84,6 +84,18 @@ test('Meta: a due post with a failed Meta check = verification unavailable; a pu
   assert.equal(placementStatus({ ...FOCUS, platform_state: 'scheduled', provider_id: '999' }, { now: NOW }).code, 'scheduled', 'a platform-scheduled Meta post is blue, not published');
 });
 
+test('Issue 7 native-scheduled + native_queue_readback evidence = Scheduled (not In preparation)', () => {
+  const issue7 = {
+    step_key: 'gpt-ll-promotion-2026-11-15', placement: 'linkedin_feed', stage: 'scheduled',
+    platform_state: 'native-scheduled', planned_at: '2026-11-17T17:30:00Z', set_by: 'GPT',
+    evidence: [{ at: '2026-11-15T16:02:19Z', by: 'GPT', kind: 'native_queue_readback', text: 'LinkedIn Post scheduled toast and Scheduled list show Tue 17 Nov 5:30PM' }]
+  };
+  const s = placementStatus(issue7, { now: NOW });
+  assert.equal(s.code, 'scheduled');
+  assert.match(s.when || '', /17:30|5:30/i);
+  assert.equal(placementStatus({ ...issue7, evidence: [] }, { now: NOW }).code, 'in_preparation', 'native-scheduled without queue read-back stays In preparation');
+});
+
 test('tasks: a reminder never looks scheduled; ticked = done; open Outlook decision = needs approval', () => {
   assert.equal(taskStatus({ key: 'k', channel: 'Outlook personal notes', day: '2026-11-10', done: false }, { today: '2026-11-09', open: new Set() }).code, 'in_preparation');
   assert.equal(taskStatus({ key: 'k', channel: 'Outlook personal notes', day: '2026-11-09', done: false }, { today: '2026-11-09', open: new Set(['outlook|k']) }).code, 'needs_approval');
