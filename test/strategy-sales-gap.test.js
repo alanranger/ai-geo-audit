@@ -31,6 +31,26 @@ const txns = [
 ];
 const gap = (events = [lake, macro], extra = {}) => buildSalesGap({ today: TODAY, txns, targets: TARGETS, events, fill: FILL, lead: LEAD, quarters: QUARTERS, ...extra });
 
+test('current month normal non-dated is last year from tomorrow; a later month is the whole month', () => {
+  const rows = [
+    { txn_date: '2025-11-17', category_order: 8, amount: 575 },
+    { txn_date: '2025-11-18', category_order: 7, amount: 200 },
+    { txn_date: '2025-11-30', category_order: 8, amount: 40 },
+    { txn_date: '2025-11-18', category_order: 8, amount: 90, is_jlr: true },
+    { txn_date: '2025-11-20', category_order: 2, amount: 500 },
+    { txn_date: '2025-12-01', category_order: 8, amount: 10 },
+    { txn_date: '2025-12-31', category_order: 4, amount: 50 }
+  ];
+  const g = buildSalesGap({ today: '2026-11-17', txns: rows, targets: Array(12).fill(5000), events: [], fill: FILL, lead: LEAD, quarters: QUARTERS });
+  const [nov, dec] = g.months;
+  assert.equal(nov.normal_non_dated, 240);
+  assert.equal(nov.normal_window, '18–30 Nov');
+  assert.equal(dec.normal_non_dated, 60);
+  assert.equal(dec.normal_window, '');
+  assert.ok(g.rolling.normal.total === nov.normal_non_dated + dec.normal_non_dated + g.months[2].normal_non_dated);
+  assert.match(g.rules.join('\n'), /day after today/);
+});
+
 test('fill rates parse from scorecard F4 (last 12 months + next 6)', () => {
   assert.deepEqual(fillRates([{ key: 'F4', l12: '55.9% / 56.3% / 58.3% / 56.3%' }]), { day: 0.559, residential: 0.563, course: 0.583, all: 0.563, basis: 'KPI scorecard F4 · last 12 months + next 6' });
   assert.equal(fillRates([{ key: 'F4', l12: '—' }]), null);

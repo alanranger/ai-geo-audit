@@ -90,7 +90,7 @@ test('monthly tile v2 face: table + total, non-dated, pipeline line, simple deta
   assert.match(nov, /Courses[\s\S]*One-day workshops[\s\S]*Residential[\s\S]*sg-qtot[\s\S]*Total/);
   assert.match(nov, /From gift vouchers, Pick n Mix, 1-2-1s, mentoring, Academy, commissions, prints &amp; royalties\./);
   assert.match(nov, /data-sg-agreed="2026-11"><div class="sg-agh"><b>Agreed &amp; prospects due this month<\/b>/, 'QUESTION (dd) replaces the pipeline line');
-  assert.match(nov, /<summary>details<\/summary>[\s\S]*Events to push this month[\s\S]*Booked ahead for this month's events[\s\S]*Normal non-dated sales, same month last year[\s\S]*Still to find after normal and pipeline/);
+  assert.match(nov, /<summary>details<\/summary>[\s\S]*Events to push this month[\s\S]*Booked ahead for this month's events[\s\S]*Normal non-dated sales, same dates last year, 10–30 Nov[\s\S]*Still to find after normal and pipeline/);
   assert.doesNotMatch(nov, /sg-v|sg-from|damping|outside the prime window|events &amp; working/, 'verdict box, "from … +N more" and the working are off the tile');
   const dec = h.slice(h.indexOf('data-sg-month="2026-12"'), h.indexOf('data-sg-month="2027-01"'));
   assert.match(dec, /sg-big">£[\d.]+k <span class="sg-u">still to sell</, 'future months: no "of target · sold"');
@@ -159,8 +159,8 @@ test('committed work: "− committed £y" named in the monthly / Remedy / quarte
 });
 
 test('monthly pipeline line reads pipeline_by_month; missing fields are £0; a failed read is an error', () => {
-  assert.deepEqual(monthPipeline(undefined, null), { weighted: 0, dated_event: 0, undated: 0, undated_count: 0 });
-  assert.deepEqual(monthPipeline({ total: 530, cats: {} }, { total: 1410, undated_gbp: 160, undated_count: 3 }, 40), { weighted: 530, dated_event: 40, undated: 160, undated_count: 3 });
+  assert.deepEqual(monthPipeline(undefined, null), { weighted: 0, quoted: 0, count: 0, dated_event: 0, undated: 0, undated_count: 0, undated_quoted: 0 });
+  assert.deepEqual(monthPipeline({ total: 530, cats: {} }, { total: 1410, undated_gbp: 160, undated_count: 3 }, 40), { weighted: 530, quoted: 0, count: 0, dated_event: 40, undated: 160, undated_count: 3, undated_quoted: 0 });
   assert.deepEqual(monthPipeline({ total: 1 }, { error: 'boom' }), { error: 'boom' });
   const g = gap(EVENTS, { pipeline: { '2026-12': { total: 880, cats: {} } } });
   assert.deepEqual(g.months.map((m) => m.pipeline_month.weighted), [0, 880, 0]);
