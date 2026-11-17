@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeLeadTimes, buildMoments, campaignRules, campaignWeeks, mondayOf } from '../lib/strategy-moments.mjs';
+import { computeLeadTimes, buildMoments, campaignRules, campaignWeeks, mondayOf, reviseFeaturedStep } from '../lib/strategy-moments.mjs';
 import { shortName, whenLabel } from '../lib/strategy-board-rows.mjs';
 
 const TODAY = '2026-11-06';
@@ -22,11 +22,23 @@ test('missed moments are dropped while a later one is still to come; no Catch-up
 });
 
 test('all moments past + event ahead → one "Last chance" row this week', () => {
-  const ms = buildMoments([{ title: 'Course', date: '2026-11-09', kind: 'course', event_key: 'c' }], LT, TODAY);
+  const ms = buildMoments([{ title: 'Course', date: '2026-11-12', kind: 'course', event_key: 'c' }], LT, TODAY);
   assert.equal(ms.length, 1);
   assert.equal(ms[0].moment, 'last_chance');
   assert.equal(ms[0].label, 'Last chance');
   assert.equal(ms[0].week, mondayOf(TODAY));
+});
+
+test('booking cutoff: a residential inside 14 days and a day workshop inside 3 days are not promoted', () => {
+  const lt = { residential: LT.day, day: LT.day, course: LT.course };
+  const nearStay = buildMoments([{ title: 'Norfolk', date: '2026-11-12', end: '2026-11-14', kind: 'residential', event_key: 'n' }], lt, TODAY);
+  const farStay = buildMoments([{ title: 'Lake', date: '2026-11-21', end: '2026-11-23', kind: 'residential', event_key: 'l' }], lt, TODAY);
+  const nearDay = buildMoments([{ title: 'Walk', date: '2026-11-08', kind: 'day', event_key: 'w' }], lt, TODAY);
+  const farDay = buildMoments([{ title: 'Macro', date: '2026-11-10', kind: 'day', event_key: 'm' }], lt, TODAY);
+  assert.equal(nearStay.length, 0);
+  assert.ok(farStay.length > 0);
+  assert.equal(nearDay.length, 0);
+  assert.ok(farDay.length > 0);
 });
 
 test('events dated today / past, with no places left (Booking Sheet), or not promoted never appear', () => {
@@ -82,6 +94,30 @@ test('this week: steps only use the days left (earlier days move to today), tick
   assert.ok(w.steps.every((s) => s.day >= TODAY));
   const moved = w.steps.find((s) => s.key.endsWith('2026-11-05'));
   assert.ok(moved && moved.day === TODAY && moved.scheduled_day === '2026-11-05' && moved.moved, 'planned day kept beside the moved day');
+});
+
+test('an offer that ended yesterday is not carried, and a bundle drops the cutoff date then re-titles', () => {
+  const ended = buildMoments([{ title: 'Norfolk', date: '2026-12-20', end: '2026-12-22', kind: 'residential', event_key: 'n', offer: { code: 'NORFOLK150', ends: '2026-11-05' } }], { residential: LT.day }, TODAY);
+  assert.ok(ended.length > 0);
+  assert.ok(ended.every((m) => !m.event.offer));
+  const row = {
+    channel: 'Outlook personal notes',
+    step: 'Personal note to past clients: "Last 2 places Norfolk 20–22 Nov" + 2 more',
+    featured: [
+      { name: 'Norfolk', when: '20–22 Nov', date: '2026-11-20', stage: 'Last chance', booked: 2, cap: 4 },
+      { name: 'Abstract & Macro', when: 'Sat 28 Nov', date: '2026-11-28', stage: 'Last chance', booked: 0, cap: 4 },
+      { name: 'Hay Woods walk', when: 'Fri 4 Dec', date: '2026-12-04', stage: 'Last chance', booked: 1, cap: 6 }
+    ]
+  };
+  const next = reviseFeaturedStep(row, '2026-11-17');
+  assert.match(next.step, /Abstract & Macro Sat 28 Nov/);
+  assert.match(next.step, /\+ 1 more/);
+  assert.equal(next.featured.some((f) => f.name === 'Norfolk'), false);
+  assert.equal(next.featured.length, 2);
+  const onlyOffer = reviseFeaturedStep({ channel: 'Facebook + Instagram', step: 'Post', featured: [{ name: 'Norfolk', when: '20–22 Nov', date: '2026-12-20', event_key: 'n', offer: { ends: '2026-11-16' } }] }, '2026-11-17');
+  assert.equal(onlyOffer.retire, true);
+  const draft = reviseFeaturedStep({ channel: 'LinkedIn', step: 'What would useful feedback tell you?', featured: [{ name: 'What would useful feedback tell you?', date: '2026-11-18', stage: 'drafted' }] }, '2026-11-17');
+  assert.equal(draft, null);
 });
 
 test('short names and UK dates (no ISO dates, no raw product titles)', () => {
