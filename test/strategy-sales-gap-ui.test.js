@@ -45,9 +45,15 @@ test('Strategy quarter tile v2: dated events table + total, non-dated needed by 
   const h = w.stSalesGapHtml({ sales_gap: g }).tiles;
   const q = h.slice(h.indexOf('sg-card sg-q'), h.indexOf('data-sg-month'));
   assert.match(q, /Quarter · 9 Nov → 31 Jan/);
-  assert.match(q, /still to sell/);
+  const k1 = (v) => `£${(Math.round((Number(v) || 0) / 100) / 10).toFixed(1)}k`;
+  const sold = g.months.find((m) => m.current).sold;
+  assert.match(q, new RegExp(`sg-big"><b class="sg-amber">${k1(g.cover.rolling.bar.still_to_find).replace('.', '\\.')}<\\/b> <span class="sg-u">still to find<\\/span><\\/div><div class="sg-u">of ${k1(g.rolling.still_to_sell).replace('.', '\\.')} still to sell · ${k1(sold).replace('.', '\\.')} sold this month`));
   const live = w.stSalesGapHtml({ sales_gap: { ...g, rolling: { ...g.rolling, still_to_sell: 15028, likely: 8389 } } }).tiles;
-  assert.match(live, /sg-big">£15\.0k <span class="sg-u">still to sell[\s\S]*£8\.4k likely dated[\s\S]*£6\.6k non-dated</, 'header figure + bar labels as in the mock-up');
+  assert.match(live, /of £15\.0k still to sell[\s\S]*£8\.4k likely dated[\s\S]*£6\.6k non-dated</, 'sub-line uses the gross figure; the bar labels are unchanged');
+  const coveredBar = { ...g.cover.rolling.bar, still_to_find: 0, covered: true, surplus_not_carried: 400 };
+  const covered = w.stSalesGapHtml({ sales_gap: { ...g, cover: { ...g.cover, rolling: { ...g.cover.rolling, bar: coveredBar } } } }).tiles;
+  const cq = covered.slice(covered.indexOf('sg-card sg-q'), covered.indexOf('data-sg-month'));
+  assert.match(cq, /sg-big sg-ccov">Covered <span class="sg-u">\+£0\.4k surplus<\/span>/, 'still to find £0 shows Covered in green, with the surplus small');
   assert.match(q, /Dated events[\s\S]*Category[\s\S]*Events[\s\S]*Unsold places[\s\S]*If all sold[\s\S]*Fill rate[\s\S]*Likely £/);
   assert.match(q, /Courses[\s\S]*One-day workshops[\s\S]*Residential[\s\S]*sg-qtot[\s\S]*Total/);
   assert.match(q, /Non-dated needed[\s\S]*Nov[\s\S]*Dec[\s\S]*Jan[\s\S]*Total[\s\S]*Needed/);
