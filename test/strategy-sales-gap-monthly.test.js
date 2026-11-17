@@ -82,7 +82,7 @@ test('monthly tile v2 face: table + total, non-dated, pipeline line, simple deta
   const h = w.stSalesGapHtml({ sales_gap: g }).tiles;
   const nov = h.slice(h.indexOf('data-sg-month="2026-11"'), h.indexOf('data-sg-month="2026-12"'));
   assert.match(nov, /November[\s\S]*21 days left/);
-  assert.match(nov, /sg-big">£5\.5k <span class="sg-u">of £5,755 still to sell · £250 sold</);
+  assert.match(nov, /sg-big sg-now">£5\.5k <span class="sg-u">of £5,755 still to sell<\/span><span class="sg-u"> · <\/span><span class="sg-sold">£0\.3k<\/span> <span class="sg-u">sold</);
   assert.match(nov, /sg-bar[\s\S]*£5\.3k non-dated/);
   const live = browser().stSalesGapHtml({ sales_gap: { ...g, months: [{ ...g.months[0], still_to_sell: 5505, likely: 1806, non_dated_needed: 3699 }, ...g.months.slice(1)] } }).tiles;
   assert.match(live.slice(live.indexOf('data-sg-month="2026-11"')), /^[^]*?sg-bar"><span class="sg-b1" style="width:33%" data-full="£1\.8k likely dated" data-short="£1\.8k">£1\.8k likely dated<\/span><span class="sg-b2" style="width:67%" data-full="£3\.7k non-dated" data-short="£3\.7k">£3\.7k non-dated</, 'bar labels as in the mock-up (QUESTION (ee): full label, £ alone as the fallback)');
