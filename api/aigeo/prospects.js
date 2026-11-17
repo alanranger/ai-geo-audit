@@ -92,6 +92,12 @@ function stamp(v) {
   if (!Number.isFinite(t)) throw new Error('last_touch_at must be a date or ISO time');
   return new Date(t).toISOString();
 }
+const pct = (name) => (v) => {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0 || n > 100) throw new Error(`${name} must be a whole number from 0 to 100`);
+  return n;
+};
 function uuid(v) {
   if (v == null || v === '') return null;
   if (!UUID_RE.test(String(v))) throw new Error('person_id must be a customer_person uuid');
@@ -119,7 +125,8 @@ const FIELDS = {
   next_action: text(300), next_action_date: dateOf('next_action_date'), owner: oneOf(OWNERS, 'owner'), last_touch_at: stamp, source: oneOfOrNull(SOURCES, 'source'),
   lost_reason: oneOfOrNull(LOST_CODES, 'lost_reason'), status_note: text(300), revisit_on: dateOf('revisit_on'), notes: text(500),
   customer_market: oneOf(MARKETS, 'customer_market'), value_basis: oneOf(VALUE_BASES, 'value_basis'), value_basis_note: text(500), review_status: oneOf(REVIEW, 'review_status'),
-  source_ref: text(200), revenue_type: oneOf(REVENUE_TYPES, 'revenue_type'), delivery_due: dateOf('delivery_due'), invoice_by: dateOf('invoice_by'), relates_to_event: eventRef
+  source_ref: text(200), revenue_type: oneOf(REVENUE_TYPES, 'revenue_type'), delivery_due: dateOf('delivery_due'), invoice_by: dateOf('invoice_by'), relates_to_event: eventRef,
+  confidence_pct: pct('confidence_pct'), confidence_reason: text(300), confidence_set_at: stamp, confidence_set_by: oneOfOrNull(['GPT', 'Alan'], 'confidence_set_by'), alan_confidence_pct: pct('alan_confidence_pct')
 };
 /** Only the fields sent are validated and written. */
 export function enquiryPatch(e) {

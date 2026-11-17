@@ -143,7 +143,7 @@ test('UI: the table under the tiles (rows, amber shortfall, green covered, rolli
   assert.match(t, /&quot;Still to find&quot; for the rolling 3 months = Nov \+ Dec shortfalls only: January's surplus can't pay an earlier month's bills\./);
   assert.match(t, /Each enquiry gets an <b>expected cash month<\/b>/);
   assert.match(h, /data-sg-agreed="2026-12"><div class="sg-agh"><b>Agreed &amp; prospects due this month<\/b> · still to find/, 'QUESTION (dd): the agreed & prospects box replaces the one-line pipeline box');
-  assert.match(h, /data-sg-agreed="quarter"><div class="sg-agh"><b>Agreed &amp; prospects this quarter<\/b>[\s\S]*Not yet in a month<\/b> <span class="rt-sub">\(GPT \+ Alan qualifying\)<\/span>: 2 enquiries/, 'quarter box + undated (aggregate)');
+  assert.match(h, /data-sg-agreed="quarter"><div class="sg-agh"><b>Agreed &amp; prospects this quarter<\/b>[\s\S]*Pipeline needing a month<\/b>: 2 prospects · £2,300 quoted · £920 expected/, 'quarter box + prospects with no month');
   assert.doesNotMatch(h, /Prospects pipeline:/);
   assert.match(ctx.stSalesGapHtml({ sales_gap: g }).remedy, /− dated-event enquiries £\d+/, 'Remedy names the dated-event enquiries');
 });

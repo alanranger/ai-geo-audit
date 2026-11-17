@@ -86,6 +86,7 @@ test('tiles: "How it\'s covered" bar + key under the headline bar in all 4 tiles
   assert.equal((h.match(/data-sg-cover>/g) || []).length, 4, 'quarter + 3 months');
   const nov = h.slice(h.indexOf('data-sg-month="2026-11"'), h.indexOf('data-sg-month="2026-12"'));
   assert.match(nov, /<div class="sg-bar">[\s\S]*?<\/div><div class="sg-cov" data-sg-cover><div class="sg-covt">How it's covered<\/div>/, 'directly under the headline bar');
+  assert.match(nov, /Pipeline · 2 prospects · £900 quoted · £220 expected/, 'the month line is quoted value and expected (value × confidence)');
   assert.match(nov, /sg-s-ev[\s\S]*sg-s-no[\s\S]*sg-s-ag[\s\S]*sg-s-pr[\s\S]*sg-s-gap/);
   assert.match(nov, /Normal non-dated £[\d.]+k?<\/span>.*Agreed work \+ invoice £1\.5k<\/span>.*Prospects £0\.2k<\/span>.*Still to find £/, 'key names and values every non-zero segment (no events this November in the fixture)');
   const jan = h.slice(h.indexOf('data-sg-month="2027-01"'));
@@ -118,7 +119,7 @@ test('"Agreed & prospects": agreed first then weighted, chips, "£75 → £15", 
   assert.match(q, /\+1 more → Prospects/);
   assert.match(q, /£1,250 · Nov/);
   assert.match(q, /£1,250 · Dec/);
-  assert.match(q, /Not yet in a month<\/b> <span class="rt-sub">\(GPT \+ Alan qualifying\)<\/span>: 1 enquiry · £400 weighted/);
+  assert.match(q, /Pipeline needing a month<\/b>: 1 prospect · £1,000 quoted · £400 expected/);
 });
 
 test('labels come ONLY from the admin prospects API: the public summary (prospects + sales gap) has no enquiry labels, names or refs', () => {

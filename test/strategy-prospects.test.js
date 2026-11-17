@@ -103,6 +103,20 @@ test('API: validated, idempotent by id, booked_paid needs a Booking Sheet match,
   assert.deepEqual(changesOf(prev, { stage: 'scheduled' }), { stage: { from: 'quote', to: 'scheduled' } });
 });
 
+test('confidence: Alan beats GPT; a score replaces the stage %; unscored rows keep the stage default', () => {
+  const scored = { ...ROWS[0], confidence_pct: 50, alan_confidence_pct: 80, review_status: 'revalidate' };
+  assert.equal(weightedOf(scored, P), 960, 'Alan 80% of £1,200, and the old-lead factor does not apply');
+  assert.equal(weightedOf({ ...ROWS[0], confidence_pct: 50, review_status: 'revalidate' }, P), 600, 'GPT 50% replaces the stage %');
+  assert.equal(weightedOf({ ...ROWS[0], review_status: 'revalidate' }, P), 120, 'unscored: stage 40% × the old-lead factor');
+  const m = pipelineByMonth([scored], P, '2026-11');
+  assert.equal(m['2026-12'].count, 1);
+  assert.equal(m['2026-12'].quoted, 1200);
+  assert.equal(m['2026-12'].total, 960);
+  assert.throws(() => enquiryPatch({ confidence_pct: 150 }), /confidence_pct must be a whole number/);
+  assert.deepEqual(changesOf({ alan_confidence_pct: null }, enquiryPatch({ alan_confidence_pct: 80 })), { alan_confidence_pct: { from: null, to: 80 } });
+  assert.deepEqual(changesOf({ alan_confidence_pct: 80 }, enquiryPatch({ alan_confidence_pct: '' })), { alan_confidence_pct: { from: 80, to: null } }, 'a blank clears the override');
+});
+
 test('UI: four stage tiles + Pipeline, weighted; rows come from the admin API, not the summary', () => {
   const ctx = { document: { addEventListener() {} }, console, Intl, Date, Math, Number, String, JSON, Promise, Object };
   ctx.window = ctx;
