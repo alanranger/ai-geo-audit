@@ -130,3 +130,36 @@ test('UI: four stage tiles + Pipeline, weighted; rows come from the admin API, n
   assert.match(html, /Real conversion appears once 20 enquiries have closed/);
   assert.doesNotMatch(html, /TEST a/, 'no names from the summary');
 });
+
+test('Marketing mounts the same prospects table; its filter does not change Strategy', async () => {
+  const ctx = { document: { addEventListener() {}, getElementById: () => null, createElement: () => ({ dataset: {}, addEventListener() {}, querySelector: () => null }) }, console, Intl, Date, Math, Number, String, JSON, Promise, Object };
+  ctx.window = ctx;
+  ctx.getAdminKey = () => 'test-key';
+  ctx.fetch = async () => ({ ok: true, json: async () => ({ ok: true, rows: ROWS, history: [], config: CONFIG, clients: {}, revalidate_factor: 0.25 }) });
+  vm.runInNewContext(fs.readFileSync(new URL('../lib/strategy-prospects.js', import.meta.url), 'utf8'), ctx);
+  const listen = {};
+  const host = (id, title) => {
+    const nodes = {};
+    return {
+      id, isConnected: true, nodes, innerHTML: '', dataset: title ? { ppTitle: title } : {},
+      addEventListener(type, fn) { listen[id + type] = fn; },
+      querySelector(sel) { nodes[sel] = nodes[sel] || { innerHTML: '', hidden: false }; return nodes[sel]; }
+    };
+  };
+  const strategy = host('st-prospects');
+  const marketing = host('mk-prospects', 'Prospects (enquiries pipeline)');
+  const summary = { prospects: summarizeProspects({ rows: ROWS, config: CONFIG, history: [], today: TODAY, months: monthsFrom(TODAY, 3) }) };
+  ctx.stMountProspects(strategy, summary);
+  ctx.stMountProspects(marketing, summary);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.match(marketing.innerHTML, /mk-sec-h">Prospects \(enquiries pipeline\)/);
+  assert.match(strategy.innerHTML, />Prospects: non-dated work in the pipeline </);
+  assert.match(marketing.innerHTML, /Confidence/);
+  assert.match(strategy.innerHTML, /Confidence/);
+  listen['st-prospectschange']({ target: { dataset: { ppF: 'stage' }, value: 'quote' } });
+  listen['mk-prospectschange']({ target: { dataset: { ppF: 'stage' }, value: 'qualify' } });
+  assert.equal(ctx.stProspectsParts.state.f.stage, 'quote');
+  assert.match(strategy.nodes['[data-pp-chips]'].innerHTML, /Quote/);
+  assert.match(marketing.nodes['[data-pp-chips]'].innerHTML, /Qualify/);
+  assert.doesNotMatch(strategy.nodes['[data-pp-chips]'].innerHTML, /Qualify/);
+});
