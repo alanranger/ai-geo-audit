@@ -65,6 +65,29 @@ test('Strategy quarter tile v2: dated events table + total, non-dated needed by 
   assert.match(w.stSalesGapHtml({ sales_gap: g }).tiles, /data-sg-agreed="quarter">[\s\S]*admin key needed to list enquiries/, 'no admin key: no enquiry list (labels come only from the admin API)');
 });
 
+test('a shortfall under £100 shows Covered, not a gap', () => {
+  const w = browser();
+  assert.deepEqual([0, 7, 99, 100, 450].map((n) => w.stShortfallFace(n)), ['covered', 'short', 'short', 'gap', 'gap']);
+  const paint = (n) => {
+    const months = g.cover.months.map((m) => (m.label === 'Dec' ? { ...m, still_to_find: n, surplus: 0, bar: { ...m.bar, still_to_find: n, covered: !(n > 0.5), surplus: 0 } } : m));
+    const rolling = { ...g.cover.rolling, still_to_find: n, bar: { ...g.cover.rolling.bar, still_to_find: n, covered: !(n > 0.5), surplus: 0, surplus_not_carried: 0 } };
+    return w.stSalesGapHtml({ sales_gap: { ...g, cover: { ...g.cover, months, rolling } } }).tiles;
+  };
+  const small = paint(7);
+  const dec = small.slice(small.indexOf('>December<'), small.indexOf('>January<'));
+  assert.match(dec, /sg-ccov">Covered<\/span> <span class="sg-u">£7 short<\/span>/);
+  assert.match(dec, /prospects due this month<\/b> · <span class="sg-ccov">Covered<\/span> <span class="sg-u">£7 short<\/span>/);
+  assert.doesNotMatch(dec, /sg-s-gap|still to find/);
+  const q = small.slice(small.indexOf('sg-card sg-q'), small.indexOf('data-sg-month'));
+  assert.match(q, /sg-big sg-ccov">Covered <span class="sg-u">£7 short<\/span>/);
+  assert.doesNotMatch(q, /sg-s-gap/);
+  assert.match(small.slice(small.indexOf('id="sg-cover"')), /<td class="sg-ccov">covered <span class="sg-u">£7 short<\/span><\/td>/);
+  const gap = paint(450);
+  const decGap = gap.slice(gap.indexOf('>December<'), gap.indexOf('>January<'));
+  assert.match(decGap, /sg-s-gap/);
+  assert.match(decGap, /Still to find £0\.5k/);
+});
+
 test('Marketing: no duplicate sales-gap tiles; one link line with the same rolling figures; Repeat / Academy moved', () => {
   const w = browser();
   const html = w.mkOverviewTiles.gridHtml({ d: {}, s: { sales_gap: g, insights: { rows: {} } }, error: null, health: { state: 'loading' } });
