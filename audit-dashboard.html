@@ -14933,7 +14933,7 @@
 
       <!-- Standalone LLM answers (ChatGPT) — NOT Google AI Overviews -->
       <div class="metrics-section" id="llm-visibility-section" style="margin-bottom: 2rem;">
-        <h3 style="color: var(--brand-orange); margin-bottom: 0.35rem; font-size: 1.35rem;">ChatGPT / LLM answers</h3>
+        <h3 style="color: var(--brand-orange); margin-bottom: 0.35rem; font-size: 1.35rem;">AI assistant answers (ChatGPT · Gemini · Perplexity · Claude)</h3>
         <p style="font-size: 0.95rem; color: #555; margin-bottom: 0.75rem; line-height: 1.45;">
           Standalone LLM visibility (ChatGPT + AI-mention index) — <strong>separate from Google AI Overviews</strong> on this scorecard and Ranking &amp; AI.
           Domain mentions/trend + a fixed money-prompt bank (“am I named?”). No blended AI score.
@@ -45115,7 +45115,7 @@
 
     async function fetchLlmVisibility() {
       try {
-        const r = await fetch(apiUrl('/api/aigeo/llm-visibility?propertyUrl=' + encodeURIComponent('https://www.alanranger.com')));
+        const r = await fetch(apiUrl('/api/aigeo/llm-visibility?propertyUrl=' + encodeURIComponent('https://www.alanranger.com') + '&v=engines'));
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const j = await r.json();
         try {
@@ -45131,6 +45131,26 @@
         debugLog('LLM visibility API: ' + (e?.message || e), 'warn');
         return null;
       }
+    }
+
+    function llmEngineBlock(j, count) {
+      const labels = { chat_gpt: 'ChatGPT', gemini: 'Gemini', perplexity: 'Perplexity', claude: 'Claude' };
+      const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      const tiles = (j.engine_tiles || []).map((t) => {
+        const colour = t.ok ? '#166534' : '#b45309';
+        return '<div><div style="font-size:0.75rem;color:#64748b;">' + esc(labels[t.key] || t.key) + '</div>'
+          + '<div style="font-size:1.15rem;font-weight:700;color:' + colour + ';">' + esc(t.text) + '</div>'
+          + (t.trend ? '<div style="font-size:0.75rem;color:#64748b;">' + esc(t.trend) + '</div>' : '') + '</div>';
+      }).join('');
+      const head = ['chat_gpt', 'gemini', 'perplexity', 'claude'].map((k) => '<th>' + labels[k] + '</th>').join('');
+      const mark = (cell) => !cell ? '<span style="color:#b45309;">no data</span>' : (cell.named ? (cell.cited ? '✓ cited' : '✓') : '✗');
+      const body = (j.engine_rows || []).map((row) => '<tr><td class="llm-col-kw">' + esc(row.prompt) + '</td>'
+        + ['chat_gpt', 'gemini', 'perplexity', 'claude'].map((k) => '<td class="llm-col-named">' + mark(row.cells?.[k]) + '</td>').join('')
+        + '<td class="llm-col-rivals">' + esc((row.rivals || []).join(', ') || '—') + '</td></tr>').join('');
+      return '<div style="display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:0.75rem;margin:0.5rem 0 1rem;">' + tiles + '</div>'
+        + '<p style="font-size:0.85rem;font-weight:700;margin:0 0 0.4rem;color:#0f172a;">AI assistant answers (' + count + ' questions)</p>'
+        + '<table class="llm-vis-table" style="table-layout:auto"><thead><tr><th class="llm-col-kw">Question</th>' + head + '<th class="llm-col-rivals">Rivals named</th></tr></thead><tbody>'
+        + body + '</tbody></table>';
     }
 
     function renderLlmVisibilitySection(j) {
@@ -45164,11 +45184,6 @@
         if (!p) return '—';
         return (p.rivals || []).slice(0, 3).join(', ') || '—';
       };
-      const promptRows = prompts.map((p) => {
-        const kw = String(p.keyword || p.prompt || '');
-        return '<tr><td class="llm-col-kw">' + kw + '</td><td class="llm-col-named">' + namedCell(p)
-          + '</td><td class="llm-col-rivals">' + rivalsCell(p) + '</td></tr>';
-      }).join('');
       const clusterRows = LLM_CLUSTER_TAXONOMY.slice().sort((a, b) => a.cluster_id.localeCompare(b.cluster_id)).map((c) => {
         const members = lockedRows
           .filter((r) => llmRowBelongsToCluster(r, c))
@@ -45203,10 +45218,7 @@
         + '<div><div style="font-size:0.75rem;color:#64748b;">Last run</div><div style="font-size:0.95rem;font-weight:600;">' + String(s.run_at || '').slice(0, 16).replace('T', ' ') + '</div></div>'
         + '</div>'
         + (histBits ? '<p style="font-size:0.82rem;color:#475569;margin:0 0 0.75rem;"><strong>Mentions trend:</strong> ' + histBits + '</p>' : '')
-        + '<p style="font-size:0.85rem;font-weight:700;margin:0 0 0.4rem;color:#0f172a;">ChatGPT / LLM answers (15 reps)</p>'
-        + '<table class="llm-vis-table"><colgroup><col class="c-kw"><col class="c-named"><col class="c-rivals"></colgroup>'
-        + '<thead><tr><th class="llm-col-kw">Tracked keyword</th><th class="llm-col-named">ChatGPT names me?</th><th class="llm-col-rivals">Rivals cited</th></tr></thead>'
-        + '<tbody>' + promptRows + '</tbody></table>'
+        + llmEngineBlock(j, prompts.length)
         + '<p style="font-size:0.85rem;font-weight:700;margin:1.1rem 0 0.4rem;color:#0f172a;">Cluster view (rep + members by target page)</p>'
         + '<table class="llm-vis-table"><colgroup><col class="c-cluster"><col class="c-rep"><col class="c-members"><col class="c-cnamed"><col class="c-crivals"></colgroup>'
         + '<thead><tr><th class="llm-col-cluster">Cluster</th><th class="llm-col-rep">Rep</th><th class="llm-col-members">Members</th><th class="llm-col-cnamed">Rep named?</th><th class="llm-col-crivals">Rivals cited</th></tr></thead>'

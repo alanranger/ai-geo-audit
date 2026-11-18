@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pictureFrom } from '../lib/acquisition/ai-picture.js';
+import { pictureFrom, engineLine, engineRows } from '../lib/acquisition/ai-picture.js';
+import { SITE_AI_HEALTH_WEIGHTS } from '../lib/audit/siteAiHealthComposite.js';
+import { aiSection } from '../lib/acquisition/acquisition-sections.js';
 
 test('tiles use the stored named counts and a missing engine stays empty', () => {
   const picture = pictureFrom([
@@ -26,4 +28,12 @@ test('tiles use the stored named counts and a missing engine stays empty', () =>
   assert.equal(picture.google_ai_mode.of, 2);
   assert.match(picture.gaps[0], /photography holidays UK/);
   assert.match(picture.rivals[0], /example.com/);
+  const tile = aiSection({}, picture).tiles.find((t) => t.label === 'ChatGPT answers naming you');
+  assert.equal(tile.text, engineLine(picture.engines.chat_gpt).text);
+  assert.equal(engineLine(picture.engines.gemini).text, 'no data this week');
+  const row = engineRows(picture)[0];
+  assert.equal(row.cells.chat_gpt.named, false);
+  assert.equal(row.cells.gemini, null);
+  assert.equal(row.rivals[0], 'example.com');
+  assert.deepEqual(SITE_AI_HEALTH_WEIGHTS, { surface: 0.4, top: 0.4, brand: 0.2 });
 });

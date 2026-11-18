@@ -4,6 +4,7 @@
 export const config = { runtime: 'nodejs', maxDuration: 30 };
 
 import { createClient } from '@supabase/supabase-js';
+import { pictureFrom, engineLine, engineRows, ENGINE_KEYS } from '../../lib/acquisition/ai-picture.js';
 
 const PROPERTY = 'https://www.alanranger.com';
 
@@ -35,12 +36,16 @@ export default async function handler(req, res) {
     const latest = data?.[0] || null;
     const prompts = Array.isArray(latest?.prompt_results) ? latest.prompt_results : [];
     const named = prompts.filter((p) => p?.named === true).length;
+    const picture = pictureFrom(data || []);
+    const engine_tiles = ENGINE_KEYS.map((key) => ({ key, ...engineLine(picture.engines?.[key]) }));
 
     return send(res, 200, {
       surface: 'standalone_llm',
       label: 'ChatGPT / LLM answers',
       not_google_aio: true,
       latest,
+      engine_tiles,
+      engine_rows: engineRows(picture),
       history: (data || []).map((r) => ({
         id: r.id,
         run_at: r.run_at,
