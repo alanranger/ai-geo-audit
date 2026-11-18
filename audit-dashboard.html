@@ -108474,6 +108474,15 @@ Confidence: ${c}`;
     // No badge on the heading: the per-tile corner badges already say which tool
     // measured each figure. Subtitle + explainer are hover-only — visible prose
     // between sections was breaking the tile-grid rhythm.
+    function sectionListsHtml(s) {
+      var lists = (s.lists || []).filter(function (list) { return list && list.rows && list.rows.length; });
+      if (!lists.length) return '';
+      return '<div id="acq-ai-detail">' + lists.map(function (list) {
+        var esc = function (s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
+        return '<details><summary>' + esc(list.title) + ' (' + list.rows.length + ')</summary><ul>'
+          + list.rows.map(function (row) { return '<li>' + esc(row) + '</li>'; }).join('') + '</ul></details>';
+      }).join('') + '</div>';
+    }
     function sectionHtml(s) {
       var checks = (s.checks || []).filter(function (c) { return c.level === 'error'; }).map(checkHtml).join('');
       var tip = sectionTip(s);
@@ -108484,6 +108493,7 @@ Confidence: ${c}`;
         + '<div class="acq-grid-6">'
         + s.tiles.map(function (t) { return tileHtml(s, t); }).join('') + '</div>'
         + (checks ? '<div class="acq-sec-checks">' + checks + '</div>' : '')
+        + sectionListsHtml(s)
         + '</div>';
     }
     // The two layouts are mutually exclusive by design: the site lens groups by

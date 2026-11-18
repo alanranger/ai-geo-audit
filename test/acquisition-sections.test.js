@@ -268,6 +268,18 @@ test('the GSC explainer names both figures so neither looks wrong', () => {
   assert.match(text, /Both correct/);
 });
 
+test('a stored engine run shows how many questions named you', () => {
+  const section = aiSection({}, {
+    engines: { chat_gpt: { ok: true, named: 7, of: 12, cited: 4, at: '2026-11-16', trend: 'was 3 of 11' } }
+  });
+  const tile = section.tiles.find((t) => t.label === 'ChatGPT answers naming you');
+  assert.equal(tile.text, '7 of 12');
+  assert.match(tile.sub, /cited in 4/);
+  assert.match(tile.sub, /was 3 of 11/);
+  const missing = section.tiles.find((t) => t.label === 'Gemini answers naming you');
+  assert.equal(missing.text, 'no data this week');
+});
+
 test('aiSection labels mentions as citations and says which platforms are missing', () => {
   const section = aiSection({
     monthly: { chat_gpt: [{ mentions: 93 }], google: [{ mentions: 832 }] },
@@ -275,15 +287,18 @@ test('aiSection labels mentions as citations and says which platforms are missin
   });
   assert.equal(section.source, 'D4S');
   assert.match(section.subtitle, /NOT visits/);
-  assert.equal(section.tiles[0].value, 93);
-  assert.equal(section.tiles[0].unit, 'mentions');
+  const sampleTile = section.tiles.find((t) => t.label === 'ChatGPT mentions (DataForSEO sample)');
+  assert.equal(sampleTile.value, 93);
+  assert.equal(sampleTile.unit, 'mentions');
   // The citation count comes from the newest snapshot, the value from the
   // period, so the sub-line must name its basis. Google AI otherwise reads
   // "274 mentions · cites you in 832 of 832", which looks impossible.
-  assert.match(section.tiles[0].sub, /latest snapshot: cited in 24 of 93 tracked prompts/);
+  assert.match(sampleTile.sub, /latest snapshot: cited in 24 of 93 tracked prompts/);
   const unavailable = section.tiles.find((t) => t.muted);
-  assert.equal(unavailable.text, 'not available');
+  assert.equal(unavailable.text, 'no data this week');
   assert.equal(unavailable.value, null);
+  const sample = section.tiles.find((t) => t.label === 'ChatGPT mentions (DataForSEO sample)');
+  assert.match(sample.sub, /DataForSEO sample database/);
 });
 
 test('youtubeSection says a view is not a visit, and marks impressions pending', () => {

@@ -24,6 +24,7 @@ import {
   buildChannelRows,
 } from '../../lib/acquisition/channels-report.js';
 import { ga4PriorComparable } from '../../lib/acquisition/ga4-channels.js';
+import { pictureFrom } from '../../lib/acquisition/ai-picture.js';
 import {
   ATTRIBUTION_START,
   channelForSource,
@@ -143,6 +144,25 @@ async function fetchGsc(sb, days) {
     .limit(400);
   if (error) throw new Error(`gsc_timeseries: ${error.message}`);
   return data || [];
+}
+
+async function fetchAnswerPicture(sb) {
+  const snaps = await sb.from('llm_visibility_snapshots')
+    .select('run_at, prompt_results, meta')
+    .eq('property_url', PROPERTY)
+    .order('run_at', { ascending: false })
+    .limit(2);
+  if (snaps.error) throw new Error(`llm_visibility_snapshots: ${snaps.error.message}`);
+  const latestRank = await sb.from('keyword_rankings').select('created_at').order('created_at', { ascending: false }).limit(1);
+  if (latestRank.error) throw new Error(`keyword_rankings: ${latestRank.error.message}`);
+  const at = latestRank.data?.[0]?.created_at || null;
+  const day = at ? String(at).slice(0, 10) : null;
+  const next = day ? new Date(Date.parse(`${day}T00:00:00.000Z`) + 86400000).toISOString().slice(0, 10) : null;
+  const ranks = day
+    ? await sb.from('keyword_rankings').select('ai_engines').gte('created_at', day).lt('created_at', next)
+    : { data: [], error: null };
+  if (ranks.error) throw new Error(`keyword_rankings: ${ranks.error.message}`);
+  return pictureFrom(snaps.data || [], ranks.data || [], day);
 }
 
 async function fetchLlm(sb, days) {
@@ -355,7 +375,7 @@ function totalsFromGsc(rows) {
   );
 }
 
-function buildSections({ ga4Rows, gscTotals, gscRows, llm, rows }) {
+function buildSections({ ga4Rows, gscTotals, gscRows, llm, rows, picture }) {
   const organicVisits = rows.find((r) => r.key === 'google_organic')?.visits?.value ?? null;
   const yt = rows.find((r) => r.key === 'youtube');
   const gsc = gscSection(gscTotals, gscCoverage(gscRows));
@@ -363,12 +383,12 @@ function buildSections({ ga4Rows, gscTotals, gscRows, llm, rows }) {
     ga4RealVisitsSection(ga4Rows),
     ga4Section(ga4Rows),
     { ...gsc, explainer: gscExplainer(gscTotals?.clicks ?? null, organicVisits) },
-    aiSection(llm),
+    aiSection(llm, picture),
     youtubeSection(yt?.reach, yt?.context, yt?.engagement),
   ];
 }
 
-function buildPeriodBundle({ ga4Rows, gscRows, llm, youtubeRows, academyRows }) {
+function buildPeriodBundle({ ga4Rows, gscRows, llm, youtubeRows, academyRows, picture }) {
   const totals = academyTotals(academyRows);
   const ga4 = ga4Rows.length ? bucketGa4Visits(ga4Rows) : null;
   const gscTotals = totalsFromGsc(gscRows);
@@ -380,7 +400,7 @@ function buildPeriodBundle({ ga4Rows, gscRows, llm, youtubeRows, academyRows }) 
     academyByChannel: totals.byChannel,
     ga4,
   });
-  return buildSections({ ga4Rows, gscTotals, gscRows, llm, rows });
+  return buildSections({ ga4Rows, gscTotals, gscRows, llm, rows, picture });
 }
 
 export default async function handler(req, res) {
@@ -391,12 +411,13 @@ export default async function handler(req, res) {
   const days = normalisePeriod(req.query?.days);
 
   try {
-    const [gscAll, llmAll, youtubeAll, academyAll, ga4All] = await Promise.all([
+    const [gscAll, llmAll, youtubeAll, academyAll, ga4All, picture] = await Promise.all([
       fetchGsc(sb, days * 2),
       fetchLlm(sb, days * 2),
       fetchYoutube(sb, days * 2),
       fetchAcademyTrials(days * 2),
       fetchGa4(sb, days * 2),
+      fetchAnswerPicture(sb),
     ]);
 
     const gscSplit = splitByIsoDate(gscAll, 'date', days);
@@ -424,13 +445,14 @@ export default async function handler(req, res) {
     });
     const buckets = weekBuckets(days, new Date());
     const sections = attachPrevToSections(
-      buildPeriodBundle({ ga4Rows, gscRows, llm, youtubeRows, academyRows }),
+      buildPeriodBundle({ ga4Rows, gscRows, llm, youtubeRows, academyRows, picture }),
       buildPeriodBundle({
         ga4Rows: ga4Split.previous,
         gscRows: gscSplit.previous,
         llm: llmSplit.previous,
         youtubeRows: ytSplit.previous,
         academyRows: academySplit.previous,
+        picture,
       })
     );
     const priorGa4Days = ga4DistinctDays(ga4Split.previous);
@@ -467,7 +489,7 @@ export default async function handler(req, res) {
           : `GA4 channel history starts ${ga4Start || 'unknown'} — the prior ${days}-day window only has ${priorGa4Days} day(s) of data, so visit deltas are hidden until enough history exists.`,
       },
       notes: {
-        ai_platforms: 'ChatGPT and Google AI are the only platforms DataForSEO llm_mentions covers — Gemini and Perplexity are not available from this source.',
+        ai_platforms: 'The answer tiles are the 12 tracked questions. The two mention tiles are DataForSEO\'s sample database, a different measure.',
         ai_granularity: `AI mention history is month-granular; this period uses the last ${monthsForPeriod(days)} month(s).`,
         reach: 'Reach units differ per tool (impressions vs mentions vs views) and are never summed. Only the GA4 visits section adds up.',
         keywords: 'Keyword-level detail lives in the Keyword Ranking & AI tab.',
