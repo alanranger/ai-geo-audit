@@ -22,6 +22,7 @@ import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-loca
 import { getBusinessDevice } from '../../lib/keyword-ranking/business-location.js';
 import { loadRedirectLookups } from '../../lib/keyword-ranking/redirect-lookups.js';
 import { parseSerpResult } from '../../lib/keyword-ranking/parse-serp-result.js';
+import { organicTask, postOrganicTasks, SERP_METHOD } from '../../lib/keyword-ranking/organic-serp.js';
 import { batchEstimateUsd, dfsApprovalGate, unscheduledContext } from '../../lib/keyword-ranking/dfs-approval-gate.js';
 import {
   preflightLocalCapture,
@@ -424,9 +425,6 @@ function buildEmptySerpResult(keyword, depth, errorMessage, errorCode, locationN
 }
 
 async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SERP_DEPTH, opts = {}) {
-  const endpoint =
-    "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
-
   // expand_ai_overview is the main cost driver (~3-5x per request).
   // Default OFF for ad-hoc calls. Monday Ranking + app full refresh / refresh-keywords
   // pass ai_overview: true so Surface AIO ownership uses real citations.
@@ -470,16 +468,14 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
       if (Number.isFinite(d) && d > 0) taskPayload.people_also_ask_click_depth = d;
     }
 
-    const dfResponse = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Basic ${auth}`,
-      },
-      body: JSON.stringify([taskPayload]),
-    });
-
-    const data = await dfResponse.json();
+    const rankPayload = {
+      ...taskPayload,
+      load_async_ai_overview: false,
+      expand_ai_overview: false,
+    };
+    const posted = await postOrganicTasks(auth, [organicTask(rankPayload, true)]);
+    const dfResponse = { ok: posted.ok };
+    const data = posted.data || {};
 
     if (!dfResponse.ok || !String(data.status_code).startsWith("200")) {
       const taskStatus = data?.tasks?.[0]?.status_code;
@@ -524,13 +520,28 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
       best_rank_absolute: bestRankAbsolute,
       best_url: bestUrl,
       best_title: bestTitle,
-      surfaces,
-      ai_overview_citations: aiOverviewCitations,
-      serp_surface_stack: serpSurfaceStack,
     } = parsed;
+    // Map pack, AI Overview and the other blocks come from a second call with the fix off.
+    let surfaces = { local_pack_present: false, local_pack_position: null, kp_present: false, kp_ours: false, featured_snippet_ours: false, paa_ours: false, serp_features_extra: {} };
+    let aiOverviewCitations = null;
+    let serpSurfaceStack = [];
+    let featureResult = null;
+    let featureCost = 0;
+    const featurePosted = await postOrganicTasks(auth, [organicTask(taskPayload, false)]);
+    const featureData = featurePosted.data || {};
+    if (featurePosted.ok && String(featureData.status_code || '').startsWith('200')) {
+      const featureTask = featureData.tasks?.[0];
+      featureCost = Number(featureTask?.cost || 0);
+      featureResult = featureTask?.result?.[0] || null;
+      if (featureResult) {
+        const featureParsed = parseSerpResult(featureResult, targetRoot, await loadRedirectLookups(targetRoot));
+        surfaces = featureParsed.surfaces || surfaces;
+        aiOverviewCitations = featureParsed.ai_overview_citations;
+        serpSurfaceStack = featureParsed.serp_surface_stack || [];
+      }
+    }
 
-    // Derive SERP features from result.item_types
-    const itemTypes = result?.item_types || [];
+    const itemTypes = featureResult?.item_types || [];
     const classInfo = resolveKeywordClass(keyword);
 
     // Pack presence: DFS item_types often omits local_pack even when items[] has it.
@@ -552,7 +563,8 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
       ...(surfaces.serp_features_extra || {}),
     };
     const organicCount = items.filter((item) => item.type === 'organic').length;
-    const taskCost = task?.cost != null ? Number(task.cost) : (data?.cost != null ? Number(data.cost) : null);
+    const rankCost = task?.cost != null ? Number(task.cost) : (data?.cost != null ? Number(data.cost) : 0);
+    const taskCost = (Number.isFinite(rankCost) ? rankCost : 0) + (Number.isFinite(featureCost) ? featureCost : 0);
     const seResultsCount = result?.se_results_count != null ? Number(result.se_results_count) : null;
 
     const serpResult = {
@@ -612,6 +624,7 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot, depth = DEFAULT_SE
       location_coordinate: locationCoordinate,
       geo_method: geoMethod,
       method_version: methodVersion,
+      serp_method: SERP_METHOD,
       error: serpResult.error || null,
       checked_at: new Date().toISOString(),
       best_rank_group: bestRankGroup,

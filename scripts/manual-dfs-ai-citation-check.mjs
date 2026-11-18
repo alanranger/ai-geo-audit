@@ -5,6 +5,13 @@
  */
 import dotenv from 'dotenv';
 import { extractCitationsFromDfsResult } from '../lib/ai-citation-extract.js';
+import { organicTask, postAiMode, postOrganicTasks } from '../lib/keyword-ranking/organic-serp.js';
+
+function asProbe(posted) {
+  const data = posted?.data || {};
+  const task = data.tasks?.[0];
+  return { ok: posted?.ok, task, result: task?.result?.[0], data };
+}
 
 dotenv.config({ path: '.env.local' });
 
@@ -48,17 +55,15 @@ async function dfsPost(endpoint, payload) {
 
 async function probeKeyword(keyword) {
   const [aiMode, serpNoExpand, serpExpand] = await Promise.all([
-    dfsPost('https://api.dataforseo.com/v3/serp/google/ai_mode/live/advanced', {
-      keyword, language_name: 'English', location_name: 'United Kingdom', device: 'desktop', os: 'windows',
-    }),
-    dfsPost('https://api.dataforseo.com/v3/serp/google/organic/live/advanced', {
+    postAiMode(auth, keyword, 'United Kingdom').then(asProbe),
+    postOrganicTasks(auth, [organicTask({
       keyword, language_code: 'en', location_code: 2826, device: 'desktop', os: 'windows', depth: 100,
       load_async_ai_overview: false, expand_ai_overview: false,
-    }),
-    dfsPost('https://api.dataforseo.com/v3/serp/google/organic/live/advanced', {
+    }, false)]).then(asProbe),
+    postOrganicTasks(auth, [organicTask({
       keyword, language_code: 'en', location_code: 2826, device: 'desktop', os: 'windows', depth: 100,
       load_async_ai_overview: true, expand_ai_overview: true,
-    }),
+    }, false)]).then(asProbe),
   ]);
 
   const aiModeSlot = extractCitationsFromDfsResult(aiMode.result);

@@ -13,6 +13,7 @@
  */
 
 import { extractAiModeCitationsFromTask } from '../../lib/keyword-ranking/fetch-ai-mode-local.js';
+import { AI_MODE_ENDPOINT, aiModeTask } from '../../lib/keyword-ranking/organic-serp.js';
 
 export default async function handler(req, res) {
   // Set CORS headers
@@ -41,8 +42,7 @@ export default async function handler(req, res) {
     "photography courses coventry";
 
   // DataForSEO AI Mode Live Advanced endpoint
-  const endpoint =
-    "https://api.dataforseo.com/v3/serp/google/ai_mode/live/advanced";
+  const endpoint = AI_MODE_ENDPOINT;
 
   const auth = Buffer.from(`${login}:${password}`).toString("base64");
 
@@ -54,15 +54,7 @@ export default async function handler(req, res) {
         Authorization: `Basic ${auth}`,
       },
       // Live method accepts an array with one task
-      body: JSON.stringify([
-        {
-          keyword,
-          language_name: "English",
-          location_name: "United Kingdom",
-          device: "desktop",
-          os: "windows",
-        },
-      ]),
+      body: JSON.stringify([aiModeTask(keyword, 'United Kingdom')]),
     });
 
     const data = await dfResponse.json();

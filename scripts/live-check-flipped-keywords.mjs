@@ -13,6 +13,7 @@ import { config as dotenvConfig } from 'dotenv';
 import { parseSerpResult } from '../lib/keyword-ranking/parse-serp-result.js';
 import { loadRedirectLookups } from '../lib/keyword-ranking/redirect-lookups.js';
 import { resolveLocalCaptureFields } from '../lib/keyword-ranking/local-capture-preflight.js';
+import { organicTask, postOrganicTasks } from '../lib/keyword-ranking/organic-serp.js';
 import { getBusinessCid, getBusinessDevice } from '../lib/keyword-ranking/business-location.js';
 import { batchEstimateUsd, dfsApprovalGate } from '../lib/keyword-ranking/dfs-approval-gate.js';
 
@@ -51,10 +52,8 @@ function manualCheck(items) {
 }
 
 async function capture(keyword) {
-  const r = await fetch('https://api.dataforseo.com/v3/serp/google/organic/live/advanced', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Basic ${auth()}` }, body: JSON.stringify([payload(keyword)]),
-  });
-  const data = await r.json();
+  const posted = await postOrganicTasks(auth(), [organicTask(payload(keyword), true)]);
+  const data = posted.data;
   fs.writeFileSync(`${OUT_DIR}/${keyword.replace(/\W+/g, '-')}.json`, JSON.stringify(data));
   return data;
 }

@@ -12,6 +12,7 @@
 import { resolveTrackingLocation } from '../../lib/keyword-ranking/tracking-location.js';
 import { resolveSerpItems } from '../../lib/keyword-ranking/serp-redirect-owner.js';
 import { extractCitationsFromDfsResult, toLegacyShape } from '../../lib/ai-citation-extract.js';
+import { AI_MODE_ENDPOINT, aiModeTask } from '../../lib/keyword-ranking/organic-serp.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -48,8 +49,7 @@ function extractCitationsFromTask(task) {
 }
 
 async function fetchAiModeForKeyword(keyword, auth, locationName = "United Kingdom") {
-  const endpoint =
-    "https://api.dataforseo.com/v3/serp/google/ai_mode/live/advanced";
+  const endpoint = AI_MODE_ENDPOINT;
 
   const dfResponse = await fetch(endpoint, {
     method: "POST",
@@ -57,15 +57,7 @@ async function fetchAiModeForKeyword(keyword, auth, locationName = "United Kingd
       "Content-Type": "application/json",
       Authorization: `Basic ${auth}`,
     },
-    body: JSON.stringify([
-      {
-        keyword,
-        language_name: "English",
-        location_name: locationName || "United Kingdom",
-        device: "desktop",
-        os: "windows",
-      },
-    ]),
+    body: JSON.stringify([aiModeTask(keyword, locationName)]),
   });
 
   let data;
