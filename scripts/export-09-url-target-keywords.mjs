@@ -1,5 +1,5 @@
 /**
- * Export 09-url-target-keywords.csv from DB SoT + LOCKED-v12.
+ * Export 09-url-target-keywords.csv from DB SoT via the shared builder (page_url order).
  * UTF-8 BOM for Excel. Writes shared-resources, config/, Drive outbox.
  *
  * Usage: node scripts/export-09-url-target-keywords.mjs
@@ -9,12 +9,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
 import { loadLocalSupabaseEnv, isLegacyJwt } from '../lib/load-local-supabase-env.mjs';
+import { buildCsv09Body, loadLocked } from '../lib/configIntegrity/checks.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const env = loadLocalSupabaseEnv(root);
 
 const PROPERTY = 'https://www.alanranger.com';
-const lockedPath = path.join(root, 'config/keyword-tracking-locations-and-class-LOCKED-v12.csv');
 const outRepo = path.join(root, '../alan-shared-resources/csv/09-url-target-keywords.csv');
 const outAudit = path.join(root, 'config/09-url-target-keywords.csv');
 const outDrive = path.join(
@@ -33,31 +33,6 @@ if (isLegacyJwt(supabaseKey)) {
 }
 
 const sb = createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } });
-
-function parseCsv(text) {
-  const lines = text.trim().split(/\r?\n/);
-  const headers = lines[0].split(',').map((h) => h.trim());
-  return lines.slice(1).map((line) => {
-    const cols = [];
-    let cur = '';
-    let q = false;
-    for (let i = 0; i < line.length; i++) {
-      const c = line[i];
-      if (c === '"') { q = !q; continue; }
-      if (c === ',' && !q) { cols.push(cur); cur = ''; continue; }
-      cur += c;
-    }
-    cols.push(cur);
-    const o = {};
-    headers.forEach((h, i) => { o[h] = (cols[i] || '').trim(); });
-    return o;
-  });
-}
-
-function esc(v) {
-  const s = String(v ?? '');
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
 
 async function fetchAll() {
   const out = [];
@@ -79,37 +54,7 @@ async function fetchAll() {
 }
 
 const master = await fetchAll();
-const locked = parseCsv(fs.readFileSync(lockedPath, 'utf8'));
-const lockedByKw = new Map();
-for (const r of locked) {
-  lockedByKw.set(String(r.keyword || '').toLowerCase(), r);
-}
-
-const header = [
-  'url',
-  'target_keyword',
-  'target_class',
-  'keyword_class',
-  'tracked_in_151',
-  'notes'
-];
-const lines = [header.join(',')];
-for (const row of master) {
-  const kw = String(row.target_keyword || '').trim();
-  const hit = kw ? lockedByKw.get(kw.toLowerCase()) : null;
-  lines.push(
-    [
-      esc(row.page_url),
-      esc(kw),
-      esc(row.target_class || ''),
-      esc(hit?.class || ''),
-      esc(hit ? 'Y' : 'N'),
-      esc(row.notes || '')
-    ].join(',')
-  );
-}
-// UTF-8 BOM for Excel (avoids â€" / mojibake on Windows)
-const body = `\uFEFF${lines.join('\n')}\n`;
+const body = buildCsv09Body(master, loadLocked());
 
 const byClass = master.reduce((a, r) => {
   const c = r.target_class || 'null';

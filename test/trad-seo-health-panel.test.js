@@ -16,6 +16,16 @@ test('groups missing page_entities into one auto-clear line with URLs', () => {
   assert.equal(rows[0].urls.length, 2);
 });
 
+test('pages the latest check missed stay one row', () => {
+  const rows = groupHealthRows([
+    { check: 'D5', status: 'fault', severity: 'amber', title: 'page_entities row not refreshed since 2026-11-03 (blog)', url: 'https://www.alanranger.com/blog-on-photography/a' },
+    { check: 'D5', status: 'fault', severity: 'amber', title: 'page_entities row not refreshed since 2026-11-03 (blog)', url: 'https://www.alanranger.com/blog-on-photography/b' }
+  ]);
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].title, /2 pages were not evaluated by the latest page check/);
+  assert.match(rows[0].fix, /checked and left unchanged/);
+});
+
 test('D4 names the Export 09 keywords button', () => {
   const rows = groupHealthRows([{
     check: 'D4', status: 'fault', severity: 'amber',
