@@ -47,6 +47,7 @@ export default async function handler(req, res) {
       engine_tiles,
       engine_rows: engineRows(picture),
       break_note: picture.breakNote || '',
+      cluster_rows: picture.clusterRows || [],
       history: (data || []).map((r) => ({
         id: r.id,
         run_at: r.run_at,

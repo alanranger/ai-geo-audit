@@ -45098,6 +45098,7 @@
       { cluster_id: 'COURSES-Local-general', rep: 'photography courses coventry', target_page: '/photography-courses-coventry' },
       { cluster_id: 'COURSES-Local-private', rep: 'private photography lessons', target_page: '/private-photography-lessons' },
       { cluster_id: 'COURSES-National-online', rep: 'online photography course', target_page: '/free-online-photography-course' },
+      { cluster_id: 'CORPORATE-Regional', rep: 'corporate photography training', target_page: '/corporate-photography-training' },
       { cluster_id: 'GIFTS-National', rep: 'photography gift vouchers', target_page: '/photography-gift-vouchers' },
       { cluster_id: 'HOLIDAYS-National', rep: 'photography holidays uk', target_page: '/photography-workshops-near-me' },
       { cluster_id: 'MENTORING-National', rep: 'photography mentoring', target_page: '/rps-courses-mentoring-distinctions' },
@@ -45194,9 +45195,13 @@
         const memberHtml = members.length
           ? members.map((m) => '<span style="display:inline-block;margin:0.1rem 0.35rem 0.1rem 0;font-size:0.78rem;color:#0f172a;">' + m + '</span>').join('')
           : '<span style="color:#94a3b8;">(no members for target page)</span>';
-        const repHit = byKw[c.rep.toLowerCase()];
+        const hit = (j.cluster_rows || []).find((row) => row.cluster_id === c.cluster_id);
+        const namedHtml = !hit || hit.empty
+          ? '<span style="color:#94a3b8;">no question in set</span>'
+          : hit.summary;
+        const rivalHtml = !hit || hit.empty ? '—' : ((hit.rivals || []).join(', ') || '—');
         return '<tr><td class="llm-col-cluster"><strong>' + c.cluster_id + '</strong></td><td class="llm-col-rep">' + c.rep + '</td><td class="llm-col-members">' + memberHtml
-          + '</td><td class="llm-col-cnamed">' + namedCell(repHit) + '</td><td class="llm-col-crivals">' + rivalsCell(repHit) + '</td></tr>';
+          + '</td><td class="llm-col-cnamed">' + namedHtml + '</td><td class="llm-col-crivals">' + rivalHtml + '</td></tr>';
       }).join('');
       const topics = Array.isArray(latest.topic_competitors) ? latest.topic_competitors : [];
       const topicBits = topics.map((t) => {
@@ -45223,7 +45228,7 @@
         + llmEngineBlock(j, prompts.length)
         + '<p style="font-size:0.85rem;font-weight:700;margin:1.1rem 0 0.4rem;color:#0f172a;">Cluster view (rep + members by target page)</p>'
         + '<table class="llm-vis-table"><colgroup><col class="c-cluster"><col class="c-rep"><col class="c-members"><col class="c-cnamed"><col class="c-crivals"></colgroup>'
-        + '<thead><tr><th class="llm-col-cluster">Cluster</th><th class="llm-col-rep">Rep</th><th class="llm-col-members">Members</th><th class="llm-col-cnamed">Rep named?</th><th class="llm-col-crivals">Rivals cited</th></tr></thead>'
+        + '<thead><tr><th class="llm-col-cluster">Cluster</th><th class="llm-col-rep">Rep</th><th class="llm-col-members">Members</th><th class="llm-col-cnamed">Questions named</th><th class="llm-col-crivals">Rivals named</th></tr></thead>'
         + '<tbody>' + clusterRows + '</tbody></table>'
         + (topicBits ? '<p style="font-size:0.85rem;margin:0.9rem 0 0.25rem;"><strong>Topic seeds — who gets named</strong></p><ul style="margin:0;padding-left:1.2rem;font-size:0.82rem;color:#475569;">' + topicBits + '</ul>' : '');
       if (foot) {

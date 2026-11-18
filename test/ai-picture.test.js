@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pictureFrom, engineLine, engineRows, pairClass, groupTotals } from '../lib/acquisition/ai-picture.js';
+import { pictureFrom, engineLine, engineRows, pairClass, groupTotals, keepRival, cleanRivalDomains, clusterLines } from '../lib/acquisition/ai-picture.js';
+import { LLM_CLUSTER_TAXONOMY } from '../lib/llm-visibility/cluster-taxonomy.js';
+import bank from '../config/llm-strategy-questions.json' with { type: 'json' };
 import { SITE_AI_HEALTH_WEIGHTS } from '../lib/audit/siteAiHealthComposite.js';
 import { aiSection } from '../lib/acquisition/acquisition-sections.js';
 
@@ -76,4 +78,30 @@ test('a new question bank suppresses the previous trend', () => {
   assert.equal(picture.breakNote, 'new question set, from 18 Nov');
   assert.equal(engineLine(picture.engines.chat_gpt).text, 'named in 4 of 20');
   assert.equal(engineLine(picture.engines.chat_gpt).sometimes, '+2 sometimes');
+});
+
+test('every locked question has a known cluster, including corporate', () => {
+  const ids = new Set(LLM_CLUSTER_TAXONOMY.map((c) => c.cluster_id));
+  assert.equal(bank.questions.length, 20);
+  assert.equal(LLM_CLUSTER_TAXONOMY.length, 16);
+  assert.ok(ids.has('CORPORATE-Regional'));
+  for (const q of bank.questions) assert.ok(ids.has(q.cluster_id), q.prompt);
+});
+
+test('a two-question cluster counts strict names and drops non-rivals', () => {
+  assert.equal(keepRival('google.com'), false);
+  assert.equal(keepRival('vertexaisearch.cloud.google.com'), false);
+  assert.equal(keepRival('alan-ranger.squarespace.com'), false);
+  assert.equal(keepRival('yell.com'), true);
+  const resolved = cleanRivalDomains('https://vertexaisearch.cloud.google.com/redirect?url=https%3A%2F%2Fyell.com%2Fa');
+  assert.deepEqual(resolved, ['yell.com']);
+  const lines = clusterLines({
+    chat_gpt: { prompts: [
+      { cluster_id: 'GIFTS-National', named: true, rivals: ['yell.com', 'google.com'] },
+      { cluster_id: 'GIFTS-National', named: false, sometimes: true, rivals: ['alan-ranger.squarespace.com'] }
+    ] }
+  }, [{ cluster_id: 'GIFTS-National' }, { cluster_id: 'COMMERCIAL-Local-headshots' }]);
+  assert.equal(lines[0].summary, 'ChatGPT 1/2 +1 sometimes');
+  assert.deepEqual(lines[0].rivals, ['yell.com']);
+  assert.equal(lines[1].summary, 'no question in set');
 });
