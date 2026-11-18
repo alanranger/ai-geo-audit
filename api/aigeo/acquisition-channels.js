@@ -30,10 +30,12 @@ import {
   channelForSource,
   academyClient,
 } from '../../lib/acquisition/academy-signup-source.js';
+import { fetchChatgptAdsRows, squarespaceTotals, summariseChatgptAds, squarespaceOrderKey } from '../../lib/acquisition/chatgpt-ads.js';
 import {
   SOURCES,
   ga4RealVisitsSection,
   ga4Section,
+  chatgptAdsSection,
   gscSection,
   gscCoverage,
   gscExplainer,
@@ -205,6 +207,28 @@ async function fetchYoutube(sb, days) {
   return data || [];
 }
 
+async function fetchPaidTrials(days) {
+  const academy = academyClient();
+  if (!academy) return [];
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  const { data, error } = await academy
+    .from('academy_signup_attribution')
+    .select('member_id')
+    .eq('utm_source', 'chatgpt')
+    .eq('utm_medium', 'cpc')
+    .limit(1000);
+  if (error) throw new Error(`academy_signup_attribution: ${error.message}`);
+  const ids = (data || []).map((row) => row.member_id).filter(Boolean);
+  if (!ids.length) return [];
+  const trials = await academy
+    .from('academy_trial_history')
+    .select('member_id, trial_start_at, converted_at')
+    .in('member_id', ids)
+    .gte('trial_start_at', since);
+  if (trials.error) throw new Error(`academy_trial_history: ${trials.error.message}`);
+  return trials.data || [];
+}
+
 async function fetchAcademyTrials(days) {
   const sb = academyClient();
   if (!sb) return { configured: false, rows: [] };
@@ -223,6 +247,7 @@ function academyTotals(rows) {
   let unattributed = 0;
   for (const row of rows || []) {
     const key = channelForSource(row.signup_source);
+    if (row.signup_source === 'chatgpt-ads') continue;
     if (key === 'unattributed' || key === 'other') {
       unattributed += 1;
       continue;
@@ -375,20 +400,21 @@ function totalsFromGsc(rows) {
   );
 }
 
-function buildSections({ ga4Rows, gscTotals, gscRows, llm, rows, picture }) {
+function buildSections({ ga4Rows, gscTotals, gscRows, llm, rows, picture, ads }) {
   const organicVisits = rows.find((r) => r.key === 'google_organic')?.visits?.value ?? null;
   const yt = rows.find((r) => r.key === 'youtube');
   const gsc = gscSection(gscTotals, gscCoverage(gscRows));
   return [
     ga4RealVisitsSection(ga4Rows),
     ga4Section(ga4Rows),
+    chatgptAdsSection(ads),
     { ...gsc, explainer: gscExplainer(gscTotals?.clicks ?? null, organicVisits) },
     aiSection(llm, picture),
     youtubeSection(yt?.reach, yt?.context, yt?.engagement),
   ];
 }
 
-function buildPeriodBundle({ ga4Rows, gscRows, llm, youtubeRows, academyRows, picture }) {
+function buildPeriodBundle({ ga4Rows, gscRows, llm, youtubeRows, academyRows, picture, ads }) {
   const totals = academyTotals(academyRows);
   const ga4 = ga4Rows.length ? bucketGa4Visits(ga4Rows) : null;
   const gscTotals = totalsFromGsc(gscRows);
@@ -400,7 +426,7 @@ function buildPeriodBundle({ ga4Rows, gscRows, llm, youtubeRows, academyRows, pi
     academyByChannel: totals.byChannel,
     ga4,
   });
-  return buildSections({ ga4Rows, gscTotals, gscRows, llm, rows, picture });
+  return buildSections({ ga4Rows, gscTotals, gscRows, llm, rows, picture, ads });
 }
 
 export default async function handler(req, res) {
@@ -411,13 +437,15 @@ export default async function handler(req, res) {
   const days = normalisePeriod(req.query?.days);
 
   try {
-    const [gscAll, llmAll, youtubeAll, academyAll, ga4All, picture] = await Promise.all([
+    const [gscAll, llmAll, youtubeAll, academyAll, ga4All, picture, adsRows, paidTrials] = await Promise.all([
       fetchGsc(sb, days * 2),
       fetchLlm(sb, days * 2),
       fetchYoutube(sb, days * 2),
       fetchAcademyTrials(days * 2),
       fetchGa4(sb, days * 2),
       fetchAnswerPicture(sb),
+      fetchChatgptAdsRows(sb),
+      fetchPaidTrials(days * 2),
     ]);
 
     const gscSplit = splitByIsoDate(gscAll, 'date', days);
@@ -444,8 +472,26 @@ export default async function handler(req, res) {
       ga4,
     });
     const buckets = weekBuckets(days, new Date());
+    const matched = await squarespaceTotals(sb, adsRows.purchases);
+    const orders = matched.orders;
+    for (const row of adsRows.purchases) {
+      const key = squarespaceOrderKey(row.transaction_id);
+      if (key && matched.testKeys.has(key)) adsRows.excluded.add(String(row.transaction_id));
+    }
+    const adSplit = splitByIsoDate(adsRows.sessions, 'date', days);
+    const purchaseSplit = splitByIsoDate(adsRows.purchases, 'date', days);
+    const trialSplit = splitByIsoDate(paidTrials, 'trial_start_at', days);
+    const cpcOnly = (rows) => (rows || []).filter((row) => row.medium === 'cpc');
+    const adsNow = summariseChatgptAds({
+      sessions: cpcOnly(adSplit.current), purchases: cpcOnly(purchaseSplit.current), orders,
+      excluded: adsRows.excluded, provider: adsRows.provider, trials: trialSplit.current
+    });
+    const adsPrev = summariseChatgptAds({
+      sessions: cpcOnly(adSplit.previous), purchases: cpcOnly(purchaseSplit.previous), orders,
+      excluded: adsRows.excluded, provider: null, trials: trialSplit.previous
+    });
     const sections = attachPrevToSections(
-      buildPeriodBundle({ ga4Rows, gscRows, llm, youtubeRows, academyRows, picture }),
+      buildPeriodBundle({ ga4Rows, gscRows, llm, youtubeRows, academyRows, picture, ads: adsNow }),
       buildPeriodBundle({
         ga4Rows: ga4Split.previous,
         gscRows: gscSplit.previous,
@@ -453,6 +499,7 @@ export default async function handler(req, res) {
         youtubeRows: ytSplit.previous,
         academyRows: academySplit.previous,
         picture,
+        ads: adsPrev,
       })
     );
     const priorGa4Days = ga4DistinctDays(ga4Split.previous);
