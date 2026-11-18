@@ -52,6 +52,8 @@ export default async function handler(req, res) {
         id: r.id,
         run_at: r.run_at,
         named_of_prompts: r.meta?.named_of_prompts || null,
+        prompt_bank_version: r.meta?.prompt_bank_version ?? null,
+        engines: r.meta?.engines ? Object.fromEntries(['chat_gpt', 'gemini', 'perplexity', 'claude'].map((k) => [k, r.meta.engines[k] ? { ok: r.meta.engines[k].ok, named: r.meta.engines[k].named, of: r.meta.engines[k].of, sometimes: r.meta.engines[k].sometimes || 0 } : null])) : null,
         mentions: r.domain_mentions?.items_count ?? null,
         cost_usd: r.cost_usd,
       })),

@@ -10,7 +10,8 @@ export const config = {
   includeFiles: ['config/keyword-tracking-locations-and-class-LOCKED-v*.csv'],
 };
 
-import { collectLlmVisibilitySnapshot, loadFlaggedPromptBank } from '../../lib/llm-visibility/collect-core.js';
+import { loadFlaggedPromptBank } from '../../lib/llm-visibility/collect-core.js';
+import { tickLlmVisibility } from '../../lib/llm-visibility/run-tick.js';
 
 const send = (res, status, body) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -46,17 +47,9 @@ export default async function handler(req, res) {
         duration_ms: Date.now() - started,
       });
     }
-    const result = await collectLlmVisibilitySnapshot({ cadence: 'manual', persist: true });
-    return send(res, 200, {
-      ok: true,
-      id: result.id,
-      run_at: result.run_at,
-      cost_usd: result.snapshot.cost_usd,
-      named: result.snapshot.meta?.named_of_prompts || null,
-      mentions: result.snapshot.domain_mentions?.items_count ?? null,
-      prompts_total: Array.isArray(result.snapshot.prompt_results) ? result.snapshot.prompt_results.length : 0,
-      duration_ms: Date.now() - started,
-    });
+    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+    const tick = await tickLlmVisibility({ force: body.force === true, budgetMs: 240000 });
+    return send(res, 200, { ...tick, duration_ms: Date.now() - started });
   } catch (err) {
     return send(res, 500, {
       ok: false,
