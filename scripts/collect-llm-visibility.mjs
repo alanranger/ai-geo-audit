@@ -17,7 +17,7 @@ writeFileSync(
   join(root, 'scripts/output/llm-visibility-snapshot-LATEST.json'),
   JSON.stringify({ id: result.id, run_at: result.run_at, ...result.snapshot }, null, 2),
 );
-const engines = Object.fromEntries(Object.entries(result.snapshot.meta.engines || {}).map(([k, v]) => [k, v.ok ? `${v.named} of ${v.of}` : v.msg]));
+const engines = Object.fromEntries(Object.entries(result.snapshot.meta.engines || {}).map(([k, v]) => [k, v.ok ? `${v.named} of ${v.of}` + (v.sometimes ? ` +${v.sometimes} sometimes` : '') : v.msg]));
 console.log(JSON.stringify({
   id: result.id,
   run_at: result.run_at,

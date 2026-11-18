@@ -273,7 +273,7 @@ test('a stored engine run shows how many questions named you', () => {
     engines: { chat_gpt: { ok: true, named: 7, of: 12, cited: 4, at: '2026-11-16', trend: 'was 3 of 11' } }
   });
   const tile = section.tiles.find((t) => t.label === 'ChatGPT answers naming you');
-  assert.equal(tile.text, '7 of 12');
+  assert.equal(tile.text, 'named in 7 of 12');
   assert.match(tile.sub, /cited in 4/);
   assert.match(tile.sub, /was 3 of 11/);
   const missing = section.tiles.find((t) => t.label === 'Gemini answers naming you');

@@ -45138,18 +45138,20 @@
       const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
       const tiles = (j.engine_tiles || []).map((t) => {
         const colour = t.ok ? '#166534' : '#b45309';
+        const under = [t.sometimes, t.groups, t.trend].filter(Boolean).map((bit) => esc(bit)).join('<br>');
         return '<div><div style="font-size:0.75rem;color:#64748b;">' + esc(labels[t.key] || t.key) + '</div>'
           + '<div style="font-size:1.15rem;font-weight:700;color:' + colour + ';">' + esc(t.text) + '</div>'
-          + (t.trend ? '<div style="font-size:0.75rem;color:#64748b;">' + esc(t.trend) + '</div>' : '') + '</div>';
+          + (under ? '<div style="font-size:0.75rem;color:#64748b;">' + under + '</div>' : '') + '</div>';
       }).join('');
       const head = ['chat_gpt', 'gemini', 'perplexity', 'claude'].map((k) => '<th>' + labels[k] + '</th>').join('');
-      const mark = (cell) => !cell ? '<span style="color:#b45309;">no data</span>' : (cell.named ? (cell.cited ? '✓ cited' : '✓') : '✗');
-      const body = (j.engine_rows || []).map((row) => '<tr><td class="llm-col-kw">' + esc(row.prompt) + '</td>'
+      const mark = (cell) => !cell ? '<span style="color:#b45309;">no data</span>' : (cell.named ? (cell.cited ? '✓ cited' : '✓') : (cell.sometimes ? '~' : '✗'));
+      const body = (j.engine_rows || []).map((row) => '<tr><td class="llm-col-kw">' + esc(row.group) + '</td><td class="llm-col-kw">' + esc(row.service) + '</td><td class="llm-col-kw">' + esc(row.prompt) + '</td>'
         + ['chat_gpt', 'gemini', 'perplexity', 'claude'].map((k) => '<td class="llm-col-named">' + mark(row.cells?.[k]) + '</td>').join('')
         + '<td class="llm-col-rivals">' + esc((row.rivals || []).join(', ') || '—') + '</td></tr>').join('');
-      return '<div style="display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:0.75rem;margin:0.5rem 0 1rem;">' + tiles + '</div>'
+      const breakNote = j.break_note ? '<p style="margin:0 0 0.5rem;font-size:0.8rem;color:#b45309;">' + esc(j.break_note) + '</p>' : '';
+      return breakNote + '<div style="display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:0.75rem;margin:0.5rem 0 1rem;">' + tiles + '</div>'
         + '<p style="font-size:0.85rem;font-weight:700;margin:0 0 0.4rem;color:#0f172a;">AI assistant answers (' + count + ' questions)</p>'
-        + '<table class="llm-vis-table" style="table-layout:auto"><thead><tr><th class="llm-col-kw">Question</th>' + head + '<th class="llm-col-rivals">Rivals named</th></tr></thead><tbody>'
+        + '<table class="llm-vis-table" style="table-layout:auto"><thead><tr><th class="llm-col-kw">Group</th><th class="llm-col-kw">Service</th><th class="llm-col-kw">Question</th>' + head + '<th class="llm-col-rivals">Rivals named</th></tr></thead><tbody>'
         + body + '</tbody></table>';
     }
 
@@ -108478,6 +108480,7 @@ Confidence: ${c}`;
         + (accent ? ' style="' + accent + '"' : '') + tipAttr + '>' + badgeHtml
         + '<div class="acq-tile-label">' + t.label + '</div>'
         + '<div class="acq-tile-value">' + tileValue(t) + '</div>'
+        + (t.detail ? '<div class="acq-tile-sub">' + escapeAttr(t.detail) + '</div>' : '')
         + delta
         + tileEngageHtml(t)
         + (unit ? '<div class="acq-tile-sub">' + unit + '</div>' : '')
@@ -108505,6 +108508,7 @@ Confidence: ${c}`;
         + '<div class="acq-grid-6">'
         + s.tiles.map(function (t) { return tileHtml(s, t); }).join('') + '</div>'
         + (checks ? '<div class="acq-sec-checks">' + checks + '</div>' : '')
+        + (s.footnote ? '<p style="margin:0.4rem 0 0;font-size:0.8rem;color:#b45309;">' + escapeAttr(s.footnote) + '</p>' : '')
         + sectionListsHtml(s)
         + '</div>';
     }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pictureFrom, engineLine, engineRows } from '../lib/acquisition/ai-picture.js';
+import { pictureFrom, engineLine, engineRows, pairClass, groupTotals } from '../lib/acquisition/ai-picture.js';
 import { SITE_AI_HEALTH_WEIGHTS } from '../lib/audit/siteAiHealthComposite.js';
 import { aiSection } from '../lib/acquisition/acquisition-sections.js';
 
@@ -45,4 +45,35 @@ test('chat trend uses the previous prompt results when that run stored no engine
   ]);
   assert.equal(picture.engines.chat_gpt.trend, 'was 1 of 2');
   assert.equal(picture.engines.gemini, undefined);
+});
+
+test('two runs classify as named, sometimes, or not named', () => {
+  assert.equal(pairClass([true, true]), 'named');
+  assert.equal(pairClass([true, false]), 'sometimes');
+  assert.equal(pairClass([false, false]), 'not named');
+});
+
+test('group totals add up to the 20-question bank', () => {
+  const prompts = [];
+  for (let i = 0; i < 6; i += 1) prompts.push({ group: 'local', named: true, prompt: 'l' + i });
+  for (let i = 0; i < 5; i += 1) prompts.push({ group: 'regional', named: false, prompt: 'r' + i });
+  for (let i = 0; i < 9; i += 1) prompts.push({ group: 'national', named: i === 0, prompt: 'n' + i });
+  const totals = groupTotals(prompts);
+  assert.equal(totals.local.of + totals.regional.of + totals.national.of, 20);
+  assert.equal(totals.local.of, 6);
+  assert.equal(totals.regional.of, 5);
+  assert.equal(totals.national.of, 9);
+  assert.equal(totals.local.named, 6);
+  assert.equal(totals.national.named, 1);
+});
+
+test('a new question bank suppresses the previous trend', () => {
+  const picture = pictureFrom([
+    { run_at: '2026-11-18T12:00:00.000Z', meta: { prompt_bank_version: 4, engines: { chat_gpt: { ok: true, named: 4, of: 20, sometimes: 2, prompts: [] } } } },
+    { run_at: '2026-11-16T00:00:00.000Z', meta: { prompt_bank_version: 3, engines: { chat_gpt: { ok: true, named: 6, of: 12 } } } }
+  ]);
+  assert.equal(picture.engines.chat_gpt.trend, undefined);
+  assert.equal(picture.breakNote, 'new question set, from 18 Nov');
+  assert.equal(engineLine(picture.engines.chat_gpt).text, 'named in 4 of 20');
+  assert.equal(engineLine(picture.engines.chat_gpt).sometimes, '+2 sometimes');
 });
