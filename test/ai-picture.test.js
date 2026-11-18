@@ -37,3 +37,12 @@ test('tiles use the stored named counts and a missing engine stays empty', () =>
   assert.equal(row.rivals[0], 'example.com');
   assert.deepEqual(SITE_AI_HEALTH_WEIGHTS, { surface: 0.4, top: 0.4, brand: 0.2 });
 });
+
+test('chat trend uses the previous prompt results when that run stored no engine block', () => {
+  const picture = pictureFrom([
+    { run_at: '2026-11-18', meta: { engines: { chat_gpt: { ok: true, named: 6, of: 12, prompts: [] } } } },
+    { run_at: '2026-11-16', prompt_results: [{ named: true }, { named: false }] }
+  ]);
+  assert.equal(picture.engines.chat_gpt.trend, 'was 1 of 2');
+  assert.equal(picture.engines.gemini, undefined);
+});
