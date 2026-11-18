@@ -475,24 +475,28 @@ export default async function handler(req, res) {
       ga4,
     });
     const buckets = weekBuckets(days, new Date());
-    const matched = await squarespaceTotals(sb, adsRows.purchases);
+    const matched = await squarespaceTotals(sb, adsRows.orderVisits);
     const orders = matched.orders;
-    for (const row of adsRows.purchases) {
+    for (const row of adsRows.orderVisits) {
       const key = squarespaceOrderKey(row.transaction_id);
       if (key && matched.testKeys.has(key)) adsRows.excluded.add(String(row.transaction_id));
     }
     const adSplit = splitByIsoDate(adsRows.sessions, 'date', days);
+    const visitSplit = splitByIsoDate(adsRows.orderVisits, 'date', days);
     const purchaseSplit = splitByIsoDate(adsRows.purchases, 'date', days);
     const visiblePaid = paidTrials.filter((row) => !adsRows.excluded.has(`member:${row.member_id}`));
     const trialSplit = splitByIsoDate(visiblePaid, 'trial_start_at', days);
     const cpcOnly = (rows) => (rows || []).filter((row) => row.medium === 'cpc' && row.campaign !== 'claude_check');
+    const ga4Count = (rows) => cpcOnly(rows).filter((row) => !adsRows.excluded.has(String(row.transaction_id))).length;
     const adsNow = summariseChatgptAds({
-      sessions: cpcOnly(adSplit.current), purchases: cpcOnly(purchaseSplit.current), orders,
-      excluded: adsRows.excluded, provider: adsRows.provider, trials: trialSplit.current
+      sessions: cpcOnly(adSplit.current), purchases: cpcOnly(visitSplit.current), orders,
+      excluded: adsRows.excluded, provider: adsRows.provider, trials: trialSplit.current,
+      ga4Purchases: ga4Count(purchaseSplit.current)
     });
     const adsPrev = summariseChatgptAds({
-      sessions: cpcOnly(adSplit.previous), purchases: cpcOnly(purchaseSplit.previous), orders,
-      excluded: adsRows.excluded, provider: null, trials: trialSplit.previous
+      sessions: cpcOnly(adSplit.previous), purchases: cpcOnly(visitSplit.previous), orders,
+      excluded: adsRows.excluded, provider: null, trials: trialSplit.previous,
+      ga4Purchases: ga4Count(purchaseSplit.previous)
     });
     const sections = attachPrevToSections(
       buildPeriodBundle({ ga4Rows, gscRows, llm, youtubeRows, academyRows, picture, ads: adsNow }),
