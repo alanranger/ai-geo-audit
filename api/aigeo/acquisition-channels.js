@@ -224,6 +224,7 @@ async function fetchPaidTrials(days) {
     .from('academy_trial_history')
     .select('member_id, trial_start_at, converted_at')
     .in('member_id', ids)
+    .eq('exclude_from_totals', false)
     .gte('trial_start_at', since);
   if (trials.error) throw new Error(`academy_trial_history: ${trials.error.message}`);
   return trials.data || [];
@@ -236,6 +237,7 @@ async function fetchAcademyTrials(days) {
   const { data, error } = await sb
     .from('academy_trial_history')
     .select('member_id, trial_start_at, converted_at, signup_source')
+    .eq('exclude_from_totals', false)
     .gte('trial_start_at', since)
     .limit(5000);
   if (error) throw new Error(`academy_trial_history: ${error.message}`);
@@ -451,7 +453,8 @@ export default async function handler(req, res) {
     const gscSplit = splitByIsoDate(gscAll, 'date', days);
     const ga4Split = splitByIsoDate(ga4All, 'date', days);
     const ytSplit = splitByIsoDate(youtubeAll, 'captured_date', days);
-    const academySplit = splitAcademyTrials(academyAll.rows, days);
+    const visibleAcademy = (academyAll.rows || []).filter((row) => !adsRows.excluded.has(`member:${row.member_id}`));
+    const academySplit = splitAcademyTrials(visibleAcademy, days);
     const llmSplit = splitLlmMonths(llmAll, days);
 
     const gscRows = gscSplit.current;
@@ -480,8 +483,9 @@ export default async function handler(req, res) {
     }
     const adSplit = splitByIsoDate(adsRows.sessions, 'date', days);
     const purchaseSplit = splitByIsoDate(adsRows.purchases, 'date', days);
-    const trialSplit = splitByIsoDate(paidTrials, 'trial_start_at', days);
-    const cpcOnly = (rows) => (rows || []).filter((row) => row.medium === 'cpc');
+    const visiblePaid = paidTrials.filter((row) => !adsRows.excluded.has(`member:${row.member_id}`));
+    const trialSplit = splitByIsoDate(visiblePaid, 'trial_start_at', days);
+    const cpcOnly = (rows) => (rows || []).filter((row) => row.medium === 'cpc' && row.campaign !== 'claude_check');
     const adsNow = summariseChatgptAds({
       sessions: cpcOnly(adSplit.current), purchases: cpcOnly(purchaseSplit.current), orders,
       excluded: adsRows.excluded, provider: adsRows.provider, trials: trialSplit.current
