@@ -2,19 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chatgptAdsView } from '../lib/chatgpt-ads-plan-data.js';
 
-test('the card is live, with provider clicks and spend left blank', () => {
+test('the card is paused and shows the reported provider clicks and spend', () => {
   const view = chatgptAdsView();
-  assert.equal(view.state, 'LIVE');
-  assert.equal(view.since, '18 Nov 18:45');
+  assert.equal(view.state, 'PAUSED');
+  assert.equal(view.since, '19 Nov 07:11');
   assert.equal(view.ends, '2 Dec 13:00');
-  assert.equal(view.tracking.includes('OpenAI Pixel live'), true);
-  assert.equal(view.tracking.includes('v23'), true);
+  assert.equal(view.tracking.includes('0 orders'), true);
   assert.equal(view.blockers, undefined);
-  assert.equal(view.campaigns.every((row) => row.state === 'LIVE'), true);
+  assert.equal(view.campaigns.every((row) => row.state === 'PAUSED'), true);
   assert.equal(view.figures.visits, 0);
   assert.equal(view.figures.purchases, 0);
-  assert.equal(view.figures.clicks, null);
-  assert.equal(view.figures.spend_gbp, null);
+  assert.equal(view.figures.clicks, 82);
+  assert.equal(view.figures.spend_gbp, 188.19);
 });
 
 test('supplied visits, purchases and provider figures are shown', () => {
