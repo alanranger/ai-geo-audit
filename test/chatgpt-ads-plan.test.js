@@ -12,8 +12,10 @@ test('the card is paused and shows the reported provider clicks and spend', () =
   assert.equal(view.campaigns.every((row) => row.state === 'PAUSED'), true);
   assert.equal(view.figures.visits, 0);
   assert.equal(view.figures.purchases, 0);
-  assert.equal(view.figures.clicks, 82);
-  assert.equal(view.figures.spend_gbp, 188.19);
+  assert.equal(view.figures.clicks, 201);
+  assert.equal(view.figures.spend_gbp, 455);
+  assert.equal(view.spend_note.includes('£546 paid'), true);
+  assert.equal(view.spend_note.includes('Earlier snapshot'), true);
 });
 
 test('supplied visits, purchases and provider figures are shown', () => {
