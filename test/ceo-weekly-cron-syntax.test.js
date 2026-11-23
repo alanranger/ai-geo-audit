@@ -14,3 +14,9 @@ test('ceo-weekly-full-refresh.js parses (no */ inside block comments)', () => {
   const r = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr || r.stdout);
 });
+
+test('the Monday catalog parses, because a syntax error 500s every cron tick', () => {
+  const file = join(root, 'lib/ceo-weekly/dashboard-full-catalog.js');
+  const r = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr || r.stdout);
+});
