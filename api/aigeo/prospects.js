@@ -15,8 +15,9 @@
  *     unknown); customer_market D2C / B2B / unclassified; review_status recent / revalidate (never closed by age);
  *   - every create / change appends a history row (stage from → to, changed fields, who, via, when);
  *   - stage booked_paid needs matched_sale { txn_date, amount } (or { source_workbook, source_row }): only a Booking
- *     Sheet sale linked to the SAME client is matched; another client's sale is refused; several possible sales (or one
- *     not linked yet) leave it unmatched and flagged for review (history changes.match_review);
+ *     Sheet sale linked to the SAME client is matched. One unlinked row also matches when its client_name is this
+ *     person's display name, and every person with that name shares one email. Another client's sale is refused. Several possible
+ *     sales, or a shared name, stay unmatched and flagged for review (history changes.match_review);
  *   - stage closed_lost needs lost_reason.
  *   - revenue_type (QUESTION-2026-11-09 (r)): new_sale (default) / partner_development / committed_work / receivable, with
  *     delivery_due + invoice_by (committed work). Stage "allocated" (Allocated · delivery pending) is committed work only
@@ -41,7 +42,7 @@ import { requireAdminKeyOnly } from '../../lib/api/requireAdminKeyOnly.js';
 import { randomUUID } from 'node:crypto';
 import {
   COMMITTED_STAGES, DEFAULT_STAGE, LOST_CODES, LOST_REASONS, MARKETS, OWNERS, PRIORITY_ASSUMPTIONS, PROVIDERS, REVENUE_TYPES, REVIEW, SOURCES, STAGES, TYPES, VALUE_BASES,
-  clientMailLink, enquiryMailLink, pickClient, pickSale, prioritiesOf, probsOf, prospectPersonRow, rowFlags, shortClientId
+  clientMailLink, enquiryMailLink, nameMatchedSale, pickClient, pickSale, prioritiesOf, probsOf, prospectPersonRow, rowFlags, shortClientId
 } from '../../lib/strategy-prospects.mjs';
 import { REVALIDATE_FACTOR } from '../../lib/strategy-sales-gap.mjs';
 
@@ -217,13 +218,26 @@ const many = async (q, what) => {
   return data || [];
 };
 /**
- * The Booking Sheet sale a booked_paid enquiry is matched to (no client name is copied): every candidate row is read
- * (never the first), then only a sale linked to the SAME person is matched (lib/strategy-prospects.mjs pickSale).
+ * The Booking Sheet sale a booked_paid enquiry is matched to. The stored sale has no client name. A confirmed link
+ * wins. Otherwise one unlinked row whose client_name is this person's unique display name is the match.
  * Returns {} (no matched_sale sent), { sale } or { review }; another client's sale throws.
  */
+function oneClient(rows) {
+  if (!rows.length || rows.length >= 5) return false;
+  if (rows.length === 1) return true;
+  const emails = [...new Set(rows.map((row) => String(row.email || '').trim().toLowerCase()).filter(Boolean))];
+  return emails.length === 1 && rows.every((row) => String(row.email || '').trim().toLowerCase() === emails[0]);
+}
+function saleOut(row) {
+  if (!row) return row;
+  return {
+    source_workbook: row.source_workbook, source_row: row.source_row, txn_date: row.txn_date,
+    amount: row.amount, category_label: row.category_label
+  };
+}
 async function matchSale(sb, m, personId) {
   if (!m) return {};
-  let q = sb.from('booking_sheet_transactions').select('source_workbook, source_row, txn_date, amount, category_label').limit(25);
+  let q = sb.from('booking_sheet_transactions').select('source_workbook, source_row, txn_date, amount, category_label, client_name').limit(25);
   if (m.source_workbook && m.source_row != null) q = q.eq('source_workbook', String(m.source_workbook)).eq('source_row', Number(m.source_row));
   else if (DATE_RE.test(String(m.txn_date || '')) && Number.isFinite(Number(m.amount))) q = q.eq('txn_date', m.txn_date).eq('amount', Number(m.amount));
   else throw new Error('matched_sale needs { txn_date, amount } or { source_workbook, source_row }');
@@ -232,7 +246,13 @@ async function matchSale(sb, m, personId) {
   const links = ids.length ? await many(sb.from('customer_identity_link').select('source_id, person_id, confirmed').eq('source', 'bs_transaction').in('source_id', ids), 'sale links') : [];
   const pick = pickSale(sales, links, personId);
   if (pick.refused) throw new Error(`matched_sale refused: ${pick.refused}`);
-  return pick;
+  if (pick.sale) return { sale: saleOut(pick.sale) };
+  const person = personId ? await one(sb.from('customer_person').select('display_name').eq('person_id', personId)) : null;
+  const name = String(person?.display_name || '').trim();
+  const escaped = name.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const sameName = name ? await many(sb.from('customer_person').select('person_id, email').ilike('display_name', escaped).limit(5), 'client name') : [];
+  const named = oneClient(sameName) ? nameMatchedSale(sales, links, name) : null;
+  return named ? { sale: saleOut(named) } : pick;
 }
 /* ---------- client ID: match an existing customer_person, else create a "prospect" record (no consent change) ---------- */
 

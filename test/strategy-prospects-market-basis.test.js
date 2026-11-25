@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { pickSale, pipelineBuckets, pipelineByMonth, probsOf, quarterFeedOf, rowFlags, saleReviewsOf, summarizeProspects } from '../lib/strategy-prospects.mjs';
+import { nameMatchedSale, pickSale, pipelineBuckets, pipelineByMonth, probsOf, quarterFeedOf, rowFlags, saleReviewsOf, summarizeProspects } from '../lib/strategy-prospects.mjs';
 import { buildSalesGap, monthsFrom, quarterPipeline } from '../lib/strategy-sales-gap.mjs';
 import { enquiryPatch, stageRule, viaOf } from '../api/aigeo/prospects.js';
 
@@ -82,6 +82,13 @@ test('matchSale: refuses a different person\'s sale; matches only the same perso
   assert.deepEqual(two.review, { candidates: 2, same_person: 2, reason: 'more than one possible Booking Sheet sale' });
   assert.equal(pickSale(SALES, [link(10, ME)], ME).review.candidates, 2, 'an unlinked same-date-and-amount sale keeps it ambiguous');
   assert.equal(pickSale([SALES[0]], [], ME).review.reason, 'sale not linked to this client yet');
+  const named = { ...SALES[0], client_name: 'Ada Client' };
+  const other = { ...SALES[1], client_name: 'Other Client' };
+  assert.equal(nameMatchedSale([named], [], 'Ada Client').source_row, 10);
+  assert.equal(nameMatchedSale([named, other], [], 'Ada Client').source_row, 10);
+  assert.equal(nameMatchedSale([named, { ...named, source_row: 12 }], [], 'Ada Client'), null);
+  assert.equal(nameMatchedSale([other], [], 'Ada Client'), null);
+  assert.equal(nameMatchedSale([named], [link(10, ME, false)], 'Ada Client'), null);
   assert.equal(pickSale([SALES[0]], [link(10, ME, false)], ME).review.candidates, 1, 'an unconfirmed (name-only) link is a review, not a match');
   assert.match(pickSale([], [], ME).refused, /not found/);
   assert.equal(stageRule({ stage: 'quote' }, { stage: 'booked_paid' }, two.review), 'booked_paid', 'a review flag lets the stage move with no sale matched');
