@@ -64,6 +64,8 @@ test('no synced campaigns does not default to paused', () => {
   const view = adsCardModel({ statusError: 'OPENAI_ADS_SDK_KEY is not set' });
   assert.equal(view.heading, 'unavailable');
   assert.equal(view.current.length, 0);
+  assert.equal(view.historical.length, 2);
+  assert.equal(view.historical[0].note.includes('Not a live read'), true);
   assert.equal(JSON.stringify(view).includes('PAUSED since'), false);
 });
 
