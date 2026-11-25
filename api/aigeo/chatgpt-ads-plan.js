@@ -1,4 +1,5 @@
 /** Read-only ChatGPT Ads card. Status is the last Ads API sync, not a hardcoded label. */
+export const config = { runtime: 'nodejs', maxDuration: 60 };
 import { createClient } from '@supabase/supabase-js';
 import { loadAdsCard } from '../../lib/acquisition/chatgpt-ads-sync.js';
 

@@ -29,6 +29,16 @@ test('status comes from the provider field, and the end time ends the flight', (
   assert.equal(displayState({}, NOW), 'unavailable');
 });
 
+test('a sync payload keeps its synced_at, and spend is pounds', () => {
+  const view = adsCardModel({
+    campaigns: [GIFT], groups: [GROUP], synced_at: '2026-11-25T12:19:56Z',
+    report: { data: [{ impressions: 2537, clicks: 20, spend: 17.15, conversions: 0 }] }, now: NOW
+  });
+  assert.equal(view.synced_at, '2026-11-25T12:19:56Z');
+  assert.equal(view.figures.includes('2,537') || view.figures.includes('2537'), true);
+  assert.equal(view.figures.includes('£17.15'), true);
+});
+
 test('an empty ads report is unavailable, not zero', () => {
   const text = figuresText({ data: [] }, null);
   assert.equal(text.includes('unavailable'), true);
