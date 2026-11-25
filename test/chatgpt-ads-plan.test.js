@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { adsBriefLine } from '../lib/acquisition/chatgpt-ads-sync.js';
-import { adsCardModel, displayState, figuresText } from '../lib/acquisition/chatgpt-ads-card.js';
+import { adsCardModel, displayState, figuresText, sumMetric } from '../lib/acquisition/chatgpt-ads-card.js';
 
 const GIFT = {
   id: 'cmpn_4d7a58c3b7708192b3402d805deb2e85',
@@ -37,6 +37,13 @@ test('a sync payload keeps its synced_at, and spend is pounds', () => {
   assert.equal(view.synced_at, '2026-11-25T12:19:56Z');
   assert.equal(view.figures.includes('2,537') || view.figures.includes('2537'), true);
   assert.equal(view.figures.includes('£17.15'), true);
+});
+
+test('a missing daily metric stays unavailable and a stored zero does not', () => {
+  assert.equal(sumMetric([], 'clicks'), null);
+  assert.equal(sumMetric([{ clicks: 20 }, { clicks: 3 }], 'clicks'), 23);
+  assert.equal(sumMetric([{ clicks: 20 }, { clicks: null }], 'clicks'), null);
+  assert.equal(sumMetric([{ clicks: 0 }], 'clicks'), 0);
 });
 
 test('an empty ads report is unavailable, not zero', () => {
