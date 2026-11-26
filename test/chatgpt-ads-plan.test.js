@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { adsBriefLine } from '../lib/acquisition/chatgpt-ads-sync.js';
+import { adsBriefLine, flightSlice } from '../lib/acquisition/chatgpt-ads-sync.js';
 import { adsCardModel, displayState, figuresText, sumMetric } from '../lib/acquisition/chatgpt-ads-card.js';
 
 const GIFT = {
@@ -113,6 +113,23 @@ test('no synced campaigns does not default to paused', () => {
   assert.equal(view.historical.length, 2);
   assert.equal(view.historical[0].note.includes('Not a live read'), true);
   assert.equal(JSON.stringify(view).includes('PAUSED since'), false);
+});
+
+test('a paused campaign keeps its flight rows, and an empty campaign does not borrow another ok time', () => {
+  const kept = flightSlice({
+    days: [{ campaign_id: 'paused', date: '2026-11-24', clicks: 4, spend: 1 }],
+    totals: [{ campaign_id: 'paused', clicks: 4, spend: 1 }],
+    ad_metrics: [{ campaign_id: 'paused', ad_id: 'ad_1', clicks: 4 }],
+    fresh: { paused: { ok_at: '2026-11-25T08:00:00Z', empty_since: null, error: null } }
+  }, 'paused', { totals: [], days: [], ads: [], totalError: 'ads api 500' }, '2026-11-26T08:00:00Z');
+  assert.equal(kept.days.length, 1);
+  assert.equal(kept.fresh.ok_at, '2026-11-25T08:00:00Z');
+  const pending = flightSlice({
+    fresh: { gift: { ok_at: '2026-11-26T08:00:00Z', empty_since: null, error: null } }
+  }, 'academy', { totals: [], days: [], ads: [] }, '2026-11-26T09:00:00Z');
+  assert.equal(pending.fresh.ok_at, null);
+  assert.equal(pending.fresh.empty_since, '2026-11-26T09:00:00Z');
+  assert.equal(pending.days.length, 0);
 });
 
 test('the Monday brief flags a failed sync and a day of empty reporting', () => {
