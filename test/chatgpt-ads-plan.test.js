@@ -22,6 +22,35 @@ const GROUP = {
 const NOW = new Date('2026-11-25T12:00:00Z');
 const AFTER = new Date('2026-11-29T00:00:00Z');
 
+test('paused Academy retains its lifetime cap and target bid without inheriting Gift stops', () => {
+  const academy = { ...GIFT, id: 'academy-test', name: 'Academy test', status: 'paused', budget: { lifetime_spend_limit_micros: 50000000 } };
+  const target = { billing_event_type: 'click', target_strategy: 'target_cpc', target_micros: 1500000 };
+  const view = adsCardModel({ campaigns: [GIFT, academy], groups: [
+    { ...GROUP, bidding_config: target },
+    { ...GROUP, id: 'academy-group', campaign_id: academy.id, name: 'Academy', bidding_config: target }
+  ], now: NOW });
+  const gift = view.current[0];
+  const paused = view.historical[0];
+  assert.equal(gift.budget_display, '£15/day');
+  assert.equal(gift.bid_display, 'Target CPC £1.50 (average)');
+  assert.equal(gift.monitoring.spend_stop, 100);
+  assert.equal(gift.monitoring.click_stop, 115);
+  assert.equal(paused.state, 'paused');
+  assert.equal(paused.budget_display, '£50 total campaign cap');
+  assert.equal(paused.bid_display, 'Target CPC £1.50 (average)');
+  assert.equal(paused.monitoring.spend_cap, 50);
+  assert.equal(paused.monitoring.spend_stop, undefined);
+  assert.equal(paused.monitoring.click_stop, undefined);
+});
+
+test('unknown budget and target amount do not turn into a zero-pound cap or bid', () => {
+  const view = adsCardModel({ campaigns: [{ ...GIFT, budget: { daily_spend_limit_micros: null } }],
+    groups: [{ ...GROUP, bidding_config: { target_strategy: 'target_cpc', target_micros: null } }], now: NOW });
+  assert.equal(view.current[0].budget_display, 'Budget unavailable');
+  assert.equal(view.current[0].bid, 'unavailable');
+  assert.equal(view.current[0].bid_display.includes('£0'), false);
+});
+
 test('status comes from the provider field, and the end time ends the flight', () => {
   assert.equal(displayState(GIFT, NOW), 'active');
   assert.equal(displayState({ ...GIFT, name: 'anything DRAFT' }, NOW), 'active');
